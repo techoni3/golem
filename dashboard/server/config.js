@@ -16,7 +16,7 @@ export const CONFIG = {
   // CEO Claude Code session under ~/.claude/projects/<encoded>/*.jsonl.
   golemRoot:
     process.env.GOLEM_ROOT ??
-    path.join(HOME, 'Documents/software/experiments'),
+    path.join(HOME, 'Documents/software/experiments/golem'),
   // URL of the golem MCP channel server. Used by POST /api/brief to forward
   // intrusions into the live CEO session.
   channelUrl: process.env.GOLEM_CHANNEL_URL ?? 'http://127.0.0.1:7421',

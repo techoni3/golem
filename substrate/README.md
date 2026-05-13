@@ -71,7 +71,7 @@ golem dashboard                # http://localhost:4173 — orchestrator panel pu
 - **`agents/`** — leaf sub-agent personas. Spawned via the `Agent` tool from a main thread. Cannot recurse.
 - **`personas/`** — main-thread personas, loaded at session start via `claude --append-system-prompt-file <path>`. The CEO persona (`golem-ceo.md`) is the orchestrator that dispatches everything else.
 
-The CEO session anchors cwd to `$GOLEM_ROOT` (default `~/Documents/software/experiments`) so `--continue` consistently picks up the same thread. Claude Code freezes the system prompt at session creation — persona edits only take effect on `golem session --new`.
+The CEO session anchors cwd to `$GOLEM_ROOT` (default `~/Documents/software/experiments/golem`) so `--continue` consistently picks up the same thread. Claude Code freezes the system prompt at session creation — persona edits only take effect on `golem session --new`.
 
 ## Channels — push briefs and interruptions into a running CEO
 

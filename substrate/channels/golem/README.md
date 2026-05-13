@@ -95,7 +95,7 @@ npm install
 
 Channel MCP servers are registered via a project-level `.mcp.json` that
 Claude Code reads from its cwd at startup. The launcher's cwd is
-`$GOLEM_ROOT` (default `~/Documents/software/experiments`).
+`$GOLEM_ROOT` (default `~/Documents/software/experiments/golem`).
 
 There's a template at `substrate/channels/golem/.mcp.json` with
 `__ABS_PATH__` as a placeholder. Copy it into `$GOLEM_ROOT/.mcp.json` and
@@ -104,7 +104,7 @@ replace `__ABS_PATH__` with the absolute path to your substrate checkout:
 ```bash
 # Example (adjust the absolute path to your substrate location):
 SUBSTRATE_DIR="$HOME/Documents/software/experiments/golem/substrate"
-GOLEM_ROOT="${GOLEM_ROOT:-$HOME/Documents/software/experiments}"
+GOLEM_ROOT="${GOLEM_ROOT:-$HOME/Documents/software/experiments/golem}"
 sed "s|__ABS_PATH__|$SUBSTRATE_DIR|g" \
     "$SUBSTRATE_DIR/channels/golem/.mcp.json" \
     > "$GOLEM_ROOT/.mcp.json"
