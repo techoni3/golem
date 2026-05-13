@@ -1,0 +1,22 @@
+{
+  "name": "@golem/dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Real-time admin dashboard for the golem agentic substrate.",
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "check": "scripts/check.sh"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@fastify/static": "^7.0.4",
+    "@fastify/websocket": "^10.0.1",
+    "chokidar": "^3.6.0",
+    "fastify": "^4.28.1",
+    "gray-matter": "^4.0.3"
+  }
+}

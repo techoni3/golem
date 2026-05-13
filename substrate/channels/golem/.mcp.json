@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "golem": {
+      "command": "node",
+      "args": ["__ABS_PATH__/substrate/channels/golem/index.js"]
+    }
+  }
+}

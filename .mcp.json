@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "golem": {
+      "command": "node",
+      "args": ["/Users/laveesingh/Documents/software/experiments/golem/substrate/channels/golem/index.js"]
+    }
+  }
+}

@@ -1,0 +1,19 @@
+# Golem journal — kept local, not synced via git
+journal/
+
+# Per-session local overrides for Claude Code
+.claude/settings.local.json
+
+# OS / editor
+.DS_Store
+*.swp
+*~
+
+# Common stack noise (uncomment / extend as the project grows)
+# node_modules/
+# __pycache__/
+# *.pyc
+# .venv/
+# dist/
+# build/
+# coverage/

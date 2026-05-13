@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Substrate · Admin</title>
+  <link rel="stylesheet" href="styles.css"/>
+  <link rel="stylesheet" href="extra.css"/>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js"></script>
+  <script src="https://unpkg.com/marked@14.1.4/marked.min.js"></script>
+
+  <!-- Live data store (plain JS, must load before babel-transformed components) -->
+  <script src="src/api.js"></script>
+  <script src="src/store.js"></script>
+  <script src="src/format.js"></script>
+
+  <!-- Components (JSX, transformed at runtime by babel-standalone) -->
+  <script type="text/babel" data-presets="env,react" src="src/icons.jsx"></script>
+  <script type="text/babel" data-presets="env,react" src="src/atoms.jsx"></script>
+  <script type="text/babel" data-presets="env,react" src="src/shell.jsx"></script>
+  <script type="text/babel" data-presets="env,react" src="src/dashboard.jsx"></script>
+  <script type="text/babel" data-presets="env,react" src="src/drawer.jsx"></script>
+  <script type="text/babel" data-presets="env,react" src="src/project-view.jsx"></script>
+  <script type="text/babel" data-presets="env,react" src="src/other-pages.jsx"></script>
+  <script type="text/babel" data-presets="env,react" src="src/tweaks.jsx"></script>
+  <script type="text/babel" data-presets="env,react" src="src/orchestrator.jsx"></script>
+  <script type="text/babel" data-presets="env,react" src="src/drawer-ceo.jsx"></script>
+  <script type="text/babel" data-presets="env,react" src="src/app.jsx"></script>
+</body>
+</html>

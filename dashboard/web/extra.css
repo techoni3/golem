@@ -1,0 +1,743 @@
+/* Additions on top of the design's styles.css for live-data UI states. */
+
+/* Connection banner */
+.conn-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 3px 7px;
+  border-radius: 3px;
+  border: 1px solid var(--border-2);
+  background: var(--bg-2);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.conn-pill.connected { color: var(--status-active); border-color: rgba(74,222,128,0.3); background: rgba(74,222,128,0.08); }
+.conn-pill.connected .dot { box-shadow: 0 0 6px var(--status-active); animation: pulse-dot 1.6s ease-in-out infinite; }
+.conn-pill.disconnected { color: var(--status-blocked); border-color: rgba(248,113,113,0.3); background: rgba(248,113,113,0.08); }
+.conn-pill .dot {
+  width: 6px; height: 6px; border-radius: 50%; background: currentColor;
+}
+
+/* Empty / loading states for the dashboard cards */
+.empty-card {
+  background: var(--bg-1);
+  border: 1px dashed var(--border-2);
+  border-radius: var(--radius-2);
+  padding: 36px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.empty-card .empty-card-hint {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-2);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  text-align: center;
+  max-width: 360px;
+  line-height: 1.5;
+}
+
+.empty-card .mono {
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 11px;
+  color: var(--text-1);
+}
+
+/* Subagent type / role-less agent fallback */
+.role-tag {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-3);
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* Tweaks button — small inline gear in the sidebar footer (no longer a
+   floating FAB; the FAB conflicted with the CEO drawer's send button). */
+.tweaks-button-inline {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-3);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: all 100ms;
+}
+.tweaks-button-inline:hover {
+  background: var(--bg-2);
+  border-color: var(--border-2);
+  color: var(--text-1);
+}
+
+.tweaks-pop {
+  position: fixed;
+  bottom: 60px;
+  left: 14px;
+  z-index: 70;
+  width: 220px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-2);
+  box-shadow: var(--shadow-2);
+  padding: 14px 14px 12px;
+  animation: orch-modal-in 140ms ease-out;
+}
+.tweaks-pop .kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: var(--bg-3);
+  border: 1px solid var(--border-3);
+  border-radius: 3px;
+  padding: 1px 5px;
+  color: var(--text-1);
+}
+.tweaks-pop-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-3);
+  margin-bottom: 8px;
+}
+.tweaks-pop-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.tweaks-pop-version {
+  margin-top: 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+.swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid var(--border-2);
+  cursor: pointer;
+}
+.swatch.active { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Anonymous-agent placeholder avatar */
+.agent-avatar.anon {
+  background: var(--bg-3);
+  color: var(--text-2);
+  border: 1px dashed var(--border-3);
+}
+
+/* Action cell can wrap if needed */
+.timeline-action.wrappable {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+}
+
+/* ===== Orchestrator rail ===== */
+.orch-rail {
+  display: grid;
+  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr) minmax(120px, 160px) auto;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 22px;
+  background: linear-gradient(180deg, var(--bg-1) 0%, var(--bg-0) 100%);
+  border-bottom: 1px solid var(--border-2);
+  position: relative;
+}
+.orch-status { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.orch-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--text-4);
+  box-shadow: 0 0 0 3px rgba(255,255,255,0.02);
+}
+.orch-dot.live { background: var(--status-active); box-shadow: 0 0 10px var(--status-active); animation: pulse-dot 1.6s ease-in-out infinite; }
+.orch-dot.idle { background: var(--accent); opacity: 0.55; }
+.orch-dot.offline { background: var(--text-4); opacity: 0.5; }
+.orch-status-text { min-width: 0; }
+.orch-status-label {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-1);
+}
+.orch-status-sub {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.orch-memo { min-width: 0; padding: 0 6px; }
+.orch-memo-title {
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  color: var(--text-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.orch-memo-workspace { color: var(--accent); margin-right: 6px; }
+.orch-memo-summary {
+  font-size: 12px;
+  color: var(--text-1);
+  margin-top: 3px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.45;
+}
+.orch-memo-empty {
+  font-size: 12px;
+  color: var(--text-4);
+  font-style: italic;
+}
+
+.orch-gates {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  cursor: default;
+}
+.orch-gates-count {
+  display: flex; flex-direction: column; align-items: center; line-height: 1;
+}
+.orch-gates-count .big {
+  font-size: 18px; font-weight: 600; color: var(--text-1); font-family: var(--font-mono);
+}
+.orch-gates-count .small {
+  font-size: 9px; color: var(--text-3); margin-top: 3px;
+  text-transform: uppercase; letter-spacing: 0.1em;
+}
+.orch-gates-count.has-awaiting .big { color: var(--status-review); }
+.orch-gates-secondary {
+  font-size: 10.5px; color: var(--text-3); font-family: var(--font-mono);
+  padding-left: 8px; border-left: 1px solid var(--border-2);
+}
+
+.orch-actions { display: flex; gap: 6px; }
+.orch-btn {
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: var(--radius-1);
+  border: 1px solid var(--border-2);
+  background: var(--bg-2);
+  color: var(--text-1);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition: all 100ms;
+}
+.orch-btn:hover:not(:disabled) { background: var(--bg-3); border-color: var(--border-3); }
+.orch-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.orch-btn.primary {
+  background: color-mix(in oklab, var(--accent) 22%, var(--bg-2));
+  border-color: var(--accent-border);
+  color: var(--text-0);
+}
+.orch-btn.primary:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--accent) 35%, var(--bg-2));
+}
+.orch-btn.small { padding: 3px 10px; font-size: 11px; }
+.orch-btn.ok {
+  background: rgba(74,222,128,0.12); border-color: rgba(74,222,128,0.35); color: var(--status-active);
+}
+.orch-btn.ok:hover:not(:disabled) { background: rgba(74,222,128,0.22); }
+.orch-btn.ghost { background: transparent; }
+
+.orch-toast {
+  position: absolute;
+  right: 22px; top: 100%;
+  margin-top: 6px;
+  font-size: 11px;
+  padding: 5px 9px;
+  border-radius: 4px;
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  color: var(--text-1);
+  box-shadow: var(--shadow-1);
+  animation: orch-toast-in 160ms ease-out;
+  z-index: 5;
+}
+.orch-toast.ok { border-color: rgba(74,222,128,0.35); color: var(--status-active); }
+.orch-toast.err { border-color: rgba(248,113,113,0.35); color: var(--status-blocked); }
+@keyframes orch-toast-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.orch-gates-list {
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border-2);
+  padding: 6px 22px 10px;
+}
+.orch-gate-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 0;
+  font-size: 12px;
+  border-bottom: 1px dashed var(--border-2);
+}
+.orch-gate-row:last-child { border-bottom: none; }
+.orch-gate-row.more { justify-content: center; font-style: italic; padding: 6px 0; }
+.orch-gate-meta { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
+.orch-gate-badge {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 2px 6px;
+  background: rgba(245,158,11,0.12);
+  color: var(--status-review);
+  border: 1px solid rgba(245,158,11,0.3);
+  border-radius: 3px;
+}
+.orch-gate-id { color: var(--text-1); }
+.orch-gate-flow { color: var(--text-2); }
+.orch-gate-ws { color: var(--text-3); font-size: 11px; }
+.orch-gate-actions { display: flex; gap: 5px; }
+
+/* Modal */
+.orch-modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  animation: orch-fade-in 120ms ease-out;
+}
+.orch-modal {
+  width: min(640px, calc(100vw - 32px));
+  background: var(--bg-1);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-2);
+  box-shadow: var(--shadow-2);
+  padding: 18px 20px;
+  display: flex; flex-direction: column; gap: 12px;
+  animation: orch-modal-in 160ms ease-out;
+}
+@keyframes orch-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes orch-modal-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.orch-modal-header { display: flex; justify-content: space-between; align-items: center; }
+.orch-modal-title { font-size: 14px; font-weight: 600; color: var(--text-0); }
+.orch-modal-close {
+  background: transparent; border: none; color: var(--text-3);
+  font-size: 22px; line-height: 1; cursor: pointer;
+}
+.orch-modal-close:hover { color: var(--text-1); }
+.orch-modal-hint { font-size: 11.5px; color: var(--text-3); line-height: 1.5; }
+.orch-modal-hint .mono {
+  font-family: var(--font-mono);
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 10.5px;
+}
+.orch-modal-textarea {
+  width: 100%;
+  resize: vertical;
+  background: var(--bg-0);
+  color: var(--text-0);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-1);
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.orch-modal-textarea:focus { outline: none; border-color: var(--accent-border); }
+.orch-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* ===== Orchestrator rail (clickable variant) ===== */
+.orch-rail.clickable {
+  cursor: pointer;
+  transition: background 120ms;
+}
+.orch-rail.clickable:hover {
+  background: linear-gradient(180deg, var(--bg-2) 0%, var(--bg-1) 100%);
+}
+
+/* ===== CEO chat drawer ===== */
+.drawer-ceo {
+  display: flex;
+  flex-direction: column;
+  width: 580px;
+  max-width: 92vw;
+}
+.drawer-ceo .drawer-header {
+  flex: 0 0 auto;
+}
+
+.drawer-status-pill {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 3px 8px;
+  border-radius: 3px;
+  border: 1px solid var(--border-2);
+  background: var(--bg-2);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.drawer-meta-key {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+.drawer-meta-val {
+  font-size: 11.5px;
+  color: var(--text-1);
+}
+
+/* Gate strip just below the header */
+.ceo-gates {
+  flex: 0 0 auto;
+  padding: 8px 22px 10px;
+  border-bottom: 1px solid var(--border-2);
+  background: var(--bg-1);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ceo-gate-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+.ceo-gate-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.ceo-gate-actions {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.ceo-gate-more {
+  font-size: 11px;
+  color: var(--text-3);
+  font-style: italic;
+  text-align: center;
+}
+
+/* Chat lane — flex-grow so the composer pins at the bottom */
+.ceo-chat {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 22px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--bg-0);
+}
+
+.ceo-chat-empty {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 22px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 13px;
+  background: var(--bg-0);
+}
+.ceo-chat-empty-hint {
+  font-size: 11.5px;
+  color: var(--text-3);
+  max-width: 320px;
+  line-height: 1.55;
+}
+.ceo-chat-empty-hint .mono {
+  font-family: var(--font-mono);
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 10.5px;
+}
+
+/* Chat bubbles */
+.ceo-msg {
+  max-width: 88%;
+  padding: 8px 11px;
+  border-radius: var(--radius-1);
+  border: 1px solid var(--border-2);
+  background: var(--bg-1);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.ceo-msg-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.ceo-msg-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+.ceo-msg-ts {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-4);
+  white-space: nowrap;
+}
+.ceo-msg-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-1);
+}
+
+/* Role / kind variants */
+.ceo-msg.role-user {
+  align-self: flex-end;
+  background: color-mix(in oklab, var(--accent) 14%, var(--bg-2));
+  border-color: var(--accent-border);
+  color: var(--text-0);
+}
+.ceo-msg.role-user .ceo-msg-label { color: var(--accent); }
+.ceo-msg.role-user .ceo-msg-body { color: var(--text-0); }
+
+.ceo-msg.role-ceo {
+  align-self: flex-start;
+  background: var(--bg-2);
+  border-color: var(--border-2);
+}
+/* Ack messages render as a "thinking trace" line, not a chat bubble.
+   Reset everything .ceo-msg gave us and re-style as muted inline text with a
+   chevron + dim timestamp on the right. */
+.ceo-msg.role-ceo.kind-ack {
+  align-self: stretch;
+  max-width: 100%;
+  margin: 2px 0;
+  padding: 2px 4px 2px 18px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  font-size: 11px;
+  font-style: italic;
+  font-family: var(--font-mono);
+  line-height: 1.5;
+  color: var(--text-3);
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  position: relative;
+}
+.ceo-msg.role-ceo.kind-ack::before {
+  content: '›';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  color: var(--text-4);
+  font-style: normal;
+}
+.ceo-msg.role-ceo.kind-ack .ceo-msg-trace-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ceo-msg.role-ceo.kind-ack .ceo-msg-trace-ts {
+  flex: 0 0 auto;
+  font-size: 9.5px;
+  color: var(--text-4);
+  font-style: normal;
+}
+
+.ceo-msg.role-ceo.kind-response .ceo-msg-label {
+  color: var(--accent);
+}
+
+/* Markdown-rendered CEO responses. Compact typography that fits inside a
+   chat bubble — no oversized headings, lists hug, code blocks wrap. */
+.ceo-msg-body.markdown { color: var(--text-1); }
+.ceo-msg-body.markdown > *:first-child { margin-top: 0; }
+.ceo-msg-body.markdown > *:last-child { margin-bottom: 0; }
+.ceo-msg-body.markdown p { margin: 6px 0; }
+.ceo-msg-body.markdown h1,
+.ceo-msg-body.markdown h2,
+.ceo-msg-body.markdown h3,
+.ceo-msg-body.markdown h4,
+.ceo-msg-body.markdown h5,
+.ceo-msg-body.markdown h6 {
+  margin: 12px 0 4px;
+  color: var(--text-0);
+  font-weight: 600;
+  line-height: 1.3;
+}
+.ceo-msg-body.markdown h1 { font-size: 14px; }
+.ceo-msg-body.markdown h2 { font-size: 13.5px; }
+.ceo-msg-body.markdown h3 { font-size: 13px; }
+.ceo-msg-body.markdown h4,
+.ceo-msg-body.markdown h5,
+.ceo-msg-body.markdown h6 { font-size: 12.5px; color: var(--text-1); }
+.ceo-msg-body.markdown strong { color: var(--text-0); font-weight: 600; }
+.ceo-msg-body.markdown em { font-style: italic; }
+.ceo-msg-body.markdown ul,
+.ceo-msg-body.markdown ol {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+.ceo-msg-body.markdown li { margin: 2px 0; }
+.ceo-msg-body.markdown li > p { margin: 2px 0; }
+.ceo-msg-body.markdown a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: var(--accent-border);
+  text-underline-offset: 2px;
+}
+.ceo-msg-body.markdown a:hover { text-decoration-color: var(--accent); }
+.ceo-msg-body.markdown code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  border-radius: 3px;
+  padding: 1px 5px;
+  color: var(--text-0);
+}
+.ceo-msg-body.markdown pre {
+  background: var(--bg-0);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-1);
+  padding: 8px 10px;
+  margin: 8px 0;
+  overflow-x: auto;
+  line-height: 1.45;
+}
+.ceo-msg-body.markdown pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: 11.5px;
+  color: var(--text-1);
+}
+.ceo-msg-body.markdown blockquote {
+  margin: 8px 0;
+  padding: 4px 12px;
+  border-left: 2px solid var(--border-3);
+  color: var(--text-2);
+  font-style: italic;
+}
+.ceo-msg-body.markdown hr {
+  border: none;
+  border-top: 1px solid var(--border-2);
+  margin: 10px 0;
+}
+.ceo-msg-body.markdown table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 11.5px;
+  width: 100%;
+}
+.ceo-msg-body.markdown th,
+.ceo-msg-body.markdown td {
+  border: 1px solid var(--border-2);
+  padding: 4px 8px;
+  text-align: left;
+}
+.ceo-msg-body.markdown th { background: var(--bg-2); color: var(--text-0); font-weight: 600; }
+
+.ceo-msg.role-system {
+  align-self: center;
+  background: transparent;
+  border: 1px dashed var(--border-2);
+  color: var(--text-3);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  max-width: 95%;
+}
+.ceo-msg.role-system .ceo-msg-body { color: var(--text-2); }
+.ceo-msg.role-system.kind-halt {
+  border-color: rgba(248, 113, 113, 0.35);
+}
+.ceo-msg.role-system.kind-halt .ceo-msg-label { color: var(--status-blocked); }
+.ceo-msg.role-system[class*="kind-gate_"] {
+  border-color: rgba(245, 158, 11, 0.35);
+}
+.ceo-msg.role-system[class*="kind-gate_"] .ceo-msg-label {
+  color: var(--status-review);
+}
+
+/* Composer pinned at the bottom */
+.ceo-composer {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 22px 14px;
+  border-top: 1px solid var(--border-2);
+  background: var(--bg-1);
+}
+.ceo-composer-input {
+  width: 100%;
+  resize: vertical;
+  background: var(--bg-0);
+  color: var(--text-0);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-1);
+  padding: 9px 11px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.ceo-composer-input:focus {
+  outline: none;
+  border-color: var(--accent-border);
+}
+.ceo-composer button {
+  align-self: flex-end;
+}
+
+/* Drawer toast — same shape as orch-toast but anchored to the drawer header */
+.drawer-toast {
+  position: absolute;
+  top: 56px;
+  right: 22px;
+  z-index: 5;
+}
+

@@ -1,0 +1,393 @@
+#!/usr/bin/env bash
+# golem — unified CLI for the substrate.
+#
+# Subcommands:
+#   install      One-time global setup. Idempotent.
+#   reinstall    Cleanup, then install. Useful after moving the substrate dir.
+#   cleanup      Reverse `install`. Only removes what install created.
+#   session      Start (or resume) the interactive CEO Claude Code session.
+#   dashboard    Start the admin dashboard.
+#   doctor       Sanity-check the environment.
+#   help         Show this help.
+
+set -euo pipefail
+
+# ---- Locate the substrate (resolve symlinks so this works via ~/.local/bin) -
+
+SCRIPT="${BASH_SOURCE[0]}"
+while [[ -L "$SCRIPT" ]]; do
+  link_target="$(readlink "$SCRIPT")"
+  if [[ "$link_target" = /* ]]; then
+    SCRIPT="$link_target"
+  else
+    SCRIPT="$(cd "$(dirname "$SCRIPT")" && cd "$(dirname "$link_target")" && pwd)/$(basename "$link_target")"
+  fi
+done
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT")" && pwd)"
+SUBSTRATE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# ---- Config ---------------------------------------------------------------
+
+GOLEM_ROOT="${GOLEM_ROOT:-$HOME/Documents/software/experiments/golem}"
+
+TARGET_AGENTS="$HOME/.claude/agents"
+TARGET_SKILLS="$HOME/.claude/skills"
+TARGET_COMMANDS="$HOME/.claude/commands"
+TARGET_PERSONAS="$HOME/.claude/personas"
+TARGET_BIN="$HOME/.local/bin"
+PREFIX="golem-"
+
+DASHBOARD_DIR="$(cd "$SUBSTRATE_DIR/../dashboard" 2>/dev/null && pwd || echo "")"
+CHANNEL_DIR="$SUBSTRATE_DIR/channels/golem"
+MCP_JSON_PATH="$GOLEM_ROOT/.mcp.json"
+GOLEM_BIN_LINK="$TARGET_BIN/golem"
+
+# ---- Output helpers -------------------------------------------------------
+
+ok()    { printf '  \033[32m✓\033[0m %s\n' "$*"; }
+skip()  { printf '  \033[2m·\033[0m %s\n' "$*"; }
+warn()  { printf '  \033[33m!\033[0m %s\n' "$*" >&2; }
+fail()  { printf '  \033[31m✗\033[0m %s\n' "$*" >&2; }
+head1() { printf '\n\033[1m%s\033[0m\n' "$*"; }
+
+# ---- Symlink helpers ------------------------------------------------------
+
+link_target() { [[ -L "$1" ]] && readlink "$1" || true; }
+
+# Is $1 a symlink that points into our substrate?
+is_ours() {
+  local link="$1"
+  local target
+  target="$(link_target "$link")"
+  [[ -n "$target" ]] && [[ "$target" == "$SUBSTRATE_DIR"/* ]]
+}
+
+link_one() {
+  # link_one <src> <dst> <kind>
+  local src="$1" dst="$2" kind="$3"
+  if [[ -L "$dst" ]] && is_ours "$dst"; then
+    skip "$kind already linked: $(basename "$dst")"
+  elif [[ -e "$dst" ]]; then
+    warn "$kind exists, not overwriting: $dst"
+  else
+    mkdir -p "$(dirname "$dst")"
+    ln -s "$src" "$dst"
+    ok "$kind linked: $(basename "$dst")"
+  fi
+}
+
+# Unlink every entry in $1 that points into our substrate.
+unlink_dir_contents() {
+  local dir="$1" kind="$2"
+  [[ -d "$dir" ]] || return 0
+  shopt -s nullglob
+  for entry in "$dir"/*; do
+    [[ -L "$entry" ]] || continue
+    if is_ours "$entry"; then
+      rm "$entry"
+      ok "removed $kind: $(basename "$entry")"
+    fi
+  done
+  shopt -u nullglob
+}
+
+# ---- .mcp.json handling ---------------------------------------------------
+
+# What we want $GOLEM_ROOT/.mcp.json to contain (when it only has our entry).
+expected_mcp_json() {
+  cat <<EOF
+{
+  "mcpServers": {
+    "golem": {
+      "command": "node",
+      "args": ["$SUBSTRATE_DIR/channels/golem/index.js"]
+    }
+  }
+}
+EOF
+}
+
+install_mcp_json() {
+  if [[ ! -d "$GOLEM_ROOT" ]]; then
+    mkdir -p "$GOLEM_ROOT"
+  fi
+  if [[ ! -f "$MCP_JSON_PATH" ]]; then
+    expected_mcp_json > "$MCP_JSON_PATH"
+    ok "wrote $MCP_JSON_PATH"
+    return
+  fi
+  # File exists. Compare against what we'd write.
+  if diff -q <(expected_mcp_json) "$MCP_JSON_PATH" >/dev/null 2>&1; then
+    skip ".mcp.json already correct: $MCP_JSON_PATH"
+    return
+  fi
+  # Exists but differs. Don't overwrite — guide the user.
+  warn ".mcp.json already exists and differs: $MCP_JSON_PATH"
+  warn "merge this entry by hand:"
+  expected_mcp_json | sed 's/^/      /' >&2
+}
+
+cleanup_mcp_json() {
+  [[ -f "$MCP_JSON_PATH" ]] || { skip ".mcp.json absent: $MCP_JSON_PATH"; return; }
+  if diff -q <(expected_mcp_json) "$MCP_JSON_PATH" >/dev/null 2>&1; then
+    rm "$MCP_JSON_PATH"
+    ok "removed $MCP_JSON_PATH"
+  else
+    warn ".mcp.json has been hand-edited; leaving alone: $MCP_JSON_PATH"
+    warn "remove the 'golem' entry manually if you want it gone"
+  fi
+}
+
+# ---- npm helpers ----------------------------------------------------------
+
+npm_install_in() {
+  local dir="$1" label="$2"
+  [[ -d "$dir" ]] || { warn "$label dir missing: $dir"; return; }
+  [[ -f "$dir/package.json" ]] || { warn "$label has no package.json: $dir"; return; }
+  if [[ -d "$dir/node_modules" ]]; then
+    skip "$label deps already installed"
+    return
+  fi
+  command -v npm >/dev/null 2>&1 || { fail "$label needs npm; install Node 20+ and retry"; return; }
+  ( cd "$dir" && npm install --silent ) && ok "$label deps installed" || fail "$label npm install failed"
+}
+
+# ---- Subcommands ----------------------------------------------------------
+
+cmd_install() {
+  head1 "Installing golem substrate from: $SUBSTRATE_DIR"
+
+  head1 "1. Symlinking into ~/.claude/"
+  shopt -s nullglob
+  for src in "$SUBSTRATE_DIR/agents/"*.md;   do link_one "$src" "$TARGET_AGENTS/$(basename "$src")"   "agent";   done
+  for src in "$SUBSTRATE_DIR/personas/"*.md; do link_one "$src" "$TARGET_PERSONAS/$(basename "$src")" "persona"; done
+  for src in "$SUBSTRATE_DIR/commands/"*.md; do link_one "$src" "$TARGET_COMMANDS/$(basename "$src")" "command"; done
+  for src in "$SUBSTRATE_DIR/skills/"*/; do
+    [[ -f "$src/SKILL.md" ]] || continue
+    name="$(basename "$src")"
+    link_one "${src%/}" "$TARGET_SKILLS/$name" "skill"
+  done
+  shopt -u nullglob
+
+  head1 "2. Putting \`golem\` on PATH"
+  if [[ -L "$GOLEM_BIN_LINK" ]] && is_ours "$GOLEM_BIN_LINK"; then
+    skip "golem already linked: $GOLEM_BIN_LINK"
+  elif [[ -e "$GOLEM_BIN_LINK" ]]; then
+    warn "$GOLEM_BIN_LINK exists, not overwriting"
+  else
+    mkdir -p "$TARGET_BIN"
+    ln -s "$SUBSTRATE_DIR/bin/golem" "$GOLEM_BIN_LINK"
+    ok "golem linked: $GOLEM_BIN_LINK"
+  fi
+  case ":$PATH:" in
+    *":$TARGET_BIN:"*) ;;
+    *) warn "$TARGET_BIN is not on PATH; add this to your shell rc:"
+       warn "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+       ;;
+  esac
+
+  head1 "3. Registering the channel MCP server"
+  install_mcp_json
+
+  head1 "4. Installing JS deps"
+  npm_install_in "$DASHBOARD_DIR" "dashboard"
+  npm_install_in "$CHANNEL_DIR"   "channel-server"
+
+  head1 "Done."
+  echo
+  echo "Next: open a fresh terminal (so PATH refreshes) and run:"
+  echo "  golem doctor       # confirm everything is wired"
+  echo "  golem session      # start the interactive CEO session"
+  echo "  golem dashboard    # in another terminal, start the dashboard"
+}
+
+cmd_cleanup() {
+  head1 "Cleaning up golem substrate"
+
+  head1 "1. Removing ~/.claude/ symlinks"
+  unlink_dir_contents "$TARGET_AGENTS"   "agent"
+  unlink_dir_contents "$TARGET_PERSONAS" "persona"
+  unlink_dir_contents "$TARGET_COMMANDS" "command"
+  unlink_dir_contents "$TARGET_SKILLS"   "skill"
+
+  head1 "2. Removing golem from PATH"
+  if [[ -L "$GOLEM_BIN_LINK" ]] && is_ours "$GOLEM_BIN_LINK"; then
+    rm "$GOLEM_BIN_LINK"
+    ok "removed $GOLEM_BIN_LINK"
+  else
+    skip "no golem symlink at $GOLEM_BIN_LINK"
+  fi
+
+  head1 "3. Removing channel MCP registration"
+  cleanup_mcp_json
+
+  if [[ "${1:-}" == "--purge" ]]; then
+    head1 "4. Removing node_modules (--purge)"
+    for d in "$DASHBOARD_DIR/node_modules" "$CHANNEL_DIR/node_modules"; do
+      if [[ -d "$d" ]]; then
+        rm -rf "$d"
+        ok "removed $d"
+      fi
+    done
+  else
+    head1 "4. node_modules left in place"
+    skip "use \`golem cleanup --purge\` to remove dashboard + channel-server node_modules"
+  fi
+
+  head1 "Done."
+}
+
+cmd_reinstall() {
+  cmd_cleanup
+  echo
+  cmd_install
+}
+
+cmd_session() {
+  local persona="$TARGET_PERSONAS/golem-ceo.md"
+  if [[ ! -f "$persona" ]]; then
+    fail "persona missing at $persona"
+    fail "run \`golem install\` first"
+    exit 1
+  fi
+  command -v claude >/dev/null 2>&1 || { fail "\`claude\` not on PATH; install Claude Code first"; exit 1; }
+
+  mkdir -p "$GOLEM_ROOT"
+  cd "$GOLEM_ROOT"
+
+  local force_new=0
+  if [[ "${1:-}" == "--new" ]]; then
+    force_new=1
+    shift
+  fi
+
+  # Claude Code encodes cwd as ~/.claude/projects/<cwd-with-slashes-and-dots-as-hyphens>/.
+  local sessions_dir="$HOME/.claude/projects/$(echo "$GOLEM_ROOT" | tr '/.' '--')"
+  local resume=()
+  if [[ $force_new -eq 0 ]] && [[ -d "$sessions_dir" ]] && compgen -G "$sessions_dir/*.jsonl" >/dev/null 2>&1; then
+    resume=(--continue)
+  fi
+
+  # Default channel: our golem MCP server. Override via GOLEM_CEO_CHANNELS.
+  local channels="${GOLEM_CEO_CHANNELS:-server:golem}"
+  local stock=() dev=()
+  # shellcheck disable=SC2206
+  local list=($channels)
+  for spec in "${list[@]}"; do
+    case "$spec" in
+      server:*) dev+=("$spec") ;;
+      *)        stock+=("$spec") ;;
+    esac
+  done
+  local channel_args=()
+  [[ ${#stock[@]} -gt 0 ]] && channel_args+=(--channels "${stock[@]}")
+  [[ ${#dev[@]}   -gt 0 ]] && channel_args+=(--dangerously-load-development-channels "${dev[@]}")
+
+  exec claude \
+    --append-system-prompt-file "$persona" \
+    ${resume[@]+"${resume[@]}"} \
+    ${channel_args[@]+"${channel_args[@]}"} \
+    "$@"
+}
+
+cmd_dashboard() {
+  [[ -n "$DASHBOARD_DIR" ]] || { fail "dashboard dir not found relative to substrate"; exit 1; }
+  [[ -d "$DASHBOARD_DIR/node_modules" ]] || { fail "dashboard deps missing — run \`golem install\` first"; exit 1; }
+  command -v npm >/dev/null 2>&1 || { fail "\`npm\` not on PATH; install Node 20+"; exit 1; }
+  cd "$DASHBOARD_DIR"
+  exec npm start "$@"
+}
+
+cmd_doctor() {
+  head1 "golem doctor"
+  local failures=0
+
+  check() {
+    local label="$1" cond="$2"
+    if eval "$cond" >/dev/null 2>&1; then ok "$label"; else fail "$label"; failures=$((failures+1)); fi
+  }
+
+  head1 "Symlinks in ~/.claude/"
+  check "personas/golem-ceo.md"            "[[ -L '$TARGET_PERSONAS/golem-ceo.md' ]]"
+  check "agents/ has golem-* links"        "compgen -G '$TARGET_AGENTS/golem-*.md'"
+  check "skills/ has golem-* links"        "compgen -G '$TARGET_SKILLS/golem-*'"
+  check "commands/golem.md"                "[[ -L '$TARGET_COMMANDS/golem.md' ]]"
+
+  head1 "PATH wiring"
+  check "~/.local/bin/golem symlink"       "[[ -L '$GOLEM_BIN_LINK' ]]"
+  check "~/.local/bin on PATH"             "[[ \":\$PATH:\" == *\":$TARGET_BIN:\"* ]]"
+  check "\`claude\` on PATH"                "command -v claude"
+
+  head1 "Channel server registration"
+  check "$MCP_JSON_PATH exists"            "[[ -f '$MCP_JSON_PATH' ]]"
+  if [[ -f "$MCP_JSON_PATH" ]]; then
+    if diff -q <(expected_mcp_json) "$MCP_JSON_PATH" >/dev/null 2>&1; then
+      ok ".mcp.json matches expected"
+    else
+      warn ".mcp.json exists but differs (probably hand-merged with other servers)"
+    fi
+  fi
+
+  head1 "JS dependencies"
+  check "dashboard/node_modules"           "[[ -d '$DASHBOARD_DIR/node_modules' ]]"
+  check "channels/golem/node_modules"      "[[ -d '$CHANNEL_DIR/node_modules' ]]"
+
+  head1 "Channel server reachability (optional)"
+  local port="${GOLEM_CHANNEL_PORT:-7421}"
+  if command -v curl >/dev/null 2>&1 && curl -fsS --max-time 1 "http://127.0.0.1:$port/healthz" >/dev/null 2>&1; then
+    ok "channel server responding on 127.0.0.1:$port"
+  else
+    skip "channel server not running on 127.0.0.1:$port (only matters while a CEO session is live)"
+  fi
+
+  echo
+  if [[ $failures -eq 0 ]]; then
+    ok "all critical checks passed"
+  else
+    fail "$failures critical check(s) failed — run \`golem install\` to fix"
+    exit 1
+  fi
+}
+
+cmd_help() {
+  cat <<EOF
+golem — unified CLI for the substrate.
+
+Usage:
+  golem <command> [args]
+
+Commands:
+  install              One-time global setup (symlinks, .mcp.json, npm deps). Idempotent.
+  reinstall            Cleanup, then install. Use after moving the substrate dir.
+  cleanup [--purge]    Reverse install. --purge also removes node_modules.
+  session [--new] […]  Start the interactive CEO Claude Code session.
+                       --new forces a fresh session; trailing args become the first message.
+  dashboard            Start the admin dashboard on http://localhost:4173.
+  doctor               Sanity-check the environment.
+  help                 Show this message.
+
+Environment:
+  GOLEM_ROOT           Workspace anchor (default: ~/Documents/software/experiments).
+  GOLEM_CEO_CHANNELS   Space-separated channel specs for \`session\`
+                       (default: server:golem). Examples:
+                         server:golem
+                         "server:golem plugin:fakechat@claude-plugins-official"
+
+Substrate location: $SUBSTRATE_DIR
+EOF
+}
+
+# ---- Dispatch -------------------------------------------------------------
+
+cmd="${1:-help}"
+shift || true
+case "$cmd" in
+  install)     cmd_install "$@" ;;
+  reinstall)   cmd_reinstall "$@" ;;
+  cleanup)     cmd_cleanup "$@" ;;
+  session)     cmd_session "$@" ;;
+  dashboard)   cmd_dashboard "$@" ;;
+  doctor)      cmd_doctor "$@" ;;
+  help|-h|--help) cmd_help ;;
+  *) fail "unknown command: $cmd"; echo; cmd_help; exit 2 ;;
+esac

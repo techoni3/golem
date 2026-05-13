@@ -1,0 +1,20 @@
+# Runtime / generated state
+journal/
+node_modules/
+
+# Local-only Claude Code overrides (always per-developer)
+.claude/settings.local.json
+.claude/settings.local.json.bak
+.claude/scratchpad-brainstorm.md
+
+# User projects (own git repos; tracked via ~/.config/golem/projects.json)
+golem-projects/
+golem-ideas/
+
+# Archived prior iterations (v0 substrate, etc.)
+archive/
+
+# OS noise
+.DS_Store
+*.swp
+*.swo
