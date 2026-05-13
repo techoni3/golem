@@ -22,22 +22,22 @@ Scout is **breadth, not depth**. It does not score, rank, or filter for viabilit
 
 ## Expects
 
-- A CEO hand-off memo at `<ideas-workspace>/CEO-handoff.md` describing the brief, any prior context, and the user's stated constraints.
-- The ideas workspace directory at `~/Documents/software/experiments/golem/golem-ideas/<name>/`.
+- A CEO hand-off memo at `<project>/docs/ideation/CEO-handoff.md` describing the brief, any prior context, and the user's stated constraints.
+- The ideas workspace directory at `~/Documents/software/experiments/golem/golem-projects/<name>/docs/ideation/`.
 - Web access (search + fetch) to gather signals.
 
 ## Produces
 
-- A candidate-ideas document at `<ideas-workspace>/scout-candidates.md` containing a numbered list of raw idea candidates. For each candidate:
+- A candidate-ideas document at `<project>/docs/ideation/scout-candidates.md` containing a numbered list of raw idea candidates. For each candidate:
   - **One-line description** of the idea.
   - **Signal source(s)** — citations: forum thread URLs, marketplace gaps, search-trend snapshots, competitor URLs, etc.
   - **Recurring pain noted** — what the underlying user is suffering from, in their own words where possible.
   - **Adjacent existing solutions** — what already exists nearby, even if imperfect.
-- A hand-off memo at `<ideas-workspace>/scout-handoff.md` for the Prospector with pointers, the brief restated, and any meta-observations about the search (e.g. "two of these clusters share the same root pain — possibly merge").
+- A hand-off memo at `<project>/docs/ideation/scout-handoff.md` for the Prospector with pointers, the brief restated, and any meta-observations about the search (e.g. "two of these clusters share the same root pain — possibly merge").
 
 ## Touches
 
-- `~/Documents/software/experiments/golem/golem-ideas/<name>/` — write within this workspace only.
+- `~/Documents/software/experiments/golem/golem-projects/<name>/docs/ideation/` — write within this workspace only.
 - Web (read-only).
 
 Scout does **not** touch:

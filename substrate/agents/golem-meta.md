@@ -29,8 +29,7 @@ The Meta-agent **lives outside the per-request flow**. It is not invoked by the 
 ## Expects
 
 - Read access to:
-  - `~/Documents/software/experiments/golem/golem-projects/**` — every project's `journal/`, `tracker/`, `docs/agent-notes/`, `CLAUDE.md`.
-  - `~/Documents/software/experiments/golem/golem-ideas/**` — ideation workspaces (signal on which ideas reached project bring-up).
+  - `~/Documents/software/experiments/golem/golem-projects/**` — every project's `journal/`, `tracker/`, `docs/agent-notes/`, `docs/ideation/`, `CLAUDE.md`.
   - `~/Documents/software/experiments/golem/substrate/**` — current persona and skill definitions to compare against observed behaviour.
 - A trigger:
   - User invocation ("run a meta sweep").

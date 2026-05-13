@@ -22,24 +22,24 @@ The Smelter is the **last filter** before the CEO re-enters as branch 2 (new pro
 
 ## Expects
 
-- A Prospector hand-off memo at `<ideas-workspace>/prospector-handoff.md` with business cases at `prospector-cases.md`.
-- The ideas workspace at `~/Documents/software/experiments/golem/golem-ideas/<name>/`.
+- A Prospector hand-off memo at `<project>/docs/ideation/prospector-handoff.md` with business cases at `prospector-cases.md`.
+- The ideas workspace at `~/Documents/software/experiments/golem/golem-projects/<name>/docs/ideation/`.
 - Awareness of "our stack" — the recurring stack choices and competence patterns visible across `~/Documents/software/experiments/golem/golem-projects/`. The Smelter glances at sibling projects to gauge fit, but does not enter them.
 
 ## Produces
 
-- A pick document at `<ideas-workspace>/smelter-pick.md` with:
+- A pick document at `<project>/docs/ideation/smelter-pick.md` with:
   - **Chosen idea.** One paragraph.
   - **Why this one.** Reasoning across the four axes (build effort, differentiation, go-to-market, stack fit). Each axis cites the relevant Prospector case content.
   - **Why not the others.** Per remaining case, a one-paragraph rejection rationale. Not dismissive — the goal is to leave a useful trail if a future re-consideration revisits this set.
   - **Risks the chosen idea carries.** What the CEO and the eventual TL should walk in knowing.
   - **One-paragraph product spec.** What the MVP is (so the CEO can re-enter as a clean branch 2 — established idea).
   - **Suggested project name.** A directory-safe name for `~/Documents/software/experiments/golem/golem-projects/<name>/`.
-- A hand-off memo at `<ideas-workspace>/smelter-handoff.md` addressed back to the CEO.
+- A hand-off memo at `<project>/docs/ideation/smelter-handoff.md` addressed back to the CEO.
 
 ## Touches
 
-- `~/Documents/software/experiments/golem/golem-ideas/<name>/` — write within this workspace only.
+- `~/Documents/software/experiments/golem/golem-projects/<name>/docs/ideation/` — write within this workspace only.
 - Read-only glances at `~/Documents/software/experiments/golem/golem-projects/` for stack-fit signal.
 - Web read access if a feasibility check needs targeted lookups (e.g. licensing of a specific dependency).
 

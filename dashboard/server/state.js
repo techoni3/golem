@@ -41,7 +41,7 @@ export function createState() {
   let rediscoverTimer = null;
   let orchestratorTimer = null;
   /** Last computed orchestrator snapshot (so REST can return without async). */
-  let orchestratorState = { ceo: null, workspaces: [], headlineMemo: null, gates: [], gateCounts: { awaiting: 0, approved: 0, denied: 0, cancelled: 0, total: 0 } };
+  let orchestratorState = { ceo: null, sessions: [], workspaces: [], headlineMemo: null, gates: [], gateCounts: { awaiting: 0, approved: 0, denied: 0, cancelled: 0, total: 0 } };
   // Coalesce file events (chokidar fires "change" for every fs.write tick).
   const refreshTimers = new Map();
 
@@ -67,7 +67,7 @@ export function createState() {
 
   function snapshot() {
     return {
-      projects: projects.filter((p) => (p.kind === 'project' || p.kind === 'root')).map(projectSummary),
+      projects: projects.filter((p) => (p.kind === 'project' || p.kind === 'root' || p.kind === 'external')).map(projectSummary),
       workspaces: projects.map(projectSummary),
       orchestrator: orchestratorState,
       agents: [].concat(...[...stores.values()].map((s) => s.snapshotAgents())),
@@ -130,7 +130,7 @@ export function createState() {
   function watchedPaths() {
     const paths = [];
     for (const p of projects) {
-      if ((p.kind === 'project' || p.kind === 'root')) {
+      if ((p.kind === 'project' || p.kind === 'root' || p.kind === 'external')) {
         paths.push(p.hookFile);
         paths.push(p.summaryFile);
         paths.push(p.trackerDir);
@@ -165,7 +165,7 @@ export function createState() {
     // Add new workspaces. Only kind='project' gets a journal store + tickets.
     for (const p of next) {
       if (!prevIds.has(p.id)) {
-        if ((p.kind === 'project' || p.kind === 'root')) {
+        if ((p.kind === 'project' || p.kind === 'root' || p.kind === 'external')) {
           const s = createJournalStore(p);
           await s.bootstrap();
           stores.set(p.id, s);
@@ -206,7 +206,7 @@ export function createState() {
   function onTrackerOrJournalChange(filePath) {
     // Determine which workspace this path belongs to and which subsystem.
     for (const p of projects) {
-      if ((p.kind === 'project' || p.kind === 'root')) {
+      if ((p.kind === 'project' || p.kind === 'root' || p.kind === 'external')) {
         if (filePath === p.hookFile || filePath === p.summaryFile) {
           debouncedRefresh(`journal:${p.id}`, () => refreshJournal(p.id));
           return;
@@ -266,7 +266,7 @@ export function createState() {
     on: (...args) => ee.on(...args),
     off: (...args) => ee.off(...args),
     snapshot,
-    projects: () => projects.filter((p) => (p.kind === 'project' || p.kind === 'root')).map(projectSummary),
+    projects: () => projects.filter((p) => (p.kind === 'project' || p.kind === 'root' || p.kind === 'external')).map(projectSummary),
     workspaces: () => projects.map(projectSummary),
     project,
     projectAgents,

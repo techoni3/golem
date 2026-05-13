@@ -70,7 +70,15 @@ fi
 
 printf '%s\n' "$ENTRY" >> "$JOURNAL_FILE" 2>/dev/null || {
   echo "journal-event: could not write to $JOURNAL_FILE" >&2
-  exit 0
 }
+
+# v3: on SessionEnd, release the project lock this session was holding (if any).
+# No-op if the session isn't registered or holds no claim. Idempotent against
+# the eventual `kill -0` GC.
+if [[ "$EVENT_TYPE" == "session-end" ]] && command -v golem >/dev/null 2>&1; then
+  if [[ -n "${SESSION_ID:-}" ]]; then
+    golem session release --session-id "$SESSION_ID" >/dev/null 2>&1 || true
+  fi
+fi
 
 exit 0

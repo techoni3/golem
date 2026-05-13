@@ -118,7 +118,11 @@ Agent(
 )
 ```
 
-After the team converges and all teammates have shut down, call `TeamDelete()` to release the team config + task list. Skipping `TeamDelete` is not fatal but leaves stale state on disk across sessions.
+After the team converges, follow the **closing-sequence checklist** (see §"Team supervision" below) — `SendMessage` shutdown_request to every teammate, wait for `isActive: false`, THEN call `TeamDelete()`. `TeamDelete` alone does NOT kill tmux-backed teammate processes; orphans accumulate otherwise.
+
+**Productive turn 1 is mandatory.** Every teammate's spawn prompt MUST describe concrete work the teammate can produce on turn 1 — a write, a read+SendMessage, anything observable. **Never** instruct a teammate to "wait for the first SendMessage" as its turn-1 action. Claude Code may pick a synchronous backend for the spawn, in which case `end_turn` after a no-work turn terminates the teammate and the loop silently dies (the field-observed PA↔PAR v1 failure mode). The canonical pattern is the **PAR pre-bake review**: the Reviewer reads available baseline (existing specs, related docs, the brief itself) and SendMessages the Architect a pre-bake verdict on turn 1, so by the time the Architect finishes v1 there's already feedback waiting in its inbox.
+
+**`team_name` MUST be project-namespaced.** Use `specs-<project_id>`, `arch-<project_id>`, `tdd-<project_id>-tkt-<ticket_id>` patterns. `~/.claude/teams/<name>/` is a machine-global namespace; two CEOs running on different projects with un-namespaced `team_name` collide.
 
 **Leaf one-shots never use `TeamCreate`.** Substrator, UX Designer, Local DevOps, Cloud DevOps, Documentarian, Diagnoser, Scout / Prospector / Smelter — these are single-agent dispatches and must be spawned as plain `Agent(subagent_type: ..., description: ..., prompt: ...)` with **no** `team_name`. Wrapping a one-shot in a team adds bookkeeping for nothing.
 
@@ -138,6 +142,53 @@ Each addressee retains its context across messages, so the Reviewer can iterate 
 **Cap iterative loops at ~3 rounds.** If not converging, escalate to the main thread — the disagreement is structural and a higher-level decision is needed.
 
 **Teammates cannot spawn anything.** No `Agent` tool, no nested teams. They can only `SendMessage` other named teammates in the same team and use the leaf-level tools they were given (Read/Write/Edit/Bash, plus stack-specific ones).
+
+## Team supervision (the orchestrator is the team lead)
+
+A team that's spawned-and-forgotten is flying blind. Claude Code's `Agent(team_name=…)` silently picks between two backends:
+
+- **Synchronous subagent** — `Agent()` blocks until the agent yields. `end_turn` = termination. A teammate told to "wait" on turn 1 will be terminated before it ever receives a SendMessage.
+- **Tmux-backed teammate** — `Agent()` returns immediately ("Spawned successfully ... will receive instructions via mailbox"). The teammate is alive in a tmux pane; `end_turn` is true idle; SendMessage wakes it.
+
+The orchestrator discriminates by inspecting tool-return text immediately after every team-spawn Agent call. On the tmux backend, **start a `Monitor` watching the team** before continuing.
+
+**Canonical Monitor invocation:**
+
+```
+Monitor(
+  description: "team supervision: <team_name>",
+  command: "bash $GOLEM_ROOT/substrate/scripts/team-monitor.sh <team_name>",
+  timeout_ms: 3600000,
+  persistent: false
+)
+```
+
+Each stdout line from the script becomes a fresh conversation turn for the orchestrator. The script emits exactly these signals:
+
+| Signal | Orchestrator action |
+|---|---|
+| `monitor: armed for <team>`              | Log; team is being supervised |
+| `inbox <member>+1 <from>: <body>`        | Log; normal hand-off |
+| `verdict <member>: approve|request-changes|block` | Read the hand-off log; convergence imminent |
+| `isActive <member>: true → false` (no verdict) | Suspected synchronous-backend termination — re-spawn or escalate |
+| `stall <member>: mtime stale Ns` (first) | `SendMessage` polite "still working?" nudge |
+| `stall <member>: ...` (second)           | Treat as hard stall — `respond` escalation memo |
+| `team-config-missing`                    | Premature TeamDelete or corruption — escalate |
+| `converged <team>`                       | Run the closing-sequence checklist below |
+
+If **no Monitor events arrive for ≥ 10 min** during a known-live team, suspect Monitor died. `Read` the team config + a transcript to verify; restart Monitor if needed.
+
+**Closing-sequence checklist (F5 prevention, mandatory).** After every iterative-team convergence, BEFORE `TeamDelete()`:
+
+1. `SendMessage({to: <each-teammate>, message: {type: "shutdown_request"}})`.
+2. Wait for `shutdown_response` (or Monitor confirming all `isActive: false`).
+3. `Read ~/.claude/teams/<team_name>/config.json`; verify every member has `isActive: false`.
+4. `TeamDelete()`.
+5. `Bash(command: "ps -ef | grep agent-id-…")` — expected empty. If a teammate's tmux process is still alive, `Bash(command: "tmux -L claude-swarm-<pid> kill-session")`.
+
+`TeamDelete` alone removes team config + inboxes but does NOT kill teammate processes — orphan tmux panes consume CPU/memory indefinitely if you skip the shutdown_request step.
+
+**Tool-return-text pattern matching is fragile.** Discriminating tmux vs synchronous backend by string prefix is what the docs allow today; expect to revisit if Claude Code changes the surface.
 
 ## Prompt shape — what to put in the `prompt`
 
@@ -203,6 +254,10 @@ For teammates: a teammate that hits an unrecoverable error should `SendMessage` 
 - **Spawning a teammate without a `team_name`.** They cannot reach each other via SendMessage.
 - **Spawning teammates with a shared `team_name` but skipping `TeamCreate` first.** The team registry is empty, SendMessage routes nowhere, and the loop stalls with both teammates going idle after spawn. `TeamCreate` MUST precede the Agent calls for iterative-loop spawns.
 - **Wrapping a leaf one-shot in `TeamCreate`.** A single-agent dispatch (Substrator, UX Designer, Documentarian, Diagnoser, etc.) is a plain `Agent(...)` call with no `team_name` and no preceding `TeamCreate`.
+- **Instructing a teammate to "wait for the first SendMessage" as its turn-1 action.** On the synchronous backend this terminates the teammate before any message arrives; on the tmux backend it's wasted cycles. Every spawn prompt must produce real turn-1 work (the PAR pre-bake-review pattern).
+- **Calling `TeamDelete` without first sending `shutdown_request`.** Tmux-backed teammates do not exit on `TeamDelete` — orphan processes accumulate. The closing-sequence checklist is mandatory.
+- **Un-namespaced `team_name`.** `~/.claude/teams/<name>/` is machine-global. Two CEOs running un-namespaced teams collide.
+- **Spawning an iterative team without subsequently starting a `Monitor`.** Flying blind on supervision; F2/F3/F4 failures go undetected.
 - **Skipping the closing reflex** because "this turn was short".
 - **Assuming the spawned agent will "look at" the orchestrator's recent decisions.** It can't — give it pointers to disk.
 - **Mixing Option 1 and Option 2 for the same role.** Iterative-loop personas always team-spawn. Leaf personas never.

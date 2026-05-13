@@ -23,6 +23,32 @@ import { CONFIG } from './config.js';
 
 const HOME = os.homedir();
 
+const SESSIONS_REGISTRY = path.join(
+  process.env.XDG_CONFIG_HOME ?? path.join(HOME, '.config'),
+  'golem',
+  'sessions.json',
+);
+
+// Read all live CEO sessions from the v3 session registry. Each row records
+// {session_id, pid, boot_time, claimed_project, claimed_at, ...}. Returns []
+// on missing / unparseable file.
+export async function readSessions() {
+  let raw;
+  try {
+    raw = await fs.readFile(SESSIONS_REGISTRY, 'utf8');
+  } catch {
+    return [];
+  }
+  let json;
+  try {
+    json = JSON.parse(raw);
+  } catch (err) {
+    console.error('[orchestrator] failed to parse', SESSIONS_REGISTRY, err.message);
+    return [];
+  }
+  return Array.isArray(json.sessions) ? json.sessions : [];
+}
+
 function encodeCwdToProjectKey(cwd) {
   // Claude Code uses cwd with `/` and (on macOS) `.` replaced by `-`.
   // We replicate the same encoding so we can find the right sessions dir.
@@ -173,8 +199,9 @@ function parseFrontmatter(md) {
  * Build the full orchestrator snapshot used by /api/orchestrator and the WS.
  */
 export async function orchestratorSnapshot(workspaces) {
-  const [ceo, ...rest] = await Promise.all([
+  const [ceo, sessions, ...rest] = await Promise.all([
     detectCeoSession(),
+    readSessions(),
     ...workspaces.map(async (w) => {
       const [memo, gates] = await Promise.all([latestJourneyMemo(w), readGates(w)]);
       return { workspace: w.id, kind: w.kind, name: w.name, memo, gates };
@@ -196,6 +223,7 @@ export async function orchestratorSnapshot(workspaces) {
 
   return {
     ceo,
+    sessions,       // v3: array of live CEO sessions (multi-CEO ready)
     workspaces: perWorkspace,
     headlineMemo,
     gates: allGates.sort((a, b) => (b.mtime ?? 0) - (a.mtime ?? 0)),

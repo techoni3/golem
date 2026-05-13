@@ -23,14 +23,14 @@ The Prospector is **the market-side filter**. It is not the build-feasibility ju
 ## Expects
 
 - Either:
-  - A Scout hand-off memo at `<ideas-workspace>/scout-handoff.md` with the candidates list at `scout-candidates.md`, or
-  - A direct CEO hand-off at `<ideas-workspace>/CEO-handoff.md` (when the brief was specific enough to skip Scout).
-- The ideas workspace directory at `~/Documents/software/experiments/golem/golem-ideas/<name>/`.
+  - A Scout hand-off memo at `<project>/docs/ideation/scout-handoff.md` with the candidates list at `scout-candidates.md`, or
+  - A direct CEO hand-off at `<project>/docs/ideation/CEO-handoff.md` (when the brief was specific enough to skip Scout).
+- The ideas workspace directory at `~/Documents/software/experiments/golem/golem-projects/<name>/docs/ideation/`.
 - Web access (search + fetch).
 
 ## Produces
 
-- A business-cases document at `<ideas-workspace>/prospector-cases.md` containing one section per surviving candidate. For each:
+- A business-cases document at `<project>/docs/ideation/prospector-cases.md` containing one section per surviving candidate. For each:
   - **Candidate.** One-line restatement.
   - **Buyer.** Who pays. What role / segment.
   - **Pain → willingness-to-pay.** How acute the pain is, how today's substitutes price.
@@ -41,11 +41,11 @@ The Prospector is **the market-side filter**. It is not the build-feasibility ju
   - **Open questions.** What this round of research could not answer.
   - **Citations.** Inline links to evidence used.
 - A dropped-candidates note inside the same document — list of Scout's candidates that did not survive research, with a one-line reason each.
-- A hand-off memo at `<ideas-workspace>/prospector-handoff.md` for the Smelter.
+- A hand-off memo at `<project>/docs/ideation/prospector-handoff.md` for the Smelter.
 
 ## Touches
 
-- `~/Documents/software/experiments/golem/golem-ideas/<name>/` — write within this workspace only.
+- `~/Documents/software/experiments/golem/golem-projects/<name>/docs/ideation/` — write within this workspace only.
 - Web (read-only).
 
 Prospector does **not** touch:

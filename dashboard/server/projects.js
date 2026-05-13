@@ -7,9 +7,16 @@
 // We exclude `archive/` and dotfile-prefixed dirs from both roots.
 
 import path from 'node:path';
+import os from 'node:os';
 import fs from 'node:fs/promises';
 import { CONFIG } from './config.js';
 import { colorFor, glyphFor } from './util.js';
+
+const REGISTRY_FILE = path.join(
+  process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'),
+  'golem',
+  'projects.json',
+);
 
 const EXCLUDED = new Set(['archive', 'node_modules']);
 
@@ -138,20 +145,84 @@ async function discoverRoot() {
   };
 }
 
-// Backwards-compatible name. Returns the CEO root workspace, projects, and
-// ideas with a `kind` field on each entry. Callers that need only one kind
-// filter on it.
+// Read ~/.config/golem/projects.json and surface any registered project whose
+// `path` isn't already discovered by the auto-scan. This is the v3 mechanism
+// for external projects (e.g. trialroomai outside golem/golem-projects/).
+async function discoverFromRegistry(alreadyDiscoveredPaths) {
+  let raw;
+  try {
+    raw = await fs.readFile(REGISTRY_FILE, 'utf8');
+  } catch {
+    return [];
+  }
+  let json;
+  try {
+    json = JSON.parse(raw);
+  } catch (err) {
+    console.error(`[projects.js] failed to parse ${REGISTRY_FILE}:`, err.message);
+    return [];
+  }
+  const out = [];
+  for (const entry of json.projects ?? []) {
+    if (!entry?.path || !entry?.id) continue;
+    if (entry.kind === 'root') continue; // root is auto-discovered separately
+    if (alreadyDiscoveredPaths.has(entry.path)) continue;
+
+    // Only surface if the path actually exists.
+    try {
+      await fs.access(entry.path);
+    } catch {
+      continue;
+    }
+
+    const workspaceDir = entry.path;
+    const journalDir = path.join(workspaceDir, 'journal');
+    let hasJournal = false;
+    try { await fs.access(journalDir); hasJournal = true; } catch { /* ignore */ }
+
+    const title = (await readClaudeMdTitle(workspaceDir)) || entry.name || entry.id;
+    const description = (await readDescription(workspaceDir)) || '';
+
+    out.push({
+      id: entry.id,
+      kind: entry.kind ?? 'external',
+      name: title,
+      glyph: glyphFor(title),
+      color: colorFor(entry.id),
+      description,
+      path: workspaceDir,
+      journalDir,
+      hookFile: path.join(journalDir, 'hook.jsonl'),
+      summaryFile: path.join(journalDir, 'summary.jsonl'),
+      trackerDir: path.join(workspaceDir, 'tracker'),
+      gatesDir: path.join(workspaceDir, 'docs', 'agent-notes', 'gates'),
+      agentNotesDir: path.join(workspaceDir, 'docs', 'agent-notes'),
+      hasJournal,
+    });
+  }
+  return out;
+}
+
+// Backwards-compatible name. Returns the CEO root workspace, projects (from
+// auto-scan AND the v3 registry), and ideas with a `kind` field on each entry.
 export async function discoverProjects() {
   const [rootWorkspace, projects, ideas] = await Promise.all([
     discoverRoot(),
     discoverFromRoot(CONFIG.projectsRoot, 'project', { requireSubstrate: true }),
     discoverFromRoot(CONFIG.ideasRoot, 'idea', { requireSubstrate: false }),
   ]);
+  const alreadyDiscoveredPaths = new Set([
+    ...(rootWorkspace ? [rootWorkspace.path] : []),
+    ...projects.map((p) => p.path),
+    ...ideas.map((p) => p.path),
+  ]);
+  const external = await discoverFromRegistry(alreadyDiscoveredPaths);
+
   const all = [];
   if (rootWorkspace) all.push(rootWorkspace);
-  all.push(...projects, ...ideas);
-  // Stable order: root first, then projects (alpha), then ideas (alpha).
-  const kindOrder = { root: 0, project: 1, idea: 2 };
+  all.push(...projects, ...ideas, ...external);
+  // Stable order: root first, then projects (alpha), then external (alpha), then ideas.
+  const kindOrder = { root: 0, project: 1, external: 2, idea: 3 };
   all.sort((a, b) => {
     const oa = kindOrder[a.kind] ?? 9;
     const ob = kindOrder[b.kind] ?? 9;
