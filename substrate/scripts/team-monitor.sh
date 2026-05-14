@@ -95,6 +95,26 @@ transcript_mtime() {
   stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || true
 }
 
+# Sanitise a member name into something usable as a shell variable suffix.
+mangle() {
+  printf '%s' "$1" | tr -c 'A-Za-z0-9_' '_'
+}
+
+# Get a per-member state value: get_state <map_name> <member>
+get_state() {
+  local map="$1" key
+  key="$(mangle "$2")"
+  eval "printf '%s' \"\${${map}_${key}:-}\""
+}
+
+# Set a per-member state value: set_state <map_name> <member> <value>
+set_state() {
+  local map="$1" key value
+  key="$(mangle "$2")"
+  value="$3"
+  eval "${map}_${key}=\"\$value\""
+}
+
 # Find new transcript lines emitted since last_size; emit verdict tokens.
 # Stores last_size in the named variable (member-specific via dynamic eval).
 scan_verdict_tokens() {
@@ -103,7 +123,8 @@ scan_verdict_tokens() {
   f="$(find_transcript "$sid")" || return 0
   local size cur_size
   size="$(stat -f %z "$f" 2>/dev/null || stat -c %s "$f" 2>/dev/null || echo 0)"
-  cur_size="${transcript_size[$member]:-0}"
+  cur_size="$(get_state transcript_size "$member")"
+  cur_size="${cur_size:-0}"
   if [[ "$size" -gt "$cur_size" ]]; then
     # Tail the new bytes; grep for verdict tokens. case-insensitive, word-ish.
     tail -c $(( size - cur_size )) "$f" 2>/dev/null \
@@ -113,7 +134,7 @@ scan_verdict_tokens() {
           emit "verdict $member: $token"
         done
   fi
-  transcript_size[$member]="$size"
+  set_state transcript_size "$member" "$size"
 }
 
 # ---- Main loop --------------------------------------------------------------
@@ -131,11 +152,9 @@ fi
 
 emit "monitor: armed for $TEAM_NAME"
 
-declare -A inbox_count
-declare -A is_active
-declare -A transcript_size
-declare -A last_change_epoch   # epoch when this member last had observable activity
-declare -A stall_emitted_at    # last stall emission, so we don't spam
+# bash 3.2 compatibility: simulate associative arrays via dynamic variable
+# names (`<map>_<mangled-key>`) using mangle/get_state/set_state above.
+# Maps in use: inbox_count, is_active, transcript_size, stall_emitted_at.
 
 events_emitted=0
 config_missing_streak=0
@@ -170,16 +189,18 @@ while true; do
     unread="$(inbox_unread "$inbox_file")"
 
     # isActive transitions
-    prev_active="${is_active[$member]:-__init__}"
+    prev_active="$(get_state is_active "$member")"
+    [[ -z "$prev_active" ]] && prev_active="__init__"
     if [[ "$prev_active" != "__init__" && "$prev_active" != "$active" ]]; then
       emit "isActive $member: $prev_active → $active"
       events_emitted=$((events_emitted + 1))
     fi
-    is_active[$member]="$active"
+    set_state is_active "$member" "$active"
     [[ "$active" == "true" ]] && any_active=1
 
     # Inbox transitions
-    prev_inbox="${inbox_count[$member]:-0}"
+    prev_inbox="$(get_state inbox_count "$member")"
+    prev_inbox="${prev_inbox:-0}"
     if [[ "$unread" -gt "$prev_inbox" ]]; then
       # New message(s) — emit one line per unread peer message (truncated).
       body_lines="$(jq -r '.[] | select(.read == false) | ((.from // "?") + ": " + ((.body // .message // "")[0:120]))' "$inbox_file" 2>/dev/null | tail -n $(( unread - prev_inbox )))"
@@ -187,7 +208,7 @@ while true; do
         [[ -n "$line" ]] && { emit "inbox $member+1 $line"; events_emitted=$((events_emitted + 1)); }
       done <<< "$body_lines"
     fi
-    inbox_count[$member]="$unread"
+    set_state inbox_count "$member" "$unread"
     [[ "$unread" -gt 0 ]] && any_unread=1
 
     # Verdict token scan (only when transcript advances)
@@ -197,12 +218,13 @@ while true; do
     if [[ "$active" == "true" && -n "$mtime" ]]; then
       age=$(( ts_now - mtime ))
       if (( age >= STALL_SEC )); then
-        last_stall="${stall_emitted_at[$member]:-0}"
+        last_stall="$(get_state stall_emitted_at "$member")"
+        last_stall="${last_stall:-0}"
         # Re-emit at most once every (STALL_SEC * 2).
         if (( ts_now - last_stall >= STALL_SEC * 2 )); then
           emit "stall $member: mtime stale ${age}s (threshold ${STALL_SEC}s)"
           events_emitted=$((events_emitted + 1))
-          stall_emitted_at[$member]="$ts_now"
+          set_state stall_emitted_at "$member" "$ts_now"
         fi
       fi
     fi
