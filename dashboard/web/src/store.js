@@ -31,6 +31,7 @@
 
   const ORCH_EMPTY = {
     ceo: null,
+    sessions: [],
     workspaces: [],
     headlineMemo: null,
     gates: [],
@@ -279,6 +280,26 @@
     });
   }
 
+  // Per-session chat filter. Messages without a session_id are surfaced in
+  // every lane (system errors that pre-date routing fall into this bucket).
+  function getChatForSession(sessionId) {
+    if (!sessionId) return state.chat.slice();
+    return state.chat.filter((m) => !m.session_id || m.session_id === sessionId);
+  }
+
+  // The CEO session list, deduped + sorted: live sessions first, claimed
+  // projects before unbound. Each row carries channel_url so the UI can show a
+  // "channel" badge / link.
+  function getSessions() {
+    const list = state.orchestrator?.sessions ?? [];
+    return list.slice().sort((a, b) => {
+      const aClaim = a.claimed_project ? 0 : 1;
+      const bClaim = b.claimed_project ? 0 : 1;
+      if (aClaim !== bClaim) return aClaim - bClaim;
+      return (a.boot_time || '').localeCompare(b.boot_time || '');
+    });
+  }
+
   window.Store = {
     subscribe,
     getState: () => state,
@@ -294,6 +315,8 @@
     getAgentDetail,
     getOrchestrator: () => state.orchestrator,
     getChat: () => state.chat,
+    getChatForSession,
+    getSessions,
   };
 
   // Kick off as soon as DOM is ready (script in <body>, so it already is).

@@ -1,93 +1,113 @@
-// Orchestrator rail — persistent top-of-page ticker tape showing the CEO
-// session state, the most-recent journey memo, and open gate counts. The
-// rail itself is non-modal — click anywhere on it (or the "New brief" /
-// gate action buttons) to open the CEO chat drawer on the right.
+// Orchestrator rail — persistent top-of-page strip showing every live CEO
+// session as a chip. Each chip is clickable → opens the CeoChatDrawer for
+// that session.
 //
-// All actual interaction (briefs, halts, gate verdicts, chat with the CEO)
-// lives in CeoChatDrawer — see drawer-ceo.jsx.
+// v3: this rail is no longer single-CEO. The v3 registry surface
+// (`orchestrator.sessions[]`) drives a row of session chips. Below the chips
+// the rail still shows the headline journey memo + the aggregate gate count.
+//
+// Single-CEO case: the chip strip collapses to one row; clicking opens the
+// drawer for that session and behaviour is identical to v2.
+// Zero-CEO case:   the rail shows a "boot a CEO" hint; chat drawer disabled.
+// Multi-CEO case:  each chip routes briefs / halts / gates to its session.
 
 const { useCallback } = React;
 
-function openCeoDrawer() {
-  window.dispatchEvent(new CustomEvent('open-ceo-drawer'));
+function openCeoDrawer(sessionId) {
+  window.dispatchEvent(new CustomEvent('open-ceo-drawer', { detail: { sessionId: sessionId ?? null } }));
 }
 
 function OrchestratorRail() {
   useStore();
   const orch = window.Store.getOrchestrator();
-  const ceo = orch?.ceo;
+  const sessions = window.Store.getSessions();
   const memo = orch?.headlineMemo;
   const counts = orch?.gateCounts ?? { awaiting: 0, total: 0 };
 
-  let statusLabel, statusClass;
-  if (!ceo) { statusLabel = 'No session'; statusClass = 'offline'; }
-  else if (ceo.live) { statusLabel = 'Live'; statusClass = 'live'; }
-  else { statusLabel = `Idle · ${fmtAge(ceo.age_ms)}`; statusClass = 'idle'; }
-
-  const onRailClick = useCallback(() => openCeoDrawer(), []);
-  const stop = (e) => e.stopPropagation();
+  const onMemoClick = useCallback(() => {
+    // No specific session → drawer falls back to the first available one.
+    openCeoDrawer(sessions[0]?.session_id ?? null);
+  }, [sessions]);
 
   return (
-    <div
-      className="orch-rail clickable"
-      onClick={onRailClick}
-      title="Open CEO chat"
-    >
-      <div className="orch-status">
-        <span className={`orch-dot ${statusClass}`}/>
-        <div className="orch-status-text">
-          <div className="orch-status-label">CEO · {statusLabel}</div>
-          <div className="orch-status-sub">
-            {ceo
-              ? <>session <span className="mono">{ceo.session_id.slice(0, 8)}</span></>
-              : <span style={{ color: 'var(--text-4)' }}>boot with <span className="mono">golem session</span> to start one</span>}
+    <div className="orch-rail orch-rail-v3">
+      <div className="orch-sessions">
+        {sessions.length === 0 && (
+          <div className="orch-session-empty">
+            <span className="orch-dot offline"/>
+            <span className="orch-status-label">No CEO live</span>
+            <span className="orch-session-hint">
+              boot with <span className="mono">golem session start --project &lt;id&gt;</span>
+            </span>
           </div>
-        </div>
+        )}
+        {sessions.map((s) => <SessionChip key={s.session_id} session={s}/>)}
       </div>
 
-      <div className="orch-memo">
-        {memo ? (
-          <>
-            <div className="orch-memo-title" title={memo.path}>
-              <span className="orch-memo-workspace">{memo.workspace_name}</span>
-              <span className="sep">·</span>
-              <span className="mono">{memo.name}</span>
+      <div className="orch-meta-row" onClick={onMemoClick} title={memo ? 'Open CEO chat' : 'Open CEO chat'}>
+        <div className="orch-memo">
+          {memo ? (
+            <>
+              <div className="orch-memo-title" title={memo.path}>
+                <span className="orch-memo-workspace">{memo.workspace_name}</span>
+                <span className="sep">·</span>
+                <span className="mono">{memo.name}</span>
+              </div>
+              <div className="orch-memo-summary" title={memo.summary}>
+                {memo.summary || <span style={{ color: 'var(--text-4)' }}>(memo body empty)</span>}
+              </div>
+            </>
+          ) : (
+            <div className="orch-memo-empty">
+              {sessions.length > 0 ? 'no journey memo yet — click a CEO chip to push a brief' : 'no CEO session live'}
             </div>
-            <div className="orch-memo-summary" title={memo.summary}>{memo.summary || <span style={{color:'var(--text-4)'}}>(memo body empty)</span>}</div>
-          </>
-        ) : (
-          <div className="orch-memo-empty">no journey memo yet — click to push a brief</div>
-        )}
-      </div>
-
-      <div className="orch-gates">
-        <div className={`orch-gates-count ${counts.awaiting > 0 ? 'has-awaiting' : ''}`}>
-          <span className="big">{counts.awaiting}</span>
-          <span className="small">awaiting</span>
+          )}
         </div>
-        {counts.total > counts.awaiting && (
-          <div className="orch-gates-secondary">{counts.total - counts.awaiting} closed</div>
-        )}
-      </div>
 
-      <div className="orch-actions" onClick={stop}>
-        <button className="orch-btn primary" onClick={openCeoDrawer} title="Open the CEO chat to send a brief">
-          Open chat
-        </button>
+        <div className="orch-gates">
+          <div className={`orch-gates-count ${counts.awaiting > 0 ? 'has-awaiting' : ''}`}>
+            <span className="big">{counts.awaiting}</span>
+            <span className="small">awaiting</span>
+          </div>
+          {counts.total > counts.awaiting && (
+            <div className="orch-gates-secondary">{counts.total - counts.awaiting} closed</div>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-function fmtAge(ms) {
-  if (ms == null) return '?';
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h`;
-  return `${Math.floor(h / 24)}d`;
+function SessionChip({ session }) {
+  const onClick = useCallback((e) => {
+    e.stopPropagation();
+    openCeoDrawer(session.session_id);
+  }, [session.session_id]);
+
+  const claim = session.claimed_project;
+  const channel = session.channel_port;
+  const statusClass = channel ? 'live' : 'idle';
+  const statusLabel = channel ? 'Live' : 'No channel';
+
+  return (
+    <button
+      className={`orch-session-chip ${claim ? 'claimed' : 'unbound'}`}
+      onClick={onClick}
+      title={
+        `session ${session.session_id}\n` +
+        `pid ${session.pid}\n` +
+        (claim ? `claim ${claim}` : 'unbound — no project claimed') +
+        (channel ? `\nchannel http://${session.channel_host}:${channel}` : '\nno channel registered (briefs cannot be delivered)')
+      }
+    >
+      <span className={`orch-dot ${statusClass}`}/>
+      <span className="orch-session-claim">
+        {claim ? <span className="mono">{claim}</span> : <span className="orch-session-unbound">&lt;unbound&gt;</span>}
+      </span>
+      <span className="orch-session-id mono">{session.session_id.slice(0, 8)}</span>
+      <span className="orch-session-status">{statusLabel}</span>
+    </button>
+  );
 }
 
 window.OrchestratorRail = OrchestratorRail;

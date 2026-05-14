@@ -140,11 +140,21 @@
       ),
     tickets: (projectId) => getJSON(`/api/projects/${encodeURIComponent(projectId)}/tickets`),
     // Orchestrator intrusions (proxied to the golem MCP channel server).
-    pushBrief: (text) => postJSON('/api/brief', { brief: text }),
-    pushInterrupt: (text) => postJSON('/api/interrupt', { text }),
-    pushHalt: (reason) => postJSON('/api/halt', { reason: reason ?? '' }),
-    pushGate: (gateId, decision, note) =>
-      postJSON(`/api/gates/${encodeURIComponent(gateId)}/${encodeURIComponent(decision)}`, { note: note ?? '' }),
-    channelHealth: () => getJSON('/api/channel/health'),
+    // sessionId routes the brief to a specific live CEO. Omit it (or pass null)
+    // when there is exactly one CEO live — the server picks it up by default.
+    pushBrief: (text, sessionId) =>
+      postJSON('/api/brief', { brief: text, session_id: sessionId ?? null }),
+    pushInterrupt: (text, sessionId) =>
+      postJSON('/api/interrupt', { text, session_id: sessionId ?? null }),
+    pushHalt: (reason, sessionId) =>
+      postJSON('/api/halt', { reason: reason ?? '', session_id: sessionId ?? null }),
+    pushGate: (gateId, decision, note, sessionId) =>
+      postJSON(
+        `/api/gates/${encodeURIComponent(gateId)}/${encodeURIComponent(decision)}`,
+        { note: note ?? '', session_id: sessionId ?? null },
+      ),
+    channels: () => getJSON('/api/channels'),
+    channelHealth: (sessionId) =>
+      getJSON(`/api/channel/health${sessionId ? `?session=${encodeURIComponent(sessionId)}` : ''}`),
   };
 })();

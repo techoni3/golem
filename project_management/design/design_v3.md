@@ -10,6 +10,12 @@ This doc supersedes `v3_notes.md` (which remains as the brainstorm scratchpad). 
 
 ---
 
+<!-- Status note (2026-05-14): The originally Phase-2-deferred items
+     (D-v3-102/103/104) have been promoted into v3 after the multi-CEO
+     workflow exposed real bugs (dashboard chat singleton + stale-session
+     ghosts). The §15 narrative below has been rewritten accordingly; the
+     decisions log in §17 marks them Shipped. -->
+
 ## 1. What v3 delivers
 
 v2 was about **observing one CEO running one project**. v3 is about **running many projects safely in parallel**, with the team-lead actively supervising the teams it spawns. Three load-bearing themes:
@@ -511,19 +517,24 @@ Failures are silent (logged via the script's stderr); the registry GC on the nex
 
 ---
 
-## 15. Dashboard side — Phase 2 (deferred)
+## 15. Dashboard side — shipped in v3 (Phase 2 promoted)
 
-What v3 ships in the dashboard:
+What v3 ships in the dashboard (now including the Phase 2 chat work):
+
+**Registry surfacing** (originally Phase 1):
 - `dashboard/server/config.js` paths already updated to point at `$GOLEM_ROOT/golem-projects/`. ✓
 - `dashboard/server/projects.js` extended to ALSO read `~/.config/golem/projects.json` and surface every entry whose `path` isn't already discovered by the auto-scan. De-dup by absolute path. Entries whose path doesn't exist on disk are logged-and-skipped.
-- `dashboard/server/orchestrator.js` extended to read `~/.config/golem/sessions.json` and render one CEO record per live session (instead of inferring CEO liveness from a single transcript jsonl).
+- `dashboard/server/orchestrator.js` reads `~/.config/golem/sessions.json` AND `~/.config/golem/channels.json`; PID-liveness filter strips ghosts whose pid is dead so the UI never surfaces stale rows even if no CLI command has run a GC pass.
+- Journal store cross-references the dead-session set: a CEO whose pid the registry knows is dead is demoted to `done` regardless of journal mtime — closes the "ACTIVE forever" failure mode when Claude exits before SessionEnd fires.
 
-What v3 **defers** to Phase 2:
-- **Channel server session-id routing.** Today the channel server is implicitly one-CEO. Multi-CEO requires each CEO MCP-connecting to declare its `session_id`, and the dashboard's `/api/brief` taking a target session_id. Until this lands, dashboard chat goes to whichever CEO is connected to the channel server; if multiple, behaviour is undefined. **Workaround for v3 terminal-first usage:** the user opens a terminal per CEO and types briefs directly. The dashboard remains read-only for chat.
-- **Per-CEO chat drawer UX.** Today the drawer is global. Reshaping it for multi-CEO is a frontend redesign call — settling on per-CEO tab vs persistent-drawer-following-view vs per-project-drawer is deferred (decision `D-v3-103`).
-- **Unbound-CEO UI affordance** (`D-v3-104`).
+**Multi-CEO chat routing** (originally `D-v3-102` / `D-v3-103` / `D-v3-104`, all shipped):
+- **Channel server is now per-session.** `substrate/channels/golem/index.js` reads `CLAUDE_CODE_SESSION_ID` on boot, binds an ephemeral port (`GOLEM_CHANNEL_PORT=0` is the CLI default), and registers `{session_id, host, port, pid}` to `~/.config/golem/channels.json` via an atomic mkdir-locked write. Cleanup on SIGINT/SIGTERM/SIGHUP/beforeExit removes the row. Every `ack` / `respond` broadcast carries `session_id` so the dashboard can route the message into the right lane.
+- **Dashboard chat backend (`chat.js`) is now a multiplexer.** Instead of a single SSE consumer it maintains a `session_id → SSE` map driven by the channels registry; it reconciles on a 3s poll (new CEO joins → new consumer; CEO disappears → consumer torn down). Each message recorded carries `session_id`.
+- **Dashboard brief proxy (`brief.js`) routes by session_id.** `/api/brief`, `/api/interrupt`, `/api/halt`, `/api/gates/:id/:decision` accept a `session_id` body field (or `?session=` query). Server resolves the target channel from `channels.json`. Single-CEO case stays auto-routed for backwards compat; zero-CEO falls back to the legacy `CONFIG.channelUrl` probe.
+- **Frontend renders sessions as chips on the orchestrator rail.** Each chip shows `claim · session_id_short · status` and is clickable → opens the chat drawer keyed to that session. Inside the drawer a session-tab strip lets the user switch between live CEOs without closing. Unbound CEOs render with an explicit `<unbound>` claim label and a dashed chip border — that's the `D-v3-104` affordance.
+- New REST: `GET /api/channels` lists the channel registry for debug + frontend tab-strip enrichment.
 
-This trade-off is deliberate: Phase 1 unblocks the architecture; Phase 2 is informed by terminal-mode usage of multiple CEOs in real workflows before the UI hardens.
+The original deferral note read *"workaround for v3 terminal-first usage: the user opens a terminal per CEO and types briefs directly. The dashboard remains read-only for chat."* That workaround is no longer required — multi-CEO chat is end-to-end functional in v3.
 
 ---
 
@@ -541,10 +552,14 @@ This trade-off is deliberate: Phase 1 unblocks the architecture; Phase 2 is info
 8. **`dashboard/server/orchestrator.js`** — read `~/.config/golem/sessions.json`, list one CEO per row.
 9. **Self-test pass** — `golem doctor` extended, smoke-test each new subcommand, verify happy path of claim/release with a dummy session.
 
-### Phase 2 (deferred, post-Phase-1 learnings)
+### Phase 2 (promoted into v3 — was deferred, now shipped)
 
-- Channel server `session_id`-keyed routing (D-v3-102).
-- Dashboard chat drawer UX restructure (D-v3-103, D-v3-104).
+- Channel server `session_id`-keyed routing (D-v3-102). **Shipped.**
+- Dashboard chat drawer UX restructure (D-v3-103). **Shipped — per-session chips on rail + tab strip inside drawer.**
+- Unbound-CEO UI affordance (D-v3-104). **Shipped — `<unbound>` chip + dashed border.**
+
+### Phase 2 (still deferred, post-Phase-1 learnings)
+
 - Optional: `golem team teardown` CLI if F5 recurs.
 - Optional: `golem lint-settings` CLI if F1 recurs.
 - Optional: backend-selection investigation if F2 recurs.
@@ -569,13 +584,10 @@ Locked (committed direction):
 - `D-v3-012` — Backend-aware spawn handling via tool-return text inspection. Known fragility. (§9.4)
 - `D-v3-013` — Monitor wrapper at `substrate/scripts/team-monitor.sh`; CEO uses single canonical invocation. (§13)
 - `D-v3-014` — Directory restructure: `$GOLEM_ROOT = ~/Documents/software/experiments/golem/`. All in-tree projects under `golem/golem-projects/`. External projects anywhere on disk + registry. (§2)
-- `D-v3-015` — Dashboard registry reads (`projects.json`, `sessions.json`) ship in v3; channel-server routing + per-CEO drawer deferred to Phase 2. (§15)
-
-Open (Phase 2):
-
-- `D-v3-102` — Channel server `session_id`-keyed connection map; brief routing targets a specific session.
-- `D-v3-103` — Dashboard chat drawer UX (per-CEO tab vs persistent drawer following project view vs per-project drawer).
-- `D-v3-104` — Unbound-CEO UI affordance.
+- `D-v3-015` — Dashboard registry reads (`projects.json`, `sessions.json`, `channels.json`) ship in v3; channel-server routing + per-CEO drawer ALSO shipped (revised from original Phase-2 deferral). PID-liveness filter strips ghost CEOs from both the sessions list and the journal-derived agents table. (§15)
+- `D-v3-102` — **Shipped.** Channel server reads `CLAUDE_CODE_SESSION_ID`, binds an ephemeral port via `GOLEM_CHANNEL_PORT=0` (the CLI's new default), and registers `{session_id, host, port, pid}` to `~/.config/golem/channels.json`. Dashboard `chat.js` multiplexes one SSE consumer per session; `brief.js` routes by `session_id`. (§15)
+- `D-v3-103` — **Shipped.** Each live CEO renders as a clickable chip on the orchestrator rail; the drawer carries a session-tab strip when more than one CEO is live, with messages filtered to the active session. (§15)
+- `D-v3-104` — **Shipped.** Unbound CEOs render with `<unbound>` claim label + dashed chip border. (§15)
 
 Revisit triggers (deferred-with-tripwire):
 

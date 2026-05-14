@@ -7,7 +7,7 @@ import { CONFIG } from './config.js';
 import { createState } from './state.js';
 import { ROLES } from './roles.js';
 import { TRACKER_COLUMNS } from './tracker.js';
-import { pushBrief, pushInterrupt, pushHalt, pushGate, channelHealth } from './brief.js';
+import { pushBrief, pushInterrupt, pushHalt, pushGate, channelHealth, listChannels } from './brief.js';
 import { createChat } from './chat.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
@@ -101,10 +101,21 @@ async function main() {
     chat.record('system', 'error', `${label} not delivered — channel ${detail}. Is the CEO session running?`);
   }
 
+  // session_id is taken from the body OR the ?session= query string. The
+  // frontend always passes it through the body so a single brief can be
+  // routed to a specific CEO; query string is for curl convenience.
+  function extractSessionId(req) {
+    const sid = (req.body && typeof req.body === 'object' && typeof req.body.session_id === 'string'
+      ? req.body.session_id
+      : null) ?? (typeof req.query?.session === 'string' ? req.query.session : null);
+    return sid && sid.trim() ? sid.trim() : null;
+  }
+
   fastify.post('/api/brief', async (req, reply) => {
     const body = extractBody(req);
-    chat.record('user', 'brief', bodyToText(body));
-    const result = await pushBrief(body);
+    const sessionId = extractSessionId(req);
+    chat.record('user', 'brief', bodyToText(body), sessionId ? { session_id: sessionId } : {});
+    const result = await pushBrief(body, sessionId);
     if (!result.ok) {
       noteForwardFailure('brief', result);
       return reply.code(502).send(result);
@@ -113,8 +124,9 @@ async function main() {
   });
   fastify.post('/api/interrupt', async (req, reply) => {
     const body = extractBody(req);
-    chat.record('user', 'interrupt', bodyToText(body));
-    const result = await pushInterrupt(body);
+    const sessionId = extractSessionId(req);
+    chat.record('user', 'interrupt', bodyToText(body), sessionId ? { session_id: sessionId } : {});
+    const result = await pushInterrupt(body, sessionId);
     if (!result.ok) {
       noteForwardFailure('interrupt', result);
       return reply.code(502).send(result);
@@ -123,8 +135,9 @@ async function main() {
   });
   fastify.post('/api/halt', async (req, reply) => {
     const body = extractBody(req);
-    chat.record('system', 'halt', bodyToText(body) || 'halt requested');
-    const result = await pushHalt(body);
+    const sessionId = extractSessionId(req);
+    chat.record('system', 'halt', bodyToText(body) || 'halt requested', sessionId ? { session_id: sessionId } : {});
+    const result = await pushHalt(body, sessionId);
     if (!result.ok) {
       noteForwardFailure('halt', result);
       return reply.code(502).send(result);
@@ -134,10 +147,13 @@ async function main() {
   fastify.post('/api/gates/:gateId/:decision', async (req, reply) => {
     const { gateId, decision } = req.params;
     const body = extractBody(req);
-    chat.record('system', `gate_${decision}`, bodyToText(body) || `${decision} ${gateId}`, { gate_id: gateId });
+    const sessionId = extractSessionId(req);
+    const extras = { gate_id: gateId };
+    if (sessionId) extras.session_id = sessionId;
+    chat.record('system', `gate_${decision}`, bodyToText(body) || `${decision} ${gateId}`, extras);
     let result;
     try {
-      result = await pushGate(gateId, decision, body);
+      result = await pushGate(gateId, decision, body, sessionId);
     } catch (err) {
       chat.record('system', 'error', `gate ${decision} ${gateId} rejected: ${err?.message ?? err}`);
       return reply.code(400).send({ error: String(err?.message ?? err) });
@@ -146,11 +162,11 @@ async function main() {
       noteForwardFailure(`gate ${decision}`, result);
       return reply.code(502).send(result);
     }
-    // Speed up the visible state: refresh orchestrator snapshot after a gate write.
     state.refreshOrchestrator().catch(() => {});
     return result;
   });
-  fastify.get('/api/channel/health', async () => channelHealth());
+  fastify.get('/api/channel/health', async (req) => channelHealth(typeof req.query?.session === 'string' ? req.query.session : null));
+  fastify.get('/api/channels', async () => listChannels());
 
   fastify.get('/api/projects/:id', async (req, reply) => {
     const p = state.project(req.params.id);

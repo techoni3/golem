@@ -22,7 +22,7 @@ import { CONFIG } from './config.js';
 import { discoverProjects } from './projects.js';
 import { createJournalStore } from './journal.js';
 import { readTickets, ticketProgress } from './tracker.js';
-import { orchestratorSnapshot } from './orchestrator.js';
+import { orchestratorSnapshot, readDeadSessionIds } from './orchestrator.js';
 
 export function createState() {
   const ee = new EventEmitter();
@@ -42,13 +42,15 @@ export function createState() {
   let orchestratorTimer = null;
   /** Last computed orchestrator snapshot (so REST can return without async). */
   let orchestratorState = { ceo: null, sessions: [], workspaces: [], headlineMemo: null, gates: [], gateCounts: { awaiting: 0, approved: 0, denied: 0, cancelled: 0, total: 0 } };
+  /** Session_ids the registry has marked dead — used to demote ghost CEO agents. */
+  let deadSessionIds = new Set();
   // Coalesce file events (chokidar fires "change" for every fs.write tick).
   const refreshTimers = new Map();
 
   function projectSummary(p) {
     const store = stores.get(p.id);
     const ts = tickets.get(p.id) ?? [];
-    const agents = store ? store.snapshotAgents() : [];
+    const agents = store ? store.snapshotAgents({ deadSessionIds }) : [];
     const live = agents.filter((a) => a.status === 'active' || a.status === 'running').length;
     return {
       id: p.id,
@@ -70,14 +72,14 @@ export function createState() {
       projects: projects.filter((p) => (p.kind === 'project' || p.kind === 'root' || p.kind === 'external')).map(projectSummary),
       workspaces: projects.map(projectSummary),
       orchestrator: orchestratorState,
-      agents: [].concat(...[...stores.values()].map((s) => s.snapshotAgents())),
+      agents: [].concat(...[...stores.values()].map((s) => s.snapshotAgents({ deadSessionIds }))),
       tickets: [].concat(...tickets.values()),
     };
   }
 
   function projectAgents(projectId) {
     const s = stores.get(projectId);
-    return s ? s.snapshotAgents() : [];
+    return s ? s.snapshotAgents({ deadSessionIds }) : [];
   }
 
   function agentDetail(projectId, agentId) {
@@ -142,8 +144,26 @@ export function createState() {
 
   async function refreshOrchestrator() {
     try {
-      orchestratorState = await orchestratorSnapshot(projects);
+      const [snap, dead] = await Promise.all([
+        orchestratorSnapshot(projects),
+        readDeadSessionIds(),
+      ]);
+      orchestratorState = snap;
+      // Detect transitions so we can poke agent panels that newly have ghosts.
+      const newlyDead = new Set();
+      for (const sid of dead) if (!deadSessionIds.has(sid)) newlyDead.add(sid);
+      deadSessionIds = dead;
       ee.emit('event', { type: 'orchestrator-update', orchestrator: orchestratorState });
+      if (newlyDead.size > 0) {
+        for (const p of projects) {
+          if (p.kind !== 'project' && p.kind !== 'root' && p.kind !== 'external') continue;
+          ee.emit('event', {
+            type: 'agents-update',
+            projectId: p.id,
+            agents: projectAgents(p.id),
+          });
+        }
+      }
     } catch (err) {
       console.error('[orchestrator]', err);
     }

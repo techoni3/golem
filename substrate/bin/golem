@@ -729,6 +729,19 @@ session_start() {
   local session_id; session_id="$(gen_uuid)"
   build_channel_args
 
+  # Multi-CEO: each CEO's channel-server child binds an ephemeral port (0 →
+  # kernel-assigned). The channel server writes its bound port + this session's
+  # id into ~/.config/golem/channels.json so the dashboard can fan out SSE
+  # subscriptions. Allow override via the env so single-CEO smoke tests still
+  # pin a known port.
+  export GOLEM_CHANNEL_PORT="${GOLEM_CHANNEL_PORT:-0}"
+  # The MCP child does NOT receive CLAUDE_CODE_SESSION_ID from Claude Code's
+  # env (verified empirically: claude propagates user-set env like
+  # GOLEM_CHANNEL_PORT to its MCP children, but does not stamp its own
+  # session id). Export the id under our own name so the channel server can
+  # register itself in ~/.config/golem/channels.json keyed by session.
+  export GOLEM_CEO_SESSION_ID="$session_id"
+
   if [[ $detach -eq 1 ]]; then
     # Detached: spawn in background, record real PID, return.
     setsid claude \

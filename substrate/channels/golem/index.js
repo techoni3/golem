@@ -3,9 +3,22 @@
 // into a live `golem-ceo` Claude Code session, and exposes a `GET /events`
 // SSE stream so the dashboard can subscribe to CEO acks.
 //
+// v3 multi-CEO topology:
+//   - Each CEO session spawns its own channel-server child (one MCP per CEO).
+//   - GOLEM_CHANNEL_PORT=0 (the launcher's default) → bind a random free port,
+//     so multiple CEOs coexist without EADDRINUSE.
+//   - On listen, the channel server registers itself in
+//     ~/.config/golem/channels.json keyed by CLAUDE_CODE_SESSION_ID. The
+//     dashboard reads that registry and opens one SSE per session.
+//   - Every broadcast payload carries `session_id` so the dashboard can route
+//     the message into the right CEO's chat lane.
+//
 // See substrate/channels/golem/README.md for setup. Authoritative protocol
 // docs: https://code.claude.com/docs/en/channels-reference.md
 import http from 'node:http';
+import path from 'node:path';
+import os from 'node:os';
+import fs from 'node:fs';
 import { URL } from 'node:url';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -15,7 +28,9 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 const VERSION = '0.1.0';
-const PORT = Number(process.env.GOLEM_CHANNEL_PORT || 7421);
+// GOLEM_CHANNEL_PORT=0 → kernel-assigned free port (multi-CEO mode).
+// Default kept at 7421 so single-CEO smoke tests & legacy callers still work.
+const PORT = Number(process.env.GOLEM_CHANNEL_PORT ?? 7421);
 const HOST = '127.0.0.1';
 const ALLOWED_SENDERS = new Set(
   (process.env.GOLEM_CHANNEL_ALLOWED_SENDERS || 'dashboard,cli,curl')
@@ -24,12 +39,30 @@ const ALLOWED_SENDERS = new Set(
     .filter(Boolean),
 );
 
+// Identity for chat-routing. Verified empirically: Claude Code does NOT
+// stamp `CLAUDE_CODE_SESSION_ID` onto MCP-child env (despite some docs
+// implying so) — only user-set env like GOLEM_CHANNEL_PORT propagates. The
+// golem session launcher (substrate/bin/golem) explicitly exports
+// `GOLEM_CEO_SESSION_ID` before exec'ing claude so the value reaches the
+// MCP child. The `CLAUDE_CODE_SESSION_ID` fallback covers any future runtime
+// where claude-code does propagate it.
+const SESSION_ID =
+  process.env.GOLEM_CEO_SESSION_ID || process.env.CLAUDE_CODE_SESSION_ID || '';
+
+const CHANNELS_REGISTRY = path.join(
+  process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'),
+  'golem',
+  'channels.json',
+);
+const CHANNELS_LOCK = `${CHANNELS_REGISTRY}.lock`;
+
 // --- Outbound: SSE listeners on /events ------------------------------------
 /** @type {Set<(chunk: string) => void>} */
 const listeners = new Set();
 
 function broadcast(eventName, payload) {
-  const data = JSON.stringify(payload);
+  const enriched = { session_id: SESSION_ID, ...payload };
+  const data = JSON.stringify(enriched);
   const chunk = `event: ${eventName}\ndata: ${data}\n\n`;
   for (const emit of listeners) {
     try {
@@ -37,6 +70,89 @@ function broadcast(eventName, payload) {
     } catch {
       // listener already gone; will be reaped on next request abort
     }
+  }
+}
+
+// --- Channel registry ------------------------------------------------------
+// Atomic mkdir-based mutex; matches the convention used by the golem CLI for
+// projects.json / sessions.json. Holds the lock just long enough to
+// read-modify-write the JSON file.
+function withChannelLock(fn) {
+  const dir = path.dirname(CHANNELS_REGISTRY);
+  try { fs.mkdirSync(dir, { recursive: true }); } catch { /* ignore */ }
+  const tries = 50;
+  for (let i = 0; i < tries; i++) {
+    try {
+      fs.mkdirSync(CHANNELS_LOCK);
+      try { return fn(); }
+      finally { try { fs.rmdirSync(CHANNELS_LOCK); } catch { /* ignore */ } }
+    } catch (err) {
+      if (err && err.code === 'EEXIST') {
+        // stale lock? if mtime > 5s drop it.
+        try {
+          const st = fs.statSync(CHANNELS_LOCK);
+          if (Date.now() - st.mtimeMs > 5000) {
+            try { fs.rmdirSync(CHANNELS_LOCK); } catch { /* ignore */ }
+          }
+        } catch { /* ignore */ }
+        // Tight retry; we're in a node single-process child so the busy
+        // window is microseconds.
+        const wait = Date.now() + 20;
+        while (Date.now() < wait) { /* spin briefly */ }
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error(`failed to acquire ${CHANNELS_LOCK} after ${tries} tries`);
+}
+
+function readChannelsRegistry() {
+  try {
+    const raw = fs.readFileSync(CHANNELS_REGISTRY, 'utf8');
+    const json = JSON.parse(raw);
+    if (json && Array.isArray(json.channels)) return json;
+  } catch { /* ignore */ }
+  return { version: 1, channels: [] };
+}
+
+function writeChannelsRegistry(reg) {
+  const tmp = `${CHANNELS_REGISTRY}.tmp.${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(reg, null, 2));
+  fs.renameSync(tmp, CHANNELS_REGISTRY);
+}
+
+function registerChannel(port) {
+  if (!SESSION_ID) {
+    process.stderr.write('[golem-channel] CLAUDE_CODE_SESSION_ID empty; channel will not register for multi-CEO routing\n');
+    return;
+  }
+  withChannelLock(() => {
+    const reg = readChannelsRegistry();
+    reg.channels = reg.channels.filter((c) => c.session_id !== SESSION_ID);
+    reg.channels.push({
+      session_id: SESSION_ID,
+      pid: process.pid,
+      host: HOST,
+      port,
+      version: VERSION,
+      started_at: new Date().toISOString(),
+    });
+    writeChannelsRegistry(reg);
+  });
+}
+
+function unregisterChannel() {
+  if (!SESSION_ID) return;
+  try {
+    withChannelLock(() => {
+      const reg = readChannelsRegistry();
+      const before = reg.channels.length;
+      reg.channels = reg.channels.filter((c) => c.session_id !== SESSION_ID);
+      if (reg.channels.length !== before) writeChannelsRegistry(reg);
+    });
+  } catch (err) {
+    process.stderr.write(`[golem-channel] failed to unregister: ${err.message}\n`);
   }
 }
 
@@ -308,8 +424,28 @@ function extractContent(raw) {
 
 // --- Boot ------------------------------------------------------------------
 server.listen(PORT, HOST, () => {
+  const addr = server.address();
+  const boundPort = typeof addr === 'object' && addr ? addr.port : PORT;
   // stderr only — stdout is reserved for MCP stdio framing.
-  process.stderr.write(`[golem-channel] http://${HOST}:${PORT} (v${VERSION})\n`);
+  process.stderr.write(
+    `[golem-channel] http://${HOST}:${boundPort} (v${VERSION}) session=${SESSION_ID || '(none)'}\n`,
+  );
+  try { registerChannel(boundPort); } catch (err) {
+    process.stderr.write(`[golem-channel] register failed: ${err.message}\n`);
+  }
 });
+
+// Cleanup hooks — the channel registry should not grow ghosts when the CEO
+// dies or restarts. The stale-PID GC in the dashboard is a backstop, not a
+// primary cleanup path.
+function shutdown(code = 0) {
+  unregisterChannel();
+  try { server.close(); } catch { /* ignore */ }
+  process.exit(code);
+}
+process.on('SIGINT',  () => shutdown(0));
+process.on('SIGTERM', () => shutdown(0));
+process.on('SIGHUP',  () => shutdown(0));
+process.on('beforeExit', () => unregisterChannel());
 
 await mcp.connect(new StdioServerTransport());

@@ -1,22 +1,52 @@
-// CEO chat drawer — slides in from the right when the orchestrator rail is
-// clicked. Renders the chat lane (user briefs + CEO acks/responses + system
-// events) with a compose box pinned at the bottom and the gate-row list
-// underneath the header. Reuses .drawer-* styles from styles.css.
+// CEO chat drawer — slides in from the right when a CEO chip on the
+// orchestrator rail is clicked. Renders the chat lane (user briefs + CEO
+// acks/responses + system events) filtered to the active session, with a
+// compose box pinned at the bottom and the gate-row list underneath the
+// header. Reuses .drawer-* styles from styles.css.
+//
+// v3: the drawer is keyed by a `sessionId` set via the `open-ceo-drawer`
+// CustomEvent. Briefs/halts/gate verdicts include the session_id so the
+// backend routes them to the correct CEO. A session selector at the top of
+// the drawer lets the user switch between live CEOs without closing.
 
-const { useState, useEffect, useRef, useCallback } = React;
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
 function CeoChatDrawer() {
   useStore();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState(null);
+  const [activeSessionId, setActiveSessionId] = useState(null);
   const orch = window.Store.getOrchestrator();
-  const messages = window.Store.getChat();
-  const ceo = orch?.ceo;
-  const gates = (orch?.gates ?? []).filter(g => g.status === 'awaiting');
+  const sessions = window.Store.getSessions();
+
+  // Auto-pick the only live session when there is exactly one and none is
+  // selected yet. Also re-pick when the previously-active session disappears
+  // (CEO died / was unregistered).
+  useEffect(() => {
+    if (sessions.length === 0) {
+      if (activeSessionId !== null) setActiveSessionId(null);
+      return;
+    }
+    if (!activeSessionId || !sessions.some((s) => s.session_id === activeSessionId)) {
+      setActiveSessionId(sessions[0].session_id);
+    }
+  }, [sessions, activeSessionId]);
+
+  const active = useMemo(
+    () => sessions.find((s) => s.session_id === activeSessionId) ?? null,
+    [sessions, activeSessionId],
+  );
+
+  const messages = window.Store.getChatForSession(activeSessionId);
+  const gates = (orch?.gates ?? []).filter((g) => g.status === 'awaiting');
 
   useEffect(() => {
-    const opener = () => setOpen(true);
+    const opener = (e) => {
+      setOpen(true);
+      const wanted = e?.detail?.sessionId;
+      if (wanted) setActiveSessionId(wanted);
+    };
     window.addEventListener('open-ceo-drawer', opener);
     return () => window.removeEventListener('open-ceo-drawer', opener);
   }, []);
@@ -48,22 +78,23 @@ function CeoChatDrawer() {
   const onSubmit = useCallback((text) => {
     const trimmed = text.trim();
     if (!trimmed) return;
-    return send(() => window.SubstrateAPI.pushBrief(trimmed), 'Brief');
-  }, [send]);
+    return send(() => window.SubstrateAPI.pushBrief(trimmed, activeSessionId), 'Brief');
+  }, [send, activeSessionId]);
 
   const onHalt = useCallback(() => {
-    if (!confirm('Send a halt request to the CEO? It will gracefully yield after the current dispatch.')) return;
-    send(() => window.SubstrateAPI.pushHalt('Halt requested from dashboard'), 'Halt');
-  }, [send]);
+    if (!confirm(`Send a halt request to CEO ${activeSessionId?.slice(0, 8) ?? '?'} — gracefully yield after current dispatch?`)) return;
+    send(() => window.SubstrateAPI.pushHalt('Halt requested from dashboard', activeSessionId), 'Halt');
+  }, [send, activeSessionId]);
 
   const onGateDecision = useCallback((gateId, decision) => {
-    send(() => window.SubstrateAPI.pushGate(gateId, decision, ''), `Gate ${decision}`);
-  }, [send]);
+    send(() => window.SubstrateAPI.pushGate(gateId, decision, '', activeSessionId), `Gate ${decision}`);
+  }, [send, activeSessionId]);
 
+  const hasChannel = !!active?.channel_port;
   let statusLabel, statusClass;
-  if (!ceo) { statusLabel = 'No session'; statusClass = 'offline'; }
-  else if (ceo.live) { statusLabel = 'Live'; statusClass = 'live'; }
-  else { statusLabel = `Idle · ${fmtAge(ceo.age_ms)}`; statusClass = 'idle'; }
+  if (!active) { statusLabel = 'No session'; statusClass = 'offline'; }
+  else if (hasChannel) { statusLabel = 'Live'; statusClass = 'live'; }
+  else { statusLabel = 'No channel'; statusClass = 'idle'; }
 
   return (
     <>
@@ -78,18 +109,56 @@ function CeoChatDrawer() {
             </div>
             <button className="drawer-close" onClick={() => setOpen(false)}><Icon.Close/></button>
           </div>
+
+          {sessions.length > 1 && (
+            <div className="drawer-session-tabs">
+              {sessions.map((s) => (
+                <button
+                  key={s.session_id}
+                  className={`drawer-session-tab ${s.session_id === activeSessionId ? 'active' : ''}`}
+                  onClick={() => setActiveSessionId(s.session_id)}
+                  title={`session ${s.session_id} · ${s.claimed_project ?? 'unbound'}`}
+                >
+                  <span className="drawer-session-tab-claim">
+                    {s.claimed_project ?? <span className="drawer-session-unbound">&lt;unbound&gt;</span>}
+                  </span>
+                  <span className="drawer-session-tab-sid mono">{s.session_id.slice(0, 8)}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="drawer-meta">
-            {ceo && (
-              <div className="drawer-meta-item" title={ceo.session_id}>
-                <span className="drawer-meta-key">session</span>
-                <span className="drawer-meta-val mono">{ceo.session_id.slice(0, 12)}</span>
-              </div>
+            {active && (
+              <>
+                <div className="drawer-meta-item" title={active.session_id}>
+                  <span className="drawer-meta-key">session</span>
+                  <span className="drawer-meta-val mono">{active.session_id.slice(0, 12)}</span>
+                </div>
+                <div className="drawer-meta-item" title={active.claimed_project ?? 'unbound'}>
+                  <span className="drawer-meta-key">claim</span>
+                  <span className="drawer-meta-val mono">
+                    {active.claimed_project ?? <span className="drawer-session-unbound">&lt;unbound&gt;</span>}
+                  </span>
+                </div>
+                {active.channel_port && (
+                  <div className="drawer-meta-item" title={`http://${active.channel_host}:${active.channel_port}`}>
+                    <span className="drawer-meta-key">channel</span>
+                    <span className="drawer-meta-val mono">:{active.channel_port}</span>
+                  </div>
+                )}
+              </>
             )}
             <div className="drawer-meta-item">
               <span className="drawer-meta-key">gates</span>
               <span className="drawer-meta-val">{gates.length} awaiting</span>
             </div>
-            <button className="orch-btn small" disabled={busy || !ceo?.live} onClick={onHalt} title={!ceo?.live ? 'no live CEO session to halt' : 'halt current journey'}>
+            <button
+              className="orch-btn small"
+              disabled={busy || !hasChannel}
+              onClick={onHalt}
+              title={!hasChannel ? 'no channel — cannot deliver halt' : 'halt current journey'}
+            >
               Halt
             </button>
           </div>
@@ -97,19 +166,19 @@ function CeoChatDrawer() {
 
         {gates.length > 0 && (
           <div className="ceo-gates">
-            {gates.slice(0, 3).map(g => (
+            {gates.slice(0, 3).map((g) => (
               <div className="ceo-gate-row" key={g.gate_id}>
                 <div className="ceo-gate-meta">
                   <span className="orch-gate-badge">gate</span>
                   <span className="orch-gate-flow">
-                    {g.phase_just_completed || '?'} <span style={{color:'var(--text-4)'}}>→</span> {g.next_phase || '?'}
+                    {g.phase_just_completed || '?'} <span style={{ color: 'var(--text-4)' }}>→</span> {g.next_phase || '?'}
                   </span>
                   <span className="orch-gate-id mono" title={g.gate_id}>{g.gate_id}</span>
                 </div>
                 <div className="ceo-gate-actions">
-                  <button className="orch-btn small ok"   disabled={busy} onClick={() => onGateDecision(g.gate_id, 'approve')}>Approve</button>
-                  <button className="orch-btn small"      disabled={busy} onClick={() => onGateDecision(g.gate_id, 'deny')}>Deny</button>
-                  <button className="orch-btn small ghost" disabled={busy} onClick={() => onGateDecision(g.gate_id, 'cancel')}>Cancel</button>
+                  <button className="orch-btn small ok"    disabled={busy || !hasChannel} onClick={() => onGateDecision(g.gate_id, 'approve')}>Approve</button>
+                  <button className="orch-btn small"       disabled={busy || !hasChannel} onClick={() => onGateDecision(g.gate_id, 'deny')}>Deny</button>
+                  <button className="orch-btn small ghost" disabled={busy || !hasChannel} onClick={() => onGateDecision(g.gate_id, 'cancel')}>Cancel</button>
                 </div>
               </div>
             ))}
@@ -121,7 +190,7 @@ function CeoChatDrawer() {
 
         <ChatLane messages={messages}/>
 
-        <Composer onSubmit={onSubmit} busy={busy}/>
+        <Composer onSubmit={onSubmit} busy={busy || !hasChannel} placeholderHint={!hasChannel ? 'No channel — start a CEO via `golem session start` to send briefs' : undefined}/>
 
         {toast && (
           <div className={`orch-toast ${toast.kind} drawer-toast`} key={toast.id}>{toast.text}</div>
@@ -135,7 +204,6 @@ function ChatLane({ messages }) {
   const ref = useRef(null);
   const stickToBottom = useRef(true);
 
-  // Detect if the user has scrolled away from the bottom; if so stop autoscroll.
   const onScroll = useCallback(() => {
     const el = ref.current;
     if (!el) return;
@@ -172,8 +240,6 @@ function ChatBubble({ m }) {
   const cls = `ceo-msg role-${m.role} kind-${m.kind}`;
   const ts = window.SubstrateFmt?.fmtClock?.(m.ts) || '';
 
-  // Ack messages render as a trace line (think: "thinking" trace in agent UIs),
-  // not as a full chat bubble. Plain text, no markdown.
   if (m.kind === 'ack') {
     return (
       <div className={cls}>
@@ -183,8 +249,6 @@ function ChatBubble({ m }) {
     );
   }
 
-  // CEO substantive messages render as markdown. User + system text stays plain
-  // (user text is just what they typed; system events are short labels).
   const renderMarkdown = m.role === 'ceo' && m.kind === 'response' && window.marked;
   const label = labelFor(m);
   return (
@@ -205,10 +269,6 @@ function ChatBubble({ m }) {
   );
 }
 
-// One-time marked config: GFM (tables, fences, autolinks), no hard line breaks.
-// The dashboard is single-user / localhost-only; CEO output is trusted so we
-// don't bolt on DOMPurify. If that ever changes (remote channel sources push
-// into the chat), wrap this in a sanitiser.
 let mdConfigured = false;
 function renderMd(text) {
   if (!window.marked) return text;
@@ -230,7 +290,7 @@ function labelFor(m) {
   return m.role;
 }
 
-function Composer({ onSubmit, busy }) {
+function Composer({ onSubmit, busy, placeholderHint }) {
   const [text, setText] = useState('');
   const taRef = useRef(null);
 
@@ -250,13 +310,16 @@ function Composer({ onSubmit, busy }) {
     }
   };
 
+  const placeholder = placeholderHint
+    ?? 'Send a brief, status question, or interrupt to the CEO…  (⌘/Ctrl + Enter to send)';
+
   return (
     <form className="ceo-composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
       <textarea
         ref={taRef}
         className="ceo-composer-input"
         rows={3}
-        placeholder="Send a brief, status question, or interrupt to the CEO…  (⌘/Ctrl + Enter to send)"
+        placeholder={placeholder}
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKey}
@@ -267,17 +330,6 @@ function Composer({ onSubmit, busy }) {
       </button>
     </form>
   );
-}
-
-function fmtAge(ms) {
-  if (ms == null) return '?';
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h`;
-  return `${Math.floor(h / 24)}d`;
 }
 
 window.CeoChatDrawer = CeoChatDrawer;

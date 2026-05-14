@@ -23,30 +23,89 @@ import { CONFIG } from './config.js';
 
 const HOME = os.homedir();
 
-const SESSIONS_REGISTRY = path.join(
+const CONFIG_DIR = path.join(
   process.env.XDG_CONFIG_HOME ?? path.join(HOME, '.config'),
   'golem',
-  'sessions.json',
 );
+const SESSIONS_REGISTRY = path.join(CONFIG_DIR, 'sessions.json');
+const CHANNELS_REGISTRY = path.join(CONFIG_DIR, 'channels.json');
 
-// Read all live CEO sessions from the v3 session registry. Each row records
-// {session_id, pid, boot_time, claimed_project, claimed_at, ...}. Returns []
-// on missing / unparseable file.
-export async function readSessions() {
+function pidAlive(pid) {
+  if (!pid || pid === 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // EPERM means the pid exists but is owned by another user — treat as alive.
+    return err && err.code === 'EPERM';
+  }
+}
+
+async function readRegistry(file, listKey) {
   let raw;
   try {
-    raw = await fs.readFile(SESSIONS_REGISTRY, 'utf8');
+    raw = await fs.readFile(file, 'utf8');
   } catch {
     return [];
   }
-  let json;
   try {
-    json = JSON.parse(raw);
+    const json = JSON.parse(raw);
+    return Array.isArray(json[listKey]) ? json[listKey] : [];
   } catch (err) {
-    console.error('[orchestrator] failed to parse', SESSIONS_REGISTRY, err.message);
+    console.error('[orchestrator] failed to parse', file, err.message);
     return [];
   }
-  return Array.isArray(json.sessions) ? json.sessions : [];
+}
+
+// Read all live CEO sessions from the v3 session registry. Each row records
+// {session_id, pid, boot_time, claimed_project, claimed_at, ...}. Stale rows
+// (dead pid) are filtered out — the CLI's gc_stale_sessions is the primary
+// cleanup path but only fires on `session claim/list/start/status`. Filtering
+// here means the dashboard never surfaces ghost CEOs even when no CLI command
+// has run.
+//
+// Joins the channels.json registry to expose `channel_port` / `channel_host`
+// per session so the dashboard can fan out one SSE per CEO.
+export async function readSessions() {
+  const [sessions, channels] = await Promise.all([
+    readRegistry(SESSIONS_REGISTRY, 'sessions'),
+    readRegistry(CHANNELS_REGISTRY, 'channels'),
+  ]);
+  const channelBySession = new Map(channels.map((c) => [c.session_id, c]));
+  return sessions
+    .filter((s) => pidAlive(s.pid))
+    .map((s) => {
+      const ch = channelBySession.get(s.session_id) || null;
+      return {
+        ...s,
+        live: true,
+        channel_host: ch?.host ?? null,
+        channel_port: ch?.port ?? null,
+        channel_url: ch ? `http://${ch.host}:${ch.port}` : null,
+      };
+    });
+}
+
+// Channels registry passthrough — separate exporter so chat.js can poll it
+// directly and reconcile its SSE fanout without re-running the full
+// orchestrator snapshot.
+export async function readChannels() {
+  const channels = await readRegistry(CHANNELS_REGISTRY, 'channels');
+  return channels
+    .filter((c) => pidAlive(c.pid))
+    .map((c) => ({ ...c, url: `http://${c.host}:${c.port}` }));
+}
+
+// Set of session_ids the registry knows about but whose pids are dead. Used
+// by the journal store to demote ghost CEO agents that never got to journal a
+// session-end event (e.g. the claude process was SIGKILL'd).
+export async function readDeadSessionIds() {
+  const sessions = await readRegistry(SESSIONS_REGISTRY, 'sessions');
+  const dead = new Set();
+  for (const s of sessions) {
+    if (s.session_id && !pidAlive(s.pid)) dead.add(s.session_id);
+  }
+  return dead;
 }
 
 function encodeCwdToProjectKey(cwd) {

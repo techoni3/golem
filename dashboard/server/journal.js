@@ -61,11 +61,24 @@ function newAgent({ session_id, project, agent_id, agent_type }) {
   };
 }
 
-function classifyAgent(a, now = Date.now()) {
+function classifyAgent(a, now = Date.now(), opts = {}) {
   if (a.stopped) return 'done';
   // Tools currently in flight = running, regardless of how long the model has
   // been thinking between hook events. Long generations don't fire hooks.
   if (a.tools_running > 0) return 'running';
+  // Cross-reference v3 sessions registry: if this agent is rooted at a
+  // top-level Claude Code session (no parent_session) whose pid the registry
+  // last saw as dead, demote it to 'done' regardless of mtime. Catches the
+  // case where Claude was killed before the SessionEnd hook could fire a
+  // session-end event into the journal.
+  if (
+    opts.deadSessionIds &&
+    a.session_id &&
+    !a.parent_session &&
+    opts.deadSessionIds.has(a.session_id)
+  ) {
+    return 'done';
+  }
   const sinceLast = now - (a.last_seen ?? 0);
   if (sinceLast < CONFIG.agentActiveWindowMs) return 'active';
   if (sinceLast < CONFIG.agentIdleTimeoutMs) return 'active'; // still recent enough
@@ -485,11 +498,11 @@ export function createJournalStore(project) {
     return touchedAgentIds;
   }
 
-  function snapshotAgents() {
+  function snapshotAgents(opts = {}) {
     const now = Date.now();
     const out = [];
     for (const a of agents.values()) {
-      const status = classifyAgent(a, now);
+      const status = classifyAgent(a, now, opts);
       out.push({
         id: a.id,
         project: a.project,
