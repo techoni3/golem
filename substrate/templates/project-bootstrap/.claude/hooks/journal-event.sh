@@ -55,15 +55,63 @@ if command -v jq >/dev/null 2>&1 && [[ -n "$PAYLOAD" ]]; then
   SESSION_ID="$(printf '%s' "$PAYLOAD" | jq -r '.session_id // empty' 2>/dev/null || true)"
 fi
 
+# --- F2 teammate-exit classification --------------------------------------
+# On SubagentStop (a sub-agent / agent-team teammate terminating) classify
+# whether the exit was HEALTHY or PREMATURE. The closing reflex
+# (golem-summarise-session, run as the persona's final tool call before
+# yielding) is the strongest healthy-exit signal: a teammate that stopped
+# WITHOUT a preceding closing-reflex call is a strong premature-exit (F2
+# silent end_turn termination) candidate.
+#
+# Evidence source: the per-subagent transcript JSONL named by
+# `agent_transcript_path` in the SubagentStop payload. We scan its tail for a
+# tool_use of name "Skill" with input.skill == "golem-summarise-session".
+#
+#   clean     — closing reflex seen in the transcript tail
+#   premature — transcript readable, no closing reflex in its tail
+#   unknown   — no transcript path / unreadable / jq missing (cannot tell)
+#
+# Never throws: any failure leaves EXIT_REASON empty and journalling proceeds.
+EXIT_REASON=""
+if [[ "$EVENT_TYPE" == "subagent-stop" ]] && command -v jq >/dev/null 2>&1 && [[ -n "$PAYLOAD" ]]; then
+  AGENT_TRANSCRIPT="$(printf '%s' "$PAYLOAD" | jq -r '.agent_transcript_path // .transcript_path // empty' 2>/dev/null || true)"
+  if [[ -n "$AGENT_TRANSCRIPT" && -f "$AGENT_TRANSCRIPT" ]]; then
+    # Look at the last 25 transcript lines for the closing reflex. The reflex
+    # is the persona's *final* tool call, so a generous tail suffices and we
+    # avoid parsing the whole (possibly large) transcript.
+    REFLEX_HIT="$(tail -n 25 "$AGENT_TRANSCRIPT" 2>/dev/null \
+      | jq -rs '
+          [ .[]
+            | (.message.content // [])
+            | (if type == "array" then . else [] end)
+            | .[]
+            | select(.type == "tool_use" and .name == "Skill")
+            | (.input.skill // "")
+          ]
+          | any(. == "golem-summarise-session")
+        ' 2>/dev/null || true)"
+    if [[ "$REFLEX_HIT" == "true" ]]; then
+      EXIT_REASON="clean"
+    else
+      EXIT_REASON="premature"
+    fi
+  else
+    EXIT_REASON="unknown"
+  fi
+fi
+
 if command -v jq >/dev/null 2>&1; then
   ENTRY="$(jq -cn \
     --arg ts "$TS" \
     --arg event "$EVENT_TYPE" \
     --arg session "$SESSION_ID" \
     --arg cwd "$PWD" \
+    --arg exit_reason "$EXIT_REASON" \
     --arg payload "$PAYLOAD" \
-    '{ts: $ts, event: $event, session_id: $session, cwd: $cwd, payload: $payload}')"
+    '{ts: $ts, event: $event, session_id: $session, cwd: $cwd, payload: $payload}
+       + (if $exit_reason == "" then {} else {exit_reason: $exit_reason} end)')"
 else
+  # jq missing — cannot inspect the transcript, so exit_reason stays absent.
   esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\n'; }
   ENTRY="{\"ts\":\"$(esc "$TS")\",\"event\":\"$(esc "$EVENT_TYPE")\",\"session_id\":\"$(esc "$SESSION_ID")\",\"cwd\":\"$(esc "$PWD")\",\"payload\":\"$(esc "$PAYLOAD")\"}"
 fi

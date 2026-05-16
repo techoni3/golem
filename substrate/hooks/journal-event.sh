@@ -2,33 +2,24 @@
 #
 # journal-event.sh — append a mechanical event to the project's hook journal.
 #
-# Wired (per .claude/settings.json) to:
-#   - SessionStart       → session-start
-#   - UserPromptSubmit   → user-prompt
-#   - SessionEnd         → session-end
-#   - Stop               → stop
-#   - SubagentStop       → subagent-stop
-#   - PreToolUse(Agent)  → agent-spawn
-#   - PreToolUse(SendMessage) → send-message
-#   - PreToolUse(Bash|Read|Write|Edit|Skill) → tool-pre
-#   - PostToolUse(Agent) → agent-return
-#   - PostToolUse(SendMessage) → send-message-post
-#   - PostToolUse(Bash|Read|Write|Edit|Skill) → tool-post
-#   - Notification       → notification
-#   - PreCompact         → pre-compact
+# Wired to SessionStart, UserPromptSubmit, and SessionEnd. Reads the hook
+# payload from stdin (Claude Code passes JSON), distils to a single line, and
+# appends to journal/hook.jsonl in the project root.
 #
-# Usage:
+# Usage (from settings.json hooks):
 #   "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/journal-event.sh <event_type>"
+# where <event_type> is "session-start" | "session-end" | "user-prompt".
 #
 # Behaviour:
-#   - Resolves project root via $CLAUDE_PROJECT_DIR (falls back to walking up
-#     from $PWD looking for CLAUDE.md / .git).
+#   - Resolves project root by walking up from $PWD (the agent's effective
+#     working directory at hook-fire time) until it finds a CLAUDE.md or .git.
+#     $PWD is the correct anchor — CLAUDE_PROJECT_DIR is inherited from the
+#     parent session and would mis-route every sub-agent's events to the root
+#     workspace. If the walk finds no marker, falls back to CLAUDE_PROJECT_DIR
+#     (NOT $PWD) so stray cwds outside any project tree don't pollute random
+#     directories — they anchor at the session's home workspace.
 #   - Creates journal/ if missing.
-#   - Reads hook payload (JSON) from stdin.
-#   - Extracts canonical fields for the dashboard's consumption (session_id,
-#     tool_name, subagent_type/name/team_name, file_path, command, skill, etc.).
-#   - Appends one JSONL line to journal/hook.jsonl.
-#   - Schema-tagged with "schema": 1 so we can evolve the format.
+#   - Appends one JSONL line: {ts, event, session_id, cwd, payload}.
 #   - Never blocks the hook; failures log to stderr and exit 0.
 
 set -u
@@ -37,7 +28,7 @@ EVENT_TYPE="${1:-unknown}"
 TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 project_root() {
-  local dir="${CLAUDE_PROJECT_DIR:-$PWD}"
+  local dir="$PWD"
   while [[ "$dir" != "/" ]]; do
     if [[ -f "$dir/CLAUDE.md" ]] || [[ -d "$dir/.git" ]]; then
       printf '%s\n' "$dir"
@@ -45,7 +36,7 @@ project_root() {
     fi
     dir="$(dirname "$dir")"
   done
-  printf '%s\n' "$PWD"
+  printf '%s\n' "${CLAUDE_PROJECT_DIR:-$PWD}"
 }
 
 ROOT="$(project_root)"
@@ -59,55 +50,83 @@ mkdir -p "$JOURNAL_DIR" 2>/dev/null || {
 
 PAYLOAD="$(cat 2>/dev/null || true)"
 
+SESSION_ID=""
+if command -v jq >/dev/null 2>&1 && [[ -n "$PAYLOAD" ]]; then
+  SESSION_ID="$(printf '%s' "$PAYLOAD" | jq -r '.session_id // empty' 2>/dev/null || true)"
+fi
+
+# --- F2 teammate-exit classification --------------------------------------
+# On SubagentStop (a sub-agent / agent-team teammate terminating) classify
+# whether the exit was HEALTHY or PREMATURE. The closing reflex
+# (golem-summarise-session, run as the persona's final tool call before
+# yielding) is the strongest healthy-exit signal: a teammate that stopped
+# WITHOUT a preceding closing-reflex call is a strong premature-exit (F2
+# silent end_turn termination) candidate.
+#
+# Evidence source: the per-subagent transcript JSONL named by
+# `agent_transcript_path` in the SubagentStop payload. We scan its tail for a
+# tool_use of name "Skill" with input.skill == "golem-summarise-session".
+#
+#   clean     — closing reflex seen in the transcript tail
+#   premature — transcript readable, no closing reflex in its tail
+#   unknown   — no transcript path / unreadable / jq missing (cannot tell)
+#
+# Never throws: any failure leaves EXIT_REASON empty and journalling proceeds.
+EXIT_REASON=""
+if [[ "$EVENT_TYPE" == "subagent-stop" ]] && command -v jq >/dev/null 2>&1 && [[ -n "$PAYLOAD" ]]; then
+  AGENT_TRANSCRIPT="$(printf '%s' "$PAYLOAD" | jq -r '.agent_transcript_path // .transcript_path // empty' 2>/dev/null || true)"
+  if [[ -n "$AGENT_TRANSCRIPT" && -f "$AGENT_TRANSCRIPT" ]]; then
+    # Look at the last 25 transcript lines for the closing reflex. The reflex
+    # is the persona's *final* tool call, so a generous tail suffices and we
+    # avoid parsing the whole (possibly large) transcript.
+    REFLEX_HIT="$(tail -n 25 "$AGENT_TRANSCRIPT" 2>/dev/null \
+      | jq -rs '
+          [ .[]
+            | (.message.content // [])
+            | (if type == "array" then . else [] end)
+            | .[]
+            | select(.type == "tool_use" and .name == "Skill")
+            | (.input.skill // "")
+          ]
+          | any(. == "golem-summarise-session")
+        ' 2>/dev/null || true)"
+    if [[ "$REFLEX_HIT" == "true" ]]; then
+      EXIT_REASON="clean"
+    else
+      EXIT_REASON="premature"
+    fi
+  else
+    EXIT_REASON="unknown"
+  fi
+fi
+
 if command -v jq >/dev/null 2>&1; then
-  ENTRY="$(printf '%s' "${PAYLOAD:-{}}" | jq -c \
+  ENTRY="$(jq -cn \
     --arg ts "$TS" \
     --arg event "$EVENT_TYPE" \
+    --arg session "$SESSION_ID" \
     --arg cwd "$PWD" \
-    '{
-      schema: 1,
-      ts: $ts,
-      event: $event,
-      cwd: $cwd,
-      session_id: (.session_id // null),
-      transcript_path: (.transcript_path // null),
-      hook_event_name: (.hook_event_name // null),
-      source: (.source // null),
-      tool_name: (.tool_name // null),
-      tool_input: (.tool_input // null),
-      tool_response: (
-        if .tool_response then
-          (.tool_response | if type == "object" then
-            { ok: (.success // null), summary: ((.message // .text // null) | tostring | .[0:500]) }
-          else (. | tostring | .[0:500]) end)
-        else null end
-      ),
-      subagent_type: (.tool_input.subagent_type // null),
-      subagent_name: (.tool_input.name // null),
-      team_name: (.tool_input.team_name // null),
-      send_to: (.tool_input.to // null),
-      file_path: (.tool_input.file_path // null),
-      command: (.tool_input.command // null),
-      skill_name: (.tool_input.skill // null),
-      message: (.message // null),
-      stop_hook_active: (.stop_hook_active // null)
-    }' 2>/dev/null)"
-  if [[ -z "$ENTRY" ]]; then
-    ENTRY="$(jq -cn \
-      --arg ts "$TS" \
-      --arg event "$EVENT_TYPE" \
-      --arg cwd "$PWD" \
-      --arg payload "$PAYLOAD" \
-      '{schema: 1, ts: $ts, event: $event, cwd: $cwd, payload_raw: $payload, parse_failed: true}')"
-  fi
+    --arg exit_reason "$EXIT_REASON" \
+    --arg payload "$PAYLOAD" \
+    '{ts: $ts, event: $event, session_id: $session, cwd: $cwd, payload: $payload}
+       + (if $exit_reason == "" then {} else {exit_reason: $exit_reason} end)')"
 else
+  # jq missing — cannot inspect the transcript, so exit_reason stays absent.
   esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\n'; }
-  ENTRY="{\"schema\":1,\"ts\":\"$(esc "$TS")\",\"event\":\"$(esc "$EVENT_TYPE")\",\"cwd\":\"$(esc "$PWD")\",\"payload_raw\":\"$(esc "$PAYLOAD")\",\"jq_missing\":true}"
+  ENTRY="{\"ts\":\"$(esc "$TS")\",\"event\":\"$(esc "$EVENT_TYPE")\",\"session_id\":\"$(esc "$SESSION_ID")\",\"cwd\":\"$(esc "$PWD")\",\"payload\":\"$(esc "$PAYLOAD")\"}"
 fi
 
 printf '%s\n' "$ENTRY" >> "$JOURNAL_FILE" 2>/dev/null || {
   echo "journal-event: could not write to $JOURNAL_FILE" >&2
-  exit 0
 }
+
+# v3: on SessionEnd, release the project lock this session was holding (if any).
+# No-op if the session isn't registered or holds no claim. Idempotent against
+# the eventual `kill -0` GC.
+if [[ "$EVENT_TYPE" == "session-end" ]] && command -v golem >/dev/null 2>&1; then
+  if [[ -n "${SESSION_ID:-}" ]]; then
+    golem session release --session-id "$SESSION_ID" >/dev/null 2>&1 || true
+  fi
+fi
 
 exit 0

@@ -747,6 +747,7 @@ session_start() {
     setsid claude \
       --session-id "$session_id" \
       --append-system-prompt-file "$persona" \
+      --permission-mode acceptEdits \
       ${CHANNEL_ARGS[@]+"${CHANNEL_ARGS[@]}"} \
       ${passthru[@]+"${passthru[@]}"} \
       </dev/null >/dev/null 2>&1 &
@@ -765,6 +766,7 @@ session_start() {
   exec claude \
     --session-id "$session_id" \
     --append-system-prompt-file "$persona" \
+    --permission-mode acceptEdits \
     ${CHANNEL_ARGS[@]+"${CHANNEL_ARGS[@]}"} \
     ${passthru[@]+"${passthru[@]}"}
 }

@@ -55,6 +55,7 @@ function newAgent({ session_id, project, agent_id, agent_type }) {
     tools: 0,
     tools_running: 0, // tool-pre minus matching tool-post
     stopped: false,   // saw subagent-stop / session-end for this session_id
+    exit_reason: null, // 'clean' | 'premature' | 'unknown' — F2 exit class (subagent-stop only)
     journal: [],
     hooks: [],
     pending_hooks: new Map(), // tool_use_id → tool-pre record awaiting post
@@ -78,6 +79,24 @@ function classifyAgent(a, now = Date.now(), opts = {}) {
     opts.deadSessionIds.has(a.session_id)
   ) {
     return 'done';
+  }
+  // Symmetric cross-reference for TEAMMATES. A teammate (an agent with a
+  // parent_session that belongs to a team) parked waiting for a SendMessage
+  // stops firing journal hooks, so its last_seen mtime ages past
+  // agentIdleTimeoutMs — but it is still alive in its tmux pane. The team's
+  // ~/.claude/teams/<team_name>/config.json carries an `isActive` boolean per
+  // member, which is ground truth (see orchestrator.readLiveTeammates). If the
+  // config says this teammate is active, never demote it to 'done' on mtime
+  // alone. When the config says inactive (or has no entry), fall through to
+  // the time-based heuristic below.
+  if (
+    opts.liveTeammates &&
+    a.parent_session &&
+    a.team_name &&
+    a.name &&
+    opts.liveTeammates.has(`${a.team_name} ${a.name}`)
+  ) {
+    return 'active';
   }
   const sinceLast = now - (a.last_seen ?? 0);
   if (sinceLast < CONFIG.agentActiveWindowMs) return 'active';
@@ -333,14 +352,31 @@ export function createJournalStore(project) {
         //   2. hook_event_name=Stop (with or without agent_id) — the
         //      sub-agent's OWN frontmatter Stop firing. Terminal for that
         //      record.
+        // exit_reason (set by journal-event.sh's SubagentStop branch):
+        //   'clean'     — closing reflex (golem-summarise-session) was the
+        //                 teammate's final tool call → healthy convergence.
+        //   'premature' — teammate stopped with no closing reflex → strong
+        //                 F2 silent-termination candidate; surface loudly.
+        //   'unknown'   — transcript unavailable; cannot classify.
+        const exitReason = ev.exit_reason ?? null;
+        const exitNote =
+          exitReason === 'clean' ? ' (clean exit — closing reflex seen)'
+          : exitReason === 'premature' ? ' (PREMATURE exit — no closing reflex; possible F2 silent termination)'
+          : exitReason === 'unknown' ? ' (exit unclassified — no transcript)'
+          : '';
         if (ev.hook_event_name === 'SubagentStop' && ev.agent_id) {
+          a.exit_reason = exitReason ?? a.exit_reason ?? null;
           a.journal.push({
-            t, kind: 'system',
-            text: `Teammate ${ev.agent_id.slice(0, 8)} terminated`,
+            t, kind: exitReason === 'premature' ? 'warn' : 'system',
+            text: `Teammate ${ev.agent_id.slice(0, 8)} terminated${exitNote}`,
           });
         } else {
           a.stopped = true;
-          a.journal.push({ t, kind: 'system', text: 'Sub-agent stopped' });
+          a.exit_reason = exitReason ?? a.exit_reason ?? null;
+          a.journal.push({
+            t, kind: exitReason === 'premature' ? 'warn' : 'system',
+            text: `Sub-agent stopped${exitNote}`,
+          });
         }
         break;
       }
@@ -519,6 +555,7 @@ export function createJournalStore(project) {
         last_seen: a.last_seen,
         runtime: a.runtime,
         tools: a.tools,
+        exit_reason: a.exit_reason,
       });
     }
     return out;

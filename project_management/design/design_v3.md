@@ -496,7 +496,7 @@ Exit conditions:
 - Timeout (caller passes `timeout_ms`; default 1h via Monitor) → exit 124. Monitor surfaces this as a terminal notification.
 - `team_name` config missing for > 30 s → emit `team-config-missing` and exit 1. (Defends against premature TeamDelete.)
 
-Configurable stall threshold via env var `GOLEM_TEAM_STALL_MS` (default `120000`).
+Configurable stall threshold via optional positional argument: `team-monitor.sh <team_name> [stall_ms]` (default `120000`). The `GOLEM_TEAM_STALL_MS` env var is kept as a legacy fallback, but the positional form is preferred — an env-var-assignment prefix on a Bash command defeats Claude Code permission prefix-matching.
 
 Filter discipline: every emitted line MUST match the documented rules — no raw transcript echoing. Each line is a CEO conversation turn; noise is expensive.
 

@@ -5,9 +5,12 @@
 #
 #   Monitor(
 #     description: "team supervision: <team_name>",
-#     command: "bash $GOLEM_ROOT/substrate/scripts/team-monitor.sh <team_name>",
+#     command: "bash $GOLEM_ROOT/substrate/scripts/team-monitor.sh <team_name> [stall_ms]",
 #     timeout_ms: 3600000
 #   )
+#
+# Usage: team-monitor.sh <team_name> [stall_ms]
+#   stall_ms (optional positional) sets the stall threshold in milliseconds.
 #
 # Polls ~/.claude/teams/<team_name>/ and the teammates' transcript files every
 # ~5 s. Emits one stdout line per meaningful transition; the Monitor tool
@@ -20,8 +23,13 @@
 #   • Team config missing for > 30 s (premature TeamDelete?)             → exit 1
 #   • Anything emitting > 1000 events (runaway filter)                   → exit 2
 #
+# Stall threshold resolution (first non-empty wins):
+#   1. $2 positional argument  (documented path — prefix-matchable for permissions)
+#   2. GOLEM_TEAM_STALL_MS env var  (legacy fallback)
+#   3. hardcoded default: 120000
+#
 # Environment:
-#   GOLEM_TEAM_STALL_MS   Stall threshold in milliseconds (default: 120000)
+#   GOLEM_TEAM_STALL_MS   Stall threshold in milliseconds (legacy; prefer $2)
 #   GOLEM_TEAM_POLL_MS    Poll interval in milliseconds (default: 5000)
 
 set -euo pipefail
@@ -33,7 +41,8 @@ TEAMS_DIR="$HOME/.claude/teams/$TEAM_NAME"
 CONFIG_FILE="$TEAMS_DIR/config.json"
 INBOX_DIR="$TEAMS_DIR/inboxes"
 
-STALL_MS="${GOLEM_TEAM_STALL_MS:-120000}"
+# Positional $2 wins over GOLEM_TEAM_STALL_MS env var wins over hardcoded default.
+STALL_MS="${2:-${GOLEM_TEAM_STALL_MS:-120000}}"
 POLL_MS="${GOLEM_TEAM_POLL_MS:-5000}"
 POLL_SEC="$(awk -v m=$POLL_MS 'BEGIN{printf "%.1f", m/1000}')"
 STALL_SEC=$(( STALL_MS / 1000 ))

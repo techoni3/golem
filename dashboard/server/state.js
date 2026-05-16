@@ -22,7 +22,7 @@ import { CONFIG } from './config.js';
 import { discoverProjects } from './projects.js';
 import { createJournalStore } from './journal.js';
 import { readTickets, ticketProgress } from './tracker.js';
-import { orchestratorSnapshot, readDeadSessionIds } from './orchestrator.js';
+import { orchestratorSnapshot, readDeadSessionIds, readLiveTeammates } from './orchestrator.js';
 
 export function createState() {
   const ee = new EventEmitter();
@@ -44,13 +44,15 @@ export function createState() {
   let orchestratorState = { ceo: null, sessions: [], workspaces: [], headlineMemo: null, gates: [], gateCounts: { awaiting: 0, approved: 0, denied: 0, cancelled: 0, total: 0 } };
   /** Session_ids the registry has marked dead — used to demote ghost CEO agents. */
   let deadSessionIds = new Set();
+  /** "<team> <member>" keys for teammates the team registry reports isActive — keeps idle-but-alive teammates from being demoted to 'done' on mtime. */
+  let liveTeammates = new Set();
   // Coalesce file events (chokidar fires "change" for every fs.write tick).
   const refreshTimers = new Map();
 
   function projectSummary(p) {
     const store = stores.get(p.id);
     const ts = tickets.get(p.id) ?? [];
-    const agents = store ? store.snapshotAgents({ deadSessionIds }) : [];
+    const agents = store ? store.snapshotAgents({ deadSessionIds, liveTeammates }) : [];
     const live = agents.filter((a) => a.status === 'active' || a.status === 'running').length;
     return {
       id: p.id,
@@ -72,14 +74,14 @@ export function createState() {
       projects: projects.filter((p) => (p.kind === 'project' || p.kind === 'root' || p.kind === 'external')).map(projectSummary),
       workspaces: projects.map(projectSummary),
       orchestrator: orchestratorState,
-      agents: [].concat(...[...stores.values()].map((s) => s.snapshotAgents({ deadSessionIds }))),
+      agents: [].concat(...[...stores.values()].map((s) => s.snapshotAgents({ deadSessionIds, liveTeammates }))),
       tickets: [].concat(...tickets.values()),
     };
   }
 
   function projectAgents(projectId) {
     const s = stores.get(projectId);
-    return s ? s.snapshotAgents({ deadSessionIds }) : [];
+    return s ? s.snapshotAgents({ deadSessionIds, liveTeammates }) : [];
   }
 
   function agentDetail(projectId, agentId) {
@@ -112,7 +114,7 @@ export function createState() {
     ee.emit('event', {
       type: 'agents-update',
       projectId,
-      agents: s.snapshotAgents(),
+      agents: s.snapshotAgents({ deadSessionIds, liveTeammates }),
     });
     ee.emit('event', { type: 'project-update', project: projectSummary(p) });
   }
@@ -144,15 +146,17 @@ export function createState() {
 
   async function refreshOrchestrator() {
     try {
-      const [snap, dead] = await Promise.all([
+      const [snap, dead, liveTm] = await Promise.all([
         orchestratorSnapshot(projects),
         readDeadSessionIds(),
+        readLiveTeammates(),
       ]);
       orchestratorState = snap;
       // Detect transitions so we can poke agent panels that newly have ghosts.
       const newlyDead = new Set();
       for (const sid of dead) if (!deadSessionIds.has(sid)) newlyDead.add(sid);
       deadSessionIds = dead;
+      liveTeammates = liveTm;
       ee.emit('event', { type: 'orchestrator-update', orchestrator: orchestratorState });
       if (newlyDead.size > 0) {
         for (const p of projects) {
