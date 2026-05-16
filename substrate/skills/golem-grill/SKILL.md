@@ -37,7 +37,7 @@ Each question:
 - Has a one-line proposed default the grill will proceed on if the answer never comes.
 - States *why* the question matters (one sentence — what changes downstream depending on the answer).
 
-Cap at ~7 questions. If you have more, the brief is too vague for grilling — escalate to the orchestrator (TL or CEO) for clarification before grilling.
+Cap at ~7 questions. If you have more, the brief is too vague for grilling — escalate to the orchestrator for clarification before grilling.
 
 ### Step 3 — Ask
 

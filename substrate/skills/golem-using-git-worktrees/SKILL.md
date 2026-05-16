@@ -1,6 +1,6 @@
 ---
 name: golem-using-git-worktrees
-description: How to use git worktrees for parallel agent work without branch-switching contention. Use when the TL wants to dispatch multiple AFK-safe tickets concurrently.
+description: How to use git worktrees for parallel agent work without branch-switching contention. Use when the orchestrator wants to dispatch multiple AFK-safe tickets concurrently.
 expects:
   - A project repo with at least one branch.
   - A target directory the worktree can live in (sibling to the project, by convention).
@@ -13,7 +13,7 @@ category: sop
 
 Worktrees let multiple sub-agents work on different tickets in parallel without each one having to branch-switch (which is slow, cache-busting, and conflict-prone). Each worktree is its own working directory backed by the same `.git` store.
 
-The TL uses this skill when dispatching two or more AFK-safe tickets simultaneously.
+The orchestrator uses this skill when dispatching two or more AFK-safe tickets simultaneously.
 
 ## Layout convention
 
@@ -60,7 +60,7 @@ Do not delete the directory by hand — `git worktree remove` updates the worktr
 - **One ticket per worktree.** Do not multi-task within a worktree.
 - **AFK-safe only.** Tickets with `afk_safe: false` must run sequentially in the main worktree under user supervision.
 - **No worktree on tickets with sequential gates.** If `parent_ticket` is still in-progress, the dependent runs in the main worktree (sequential).
-- **The TL is the only persona that creates worktrees.** Engineers do not self-fork into a worktree.
+- **The orchestrator is the only persona that creates worktrees.** Engineers do not self-fork into a worktree.
 - **Never share state across worktrees mid-work.** Each is its own session; cross-worktree communication happens through git (push, pull) or through the ticket's hand-off log, not through shared scratch files.
 
 ## Anti-patterns

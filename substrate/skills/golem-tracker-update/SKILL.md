@@ -4,7 +4,7 @@ description: How to create, transition, and append to tickets in the project tra
 expects:
   - The project's tracker/ directory exists with state subdirectories.
   - Knowledge of the ticket schema (frontmatter + body sections).
-  - For state transitions: authority to mutate state (only the TL has this).
+  - For state transitions: authority to mutate state (only the orchestrator has this).
 produces:
   - A new ticket file, or a moved/edited ticket file with updated frontmatter.
   - An optional regeneration of tracker/INDEX.md.
@@ -23,7 +23,7 @@ triage → open → in-progress → review → done
                    └─ blocked ←──┘
 ```
 
-- **triage**: just landed. TL routes / refines / decomposes.
+- **triage**: just landed. The orchestrator routes / refines / decomposes.
 - **open**: ready to be picked up.
 - **in-progress**: actively being worked.
 - **review**: PR open; Code Reviewer to verdict.
@@ -34,10 +34,10 @@ triage → open → in-progress → review → done
 
 ## Authority
 
-**Only the TL mutates ticket state.** Other personas append to the hand-off log; the TL reads and decides the transition. This is load-bearing — without it, two personas can race the same ticket.
+**Only the orchestrator mutates ticket state.** Other personas append to the hand-off log; the orchestrator reads and decides the transition. This is load-bearing — without it, two personas can race the same ticket.
 
 Anyone can:
-- Create a ticket in `triage/` (the TL processes from there).
+- Create a ticket in `triage/` (the orchestrator processes from there).
 - Append to a ticket's hand-off log.
 - Read any ticket.
 
@@ -53,12 +53,16 @@ created: YYYY-MM-DD
 updated: YYYY-MM-DD            # update on every mutation
 related_adrs: [ADR-0007]       # optional; list of ADR ids the ticket touches
 parent_ticket: TKT-0040        # optional; for sub-tickets
+assignee: <subagent_type or agent name>   # optional; who is working it. Stamped by the CEO on dispatch.
+team: <team_name>                          # optional; set when dispatched to an agent team, else empty.
 labels: [stripe, webhooks]     # optional; free-form tags
 afk_safe: true                 # OK to run unattended in parallel via worktree
 ---
 ```
 
 `afk_safe: false` only when the ticket touches an invariant or has a `parent_ticket` still in-progress. Default to `true`.
+
+`assignee` and `team` are empty/absent while the ticket is unassigned (triage/open). When the CEO transitions a ticket to `in-progress`, it stamps `assignee` (and `team` if dispatched to an agent team); these are cleared or left as history on `done`.
 
 ## Body sections
 
@@ -86,14 +90,14 @@ Filled by Diagnoser. Reproduction, root cause, classification (code | architectu
 
 1. Pick the next free `TKT-NNNN` (look at `tracker/done/`, `tracker/open/`, etc., max id + 1).
 2. Compose the slug: kebab-case, ≤6 words.
-3. Write the file at `tracker/triage/<NNNN>-<slug>.md` with full frontmatter and body sections (acceptance can be `<TBD by TL>` if filed by the user).
+3. Write the file at `tracker/triage/<NNNN>-<slug>.md` with full frontmatter and body sections (acceptance can be `<TBD by orchestrator>` if filed by the user).
 4. Update `tracker/INDEX.md` (or invoke the regeneration step).
 
-Anyone can do this. The TL handles routing from `triage/`.
+Anyone can do this. The orchestrator handles routing from `triage/`.
 
 ## Procedure: transition a ticket
 
-(TL only.)
+(Orchestrator only.)
 
 1. Read the current ticket; confirm hand-off log supports the transition.
 2. Update frontmatter: `state:` and `updated:`. If transitioning to `blocked`, append a "Reason: …" line to the hand-off log first.

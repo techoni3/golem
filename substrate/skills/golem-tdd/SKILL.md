@@ -13,10 +13,10 @@ category: sop
 
 The TDD discipline as practised in golem. Two rules carry weight:
 
-1. **Test Spec Writer / Test Writer drive; Engineer follows.** The Engineer cannot author the failing test or its spec — that's anti-reward-hacking (§8.3 of the design). The Engineer's job is to make the existing failing tests pass.
+1. **Test Spec Writer / Test Writer drive; Engineer follows.** The Engineer cannot author the failing test or its spec — letting the same agent write both the tests and the code that passes them invites reward-hacking. The Engineer's job is to make the existing failing tests pass.
 2. **Vertical slices.** Each red→green cycle delivers one observable behaviour end-to-end, not one layer at a time. A passing test for a controller without the underlying repository is hollow; a passing test for a repository without the controller route is unobservable. Slices cross all the layers needed to make the behaviour real.
 
-Owned by the **TL** (orchestration) and the **Test Writer** (technique). The Engineer references this skill as context but does not drive the loop.
+The orchestrator owns dispatch and the Test Writer owns technique. The Engineer references this skill as context but does not drive the loop.
 
 ## The loop
 
@@ -33,7 +33,7 @@ Test Writer            need to be added now that the impl revealed an edge case?
 Code Reviewer          reviews PR against ticket spec, ARCH, ADRs, conventions
 ```
 
-The pre-Engineer pass is mandatory in v1 (Modus Operandi deferred per design D-003).
+The pre-commit pass — Test Spec Writer and Test Writer re-checking specs and tests after the Engineer's implementation, before the PR opens — is mandatory.
 
 ## Step-by-step
 

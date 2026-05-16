@@ -45,6 +45,8 @@ created: YYYY-MM-DD
 updated: YYYY-MM-DD
 related_adrs: [ADR-NNNN]
 parent_ticket: TKT-NNNN       # optional, for sub-tickets
+assignee: <subagent_type or agent name>   # optional; who is working it. Stamped by the CEO on dispatch.
+team: <team_name>                          # optional; set when dispatched to an agent team, else empty.
 labels: [<comma-separated>]
 afk_safe: true                # OK to run in parallel via worktree
 ---

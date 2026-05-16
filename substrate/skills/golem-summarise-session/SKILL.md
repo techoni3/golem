@@ -16,7 +16,7 @@ The closing reflex. Every persona invokes this as its **last** action before yie
 
 ## When to invoke this skill
 
-- Right before yielding control back to the orchestrator (CEO, TL).
+- Right before yielding control back to the orchestrator.
 - Right before ending the working session for any reason — even partial work, even abandoned work.
 - Even if the work was trivial. The line is cheap; the missing line is expensive.
 
@@ -58,10 +58,10 @@ The closing reflex. Every persona invokes this as its **last** action before yie
 
 - `recipe` — one token, no spaces. Classifies the session for Meta-agent pattern-matching across projects.
 - `brief` — verbatim or near-verbatim from the user's brief or the ticket. One sentence. No editorial.
-- `path_chosen` — one line. Which personas were invoked, in order, and where the work landed (e.g. "TL → Diagnoser → Engineer; PR #42 merged"). Not a transcript.
+- `path_chosen` — one line. Which personas were invoked, in order, and where the work landed (e.g. "orchestrator → Diagnoser → Engineer; PR #42 merged"). Not a transcript.
 - `outcome` — strictly one of the listed values. If unsure between `partial` and `blocked`, use `blocked` if there's an external dependency; `partial` if the session simply ran out of scope.
 - `human_interventions` — array of short strings. Empty array `[]` if none. Each entry is one phrase: "user redirected from X to Y", "user vetoed Stripe SDK choice", "user clarified ambiguous brief". This is the Meta-agent's friction signal — do not skip when interventions happened.
-- `substrate_signals` — array of short strings the Meta-agent looks for: "missing-skill: golem-pgvector", "convention drift: tests living in /tests/ vs colocated", "persona friction: TL had to re-route after Engineer over-scoped". Empty array if nothing notable.
+- `substrate_signals` — array of short strings the Meta-agent looks for: "missing-skill: golem-pgvector", "convention drift: tests living in /tests/ vs colocated", "persona friction: orchestrator had to re-route after Engineer over-scoped". Empty array if nothing notable.
 - `notes` — prose. Two to four sentences typically. Surprises, tradeoffs, "we'd do this differently next time" reflections.
 
 ## Anti-patterns

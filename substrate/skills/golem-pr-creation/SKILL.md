@@ -98,7 +98,7 @@ deferred follow-ups, trade-offs taken. Empty if there's nothing.
 3. Push the branch.
 4. Open the PR with the body shape above. Title: `<type>(<scope>): <subject>` matching the most representative commit.
 5. Append a hand-off log entry in the ticket: link to PR, summary line.
-6. Move the ticket to `tracker/review/` (TL does this; surface the request in the hand-off log).
+6. Move the ticket to `tracker/review/` (the orchestrator does this; surface the request in the hand-off log).
 
 ## Anti-patterns
 

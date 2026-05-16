@@ -157,11 +157,13 @@ The orchestrator discriminates by inspecting tool-return text immediately after 
 ```
 Monitor(
   description: "team supervision: <team_name>",
-  command: "bash $GOLEM_ROOT/substrate/scripts/team-monitor.sh <team_name>",
+  command: "bash $GOLEM_ROOT/substrate/scripts/team-monitor.sh <team_name> [stall_ms]",
   timeout_ms: 3600000,
   persistent: false
 )
 ```
+
+The stall threshold is an **optional positional argument** — `team-monitor.sh <team_name> <stall_ms>`. It is NOT passed via a `GOLEM_TEAM_STALL_MS=...` environment prefix (the old form, now removed). Omit it for the default; for longer-running dev-team work pass e.g. `... <team_name> 300000`.
 
 Each stdout line from the script becomes a fresh conversation turn for the orchestrator. The script emits exactly these signals:
 

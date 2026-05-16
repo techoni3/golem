@@ -79,7 +79,7 @@ Verdict shape:
 
 ### Step 5 — Hand off
 
-Append a hand-off log entry pointing the TL at the verdict. The TL reads the verdict and routes per `Suggested routing`.
+Append a hand-off log entry pointing the orchestrator at the verdict. The orchestrator reads the verdict and routes per `Suggested routing`.
 
 Diagnoser does **not** write the fix. Diagnosis and remediation are separated so the diagnostician's frame doesn't bias the fixer.
 
@@ -89,10 +89,10 @@ Diagnoser does **not** write the fix. Diagnosis and remediation are separated so
 - **Suggesting the fix itself.** The fixer designs the fix. The verdict tells them where to look, not what to write.
 - **Conflating proximate and root cause.** "It threw NPE on line 47" is proximate, not root.
 - **Hedging the classification.** Pick one. If unsure between code and architecture, lean architecture and let the Tech Architect (and Tech Architecture Reviewer) decide whether the design holds.
-- **Re-routing post-verdict.** Once the verdict is written, the TL routes from it. If new info changes the picture, write an addendum verdict; do not edit the original.
+- **Re-routing post-verdict.** Once the verdict is written, the orchestrator routes from it. If new info changes the picture, write an addendum verdict; do not edit the original.
 
 ## When this skill is wrong
 
 - The ticket is a feature, not a fix. Skip Diagnoser entirely; route through Product Architect.
 - The "bug" is actually a missing feature. Reclassify the ticket as a feature.
-- The bug is so trivial and well-described that the verdict adds no signal (e.g. "typo in error message"). The TL may still log a one-line verdict for consistency, but the full procedure is over-investment.
+- The bug is so trivial and well-described that the verdict adds no signal (e.g. "typo in error message"). The orchestrator may still log a one-line verdict for consistency, but the full procedure is over-investment.

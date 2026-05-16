@@ -31,7 +31,7 @@ Anything less means the ticket is not done. There is no "almost done".
 
 ### Step 1 — Re-read the acceptance criteria
 
-Open the ticket. Read the acceptance criteria. For each criterion, ask: *what observable behaviour proves this?* If you can't name one, the criterion is too vague — escalate to the TL before claiming done.
+Open the ticket. Read the acceptance criteria. For each criterion, ask: *what observable behaviour proves this?* If you can't name one, the criterion is too vague — escalate to the orchestrator before claiming done.
 
 ### Step 2 — Run lint
 

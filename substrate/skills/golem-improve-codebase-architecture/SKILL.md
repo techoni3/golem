@@ -3,7 +3,7 @@ name: golem-improve-codebase-architecture
 description: Tech Architect's iterative refinement procedure — review the code-tree against ARCH and surface architectural drift, missing invariants, or refactor candidates. Use when an architecture-classified fix lands or when periodic architecture review is invoked.
 expects:
   - The current state of the code-tree (src/), ARCH.md, ADRs, recent journal entries flagging architectural friction.
-  - A trigger: a Diagnoser verdict classified as `architecture`, or a TL/CEO request for periodic review.
+  - A trigger: a Diagnoser verdict classified as `architecture`, or an orchestrator request for periodic review.
 produces:
   - A list of architectural findings with severity (high | medium | low).
   - For each high finding: a proposed ADR or revised ADR, plus dev stories in the tracker if remediation requires code work.
@@ -16,7 +16,7 @@ The Tech Architect's procedure for systematically refining a project's architect
 
 Triggered by:
 - A Diagnoser verdict of `architecture`.
-- A TL request after multiple `code` fixes in adjacent modules (signal that the design may be wrong).
+- An orchestrator request after multiple `code` fixes in adjacent modules (signal that the design may be wrong).
 - A user request for periodic architecture review.
 - Meta-agent flagging architectural drift across the journal.
 
@@ -73,7 +73,7 @@ For each finding:
 
 For each high finding:
 - Draft an ADR (status: Proposed) capturing the decision needed. The Tech Architecture Reviewer iterates with you until the ADR is sound, then it's Accepted.
-- File one or more dev stories in `tracker/triage/` referencing the ADR. The TL routes them.
+- File one or more dev stories in `tracker/triage/` referencing the ADR. The orchestrator routes them.
 
 For each medium finding:
 - File a remediation story (no ADR needed unless a decision is implicit). Mark `category: refactor` in the ticket frontmatter.
@@ -87,14 +87,14 @@ Where the review surfaced facts that ARCH should already have stated (an invaria
 
 ### Step 7 — Hand off
 
-Submit the review doc + ADRs + tickets to the TL for routing. Append a hand-off log entry on each created ticket pointing back at the review doc.
+Submit the review doc + ADRs + tickets to the orchestrator for routing. Append a hand-off log entry on each created ticket pointing back at the review doc.
 
 ## Anti-patterns
 
 - **Big-bang re-architecture.** Findings are remediated incrementally. A "rewrite the project" recommendation is rarely the right output of this skill — if you reach for it, the project may need to be re-scoped at the CEO level, not the architect level.
 - **Reviewing implementation, not architecture.** This skill asks "are the right boundaries in place?", not "is this code idiomatic?". Code review is the Code Reviewer's job.
 - **No prioritisation.** Findings without severity have no actionable shape. Always rank.
-- **Skipping the Reviewer iteration on proposed ADRs.** Architect → Reviewer pairs exist to prevent self-approval (D-017). Even for review-driven ADRs, the Reviewer must co-sign before Accepted.
+- **Skipping the Reviewer iteration on proposed ADRs.** Architect → Reviewer pairs exist to prevent self-approval — an architect cannot accept its own ADR. Even for review-driven ADRs, the Reviewer must co-sign before Accepted.
 - **Editing existing Accepted ADRs in place.** ADRs are append-only. Supersede; do not rewrite.
 
 ## When this skill is wrong
