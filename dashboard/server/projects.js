@@ -11,6 +11,12 @@ import os from 'node:os';
 import fs from 'node:fs/promises';
 import { CONFIG } from './config.js';
 import { colorFor, glyphFor } from './util.js';
+import {
+  projectIdFor,
+  centralJournalDir,
+  centralGatesDir,
+} from './project-id.js';
+import { planPath } from './plan.js';
 
 const REGISTRY_FILE = path.join(
   process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'),
@@ -19,6 +25,50 @@ const REGISTRY_FILE = path.join(
 );
 
 const EXCLUDED = new Set(['archive', 'node_modules']);
+
+async function dirExists(p) {
+  try {
+    const st = await fs.stat(p);
+    return st.isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+// v4: resolve journal/summary/hook paths. Prefer the central location
+// (~/.config/golem/journals/<project_id>/) when that dir exists on disk;
+// otherwise fall back to the legacy in-repo <path>/journal/. The central dir is
+// keyed by the contract project_id derived from the absolute project root —
+// NOT the dashboard's own registry id, which may differ for legacy entries.
+async function resolveJournalPaths(projectPath, contractId) {
+  const central = centralJournalDir(contractId);
+  if (await dirExists(central)) {
+    return {
+      journalDir: central,
+      hookFile: path.join(central, 'hook.jsonl'),
+      summaryFile: path.join(central, 'summary.jsonl'),
+      journalCentral: true,
+    };
+  }
+  const legacy = path.join(projectPath, 'journal');
+  return {
+    journalDir: legacy,
+    hookFile: path.join(legacy, 'hook.jsonl'),
+    summaryFile: path.join(legacy, 'summary.jsonl'),
+    journalCentral: false,
+  };
+}
+
+// v4: gates dir — central (~/.config/golem/gates/<project_id>/) when present,
+// else legacy in-repo docs/agent-notes/gates/.
+async function resolveGatesDir(projectPath, contractId) {
+  const central = centralGatesDir(contractId);
+  if (await dirExists(central)) return { gatesDir: central, gatesCentral: true };
+  return {
+    gatesDir: path.join(projectPath, 'docs', 'agent-notes', 'gates'),
+    gatesCentral: false,
+  };
+}
 
 async function readClaudeMdTitle(projectDir) {
   try {
@@ -86,21 +136,28 @@ async function discoverFromRoot(root, kind, { requireSubstrate }) {
     const title = (await readClaudeMdTitle(workspaceDir)) || e.name;
     const description = (await readDescription(workspaceDir)) || '';
 
+    const contractId = projectIdFor(workspaceDir);
+    const jp = await resolveJournalPaths(workspaceDir, contractId);
+    const gd = await resolveGatesDir(workspaceDir, contractId);
+
     out.push({
       id,
+      project_id: contractId,
       kind,
       name: title,
       glyph: glyphFor(title),
       color: colorFor(id),
       description,
       path: workspaceDir,
-      journalDir,
-      hookFile: path.join(journalDir, 'hook.jsonl'),
-      summaryFile: path.join(journalDir, 'summary.jsonl'),
+      journalDir: jp.journalDir,
+      hookFile: jp.hookFile,
+      summaryFile: jp.summaryFile,
+      journalCentral: jp.journalCentral,
       trackerDir: path.join(workspaceDir, 'tracker'),
-      gatesDir: path.join(workspaceDir, 'docs', 'agent-notes', 'gates'),
+      gatesDir: gd.gatesDir,
+      gatesCentral: gd.gatesCentral,
       agentNotesDir: path.join(workspaceDir, 'docs', 'agent-notes'),
-      hasJournal,
+      hasJournal: hasJournal || jp.journalCentral,
     });
   }
   return out;
@@ -127,21 +184,30 @@ async function discoverRoot() {
   const id = 'golem-root';
   const title = (await readClaudeMdTitle(root)) || 'Golem Root';
   const description = (await readDescription(root)) || 'CEO orchestration workspace — journals CEO + sub-agent activity.';
+  // The root is v3-wired (its own journal-event.sh owns it per the contract's
+  // legacy-coexistence rule), so the central dir won't exist and we fall back
+  // to the in-repo journal/ — which is exactly what we want here.
+  const contractId = projectIdFor(root);
+  const jp = await resolveJournalPaths(root, contractId);
+  const gd = await resolveGatesDir(root, contractId);
   return {
     id,
+    project_id: contractId,
     kind: 'root',
     name: title,
     glyph: glyphFor(title),
     color: colorFor(id),
     description,
     path: root,
-    journalDir,
-    hookFile: path.join(journalDir, 'hook.jsonl'),
-    summaryFile: path.join(journalDir, 'summary.jsonl'),
+    journalDir: jp.journalDir,
+    hookFile: jp.hookFile,
+    summaryFile: jp.summaryFile,
+    journalCentral: jp.journalCentral,
     trackerDir: path.join(root, 'tracker'),
-    gatesDir: path.join(root, 'docs', 'agent-notes', 'gates'),
+    gatesDir: gd.gatesDir,
+    gatesCentral: gd.gatesCentral,
     agentNotesDir: path.join(root, 'docs', 'agent-notes'),
-    hasJournal,
+    hasJournal: hasJournal || jp.journalCentral,
   };
 }
 
@@ -176,28 +242,46 @@ async function discoverFromRegistry(alreadyDiscoveredPaths) {
     }
 
     const workspaceDir = entry.path;
-    const journalDir = path.join(workspaceDir, 'journal');
-    let hasJournal = false;
-    try { await fs.access(journalDir); hasJournal = true; } catch { /* ignore */ }
+    // v4: kind:"auto" entries are hook-registered (registered_by:"hook") and
+    // carry the contract project_id as their `id`. They render like external
+    // projects. Manual entries keep their registered kind. Either way the
+    // central journal/gates dirs are keyed by the contract project_id derived
+    // from the absolute path — derive it here so it matches the hook's writes
+    // even if the registry `id` was hand-edited.
+    const contractId = projectIdFor(workspaceDir);
+    const jp = await resolveJournalPaths(workspaceDir, contractId);
+    const gd = await resolveGatesDir(workspaceDir, contractId);
 
-    const title = (await readClaudeMdTitle(workspaceDir)) || entry.name || entry.id;
+    // The registry `name` is user-supplied via `golem project register` and is
+    // authoritative. Prefer it. An external project's own CLAUDE.md is NOT a
+    // golem harness file — its H1 is often literally "CLAUDE.md" or unrelated
+    // to the project — so it must not override the registered name. Fall back
+    // to the CLAUDE.md H1 only when the registry has no name at all.
+    const title = entry.name || (await readClaudeMdTitle(workspaceDir)) || entry.id;
     const description = (await readDescription(workspaceDir)) || '';
+    // kind:"auto" (hook-registered) renders like external projects.
+    const kind = entry.kind === 'auto' ? 'external' : (entry.kind ?? 'external');
 
     out.push({
       id: entry.id,
-      kind: entry.kind ?? 'external',
+      project_id: contractId,
+      registered_by: entry.registered_by ?? null,
+      auto: entry.kind === 'auto',
+      kind,
       name: title,
       glyph: glyphFor(title),
       color: colorFor(entry.id),
       description,
       path: workspaceDir,
-      journalDir,
-      hookFile: path.join(journalDir, 'hook.jsonl'),
-      summaryFile: path.join(journalDir, 'summary.jsonl'),
+      journalDir: jp.journalDir,
+      hookFile: jp.hookFile,
+      summaryFile: jp.summaryFile,
+      journalCentral: jp.journalCentral,
       trackerDir: path.join(workspaceDir, 'tracker'),
-      gatesDir: path.join(workspaceDir, 'docs', 'agent-notes', 'gates'),
+      gatesDir: gd.gatesDir,
+      gatesCentral: gd.gatesCentral,
       agentNotesDir: path.join(workspaceDir, 'docs', 'agent-notes'),
-      hasJournal,
+      hasJournal: jp.journalCentral || (await dirExists(jp.journalDir)),
     });
   }
   return out;
@@ -229,5 +313,11 @@ export async function discoverProjects() {
     if (oa !== ob) return oa - ob;
     return a.id.localeCompare(b.id);
   });
+  // v4: stamp the PLAN.md path on every workspace so the watcher can observe
+  // it and state.js can read progress. (The file may not exist — readPlan
+  // handles that; we only need the path to watch + read.)
+  for (const p of all) {
+    p.planFile = planPath(p.path);
+  }
   return all;
 }

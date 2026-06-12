@@ -51,6 +51,8 @@
     roles: { ...ROLES_FALLBACK },
     columns: ['triage', 'open', 'in-progress', 'review', 'blocked', 'done'],
     serverTime: null,
+    // v4: all native Claude Code sessions (not just substrated/golem ones).
+    nativeSessions: [],
   };
 
   const listeners = new Set();
@@ -95,7 +97,14 @@
     }
     if (snap.orchestrator) state.orchestrator = snap.orchestrator;
     if (Array.isArray(snap.chat)) state.chat = snap.chat.slice();
+    if (Array.isArray(snap.native_sessions)) state.nativeSessions = snap.native_sessions.slice();
     state.ready = true;
+    notify();
+  }
+
+  function applyNativeSessionsUpdate({ native_sessions }) {
+    if (!Array.isArray(native_sessions)) return;
+    state.nativeSessions = native_sessions.slice();
     notify();
   }
 
@@ -267,6 +276,9 @@
           case 'orchestrator-update':
             applyOrchestratorUpdate(msg);
             break;
+          case 'native-sessions-update':
+            applyNativeSessionsUpdate(msg);
+            break;
           case 'chat-message':
             applyChatMessage(msg);
             break;
@@ -317,6 +329,7 @@
     getChat: () => state.chat,
     getChatForSession,
     getSessions,
+    getNativeSessions: () => state.nativeSessions,
   };
 
   // Kick off as soon as DOM is ready (script in <body>, so it already is).

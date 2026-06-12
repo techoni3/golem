@@ -105,7 +105,7 @@ function AgentDrawer({ projectId, agentId, open, onClose }) {
                 {journal.map((e, i) => (
                   <div key={`${e.t}-${i}`} className="journal-entry">
                     <div className="journal-time">{window.SubstrateFmt.fmtTimeAgo(e.t)}</div>
-                    <div className={`journal-bubble ${e.kind === 'system' ? 'system' : ''}`}>{e.text}</div>
+                    <div className={`journal-bubble ${e.kind === 'system' ? 'system' : ''} ${e.kind === 'milestone' ? 'milestone' : ''}`}>{e.text}</div>
                   </div>
                 ))}
               </div>

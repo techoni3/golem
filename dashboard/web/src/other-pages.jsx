@@ -7,12 +7,32 @@ function AgentsPage({ setRoute }) {
     return (order[a.status] ?? 9) - (order[b.status] ?? 9);
   });
 
+  const nativeSessions = window.Store.getNativeSessions();
+
   return (
     <div className="page">
       <div className="page-header">
         <div>
           <h1 className="page-title">Agents</h1>
           <div className="page-subtitle">All agents across the harness, sorted by liveness.</div>
+        </div>
+      </div>
+
+      {/* v4: every native Claude Code session on the machine, not just golem. */}
+      <div className="row-section">
+        <div className="row-header">
+          <div className="row-title">
+            Native Sessions
+            <span className="row-title-count">{nativeSessions.length}</span>
+          </div>
+        </div>
+        <NativeSessions/>
+      </div>
+
+      <div className="row-header" style={{ marginTop: 4 }}>
+        <div className="row-title">
+          Substrate Agents
+          <span className="row-title-count">{all.length}</span>
         </div>
       </div>
       {all.length === 0 ? (
@@ -125,6 +145,9 @@ function ProjectsPage({ setRoute }) {
                   <div className="project-card-progress-fill"
                     style={{ width: `${(p.progress || 0) * 100}%`, background: p.color }}/>
                 </div>
+                {p.plan && p.plan.total > 0 && (
+                  <PlanProgress plan={p.plan} color={p.color}/>
+                )}
               </div>
             );
           })}

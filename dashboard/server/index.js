@@ -196,6 +196,21 @@ async function main() {
     return state.projectTickets(req.params.id);
   });
 
+  // v4: PLAN.md progress for a single project. Returns {total, done, items}
+  // (+ title). 404 if the project is unknown; {total:0,...} if it has no plan.
+  fastify.get('/api/projects/:id/plan', async (req, reply) => {
+    const p = state.project(req.params.id);
+    if (!p) return reply.code(404).send({ error: 'not_found' });
+    const plan = state.projectPlan(req.params.id);
+    if (!plan) return { title: null, total: 0, done: 0, items: [] };
+    return plan;
+  });
+
+  // v4: all native Claude Code sessions on this machine (merged CLI + registry,
+  // pid-checked). Already inside /api/snapshot as native_sessions[]; this is a
+  // convenience route + the polling target for any external scripting.
+  fastify.get('/api/native-sessions', async () => state.nativeSessions());
+
   // ---- WebSocket ----
 
   const sockets = new Set();

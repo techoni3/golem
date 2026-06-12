@@ -856,3 +856,210 @@
   color: var(--text-4);
   font-style: italic;
 }
+
+/* ===================================================================== */
+/* v4 additions: native sessions · PLAN.md progress · milestones          */
+/* ===================================================================== */
+
+/* ---- Native Claude Code sessions panel (Agents page) ---- */
+.native-sessions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 10px;
+}
+.native-session-card {
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-2);
+  background: var(--bg-1);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.native-session-card.busy { border-color: var(--accent-border); }
+.native-session-card.dead { opacity: 0.55; }
+.native-session-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.native-session-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text-0);
+}
+.native-session-status {
+  font-size: 11px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+}
+.native-session-status.status-busy { color: var(--status-running); }
+.native-session-status.status-waiting { color: var(--status-review); }
+.native-session-status.status-dead { color: var(--text-4); }
+.native-session-badge {
+  margin-left: auto;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--status-blocked) 18%, var(--bg-2));
+  color: var(--status-blocked);
+  border: 1px solid color-mix(in oklab, var(--status-blocked) 35%, transparent);
+  white-space: nowrap;
+}
+.native-session-cwd {
+  font-size: 11px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.native-session-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+
+/* ---- PLAN.md progress (project cards + hero) ---- */
+.plan-progress {
+  margin-top: 8px;
+  border-top: 1px solid var(--border-1);
+  padding-top: 8px;
+}
+.plan-progress-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  color: var(--text-2);
+}
+.plan-progress-caret {
+  font-size: 10px;
+  color: var(--text-3);
+  width: 10px;
+}
+.plan-progress-label {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+}
+.plan-progress-bar {
+  flex: 1;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--bg-3);
+  overflow: hidden;
+}
+.plan-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+.plan-progress-count {
+  font-size: 11px;
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+.plan-items {
+  list-style: none;
+  margin: 8px 0 2px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.plan-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+  line-height: 1.4;
+}
+.plan-item.done .plan-item-text {
+  color: var(--text-4);
+  text-decoration: line-through;
+}
+.plan-item-box {
+  color: var(--text-4);
+  font-size: 11px;
+  width: 12px;
+  flex-shrink: 0;
+}
+.plan-item.done .plan-item-box {
+  color: var(--status-done);
+}
+
+/* ---- Milestone strip (project view) ---- */
+.milestone-strip {
+  margin: 4px 0 14px;
+  border: 1px solid color-mix(in oklab, var(--accent) 24%, var(--border-2));
+  border-radius: var(--radius-2);
+  background: color-mix(in oklab, var(--accent) 6%, var(--bg-1));
+  padding: 10px 14px;
+}
+.milestone-strip-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+.milestone-strip-count {
+  background: color-mix(in oklab, var(--accent) 18%, var(--bg-2));
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 10px;
+  letter-spacing: 0;
+}
+.milestone-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.milestone-item {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  font-size: 12.5px;
+  color: var(--text-1);
+  line-height: 1.45;
+}
+.milestone-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  flex-shrink: 0;
+  transform: translateY(-1px);
+}
+.milestone-text { flex: 1; }
+.milestone-ts {
+  font-size: 10.5px;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+/* Milestone bubbles inside the agent journal drawer */
+.journal-bubble.milestone {
+  border-left: 2px solid var(--accent);
+  background: color-mix(in oklab, var(--accent) 8%, var(--bg-2));
+  color: var(--text-0);
+}

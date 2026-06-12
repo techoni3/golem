@@ -97,6 +97,42 @@ function ConnectionPill({ status }) {
   );
 }
 
+// v4: PLAN.md progress — a compact "N/M" bar that expands to the flat
+// checkbox-item list on click. Renders nothing when the project has no plan.
+// `color` themes the fill bar to match the project.
+function PlanProgress({ plan, color, defaultOpen = false }) {
+  const [open, setOpen] = React.useState(defaultOpen);
+  if (!plan || !plan.total) return null;
+  const pct = plan.total ? Math.round((plan.done / plan.total) * 100) : 0;
+  const barColor = color || 'var(--accent)';
+  return (
+    <div className="plan-progress" onClick={(e) => e.stopPropagation()}>
+      <button
+        className="plan-progress-head"
+        onClick={() => setOpen((o) => !o)}
+        title={plan.title || 'PLAN.md'}
+      >
+        <span className="plan-progress-caret">{open ? '▾' : '▸'}</span>
+        <span className="plan-progress-label">PLAN</span>
+        <div className="plan-progress-bar">
+          <div className="plan-progress-fill" style={{ width: `${pct}%`, background: barColor }}/>
+        </div>
+        <span className="plan-progress-count tnum">{plan.done}/{plan.total}</span>
+      </button>
+      {open && (
+        <ul className="plan-items">
+          {plan.items.map((it, i) => (
+            <li key={i} className={`plan-item ${it.done ? 'done' : ''}`}>
+              <span className="plan-item-box">{it.done ? '✓' : '○'}</span>
+              <span className="plan-item-text">{it.text || <span style={{ color: 'var(--text-4)' }}>(empty)</span>}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // Hook for components to subscribe to store changes and re-render.
 function useStore() {
   const [, force] = React.useReducer((n) => n + 1, 0);
@@ -112,4 +148,5 @@ window.StatusPill = StatusPill;
 window.Carousel = Carousel;
 window.CarouselControls = CarouselControls;
 window.ConnectionPill = ConnectionPill;
+window.PlanProgress = PlanProgress;
 window.useStore = useStore;

@@ -59,9 +59,17 @@ function ProjectView({ projectId, tab, setRoute, openAgentId }) {
               <span>{Math.round((project.progress || 0) * 100)}% done</span>
               <span className="sep">·</span>
               <span style={{ color: 'var(--accent)' }}>{liveAgents.length} live agents</span>
+              {project.auto && (<><span className="sep">·</span><span className="native-session-badge">auto</span></>)}
             </div>
+            {project.plan && project.plan.total > 0 && (
+              <div style={{ marginTop: 10, maxWidth: 460 }}>
+                <PlanProgress plan={project.plan} color={project.color} defaultOpen={false}/>
+              </div>
+            )}
           </div>
         </div>
+
+        <MilestoneStrip milestones={project.milestones || []}/>
 
         <div className="tabs">
           <button
@@ -96,6 +104,33 @@ function ProjectView({ projectId, tab, setRoute, openAgentId }) {
         onClose={closeDrawer}
       />
     </>
+  );
+}
+
+// v4: milestones are the primary progress signal — journal lines with
+// event:"milestone". Render them as a distinct, highlighted strip at the top
+// of the project view, newest last. Hidden entirely when there are none.
+function MilestoneStrip({ milestones }) {
+  if (!milestones || milestones.length === 0) return null;
+  // Show the most recent ~8, oldest first so the latest sits at the bottom.
+  const recent = milestones.slice(-8);
+  return (
+    <div className="milestone-strip">
+      <div className="milestone-strip-head">
+        <Icon.Activity size={13}/>
+        <span>Milestones</span>
+        <span className="milestone-strip-count">{milestones.length}</span>
+      </div>
+      <ul className="milestone-list">
+        {recent.map((m, i) => (
+          <li key={`${m.t}-${i}`} className="milestone-item">
+            <span className="milestone-dot"/>
+            <span className="milestone-text">{m.text}</span>
+            <span className="milestone-ts mono">{window.SubstrateFmt?.fmtClock?.(m.t) || ''}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -272,5 +307,6 @@ function Kanban({ tickets, agents }) {
 }
 
 window.ProjectView = ProjectView;
+window.MilestoneStrip = MilestoneStrip;
 window.AgentsTimeline = AgentsTimeline;
 window.Kanban = Kanban;

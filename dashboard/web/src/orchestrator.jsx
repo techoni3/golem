@@ -110,5 +110,75 @@ function SessionChip({ session }) {
   );
 }
 
+// v4: Native Claude Code sessions panel. Surfaces EVERY live `claude` session
+// on the machine (not just golem/substrated ones), derived from
+// `claude agents --json` + ~/.claude/sessions/*.json, pid-checked. Sessions in
+// projects the dashboard doesn't know about get an "unregistered" badge.
+function NativeSessions() {
+  useStore();
+  const sessions = window.Store.getNativeSessions();
+  const projects = window.Store.getState().projects;
+  const knownIds = new Set(projects.map((p) => p.id));
+
+  if (!sessions || sessions.length === 0) {
+    return (
+      <EmptyCard
+        label="no native Claude Code sessions"
+        hint={<>This lists every live <span className="mono">claude</span> session on the machine. None are running right now (or the <span className="mono">claude agents --json</span> CLI is unavailable).</>}
+      />
+    );
+  }
+
+  const statusClass = (s) => {
+    if (!s.alive) return 'dead';
+    if (s.status === 'busy') return 'busy';
+    if (s.status === 'waiting') return 'waiting';
+    return 'idle';
+  };
+
+  return (
+    <div className="native-sessions">
+      {sessions.map((s) => {
+        // A session is "registered" if its project is one the dashboard tracks.
+        const registered = s.registered || (s.project_id && knownIds.has(s.project_id));
+        const cls = statusClass(s);
+        return (
+          <div key={s.session_id || s.pid} className={`native-session-card ${cls}`}>
+            <div className="native-session-top">
+              <span className={`orch-dot ${cls === 'dead' ? 'offline' : (cls === 'idle' ? 'idle' : 'live')}`}/>
+              <span className="native-session-name">
+                {s.name || <span className="mono">{(s.session_id || '').slice(0, 8) || `pid ${s.pid}`}</span>}
+              </span>
+              <span className={`native-session-status status-${cls}`}>
+                {s.status || (s.alive ? 'alive' : 'dead')}
+                {s.waiting_for ? ` · ${s.waiting_for}` : ''}
+              </span>
+              {!registered && (
+                <span className="native-session-badge" title="this project is not registered with the dashboard">
+                  unregistered
+                </span>
+              )}
+            </div>
+            <div className="native-session-cwd mono" title={s.cwd || ''}>
+              {s.cwd || '—'}
+            </div>
+            <div className="native-session-meta">
+              <span className="mono">pid {s.pid ?? '?'}</span>
+              {s.session_id && <span className="mono" title={s.session_id}>{s.session_id.slice(0, 8)}</span>}
+              {s.project_id && <span className="mono" title="derived project_id">{s.project_id}</span>}
+              {s.updated_at && (
+                <span title="last updated">
+                  {window.SubstrateFmt?.fmtClock?.(s.updated_at) || ''}
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 window.OrchestratorRail = OrchestratorRail;
 window.openCeoDrawer = openCeoDrawer;
+window.NativeSessions = NativeSessions;

@@ -141,6 +141,9 @@ function Dashboard({ setRoute }) {
                       <div className="project-card-progress-fill"
                         style={{ width: `${(p.progress || 0) * 100}%`, background: p.color }}/>
                     </div>
+                    {p.plan && p.plan.total > 0 && (
+                      <PlanProgress plan={p.plan} color={p.color}/>
+                    )}
                   </div>
                 );
               })}

@@ -23,6 +23,8 @@ import { discoverProjects } from './projects.js';
 import { createJournalStore } from './journal.js';
 import { readTickets, ticketProgress } from './tracker.js';
 import { orchestratorSnapshot, readDeadSessionIds, readLiveTeammates } from './orchestrator.js';
+import { readNativeSessions } from './native-sessions.js';
+import { readPlan } from './plan.js';
 
 export function createState() {
   const ee = new EventEmitter();
@@ -32,10 +34,14 @@ export function createState() {
   const stores = new Map();
   /** @type {Map<string, any[]>} */
   const tickets = new Map();
+  /** v4: parsed PLAN.md per project id ({title,total,done,items}|null). */
+  const plans = new Map();
   /** @type {any[]} */
   let projects = [];
   /** @type {Map<string, any>} */
   const projectsById = new Map();
+  /** v4: latest native_sessions[] (all Claude Code sessions, not just golem). */
+  let nativeSessions = [];
 
   let watcher = null;
   let rediscoverTimer = null;
@@ -54,9 +60,15 @@ export function createState() {
     const ts = tickets.get(p.id) ?? [];
     const agents = store ? store.snapshotAgents({ deadSessionIds, liveTeammates }) : [];
     const live = agents.filter((a) => a.status === 'active' || a.status === 'running').length;
+    const plan = plans.get(p.id) ?? null;
+    const milestones = store ? store.snapshotMilestones() : [];
     return {
       id: p.id,
+      project_id: p.project_id ?? null,
       kind: p.kind,
+      // v4: hook-registered (kind:"auto" in the registry) projects render like
+      // external ones but keep this flag so the UI can badge them.
+      auto: !!p.auto,
       name: p.name,
       glyph: p.glyph,
       color: p.color,
@@ -66,6 +78,12 @@ export function createState() {
       live_agents: live,
       total_tickets: ts.length,
       has_journal: !!p.hasJournal,
+      journal_central: !!p.journalCentral,
+      gates_central: !!p.gatesCentral,
+      // v4: PLAN.md progress (null when the project has no PLAN.md).
+      plan: plan ? { title: plan.title, total: plan.total, done: plan.done, items: plan.items } : null,
+      // v4: project-level milestone feed (primary progress signal).
+      milestones,
     };
   }
 
@@ -76,6 +94,8 @@ export function createState() {
       orchestrator: orchestratorState,
       agents: [].concat(...[...stores.values()].map((s) => s.snapshotAgents({ deadSessionIds, liveTeammates }))),
       tickets: [].concat(...tickets.values()),
+      // v4: ALL Claude Code sessions on this machine (not just substrated).
+      native_sessions: nativeSessions,
     };
   }
 
@@ -93,8 +113,31 @@ export function createState() {
     return tickets.get(projectId) ?? [];
   }
 
+  function projectPlan(projectId) {
+    return plans.get(projectId) ?? null;
+  }
+
   function project(id) {
     return projectsById.get(id) ?? null;
+  }
+
+  // v4: decide whether a native session belongs to a registered project. Used
+  // for the "unregistered" UI badge. Pure/sync over the in-memory project list.
+  // Matches in priority order:
+  //   1. the resolved project root path equals a registered project path
+  //   2. the session cwd equals, or is nested under, a registered project path
+  //      (catches the case where the contract root-walk overshoots a registered
+  //      subdir to a parent .git/CLAUDE.md, e.g. a home-level CLAUDE.md).
+  function registeredIdForPath(rootPath, cwd) {
+    for (const p of projects) {
+      if (rootPath && p.path === rootPath) return p.id;
+    }
+    if (cwd) {
+      for (const p of projects) {
+        if (cwd === p.path || cwd.startsWith(p.path + path.sep)) return p.id;
+      }
+    }
+    return null;
   }
 
   async function refreshTickets(projectId) {
@@ -119,6 +162,27 @@ export function createState() {
     ee.emit('event', { type: 'project-update', project: projectSummary(p) });
   }
 
+  // v4: re-read a single project's PLAN.md (on chokidar change) and re-emit the
+  // project summary so the progress bar updates live.
+  async function refreshPlan(projectId) {
+    const p = projectsById.get(projectId);
+    if (!p) return;
+    plans.set(projectId, await readPlan(p.path));
+    ee.emit('event', { type: 'project-update', project: projectSummary(p) });
+  }
+
+  // v4: poll all native Claude Code sessions on the orchestrator tick. Merged
+  // into the snapshot as native_sessions[]; broadcast as its own event so the
+  // UI updates without a full snapshot.
+  async function refreshNativeSessions() {
+    try {
+      nativeSessions = await readNativeSessions(registeredIdForPath);
+      ee.emit('event', { type: 'native-sessions-update', native_sessions: nativeSessions });
+    } catch (err) {
+      console.error('[native-sessions]', err);
+    }
+  }
+
   function debouncedRefresh(key, fn, delay = 80) {
     const existing = refreshTimers.get(key);
     if (existing) clearTimeout(existing);
@@ -138,6 +202,9 @@ export function createState() {
         paths.push(p.hookFile);
         paths.push(p.summaryFile);
         paths.push(p.trackerDir);
+        // v4: watch PLAN.md so the progress bar updates live. chokidar watches
+        // a not-yet-existing path fine and fires `add` when it appears.
+        if (p.planFile) paths.push(p.planFile);
       }
       paths.push(p.gatesDir);
     }
@@ -183,10 +250,12 @@ export function createState() {
       if (!nextIds.has(id)) {
         stores.delete(id);
         tickets.delete(id);
+        plans.delete(id);
         projectsById.delete(id);
       }
     }
-    // Add new workspaces. Only kind='project' gets a journal store + tickets.
+    // Add new workspaces. Only kind='project'/'root'/'external' gets a journal
+    // store + tickets. Every workspace gets a PLAN.md read (v4).
     for (const p of next) {
       if (!prevIds.has(p.id)) {
         if ((p.kind === 'project' || p.kind === 'root' || p.kind === 'external')) {
@@ -198,6 +267,11 @@ export function createState() {
         } else {
           tickets.set(p.id, []);
         }
+      }
+      // Read PLAN.md for new projects (and re-read on rediscovery is cheap;
+      // restrict to first-seen to avoid clobbering a fresher chokidar read).
+      if (!prevIds.has(p.id)) {
+        plans.set(p.id, await readPlan(p.path));
       }
       projectsById.set(p.id, p);
     }
@@ -235,6 +309,10 @@ export function createState() {
           debouncedRefresh(`journal:${p.id}`, () => refreshJournal(p.id));
           return;
         }
+        if (p.planFile && filePath === p.planFile) {
+          debouncedRefresh(`plan:${p.id}`, () => refreshPlan(p.id));
+          return;
+        }
         if (filePath.startsWith(p.trackerDir + path.sep) || filePath === p.trackerDir) {
           debouncedRefresh(`tracker:${p.id}`, () => refreshTickets(p.id));
           return;
@@ -250,6 +328,7 @@ export function createState() {
   async function init() {
     await rediscover();
     await refreshOrchestrator();
+    await refreshNativeSessions();
     // Polling rediscovery every 30s catches new projects added under
     // GOLEM_PROJECTS_ROOT after the dashboard starts.
     rediscoverTimer = setInterval(() => {
@@ -270,9 +349,12 @@ export function createState() {
     }, 5_000);
 
     // Orchestrator tick: CEO session liveness + memo discovery is poll-based
-    // (we don't watch ~/.claude/projects/ — sessions append constantly).
+    // (we don't watch ~/.claude/projects/ — sessions append constantly). v4:
+    // native session discovery rides the same tick (pid + native status, not
+    // mtime, so polling is cheap and correct).
     orchestratorTimer = setInterval(() => {
       refreshOrchestrator();
+      refreshNativeSessions();
     }, 3_000);
   }
 
@@ -296,6 +378,8 @@ export function createState() {
     projectAgents,
     agentDetail,
     projectTickets,
+    projectPlan,
+    nativeSessions: () => nativeSessions,
     orchestrator: () => orchestratorState,
     refreshOrchestrator,
   };

@@ -64,9 +64,16 @@ function newAgent({ session_id, project, agent_id, agent_type }) {
 
 function classifyAgent(a, now = Date.now(), opts = {}) {
   if (a.stopped) return 'done';
-  // Tools currently in flight = running, regardless of how long the model has
-  // been thinking between hook events. Long generations don't fire hooks.
-  if (a.tools_running > 0) return 'running';
+  // Tools currently in flight = running — but only while the agent is still
+  // firing hooks. A genuine long generation or tool call still emits hook
+  // events within agentIdleTimeoutMs; a tools_running counter that stays
+  // positive long past that is a ghost: the agent was killed mid-tool-call
+  // and the matching tool-post event never journaled, leaving the counter
+  // stuck forever. Without this recency bound such agents show "in tool
+  // call" / running indefinitely (observed: leaf agents 'running' for days).
+  if (a.tools_running > 0 && now - (a.last_seen ?? 0) < CONFIG.agentIdleTimeoutMs) {
+    return 'running';
+  }
   // Cross-reference v3 sessions registry: if this agent is rooted at a
   // top-level Claude Code session (no parent_session) whose pid the registry
   // last saw as dead, demote it to 'done' regardless of mtime. Catches the
@@ -123,6 +130,8 @@ function normalizeEvent(ev) {
     tool_input,
     tool_response: payload.tool_response ?? ev.tool_response,
     message: payload.message ?? ev.message,
+    // v4 milestone text — top-level on the line, but tolerate a payload nest.
+    text: ev.text ?? payload.text ?? ev.text,
     // Agent tool spawn fields (on the PARENT'S Agent tool-call payload)
     subagent_type: tool_input.subagent_type ?? ev.subagent_type,
     subagent_name: tool_input.name ?? ev.subagent_name,
@@ -170,6 +179,11 @@ export function createJournalStore(project) {
   // team_name / parent_session.
   // Each entry: { spawn_ts, parent_session, subagent_type, subagent_name, team_name, claimed }
   const pendingSpawns = [];
+  // v4: project-level milestones — journal lines with event:"milestone".
+  // These are the primary v4 progress signal and are project-scoped (not
+  // owned by any single agent), so we collect them here and surface them in
+  // the project timeline/chat. Each: { t, text, session_id }.
+  const milestones = [];
 
   let hookOffset = 0;
   let summaryOffset = 0;
@@ -408,6 +422,24 @@ export function createJournalStore(project) {
       case 'pre-compact':
         a.journal.push({ t, kind: 'system', text: 'Context compacted' });
         break;
+      case 'milestone': {
+        // v4: a project-progress milestone appended by the model per the
+        // `work-loop` skill. Schema: {ts, event:"milestone", session_id,
+        // project_id, text}. `text` is top-level (not inside payload), so
+        // normalizeEvent preserves it as ev.text. Some emitters may nest it in
+        // payload.text / payload.message — fall back to those. We record it
+        // both at the project level (primary, for the timeline) AND as a
+        // highlighted journal entry on the emitting session's record.
+        const text = (ev.text ?? ev.message ?? '').toString().trim();
+        if (text) {
+          milestones.push({ t, text, session_id: ev.session_id });
+          if (milestones.length > CONFIG.journalCapPerAgent) {
+            milestones.splice(0, milestones.length - CONFIG.journalCapPerAgent);
+          }
+          a.journal.push({ t, kind: 'milestone', text });
+        }
+        break;
+      }
       default:
         break;
     }
@@ -577,6 +609,12 @@ export function createJournalStore(project) {
     return null;
   }
 
+  // v4: project-level milestone feed, newest last, capped. Cloned so callers
+  // can't mutate internal state.
+  function snapshotMilestones() {
+    return milestones.map((m) => ({ ...m }));
+  }
+
   return {
     project,
     async bootstrap() {
@@ -586,6 +624,7 @@ export function createJournalStore(project) {
       summaryCarry = '';
       agents.clear();
       pendingSpawns.length = 0;
+      milestones.length = 0;
       await ingestSummaries();
       await ingestHooks();
     },
@@ -598,6 +637,7 @@ export function createJournalStore(project) {
     },
     snapshotAgents,
     snapshotAgentDetail,
+    snapshotMilestones,
     agentsMap: agents,
   };
 }
