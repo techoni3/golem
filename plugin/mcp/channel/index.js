@@ -28,9 +28,20 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 const VERSION = '0.1.0';
-// GOLEM_CHANNEL_PORT=0 → kernel-assigned free port (multi-CEO mode).
-// Default kept at 7421 so single-CEO smoke tests & legacy callers still work.
-const PORT = Number(process.env.GOLEM_CHANNEL_PORT ?? 7421);
+// Port selection (multi-CEO safe by default):
+//   - Default is 0 → kernel-assigned ephemeral port. This lets any number of
+//     channel servers coexist without EADDRINUSE — critical because Claude
+//     Code probes this plugin MCP standalone (e.g. `claude mcp list`) with no
+//     env set, often while a real CEO session already holds a fixed port.
+//   - Set GOLEM_CHANNEL_PORT explicitly (e.g. to 7421) only for single-CEO
+//     smoke tests or legacy callers that need a known, pinnable port.
+// An empty/unset/blank value resolves to 0. A non-numeric value also falls
+// back to 0 rather than NaN (which would crash listen()).
+const _rawPort = process.env.GOLEM_CHANNEL_PORT;
+const PORT =
+  _rawPort != null && _rawPort.trim() !== '' && Number.isFinite(Number(_rawPort))
+    ? Number(_rawPort)
+    : 0;
 const HOST = '127.0.0.1';
 const ALLOWED_SENDERS = new Set(
   (process.env.GOLEM_CHANNEL_ALLOWED_SENDERS || 'dashboard,cli,curl')
