@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "golem-local",
+  "owner": {
+    "name": "Lavee Singh",
+    "email": "lavees96@gmail.com"
+  },
+  "description": "Local marketplace for the golem v4 plugin — thin orchestration layer over native Claude Code.",
+  "plugins": [
+    {
+      "name": "golem",
+      "source": "./plugin",
+      "description": "Golem v4: central journaling, project registry, ntfy notifications, worker/reviewer/researcher agents, and the golem channel MCP."
+    }
+  ]
+}
