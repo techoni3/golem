@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Quick end-to-end smoke check against a running dashboard.
 # Usage:
-#   scripts/check.sh                 # against http://127.0.0.1:4173
+#   scripts/check.sh                 # against http://127.0.0.1:7420
 #   PORT=5000 scripts/check.sh       # against http://127.0.0.1:5000
 
 set -u
 
 HOST="${HOST:-127.0.0.1}"
-PORT="${PORT:-4173}"
+PORT="${PORT:-7420}"
 BASE="http://${HOST}:${PORT}"
 
 red() { printf "\033[31m%s\033[0m\n" "$*"; }

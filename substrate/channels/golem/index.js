@@ -122,6 +122,10 @@ function writeChannelsRegistry(reg) {
   fs.renameSync(tmp, CHANNELS_REGISTRY);
 }
 
+// Captured once at module load so the periodic re-register heartbeat keeps a
+// stable started_at instead of advancing it every tick.
+const STARTED_AT = new Date().toISOString();
+
 function registerChannel(port) {
   if (!SESSION_ID) {
     process.stderr.write('[golem-channel] CLAUDE_CODE_SESSION_ID empty; channel will not register for multi-CEO routing\n');
@@ -136,7 +140,7 @@ function registerChannel(port) {
       host: HOST,
       port,
       version: VERSION,
-      started_at: new Date().toISOString(),
+      started_at: STARTED_AT,
     });
     writeChannelsRegistry(reg);
   });
@@ -148,7 +152,13 @@ function unregisterChannel() {
     withChannelLock(() => {
       const reg = readChannelsRegistry();
       const before = reg.channels.length;
-      reg.channels = reg.channels.filter((c) => c.session_id !== SESSION_ID);
+      // Filter by PID, not session_id. When Claude Code recycles this MCP
+      // child, the successor process boots and registerChannel's *before*
+      // this old process's exit handler runs. Both share SESSION_ID, so a
+      // session_id-based filter here would delete the successor's fresh
+      // entry — wiping the session from the registry. Removing only our own
+      // pid leaves the successor intact.
+      reg.channels = reg.channels.filter((c) => c.pid !== process.pid);
       if (reg.channels.length !== before) writeChannelsRegistry(reg);
     });
   } catch (err) {
@@ -433,6 +443,17 @@ server.listen(PORT, HOST, () => {
   try { registerChannel(boundPort); } catch (err) {
     process.stderr.write(`[golem-channel] register failed: ${err.message}\n`);
   }
+  // Re-assert registration on an interval. registerChannel only fires once at
+  // listen — if this session's entry is ever lost afterward (a cross-process
+  // write race, a manual edit, file corruption), it would never come back.
+  // A periodic re-register makes the registry self-healing: any loss is
+  // corrected within HEARTBEAT_MS. registerChannel is idempotent (it filters
+  // this session's stale rows before re-adding). unref() so the timer never
+  // keeps the process alive on its own.
+  const HEARTBEAT_MS = 30_000;
+  setInterval(() => {
+    try { registerChannel(boundPort); } catch { /* transient — next tick retries */ }
+  }, HEARTBEAT_MS).unref();
 });
 
 // Cleanup hooks — the channel registry should not grow ghosts when the CEO

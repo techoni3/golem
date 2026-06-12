@@ -4,7 +4,9 @@ import path from 'node:path';
 const HOME = os.homedir();
 
 export const CONFIG = {
-  port: parseInt(process.env.PORT ?? '4173', 10),
+  // 7420 — deliberately off Vite's default (4173) so a project's dev server
+  // can never shadow the dashboard on a shared port. Channel server is 7421.
+  port: parseInt(process.env.PORT ?? '7420', 10),
   host: process.env.HOST ?? '127.0.0.1',
   projectsRoot:
     process.env.GOLEM_PROJECTS_ROOT ??

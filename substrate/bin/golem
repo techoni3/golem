@@ -583,7 +583,14 @@ session_claim() {
                          then .claimed_project = \"$project_id\" | .claimed_at = \"$now\"
                          else . end)"
   fi
+  local project_path; project_path="$(jq -r '.path' <<<"$row")"
   ok "claimed $project_id (session $sid)"
+  # Hand the CEO its cd target. The claim is only "done" once the CEO has cd'd
+  # into the project: a sub-agent dispatched from the wrong cwd journals into
+  # the wrong namespace. Printing the exact cd here makes the step impossible
+  # to miss — it arrives in the output of the command the CEO already runs.
+  echo "REQUIRED NEXT STEP — the claim is not complete until you cd. Run this before dispatching any sub-agent:"
+  echo "  cd \"$project_path\""
 }
 
 session_release() {
@@ -729,6 +736,18 @@ session_start() {
   local session_id; session_id="$(gen_uuid)"
   build_channel_args
 
+  # Grant the CEO session cwd-persistence into every registered project dir.
+  # Claude Code clamps the Bash cwd to the primary working dir (GOLEM_ROOT)
+  # plus any --add-dir dirs; without this, `cd` into a project OUTSIDE
+  # GOLEM_ROOT silently snaps back. Projects under GOLEM_ROOT are already in
+  # scope (the --add-dir is redundant but harmless). A project registered
+  # AFTER this session starts won't be covered — register external projects
+  # before the session that works them, or restart.
+  local ADD_DIR_ARGS=() _p
+  while IFS= read -r _p; do
+    [[ -n "$_p" && -d "$_p" ]] && ADD_DIR_ARGS+=(--add-dir "$_p")
+  done < <(jq -r '.projects[]?.path // empty' "$PROJECTS_FILE" 2>/dev/null)
+
   # Multi-CEO: each CEO's channel-server child binds an ephemeral port (0 →
   # kernel-assigned). The channel server writes its bound port + this session's
   # id into ~/.config/golem/channels.json so the dashboard can fan out SSE
@@ -748,6 +767,7 @@ session_start() {
       --session-id "$session_id" \
       --append-system-prompt-file "$persona" \
       --permission-mode acceptEdits \
+      ${ADD_DIR_ARGS[@]+"${ADD_DIR_ARGS[@]}"} \
       ${CHANNEL_ARGS[@]+"${CHANNEL_ARGS[@]}"} \
       ${passthru[@]+"${passthru[@]}"} \
       </dev/null >/dev/null 2>&1 &
@@ -767,6 +787,7 @@ session_start() {
     --session-id "$session_id" \
     --append-system-prompt-file "$persona" \
     --permission-mode acceptEdits \
+    ${ADD_DIR_ARGS[@]+"${ADD_DIR_ARGS[@]}"} \
     ${CHANNEL_ARGS[@]+"${CHANNEL_ARGS[@]}"} \
     ${passthru[@]+"${passthru[@]}"}
 }
@@ -799,7 +820,7 @@ cmd_status() {
 
   if [[ $json -eq 1 ]]; then
     local dash_url=""
-    local dash_port="${PORT:-4173}"
+    local dash_port="${PORT:-7420}"
     if command -v curl >/dev/null 2>&1 && curl -fsS --max-time 1 "http://127.0.0.1:$dash_port/healthz" >/dev/null 2>&1; then
       dash_url="http://127.0.0.1:$dash_port"
     fi
@@ -834,7 +855,7 @@ cmd_status() {
   fi
 
   head1 "Dashboard"
-  local dash_port="${PORT:-4173}"
+  local dash_port="${PORT:-7420}"
   if command -v curl >/dev/null 2>&1 && curl -fsS --max-time 1 "http://127.0.0.1:$dash_port/healthz" >/dev/null 2>&1; then
     ok "running on http://127.0.0.1:$dash_port"
   else
@@ -949,8 +970,27 @@ cmd_dashboard() {
   [[ -n "$DASHBOARD_DIR" ]] || { fail "dashboard dir not found relative to substrate"; exit 1; }
   [[ -d "$DASHBOARD_DIR/node_modules" ]] || { fail "dashboard deps missing — run \`golem install\` first"; exit 1; }
   command -v npm >/dev/null 2>&1 || { fail "\`npm\` not on PATH; install Node 20+"; exit 1; }
+
+  # --public: bind 0.0.0.0 instead of the loopback-only default, so the
+  # dashboard is reachable from other devices on the LAN (or via a tunnel).
+  # Deliberately opt-in and per-run — the dashboard has no auth and its
+  # /api/brief|interrupt|halt routes drive live CEO sessions.
+  local public=0 passthru=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --public) public=1; shift ;;
+      *)        passthru+=("$1"); shift ;;
+    esac
+  done
+
+  if [[ $public -eq 1 ]]; then
+    export HOST=0.0.0.0
+    warn "--public: dashboard binding 0.0.0.0 — reachable on your LAN with NO auth."
+    warn "anyone on this network can drive your CEO sessions via /api/brief."
+  fi
+
   cd "$DASHBOARD_DIR"
-  exec npm start "$@"
+  exec npm start ${passthru[@]+"${passthru[@]}"}
 }
 
 cmd_doctor() {
@@ -1046,7 +1086,9 @@ Run:
   project info <id>
                        Print one project's metadata + current claim if any.
 
-  dashboard            Start the admin dashboard on http://localhost:4173.
+  dashboard [--public]
+                       Start the admin dashboard on http://127.0.0.1:7420.
+                       --public binds 0.0.0.0 (LAN-reachable, no auth).
 
 Inspect:
   doctor               Sanity-check the environment.

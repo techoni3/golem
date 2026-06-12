@@ -13,7 +13,7 @@ npm install
 npm start
 ```
 
-Open <http://localhost:4173>.
+Open <http://127.0.0.1:7420>.
 
 To smoke-check a running instance: `npm run check`.
 
@@ -23,7 +23,7 @@ Environment variables (all optional):
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `PORT` | `4173` | HTTP/WS port. Auto-increments by 1 if busy (up to +20). |
+| `PORT` | `7420` | HTTP/WS port (off Vite's 4173 default by design). Auto-increments by 1 if busy (up to +20). |
 | `HOST` | `127.0.0.1` | Listen host. |
 | `GOLEM_PROJECTS_ROOT` | `~/Documents/software/experiments/golem/golem-projects` | Where to scan for substrate projects. |
 | `GOLEM_AGENT_ACTIVE_MS` | `60000` | An agent is "active" if its last event is fresher than this. |

@@ -134,21 +134,19 @@ flowchart TD
 
 **Reading the gate nodes (dashed hexagons).** A `G1`–`G5` node is a human approval checkpoint. When a gate is *active* — `G1` always, `G2`–`G5` only when the brief posture lists them — the CEO does not flow straight through it: it writes a gate file, runs the closing reflex, and yields. The journey resumes on the next turn when the §0.2 gate scan finds the gate `approved` (a `denied`/`cancelled` gate ends that journey). When a `G2`–`G5` gate is *not* placed by posture, the CEO passes straight through. The `input gate` is different — it is not on the mainline and not posture-driven; any phase can divert to it the moment a sub-agent reports it is blocked on a missing secret. Both kinds are defined in the `golem-gates` skill; the §4F playbook covers how you handle them.
 
-### The claim → cd → dispatch rule (HARD — never collapse or reorder)
+### Claim → cd → dispatch (HARD — claim and `cd` are ONE action, never separable)
 
-Before **any** sub-agent dispatch on a journey, in this exact order:
+`golem session claim` and the `cd` that follows it are a **single indivisible action**: the claim is **not finished** until you have `cd`'d into the project. There is no "step 2 to remember" — the claim command itself prints the exact `cd` to run. Treat the claim as incomplete, and the lock as not truly held, until the `cd` has run.
 
 ```
-1.  Bash: golem session claim <project_id>     — acquire the project lock
-2.  Bash: cd <absolute path to project root>   — move the CEO's cwd inside the project
-3.  Agent(...)                                  — only now dispatch the first sub-agent
+Bash: golem session claim <project_id>     — claims the lock; its output prints the `cd` command to run next
+Bash: cd <the path the claim just printed> — run it IMMEDIATELY; the claim is not complete until this runs
+Agent(...)                                  — only now dispatch the first sub-agent
 ```
 
-**Step 2 is the one most easily forgotten and the most damaging to skip.** The journal hook routes events by walking `$PWD` upward to the nearest `CLAUDE.md`. If your cwd is still the root workspace when you dispatch, every sub-agent's tool calls journal into the **wrong namespace** and the project's journal is left empty. `cd` is a standalone Bash call (working directory persists across calls); it is not a compound `cd && cmd`, so it does not violate bash hygiene. This rule applies to every entry node — A.1, A.2, A.2-bootstrap, A.3, A.4 — and again after any mid-journey project switch.
+The `cd` is not optional and not deferrable. The journal hook routes events by walking `$PWD` up to the nearest `CLAUDE.md`; dispatch a sub-agent while your cwd is still the root workspace and all of its tool calls journal into the **wrong namespace**, leaving the project's journal empty. A standalone `cd` is a single Bash call (cwd persists between calls) — it is not a compound `cd && cmd` and does not breach bash hygiene. This holds at every entry node — A.1, A.2, A.2-bootstrap, A.3, A.4 — and after any mid-journey project switch. `golem session claim --root` (substrate meta-work) prints `$GOLEM_ROOT` as its target; the rule is uniform — always `cd` to whatever the claim printed.
 
-For substrate meta-work (editing the substrate itself, not a project), claim with `golem session claim --root` and keep cwd at the root workspace.
-
-`golem session claim` exit codes: `0` — lock acquired, proceed. `10` — another live session holds this project; do not retry, do not loop — `respond` to the user with the held-by detail, close with the reflex, yield. `30` — project not registered; run `golem project register <abs-path> --name '<pretty>'` first (the `golem-project-bootstrap` skill covers this), then claim.
+`golem session claim` exit codes: `0` — lock acquired; `cd` to the printed path, then proceed. `10` — another live session holds this project; do not retry, do not loop — `respond` to the user with the held-by detail, close with the reflex, yield. `30` — project not registered; run `golem project register <abs-path> --name '<pretty>'` first (the `golem-project-bootstrap` skill covers this), then claim.
 
 ---
 
@@ -281,7 +279,7 @@ After each phase or ticket completes inside a brief, do not yield — instead:
 3. **Route it** through §3 (the loop back-edge to the entry router).
 4. Loop until no in-flight or actionable open work remains.
 
-**Mid-loop project switch.** If the user redirects you to a different project mid-journey: `golem session release`, then `golem session claim <new_project_id>`, then `cd` into the new project root. If the second claim fails you are now unbound — push back to the user via `respond` and yield; do **not** auto-reclaim the previous project.
+**Mid-loop project switch.** If the user redirects you to a different project mid-journey: `golem session release`, then `golem session claim <new_project_id>` — and `cd` to the path that claim prints, as the same one indivisible action (§3). If the second claim fails you are now unbound — push back to the user via `respond` and yield; do **not** auto-reclaim the previous project.
 
 | Termination condition | Action |
 |---|---|
@@ -302,7 +300,7 @@ These are the rules that override everything else. They are tiered: when two rul
 **Tier 0 — substrate integrity.** Skipping any of these makes the work invisible or corrupts the substrate's memory.
 - The closing reflex (`golem-summarise-session`) is the mandatory final tool call of every turn.
 - On any channel event, `ack` fires immediately on receipt, before any other reasoning.
-- `golem session claim` succeeds *before* any sub-agent dispatch, and you `cd` into the project root before the first `Agent(...)` call (the §3 claim → cd → dispatch rule).
+- `golem session claim` **and** the `cd` to the path it prints are one indivisible action (§3) — both complete before any sub-agent dispatch. The claim is not "done" until the `cd` has run.
 - Secret values never enter a gate file, the journal, the channel, or git. An input gate (§4F) carries key *names* and a git-ignored target-file path only; the human writes the values into that file directly.
 
 **Tier 1 — orchestration safety.** Skipping these strands teammates or leaks processes.
