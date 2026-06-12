@@ -71,6 +71,13 @@ const Icon = {
       <path d="M1 8H4L6 3L10 13L12 8H15"/>
     </svg>
   ),
+  Gate: ({ size = 12 }) => (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 14V5L8 2L13 5V14"/>
+      <path d="M3 14H13"/>
+      <path d="M6.5 14V8.5H9.5V14"/>
+    </svg>
+  ),
 };
 
 window.Icon = Icon;

@@ -53,6 +53,11 @@
     serverTime: null,
     // v4: all native Claude Code sessions (not just substrated/golem ones).
     nativeSessions: [],
+    // v4: live channel registrations keyed by CEO session_id. Lets the command
+    // center decide, per native session, whether a brief can be delivered.
+    channels: [],
+    // v4: cross-project milestone feed (newest first), each project-chipped.
+    recentMilestones: [],
   };
 
   const listeners = new Set();
@@ -98,13 +103,15 @@
     if (snap.orchestrator) state.orchestrator = snap.orchestrator;
     if (Array.isArray(snap.chat)) state.chat = snap.chat.slice();
     if (Array.isArray(snap.native_sessions)) state.nativeSessions = snap.native_sessions.slice();
+    if (Array.isArray(snap.channels)) state.channels = snap.channels.slice();
+    if (Array.isArray(snap.recent_milestones)) state.recentMilestones = snap.recent_milestones.slice();
     state.ready = true;
     notify();
   }
 
-  function applyNativeSessionsUpdate({ native_sessions }) {
-    if (!Array.isArray(native_sessions)) return;
-    state.nativeSessions = native_sessions.slice();
+  function applyNativeSessionsUpdate({ native_sessions, channels }) {
+    if (Array.isArray(native_sessions)) state.nativeSessions = native_sessions.slice();
+    if (Array.isArray(channels)) state.channels = channels.slice();
     notify();
   }
 
@@ -122,6 +129,29 @@
     if (!orchestrator) return;
     state.orchestrator = orchestrator;
     notify();
+  }
+
+  // Rebuild the cross-project milestone feed from the per-project summaries.
+  // The snapshot ships a server-merged `recent_milestones`, but live WS deltas
+  // (project-update / projects-list) only carry a single project's milestones —
+  // so we recompute client-side from state.projects to keep the feed fresh.
+  function recomputeMilestones(cap = 40) {
+    const merged = [];
+    for (const p of state.projects) {
+      for (const m of p.milestones ?? []) {
+        merged.push({
+          t: m.t,
+          text: m.text,
+          session_id: m.session_id ?? null,
+          project: p.id,
+          project_name: p.name,
+          project_color: p.color,
+          project_glyph: p.glyph,
+        });
+      }
+    }
+    merged.sort((a, b) => (b.t ?? 0) - (a.t ?? 0));
+    state.recentMilestones = merged.slice(0, cap);
   }
 
   function applyAgentsUpdate({ projectId, agents }) {
@@ -145,6 +175,7 @@
       next[idx] = project;
       state.projects = next;
     }
+    recomputeMilestones();
     notify();
   }
 
@@ -159,6 +190,7 @@
     for (const id of [...state.ticketsByProject.keys()]) {
       if (!ids.has(id)) state.ticketsByProject.delete(id);
     }
+    recomputeMilestones();
     notify();
   }
 
@@ -176,6 +208,20 @@
 
   function getProject(id) {
     return state.projects.find((p) => p.id === id) ?? null;
+  }
+  // Resolve the dashboard project record for a derived contract project_id.
+  // Native sessions / gates / milestones carry the CONTRACT project_id
+  // (`<slug>-<6hex>`), but a project's dashboard `id` is its registry id
+  // (e.g. "trialroom-ai") which often differs from the contract id
+  // ("trialroomai-74ac11"). Match on `project_id` first, then fall back to `id`
+  // (covers entries discovered without a registry, where id === contract id).
+  function getProjectByContractId(contractId) {
+    if (!contractId) return null;
+    return (
+      state.projects.find((p) => p.project_id === contractId) ??
+      state.projects.find((p) => p.id === contractId) ??
+      null
+    );
   }
   function getProjectAgents(id) {
     return state.agentsByProject.get(id) ?? [];
@@ -316,6 +362,7 @@
     subscribe,
     getState: () => state,
     getProject,
+    getProjectByContractId,
     getProjectAgents,
     getProjectActiveAgents,
     getProjectTickets,
@@ -330,6 +377,29 @@
     getChatForSession,
     getSessions,
     getNativeSessions: () => state.nativeSessions,
+    getChannels: () => state.channels,
+    // The live channel for a given session_id, or null. A native session has a
+    // deliverable channel iff a channel-server registered under its session_id.
+    getChannelForSession: (sessionId) =>
+      sessionId ? (state.channels.find((c) => c.session_id === sessionId) ?? null) : null,
+    getRecentMilestones: () => state.recentMilestones,
+    // Every awaiting gate across all workspaces (already aggregated server-side
+    // in orchestrator.gates — central + legacy both surface there).
+    getPendingGates: () =>
+      (state.orchestrator?.gates ?? []).filter((g) => g.status === 'awaiting'),
+    // All gates (any status) for one workspace, newest first (server already
+    // sorts orchestrator.gates by mtime desc). `workspace` on a gate is the
+    // dashboard registry id.
+    getProjectGates: (workspaceId) =>
+      (state.orchestrator?.gates ?? []).filter((g) => g.workspace === workspaceId),
+    // Native Claude Code sessions whose derived contract project_id maps to this
+    // dashboard project (match the project's own contract project_id, falling
+    // back to its registry id for registry-less discoveries).
+    getProjectSessions: (project) => {
+      if (!project) return [];
+      const ids = new Set([project.project_id, project.id].filter(Boolean));
+      return state.nativeSessions.filter((s) => s.project_id && ids.has(s.project_id));
+    },
   };
 
   // Kick off as soon as DOM is ready (script in <body>, so it already is).

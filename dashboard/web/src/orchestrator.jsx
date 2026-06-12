@@ -17,34 +17,55 @@ function openCeoDrawer(sessionId) {
   window.dispatchEvent(new CustomEvent('open-ceo-drawer', { detail: { sessionId: sessionId ?? null } }));
 }
 
+// Memos older than this are no longer surfaced in the rail — a stale handoff
+// from a past journey shouldn't masquerade as the current headline.
+const MEMO_FRESH_MS = 7 * 24 * 60 * 60 * 1000;
+
 function OrchestratorRail() {
   useStore();
   const orch = window.Store.getOrchestrator();
-  const sessions = window.Store.getSessions();
-  const memo = orch?.headlineMemo;
+  // v4: control flows over per-session channels (channels.json), not the v3
+  // sessions.json registry. The channel count is the real "is anything live?".
+  const channels = window.Store.getChannels();
+  const sessions = window.Store.getSessions(); // v3 CEO chips (usually empty in v4)
   const counts = orch?.gateCounts ?? { awaiting: 0, total: 0 };
 
+  // Demote the journey memo: only surface it while it's fresh (<7d). A months-
+  // old handoff memo is history, not the current headline.
+  const rawMemo = orch?.headlineMemo;
+  const memoFresh = rawMemo && rawMemo.mtime && (Date.now() - rawMemo.mtime) < MEMO_FRESH_MS;
+  const memo = memoFresh ? rawMemo : null;
+
+  const channelCount = channels.length;
+
   const onMemoClick = useCallback(() => {
-    // No specific session → drawer falls back to the first available one.
-    openCeoDrawer(sessions[0]?.session_id ?? null);
-  }, [sessions]);
+    openCeoDrawer(channels[0]?.session_id ?? sessions[0]?.session_id ?? null);
+  }, [channels, sessions]);
 
   return (
     <div className="orch-rail orch-rail-v3">
       <div className="orch-sessions">
-        {sessions.length === 0 && (
+        {channelCount > 0 ? (
+          <div className="orch-session-empty">
+            <span className="orch-dot live"/>
+            <span className="orch-status-label">{channelCount} channel{channelCount === 1 ? '' : 's'} live</span>
+            <span className="orch-session-hint">
+              briefs &amp; gates deliver to {channelCount === 1 ? 'this session' : 'these sessions'} from the command center
+            </span>
+          </div>
+        ) : (
           <div className="orch-session-empty">
             <span className="orch-dot offline"/>
-            <span className="orch-status-label">No CEO live</span>
+            <span className="orch-status-label">No channels</span>
             <span className="orch-session-hint">
-              boot with <span className="mono">golem session start --project &lt;id&gt;</span>
+              sessions started before <span className="mono">v4.0.3</span> have no channel — new sessions register automatically
             </span>
           </div>
         )}
         {sessions.map((s) => <SessionChip key={s.session_id} session={s}/>)}
       </div>
 
-      <div className="orch-meta-row" onClick={onMemoClick} title={memo ? 'Open CEO chat' : 'Open CEO chat'}>
+      <div className="orch-meta-row" onClick={onMemoClick} title="Open CEO chat">
         <div className="orch-memo">
           {memo ? (
             <>
@@ -59,7 +80,9 @@ function OrchestratorRail() {
             </>
           ) : (
             <div className="orch-memo-empty">
-              {sessions.length > 0 ? 'no journey memo yet — click a CEO chip to push a brief' : 'no CEO session live'}
+              {channelCount > 0
+                ? 'no recent journey memo — send a brief from the command center to start one'
+                : 'no recent journey memo'}
             </div>
           )}
         </div>
@@ -117,8 +140,6 @@ function SessionChip({ session }) {
 function NativeSessions() {
   useStore();
   const sessions = window.Store.getNativeSessions();
-  const projects = window.Store.getState().projects;
-  const knownIds = new Set(projects.map((p) => p.id));
 
   if (!sessions || sessions.length === 0) {
     return (
@@ -139,8 +160,11 @@ function NativeSessions() {
   return (
     <div className="native-sessions">
       {sessions.map((s) => {
-        // A session is "registered" if its project is one the dashboard tracks.
-        const registered = s.registered || (s.project_id && knownIds.has(s.project_id));
+        // The server's `registered` flag is authoritative (matches cwd/root
+        // against the registry). Fall back to a contract-id project lookup —
+        // the dashboard `id` (registry id) ≠ the derived contract project_id,
+        // so a plain id-set membership test would mis-flag registered sessions.
+        const registered = s.registered || !!window.Store.getProjectByContractId(s.project_id);
         const cls = statusClass(s);
         return (
           <div key={s.session_id || s.pid} className={`native-session-card ${cls}`}>

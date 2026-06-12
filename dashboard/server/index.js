@@ -8,10 +8,13 @@ import { createState } from './state.js';
 import { ROLES } from './roles.js';
 import { TRACKER_COLUMNS } from './tracker.js';
 import { pushBrief, pushInterrupt, pushHalt, pushGate, channelHealth, listChannels } from './brief.js';
+import { writeGateVerdict } from './orchestrator.js';
 import { createChat } from './chat.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const WEB_ROOT = path.resolve(__dirname, '..', 'web');
+
+const DECISION_PAST = { approve: 'approved', deny: 'denied', cancel: 'cancelled' };
 
 async function main() {
   const fastify = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
@@ -146,24 +149,45 @@ async function main() {
   });
   fastify.post('/api/gates/:gateId/:decision', async (req, reply) => {
     const { gateId, decision } = req.params;
+    if (!['approve', 'deny', 'cancel'].includes(decision)) {
+      return reply.code(400).send({ error: `unknown gate decision: ${decision}` });
+    }
     const body = extractBody(req);
     const sessionId = extractSessionId(req);
     const extras = { gate_id: gateId };
     if (sessionId) extras.session_id = sessionId;
     chat.record('system', `gate_${decision}`, bodyToText(body) || `${decision} ${gateId}`, extras);
-    let result;
+
+    // 1) Authoritatively flip the gate file's status. The dashboard owns the
+    //    gate files, so a verdict is recorded on disk regardless of whether a
+    //    CEO is live to consume the channel push. This is the source of truth.
+    const fileResult = await writeGateVerdict(state.rawWorkspaces(), gateId, decision);
+
+    // 2) Best-effort: wake a live CEO via the channel so it resumes from the
+    //    verdict. A missing/unreachable channel is NOT a hard failure when the
+    //    file already flipped — the CEO (or the user) picks it up on resume.
+    let channelResult = null;
     try {
-      result = await pushGate(gateId, decision, body, sessionId);
+      channelResult = await pushGate(gateId, decision, body, sessionId);
     } catch (err) {
-      chat.record('system', 'error', `gate ${decision} ${gateId} rejected: ${err?.message ?? err}`);
-      return reply.code(400).send({ error: String(err?.message ?? err) });
+      channelResult = { ok: false, error: String(err?.message ?? err) };
     }
-    if (!result.ok) {
-      noteForwardFailure(`gate ${decision}`, result);
-      return reply.code(502).send(result);
-    }
+
     state.refreshOrchestrator().catch(() => {});
-    return result;
+
+    if (!fileResult.ok) {
+      // The file didn't flip. If the channel push also failed, surface the
+      // error; if the channel accepted it, a live CEO will action it.
+      if (channelResult && !channelResult.ok) {
+        chat.record('system', 'error', `gate ${decision} ${gateId} failed: ${fileResult.error}`);
+        return reply.code(404).send({ ok: false, error: fileResult.error, channel: channelResult });
+      }
+    } else if (channelResult && !channelResult.ok) {
+      // File flipped but no channel to notify — surface a soft note, still 200.
+      chat.record('system', `gate_${decision}`, `gate ${gateId} ${DECISION_PAST[decision]} (no live CEO to notify — will resume on next session)`, extras);
+    }
+
+    return { ok: true, gate_id: gateId, decision, file: fileResult, channel: channelResult };
   });
   fastify.get('/api/channel/health', async (req) => channelHealth(typeof req.query?.session === 'string' ? req.query.session : null));
   fastify.get('/api/channels', async () => listChannels());

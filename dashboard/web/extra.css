@@ -1063,3 +1063,509 @@
   background: color-mix(in oklab, var(--accent) 8%, var(--bg-2));
   color: var(--text-0);
 }
+
+/* ===================================================================== */
+/* v4 command center — three-zone home                                    */
+/* ===================================================================== */
+
+.command-center .page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+}
+.cc-headline-stats { display: flex; gap: 10px; flex-shrink: 0; }
+.cc-stat {
+  min-width: 64px;
+  padding: 7px 12px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-2);
+  background: var(--bg-1);
+  text-align: center;
+}
+.cc-stat-value { font-size: 20px; font-weight: 650; color: var(--text-0); line-height: 1; }
+.cc-stat-label {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-3); margin-top: 4px; white-space: nowrap;
+}
+.cc-stat.tone-active .cc-stat-value { color: var(--status-active); }
+.cc-stat.tone-running .cc-stat-value { color: var(--status-running); }
+.cc-stat.tone-review .cc-stat-value { color: var(--status-review); }
+.cc-stat.tone-muted .cc-stat-value { color: var(--text-2); }
+
+/* Three-zone grid. Sessions rail is the most prominent (widest of the three);
+   work zone center; control & feed right. Collapses to a stack on narrow. */
+.cc-grid {
+  display: grid;
+  grid-template-columns: minmax(340px, 1.15fr) minmax(280px, 1fr) minmax(300px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 1180px) {
+  .cc-grid { grid-template-columns: 1fr 1fr; }
+  .cc-control { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) {
+  .cc-grid { grid-template-columns: 1fr; }
+  .cc-control { grid-column: auto; }
+}
+
+.cc-zone { min-width: 0; }
+.cc-zone-head {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 10px;
+}
+.cc-zone-title {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+  font-weight: 600; color: var(--text-2);
+}
+.cc-zone-count {
+  font-size: 11px; font-family: var(--font-mono);
+  background: var(--bg-2); color: var(--text-2);
+  border: 1px solid var(--border-2); border-radius: 999px;
+  padding: 1px 8px;
+}
+.cc-zone-count.attn { background: color-mix(in oklab, var(--status-review) 18%, var(--bg-2)); color: var(--status-review); border-color: color-mix(in oklab, var(--status-review) 38%, transparent); }
+
+/* ---- Zone 1: sessions rail ---- */
+.cc-session-list { display: flex; flex-direction: column; gap: 10px; }
+.cc-session-card {
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-3);
+  background: var(--bg-1);
+  padding: 12px 13px;
+  display: flex; flex-direction: column; gap: 8px;
+  position: relative;
+}
+.cc-session-card.status-busy { border-color: var(--accent-border); box-shadow: 0 0 0 1px var(--accent-soft) inset; }
+.cc-session-card.status-waiting { border-color: color-mix(in oklab, var(--status-review) 40%, var(--border-2)); }
+.cc-session-card.status-dead { opacity: 0.5; }
+.cc-session-row1 { display: flex; align-items: center; gap: 9px; }
+.cc-session-name {
+  font-weight: 600; font-size: 13.5px; color: var(--text-0);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1;
+}
+.cc-status-badge {
+  flex-shrink: 0;
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10.5px; font-weight: 600;
+  padding: 2px 9px; border-radius: 999px;
+  text-transform: uppercase; letter-spacing: 0.03em;
+}
+.cc-status-badge.badge-busy { background: var(--accent-soft); color: var(--status-active); }
+.cc-status-badge.badge-waiting { background: color-mix(in oklab, var(--status-review) 16%, var(--bg-2)); color: var(--status-review); }
+.cc-status-badge.badge-idle { background: var(--bg-3); color: var(--text-2); }
+.cc-status-badge.badge-dead { background: var(--bg-3); color: var(--text-3); }
+.cc-status-pulse {
+  width: 6px; height: 6px; border-radius: 999px; background: var(--status-active);
+  box-shadow: 0 0 6px var(--status-active);
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+.orch-dot.waiting { background: var(--status-review); box-shadow: 0 0 8px var(--status-review); }
+
+.cc-session-waiting {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px; color: var(--status-review);
+  background: color-mix(in oklab, var(--status-review) 10%, var(--bg-2));
+  border: 1px solid color-mix(in oklab, var(--status-review) 26%, transparent);
+  border-radius: var(--radius-1); padding: 4px 8px;
+}
+.cc-session-row2 { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.cc-session-ages { font-size: 10.5px; color: var(--text-3); display: flex; gap: 5px; white-space: nowrap; }
+.cc-session-cwd {
+  font-size: 10.5px; color: var(--text-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* Project chip (reused across all three zones) */
+.cc-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--bg-2); border: 1px solid var(--border-2);
+  border-radius: 999px; padding: 2px 9px 2px 7px;
+  font-size: 11px; color: var(--text-1); cursor: pointer;
+  max-width: 100%;
+}
+.cc-chip:hover { background: var(--bg-3); border-color: var(--border-3); }
+.cc-chip-dot { width: 7px; height: 7px; border-radius: 999px; background: var(--text-3); flex-shrink: 0; }
+.cc-chip-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-chip-unregistered { cursor: default; border-style: dashed; color: var(--text-3); }
+.cc-chip-unregistered:hover { background: var(--bg-2); border-color: var(--border-2); }
+.cc-chip-tag {
+  font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--status-blocked); background: color-mix(in oklab, var(--status-blocked) 14%, transparent);
+  border-radius: 4px; padding: 1px 4px; flex-shrink: 0;
+}
+
+/* Per-session controls (only when a channel exists) */
+.cc-session-controls {
+  border-top: 1px solid var(--border-1); padding-top: 8px;
+  display: flex; flex-direction: column; gap: 7px; position: relative;
+}
+.cc-composer { display: flex; gap: 6px; }
+.cc-composer-input {
+  flex: 1; min-width: 0;
+  background: var(--bg-2); border: 1px solid var(--border-2);
+  border-radius: var(--radius-1); padding: 6px 9px;
+  font-size: 12px; color: var(--text-0); font-family: var(--font-sans);
+}
+.cc-composer-input:focus { outline: none; border-color: var(--accent-border); }
+.cc-composer-input:disabled { opacity: 0.5; }
+.cc-session-buttons { display: flex; align-items: center; gap: 6px; }
+.cc-channel-tag { margin-left: auto; font-size: 10px; color: var(--text-3); }
+.cc-session-nochannel {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 10.5px; color: var(--text-3); font-style: italic;
+  border-top: 1px solid var(--border-1); padding-top: 8px;
+}
+.cc-nochannel-dot { width: 6px; height: 6px; border-radius: 999px; background: var(--text-4); }
+.cc-toast {
+  position: absolute; right: 0; bottom: calc(100% + 4px);
+  font-size: 10.5px; padding: 4px 9px;
+}
+
+/* ---- Zone 2: work cards ---- */
+.cc-project-list { display: flex; flex-direction: column; gap: 10px; }
+.cc-work-card {
+  border: 1px solid var(--border-2); border-radius: var(--radius-3);
+  background: var(--bg-1); padding: 12px 13px;
+  display: flex; flex-direction: column; gap: 9px; cursor: pointer;
+}
+.cc-work-card:hover { border-color: var(--border-3); background: var(--bg-2); }
+.cc-work-card.compact {
+  flex-direction: row; align-items: center; gap: 9px;
+  padding: 9px 12px; width: 100%; text-align: left;
+}
+.cc-work-top { display: flex; align-items: center; gap: 10px; }
+.cc-work-titlewrap { min-width: 0; flex: 1; }
+.cc-work-name { font-weight: 600; font-size: 13.5px; color: var(--text-0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-work-id { font-size: 10px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-work-badges { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+.cc-gate-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 600;
+  color: var(--status-review);
+  background: color-mix(in oklab, var(--status-review) 15%, var(--bg-2));
+  border: 1px solid color-mix(in oklab, var(--status-review) 32%, transparent);
+  border-radius: 999px; padding: 2px 8px;
+}
+.cc-work-live { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--status-active); font-variant-numeric: tabular-nums; }
+.cc-work-tag {
+  font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-3); background: var(--bg-3); border-radius: 4px; padding: 1px 5px;
+}
+.cc-plan { display: flex; align-items: center; gap: 9px; }
+.cc-plan-bar { flex: 1; height: 6px; border-radius: 999px; background: var(--bg-3); overflow: hidden; }
+.cc-plan-fill { height: 100%; border-radius: 999px; transition: width 0.4s ease; }
+.cc-plan-count { font-size: 11px; color: var(--text-1); }
+.cc-plan-pct { font-size: 11px; font-weight: 600; min-width: 34px; text-align: right; }
+.cc-work-milestone {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11.5px; color: var(--text-1); line-height: 1.4;
+}
+.cc-work-milestone.muted { color: var(--text-4); font-style: italic; }
+.cc-work-milestone-dot { width: 6px; height: 6px; border-radius: 999px; background: var(--accent); flex-shrink: 0; }
+.cc-work-milestone-text { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.cc-work-milestone-ts { font-size: 10px; color: var(--text-3); flex-shrink: 0; }
+
+/* ---- Zone 3: control & feed ---- */
+.cc-control { display: flex; flex-direction: column; gap: 18px; }
+.cc-panel {
+  border: 1px solid var(--border-2); border-radius: var(--radius-3);
+  background: var(--bg-1); padding: 13px;
+}
+.cc-panel .cc-zone-head { margin-bottom: 12px; }
+.cc-panel-empty { font-size: 11.5px; color: var(--text-3); line-height: 1.5; }
+.cc-gate-list { display: flex; flex-direction: column; gap: 9px; }
+.cc-gate-row {
+  border: 1px solid var(--border-2); border-radius: var(--radius-2);
+  background: var(--bg-2); padding: 9px 10px;
+  display: flex; flex-direction: column; gap: 6px; position: relative;
+}
+.cc-gate-row-top { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.cc-gate-kind {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-2); background: var(--bg-3); border-radius: 4px; padding: 1px 6px;
+}
+.cc-gate-flow { font-size: 11.5px; color: var(--text-1); }
+.cc-gate-arrow { color: var(--text-4); margin: 0 3px; }
+.cc-gate-id { font-size: 10px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-gate-actions { display: flex; gap: 5px; margin-top: 2px; }
+
+.cc-feed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 11px; max-height: 560px; overflow-y: auto; }
+.cc-feed-item { display: flex; gap: 9px; }
+.cc-feed-dot { width: 7px; height: 7px; border-radius: 999px; background: var(--accent); flex-shrink: 0; margin-top: 4px; }
+.cc-feed-body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.cc-feed-text { font-size: 12px; color: var(--text-1); line-height: 1.45; }
+.cc-feed-meta { display: flex; align-items: center; gap: 8px; }
+.cc-feed-ts { font-size: 10px; color: var(--text-3); }
+
+/* ===================================================================== */
+/* v4 project command center — project-view.jsx                           */
+/* ===================================================================== */
+
+.project-command-center .project-hero { margin-bottom: 18px; }
+
+/* Generic section wrapper used by PLAN / Milestones / Sessions / Gates. */
+.pv-section { margin-bottom: 20px; }
+.pv-section-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.pv-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-1);
+}
+.pv-section-count {
+  font-size: 11px;
+  color: var(--text-2);
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.pv-section-count.attn {
+  background: color-mix(in oklab, var(--status-review) 18%, var(--bg-2));
+  color: var(--status-review);
+  border-color: color-mix(in oklab, var(--status-review) 38%, transparent);
+}
+.pv-quiet-line {
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.5;
+  padding: 2px 0;
+}
+
+/* ── PLAN ── */
+.pv-plan .pv-section-head { justify-content: space-between; }
+.pv-plan-stat { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-1); }
+.pv-plan-pct { font-weight: 600; }
+.pv-plan-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--bg-3);
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+.pv-plan-fill { height: 100%; border-radius: 999px; transition: width 0.4s ease; }
+.pv-plan-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pv-plan-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-1);
+  line-height: 1.45;
+}
+.pv-plan-item.done .pv-plan-text { color: var(--text-3); text-decoration: line-through; text-decoration-color: var(--border-3); }
+.pv-plan-box {
+  font-size: 12px;
+  width: 14px;
+  flex-shrink: 0;
+  color: var(--text-4);
+}
+.pv-plan-item.done .pv-plan-box { color: var(--status-active); }
+.pv-plan-text { flex: 1; min-width: 0; }
+
+/* ── Milestone timeline ── */
+.pv-timeline { list-style: none; margin: 0; padding: 0; }
+.pv-timeline-item { display: flex; gap: 12px; }
+.pv-timeline-rail {
+  position: relative;
+  width: 12px;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+}
+.pv-timeline-rail::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1.5px;
+  background: var(--border-2);
+}
+.pv-timeline-item:first-child .pv-timeline-rail::before { top: 7px; }
+.pv-timeline-item:last-child .pv-timeline-rail::before { bottom: calc(100% - 7px); }
+.pv-timeline-dot {
+  position: relative;
+  z-index: 1;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--accent);
+  margin-top: 3px;
+  box-shadow: 0 0 0 3px var(--bg-0);
+}
+.pv-timeline-body { flex: 1; min-width: 0; padding-bottom: 16px; }
+.pv-timeline-text { font-size: 13px; color: var(--text-0); line-height: 1.45; }
+.pv-timeline-ts { font-size: 10.5px; color: var(--text-3); margin-top: 3px; }
+
+/* ── Gate history (collapsed) ── */
+.pv-gate-history { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.pv-gate-history-row { display: flex; align-items: center; gap: 10px; font-size: 11.5px; }
+.pv-gate-status {
+  text-transform: uppercase;
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--bg-3);
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+.pv-gate-status.status-approved { background: color-mix(in oklab, var(--status-active) 16%, var(--bg-2)); color: var(--status-active); }
+.pv-gate-status.status-denied { background: color-mix(in oklab, var(--status-blocked) 16%, var(--bg-2)); color: var(--status-blocked); }
+.pv-gate-status.status-cancelled { background: var(--bg-3); color: var(--text-3); }
+.pv-gate-history-flow { color: var(--text-1); }
+.pv-gate-history-id { color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── Legacy (v3) container + collapsible sections ── */
+.pv-legacy {
+  margin-top: 26px;
+  border-top: 1px solid var(--border-2);
+  padding-top: 16px;
+}
+.pv-legacy-head {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-4);
+  margin-bottom: 12px;
+}
+.pv-collapse {
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-2);
+  background: var(--bg-1);
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.pv-collapse.open { background: var(--bg-0); }
+.pv-collapse-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  text-align: left;
+  transition: background 100ms ease;
+}
+.pv-collapse-head:hover { background: var(--bg-2); }
+.pv-collapse-caret { color: var(--text-3); font-size: 10px; width: 12px; flex-shrink: 0; }
+.pv-collapse-title { font-size: 12.5px; font-weight: 600; flex: 1; }
+.pv-collapse-count {
+  font-size: 11px;
+  color: var(--text-3);
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.pv-collapse-body { padding: 4px 14px 16px; border-top: 1px solid var(--border-2); }
+.pv-collapse-body .timeline-wrap,
+.pv-collapse-body .kanban { margin-top: 12px; }
+
+/* ── Legacy hook-activity rollup ── */
+.pv-hook-stream { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
+.pv-hook-row {
+  display: grid;
+  grid-template-columns: 70px 160px 70px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 5px 8px;
+  border-radius: 4px;
+  font-size: 11.5px;
+}
+.pv-hook-row:hover { background: var(--bg-2); }
+.pv-hook-ts { color: var(--text-4); font-size: 10.5px; }
+.pv-hook-agent { color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pv-hook-kind { color: var(--text-3); font-size: 10.5px; }
+.pv-hook-detail { color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ===================================================================== */
+/* Mobile / narrow-viewport layout (≤640px).                             */
+/* The user drives the dashboard from a phone. The desktop shell is a     */
+/* fixed 220px sidebar + 1fr main; on a 390px viewport that left the      */
+/* content column ~170px wide while inner grids kept hard min-widths,     */
+/* forcing the page to ~711px and overflowing horizontally. This block    */
+/* reflows the shell to a single column, turns the sidebar into a sticky  */
+/* horizontal nav strip, and relaxes the rigid min-width grids so nothing */
+/* exceeds the viewport. CSS-only — no markup/JS changes.                 */
+/* ===================================================================== */
+@media (max-width: 640px) {
+  html, body { overflow-x: hidden; }
+
+  /* Shell: stack sidebar over main instead of side-by-side. */
+  .app { grid-template-columns: 1fr; }
+
+  /* Sidebar → sticky horizontal strip across the top. */
+  .sidebar {
+    position: sticky;
+    top: 0;
+    height: auto;
+    z-index: 30;
+    border-right: none;
+    border-bottom: 1px solid var(--border-1);
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 8px 12px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .sidebar-brand { padding: 0; flex-shrink: 0; }
+  .sidebar-brand-sub { display: none; }
+  /* Collapse the section labels + the project section to keep the strip short;
+     the project list is reachable from the Projects page. */
+  .sidebar-section-label,
+  .sidebar-footer { display: none; }
+  .sidebar-section { margin: 0; }
+  .sidebar-section + .sidebar-section { display: none; }
+  .sidebar-nav { flex-direction: row; gap: 4px; }
+  .sidebar-link {
+    flex-shrink: 0;
+    white-space: nowrap;
+    padding: 6px 10px;
+  }
+
+  /* Topbar: tighten padding, let the meta wrap rather than push width. */
+  .topbar { padding: 0 12px; gap: 8px; height: auto; min-height: var(--topbar-h); flex-wrap: wrap; }
+  .topbar-meta { gap: 8px; flex-wrap: wrap; }
+
+  /* Orchestrator rail: stack its four columns. */
+  .orch-rail { grid-template-columns: 1fr; gap: 10px; padding: 10px 14px; }
+
+  /* Page padding down from 28/32 so cards fill the narrow width. */
+  .page { padding: 16px 12px 64px; }
+
+  /* Command-center already collapses cc-grid at 760px; ensure the headline
+     stats wrap instead of forcing a min row width. */
+  .cc-headline-stats { flex-wrap: wrap; gap: 8px; }
+  .cc-stat { min-width: 56px; flex: 1 1 auto; }
+
+  /* Native-sessions grid: single column on phones. */
+  .native-sessions { grid-template-columns: 1fr; }
+
+  /* Wide data tables (timeline / agent / hook rows) keep their column grid
+     but are allowed to scroll inside their own wrapper rather than stretching
+     the page width. The cells already carry min-width:0 + ellipsis. */
+  .timeline-wrap,
+  .pv-hook-stream { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+}

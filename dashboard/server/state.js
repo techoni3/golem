@@ -22,7 +22,7 @@ import { CONFIG } from './config.js';
 import { discoverProjects } from './projects.js';
 import { createJournalStore } from './journal.js';
 import { readTickets, ticketProgress } from './tracker.js';
-import { orchestratorSnapshot, readDeadSessionIds, readLiveTeammates } from './orchestrator.js';
+import { orchestratorSnapshot, readDeadSessionIds, readLiveTeammates, readChannels } from './orchestrator.js';
 import { readNativeSessions } from './native-sessions.js';
 import { readPlan } from './plan.js';
 
@@ -42,6 +42,11 @@ export function createState() {
   const projectsById = new Map();
   /** v4: latest native_sessions[] (all Claude Code sessions, not just golem). */
   let nativeSessions = [];
+  /** v4: live channel registrations (session_id → {host,port,url}). Polled on
+   *  the orchestrator tick so the command-center home can decide, per native
+   *  session, whether a brief/interrupt can be delivered — without a per-route
+   *  fetch. Each: {session_id, pid, host, port, url, version, started_at}. */
+  let channels = [];
 
   let watcher = null;
   let rediscoverTimer = null;
@@ -87,15 +92,46 @@ export function createState() {
     };
   }
 
+  // v4: merge every project's milestone feed into one newest-first list,
+  // stamped with the owning project's id / name / color / glyph so the
+  // command-center home can render a cross-project feed with NO per-project
+  // fetches. Capped to keep the snapshot payload bounded.
+  function recentMilestones(summaries, cap = 40) {
+    const merged = [];
+    for (const p of summaries) {
+      for (const m of p.milestones ?? []) {
+        merged.push({
+          t: m.t,
+          text: m.text,
+          session_id: m.session_id ?? null,
+          project: p.id,
+          project_name: p.name,
+          project_color: p.color,
+          project_glyph: p.glyph,
+        });
+      }
+    }
+    merged.sort((a, b) => (b.t ?? 0) - (a.t ?? 0));
+    return merged.slice(0, cap);
+  }
+
   function snapshot() {
+    const projectSummaries = projects
+      .filter((p) => (p.kind === 'project' || p.kind === 'root' || p.kind === 'external'))
+      .map(projectSummary);
     return {
-      projects: projects.filter((p) => (p.kind === 'project' || p.kind === 'root' || p.kind === 'external')).map(projectSummary),
+      projects: projectSummaries,
       workspaces: projects.map(projectSummary),
       orchestrator: orchestratorState,
       agents: [].concat(...[...stores.values()].map((s) => s.snapshotAgents({ deadSessionIds, liveTeammates }))),
       tickets: [].concat(...tickets.values()),
       // v4: ALL Claude Code sessions on this machine (not just substrated).
       native_sessions: nativeSessions,
+      // v4: live channel registrations — lets the home rail decide per session
+      // whether briefs/interrupts can be delivered without a /api/channels call.
+      channels,
+      // v4: cross-project milestone feed (primary progress signal), newest first.
+      recent_milestones: recentMilestones(projectSummaries),
     };
   }
 
@@ -176,8 +212,17 @@ export function createState() {
   // UI updates without a full snapshot.
   async function refreshNativeSessions() {
     try {
-      nativeSessions = await readNativeSessions(registeredIdForPath);
-      ee.emit('event', { type: 'native-sessions-update', native_sessions: nativeSessions });
+      const [sessions, chans] = await Promise.all([
+        readNativeSessions(registeredIdForPath),
+        readChannels().catch(() => channels),
+      ]);
+      nativeSessions = sessions;
+      channels = Array.isArray(chans) ? chans : [];
+      ee.emit('event', {
+        type: 'native-sessions-update',
+        native_sessions: nativeSessions,
+        channels,
+      });
     } catch (err) {
       console.error('[native-sessions]', err);
     }
@@ -380,7 +425,11 @@ export function createState() {
     projectTickets,
     projectPlan,
     nativeSessions: () => nativeSessions,
+    channels: () => channels,
     orchestrator: () => orchestratorState,
     refreshOrchestrator,
+    // Raw discovered workspace records (carry gatesDir / journalDir / paths).
+    // Used by the gate route to flip a gate file's status authoritatively.
+    rawWorkspaces: () => projects,
   };
 }
