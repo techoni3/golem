@@ -58,7 +58,9 @@ function Sidebar({ route, setRoute }) {
           )}
           {projects.map(p => {
             const active = route.kind === 'project' && route.id === p.id;
-            const live = window.Store.getProjectActiveAgents(p.id).length;
+            // v4 (fix round 2, defect 3): liveness = alive native sessions in
+            // this project, not stale v3 journal agents.
+            const live = window.Store.getProjectAliveSessions(p).length;
             return (
               <button
                 key={p.id}
@@ -111,7 +113,9 @@ function Topbar({ route, setRoute }) {
     crumbs.push({ label: p?.name || route.id, current: true });
   }
 
-  const live = window.Store.getActiveAgents().length;
+  // v4 (fix round 2, defect 3): count ALIVE native sessions, not stale v3
+  // journal agents — these are what is actually running on the machine.
+  const live = window.Store.getAliveSessionCount();
   const connection = window.Store.getState().connection;
 
   return (
@@ -130,7 +134,7 @@ function Topbar({ route, setRoute }) {
       <div className="topbar-meta">
         <ConnectionPill status={connection}/>
         <span className="topbar-meta-item">
-          <Icon.Activity/> {live} agents live
+          <Icon.Activity/> {live} session{live === 1 ? '' : 's'} live
         </span>
         <span className="topbar-meta-item">
           <Icon.Clock/> {window.SubstrateFmt.fmtClock(now)}

@@ -169,8 +169,22 @@ function SessionCard({ session: s, setRoute }) {
 
   const title = s.name || (s.cwd ? s.cwd.split('/').filter(Boolean).pop() : null) || (s.session_id ? s.session_id.slice(0, 8) : `pid ${s.pid}`);
 
+  // Whole card opens the native-session peek drawer. Inner controls
+  // (composer / Interrupt / Halt / project chip) stopPropagation so they never
+  // trigger the drawer.
+  const openPeek = () => {
+    if (s.session_id) window.openNativeSessionDrawer(s.session_id);
+  };
+
   return (
-    <div className={`cc-session-card status-${statusKind}`}>
+    <div
+      className={`cc-session-card status-${statusKind} cc-clickable`}
+      onClick={openPeek}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPeek(); } }}
+      title="open session details"
+    >
       <div className="cc-session-row1">
         <span className={`orch-dot ${dotClass}`}/>
         <span className="cc-session-name" title={s.cwd || ''}>{title}</span>
@@ -201,7 +215,7 @@ function SessionCard({ session: s, setRoute }) {
         <SessionControls session={s} channel={channel}/>
       ) : (
         s.alive && (
-          <div className="cc-session-nochannel" title="no golem channel registered for this session — briefs/interrupts cannot be delivered">
+          <div className="cc-session-nochannel" onClick={(e) => e.stopPropagation()} title="no golem channel registered for this session — briefs/interrupts cannot be delivered">
             <span className="cc-nochannel-dot"/>
             {/* When the channel mechanism is demonstrably working (other live
                 channels exist), this session is simply a pre-v4 holdover that
@@ -262,7 +276,7 @@ function SessionControls({ session: s, channel }) {
   }, [sid, run]);
 
   return (
-    <div className="cc-session-controls">
+    <div className="cc-session-controls" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
       <div className="cc-composer">
         <input
           className="cc-composer-input"

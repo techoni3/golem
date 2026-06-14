@@ -17,10 +17,6 @@ function openCeoDrawer(sessionId) {
   window.dispatchEvent(new CustomEvent('open-ceo-drawer', { detail: { sessionId: sessionId ?? null } }));
 }
 
-// Memos older than this are no longer surfaced in the rail — a stale handoff
-// from a past journey shouldn't masquerade as the current headline.
-const MEMO_FRESH_MS = 7 * 24 * 60 * 60 * 1000;
-
 function OrchestratorRail() {
   useStore();
   const orch = window.Store.getOrchestrator();
@@ -30,11 +26,13 @@ function OrchestratorRail() {
   const sessions = window.Store.getSessions(); // v3 CEO chips (usually empty in v4)
   const counts = orch?.gateCounts ?? { awaiting: 0, total: 0 };
 
-  // Demote the journey memo: only surface it while it's fresh (<7d). A months-
-  // old handoff memo is history, not the current headline.
-  const rawMemo = orch?.headlineMemo;
-  const memoFresh = rawMemo && rawMemo.mtime && (Date.now() - rawMemo.mtime) < MEMO_FRESH_MS;
-  const memo = memoFresh ? rawMemo : null;
+  // v4 (fix round 2, defect 2): the old journey-memo strip read a v3
+  // ceo-handoff-*.md that nothing in v4 writes, so it always fell back to dead
+  // copy. Replace it with the live cross-project signal — the latest milestone.
+  const latestMilestone = window.Store.getRecentMilestones()[0] ?? null;
+  const milestoneProject = latestMilestone
+    ? window.Store.getProjectByContractId(latestMilestone.project)
+    : null;
 
   const channelCount = channels.length;
 
@@ -67,22 +65,27 @@ function OrchestratorRail() {
 
       <div className="orch-meta-row" onClick={onMemoClick} title="Open CEO chat">
         <div className="orch-memo">
-          {memo ? (
-            <>
-              <div className="orch-memo-title" title={memo.path}>
-                <span className="orch-memo-workspace">{memo.workspace_name}</span>
-                <span className="sep">·</span>
-                <span className="mono">{memo.name}</span>
-              </div>
-              <div className="orch-memo-summary" title={memo.summary}>
-                {memo.summary || <span style={{ color: 'var(--text-4)' }}>(memo body empty)</span>}
-              </div>
-            </>
+          {latestMilestone ? (
+            <div className="orch-milestone-line">
+              <span
+                className="orch-milestone-chip"
+                style={milestoneProject ? { '--chip-color': milestoneProject.color } : undefined}
+                title={milestoneProject ? milestoneProject.name : (latestMilestone.project_name || latestMilestone.project || '')}
+              >
+                <span
+                  className="orch-milestone-dot"
+                  style={{ background: latestMilestone.project_color || milestoneProject?.color || 'var(--accent)' }}
+                />
+                <span className="orch-milestone-chip-text">
+                  {milestoneProject?.name || latestMilestone.project_name || latestMilestone.project || '—'}
+                </span>
+              </span>
+              <span className="orch-milestone-text" title={latestMilestone.text}>{latestMilestone.text}</span>
+              <span className="orch-milestone-ts mono">· {window.SubstrateFmt.fmtTimeAgo(latestMilestone.t)}</span>
+            </div>
           ) : (
             <div className="orch-memo-empty">
-              {channelCount > 0
-                ? 'no recent journey memo — send a brief from the command center to start one'
-                : 'no recent journey memo'}
+              no milestones yet — sessions append them as work lands
             </div>
           )}
         </div>
@@ -166,8 +169,17 @@ function NativeSessions() {
         // so a plain id-set membership test would mis-flag registered sessions.
         const registered = s.registered || !!window.Store.getProjectByContractId(s.project_id);
         const cls = statusClass(s);
+        const openPeek = () => { if (s.session_id) window.openNativeSessionDrawer(s.session_id); };
         return (
-          <div key={s.session_id || s.pid} className={`native-session-card ${cls}`}>
+          <div
+            key={s.session_id || s.pid}
+            className={`native-session-card ${cls} cc-clickable`}
+            onClick={openPeek}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPeek(); } }}
+            title="open session details"
+          >
             <div className="native-session-top">
               <span className={`orch-dot ${cls === 'dead' ? 'offline' : (cls === 'idle' ? 'idle' : 'live')}`}/>
               <span className="native-session-name">

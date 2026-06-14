@@ -63,6 +63,7 @@ function App() {
         {page}
       </div>
       <CeoChatDrawer/>
+      <NativeSessionDrawer/>
     </div>
   );
 }

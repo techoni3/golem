@@ -1,11 +1,64 @@
 // Agents / Projects / Logs pages. All read live store.
 
+// Cap on how many DONE/legacy substrate agents we ever render at once. The
+// harness can carry hundreds of historical agents (this repo's v3 journal had
+// ~400 DONE); rendering all of them buries the live view and is pointless.
+const DONE_AGENTS_RENDER_CAP = 50;
+
+function AgentCard({ agent: a, setRoute }) {
+  const role = window.Store.getRole(a.role);
+  const project = window.Store.getProject(a.project);
+  const isLive = ['active', 'running', 'review'].includes(a.status);
+  const runtime = a.started && isLive ? (Date.now() - a.started) / 1000 : a.runtime;
+  return (
+    <div
+      className="agent-card"
+      onClick={() => setRoute({ kind: 'project', id: a.project, tab: 'agents', agentId: a.id })}
+    >
+      <Avatar role={a.role} size={36} pulse={a.status === 'running'}/>
+      <div className="agent-card-body">
+        <div className="agent-card-row1">
+          <div>
+            <div className="agent-card-name">{a.name}</div>
+            <div className="agent-card-role">
+              {role.label} · {project?.name ?? a.project}
+            </div>
+          </div>
+          <StatusPill status={a.status}/>
+        </div>
+        <div className="agent-card-action" title={a.action || ''}>
+          {a.action || <span style={{ color: 'var(--text-4)' }}>—</span>}
+        </div>
+        <div className="agent-card-meta">
+          <span className="agent-card-meta-item"><Icon.Clock/>{window.SubstrateFmt.fmtRuntime(runtime)}</span>
+          <span className="agent-card-meta-item"><Icon.Tool/>{a.tools} hooks</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AgentsPage({ setRoute }) {
   useStore();
-  const all = window.Store.getAllAgents().slice().sort((a, b) => {
-    const order = { active: 0, running: 1, review: 2, blocked: 3, done: 4 };
-    return (order[a.status] ?? 9) - (order[b.status] ?? 9);
-  });
+  const [showDone, setShowDone] = React.useState(false);
+
+  const all = window.Store.getAllAgents();
+  // v4 (fix round 2, defect 4): the harness accumulates hundreds of historical
+  // (DONE) agents. Surface LIVE ones (active/running/review) ungated; collapse
+  // the rest behind a toggle that renders at most the 50 most-recent. Mirrors
+  // the project-page legacy demotion pattern.
+  const liveAgents = all
+    .filter((a) => ['active', 'running', 'review'].includes(a.status))
+    .sort((a, b) => {
+      const order = { active: 0, running: 1, review: 2 };
+      const d = (order[a.status] ?? 9) - (order[b.status] ?? 9);
+      if (d !== 0) return d;
+      return (b.last_seen ?? b.started ?? 0) - (a.last_seen ?? a.started ?? 0);
+    });
+  const doneAgents = all
+    .filter((a) => !['active', 'running', 'review'].includes(a.status))
+    .sort((a, b) => (b.last_seen ?? b.started ?? 0) - (a.last_seen ?? a.started ?? 0));
+  const doneShown = doneAgents.slice(0, DONE_AGENTS_RENDER_CAP);
 
   const nativeSessions = window.Store.getNativeSessions();
 
@@ -32,49 +85,43 @@ function AgentsPage({ setRoute }) {
       <div className="row-header" style={{ marginTop: 4 }}>
         <div className="row-title">
           Substrate Agents
-          <span className="row-title-count">{all.length}</span>
+          <span className="row-title-count">{liveAgents.length}</span>
         </div>
       </div>
-      {all.length === 0 ? (
+      {liveAgents.length === 0 ? (
         <EmptyCard
-          label="no agents recorded"
-          hint={<>Start a <span className="mono">/golem</span> session in any project to populate this view.</>}
+          label="no live substrate agents"
+          hint={<>Start a <span className="mono">/golem</span> session in any project to bring agents online. Completed agents are tucked below.</>}
         />
       ) : (
         <div className="agents-grid">
-          {all.map(a => {
-            const role = window.Store.getRole(a.role);
-            const project = window.Store.getProject(a.project);
-            const isLive = ['active', 'running', 'review'].includes(a.status);
-            const runtime = a.started && isLive ? (Date.now() - a.started) / 1000 : a.runtime;
-            return (
-              <div
-                key={a.id}
-                className="agent-card"
-                onClick={() => setRoute({ kind: 'project', id: a.project, tab: 'agents', agentId: a.id })}
-              >
-                <Avatar role={a.role} size={36} pulse={a.status === 'running'}/>
-                <div className="agent-card-body">
-                  <div className="agent-card-row1">
-                    <div>
-                      <div className="agent-card-name">{a.name}</div>
-                      <div className="agent-card-role">
-                        {role.label} · {project?.name ?? a.project}
-                      </div>
-                    </div>
-                    <StatusPill status={a.status}/>
-                  </div>
-                  <div className="agent-card-action" title={a.action || ''}>
-                    {a.action || <span style={{ color: 'var(--text-4)' }}>—</span>}
-                  </div>
-                  <div className="agent-card-meta">
-                    <span className="agent-card-meta-item"><Icon.Clock/>{window.SubstrateFmt.fmtRuntime(runtime)}</span>
-                    <span className="agent-card-meta-item"><Icon.Tool/>{a.tools} hooks</span>
-                  </div>
+          {liveAgents.map((a) => <AgentCard key={a.id} agent={a} setRoute={setRoute}/>)}
+        </div>
+      )}
+
+      {/* Demoted: historical DONE agents, collapsed by default, capped render. */}
+      {doneAgents.length > 0 && (
+        <div className="agents-done">
+          <button
+            className="agents-done-toggle"
+            onClick={() => setShowDone((v) => !v)}
+          >
+            <span className="agents-done-caret">{showDone ? '▾' : '▸'}</span>
+            <span>{doneAgents.length} completed</span>
+            <span className="agents-done-action">{showDone ? '— hide' : '— show'}</span>
+          </button>
+          {showDone && (
+            <>
+              {doneAgents.length > DONE_AGENTS_RENDER_CAP && (
+                <div className="agents-done-note">
+                  showing {DONE_AGENTS_RENDER_CAP} of {doneAgents.length} (most recent)
                 </div>
+              )}
+              <div className="agents-grid">
+                {doneShown.map((a) => <AgentCard key={a.id} agent={a} setRoute={setRoute}/>)}
               </div>
-            );
-          })}
+            </>
+          )}
         </div>
       )}
     </div>

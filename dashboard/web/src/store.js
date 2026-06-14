@@ -45,6 +45,9 @@
     agentsByProject: new Map(),
     ticketsByProject: new Map(),
     agentDetail: new Map(),
+    // v4 (fix round 2): per-native-session peek cache, keyed by session_id.
+    // Populated lazily on drawer open, mirroring agentDetail.
+    nativeSessionPeek: new Map(),
     orchestrator: ORCH_EMPTY,
     chat: [],
     chatCap: 200,
@@ -273,6 +276,26 @@
     return state.agentDetail.get(agentId) ?? null;
   }
 
+  // v4 (fix round 2): fetch + cache a native session's peek payload (recent
+  // central-journal events, milestones, transcript path). Mirrors
+  // loadAgentDetail — fetches over REST, caches by session_id, notifies.
+  async function loadNativeSessionPeek(sessionId) {
+    if (!sessionId) return null;
+    try {
+      const peek = await window.SubstrateAPI.nativeSessionPeek(sessionId);
+      state.nativeSessionPeek.set(sessionId, peek);
+      notify();
+      return peek;
+    } catch (err) {
+      console.error('loadNativeSessionPeek failed', err);
+      return null;
+    }
+  }
+
+  function getNativeSessionPeek(sessionId) {
+    return sessionId ? (state.nativeSessionPeek.get(sessionId) ?? null) : null;
+  }
+
   // ---- Boot ----
 
   async function bootstrap() {
@@ -372,6 +395,10 @@
     getRole,
     loadAgentDetail,
     getAgentDetail,
+    loadNativeSessionPeek,
+    getNativeSessionPeek,
+    getNativeSessionById: (sessionId) =>
+      sessionId ? (state.nativeSessions.find((s) => s.session_id === sessionId) ?? null) : null,
     getOrchestrator: () => state.orchestrator,
     getChat: () => state.chat,
     getChatForSession,
@@ -400,6 +427,17 @@
       const ids = new Set([project.project_id, project.id].filter(Boolean));
       return state.nativeSessions.filter((s) => s.project_id && ids.has(s.project_id));
     },
+    // v4 (fix round 2, defect 3): alive native sessions belonging to a project.
+    // The sidebar/per-project liveness dot keys off this instead of the stale
+    // v3 journal-agent count.
+    getProjectAliveSessions: (project) => {
+      if (!project) return [];
+      const ids = new Set([project.project_id, project.id].filter(Boolean));
+      return state.nativeSessions.filter((s) => s.alive && s.project_id && ids.has(s.project_id));
+    },
+    // v4 (fix round 2, defect 3): count of ALL alive native Claude Code sessions
+    // on the machine — the real "what is running" signal for the topbar.
+    getAliveSessionCount: () => state.nativeSessions.filter((s) => s.alive).length,
   };
 
   // Kick off as soon as DOM is ready (script in <body>, so it already is).

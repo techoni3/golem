@@ -10,6 +10,7 @@ import { TRACKER_COLUMNS } from './tracker.js';
 import { pushBrief, pushInterrupt, pushHalt, pushGate, channelHealth, listChannels } from './brief.js';
 import { writeGateVerdict } from './orchestrator.js';
 import { createChat } from './chat.js';
+import { readNativeSessionPeek } from './native-session-peek.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const WEB_ROOT = path.resolve(__dirname, '..', 'web');
@@ -234,6 +235,15 @@ async function main() {
   // pid-checked). Already inside /api/snapshot as native_sessions[]; this is a
   // convenience route + the polling target for any external scripting.
   fastify.get('/api/native-sessions', async () => state.nativeSessions());
+
+  // v4 (fix round 2, defect 1): per-session peek for the native-session drawer.
+  // Returns { session, events, milestones, transcript_path, note } where events
+  // are the recent central-journal hook lines filtered by this session_id.
+  fastify.get('/api/native-sessions/:sessionId/peek', async (req) => {
+    const sessionId = req.params.sessionId;
+    const session = state.nativeSessions().find((s) => s.session_id === sessionId) ?? null;
+    return readNativeSessionPeek(sessionId, session);
+  });
 
   // ---- WebSocket ----
 

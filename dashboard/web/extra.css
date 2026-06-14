@@ -220,6 +220,40 @@
   font-style: italic;
 }
 
+/* v4 (fix round 2, defect 2): live latest-milestone strip replaces the dead
+   journey-memo. One line: project chip · milestone text · relative time. */
+.orch-milestone-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+}
+.orch-milestone-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: 999px;
+  padding: 2px 9px 2px 7px;
+  font-size: 11px;
+  color: var(--text-1);
+  flex-shrink: 0;
+  max-width: 180px;
+}
+.orch-milestone-dot { width: 7px; height: 7px; border-radius: 999px; flex-shrink: 0; }
+.orch-milestone-chip-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.orch-milestone-text {
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+.orch-milestone-ts { color: var(--text-3); font-size: 10.5px; flex-shrink: 0; }
+
 .orch-gates {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 10px;
@@ -923,6 +957,107 @@
   color: var(--text-3);
 }
 
+/* ---- Clickable session cards → native-session peek drawer (fix round 2) ---- */
+.cc-clickable { cursor: pointer; transition: border-color 120ms ease, background 120ms ease; }
+.cc-clickable:hover { border-color: var(--border-3); background: var(--bg-2); }
+.cc-clickable:focus-visible { outline: 2px solid var(--accent-border); outline-offset: 1px; }
+/* Inner controls regain their normal cursor over the clickable card. */
+.cc-session-controls, .cc-session-controls * { cursor: auto; }
+.cc-session-controls .orch-btn,
+.cc-session-controls button { cursor: pointer; }
+.cc-chip { cursor: pointer; }
+
+/* ---- Native-session peek drawer (.nsd-*) — reuses .drawer-* shell ---- */
+.nsd-status { text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+.nsd-status.status-busy { color: var(--status-active); }
+.nsd-status.status-waiting { color: var(--status-review); }
+.nsd-status.status-idle { color: var(--text-2); }
+.nsd-status.status-dead { color: var(--text-4); }
+
+.nsd-meta-grid {
+  display: grid;
+  grid-template-columns: 86px 1fr;
+  gap: 6px 12px;
+  align-items: baseline;
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border-1);
+}
+.nsd-meta-key {
+  font-size: 11px;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.nsd-meta-val {
+  font-size: 12px;
+  color: var(--text-0);
+  word-break: break-all;
+  line-height: 1.4;
+}
+
+.nsd-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-3);
+  margin: 4px 0 10px;
+}
+.nsd-section-count {
+  font-size: 10.5px;
+  color: var(--text-3);
+  background: var(--bg-3);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.nsd-events { display: flex; flex-direction: column; gap: 2px; }
+.nsd-event {
+  display: grid;
+  grid-template-columns: 56px 78px 1fr;
+  gap: 8px;
+  align-items: baseline;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border-1);
+  font-size: 12px;
+}
+.nsd-event-time { color: var(--text-3); font-size: 10.5px; flex-shrink: 0; }
+.nsd-event-type {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--accent);
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.nsd-event-type.type-milestone { color: var(--status-active); }
+.nsd-event-type.type-session-end,
+.nsd-event-type.type-subagent-stop { color: var(--text-3); }
+.nsd-event-summary {
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nsd-milestones { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.nsd-milestone {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  font-size: 12.5px;
+  color: var(--text-1);
+}
+.nsd-milestone-dot {
+  width: 7px; height: 7px; border-radius: 999px;
+  background: var(--status-active); flex-shrink: 0; transform: translateY(1px);
+}
+.nsd-milestone-text { flex: 1; line-height: 1.4; }
+.nsd-milestone-ts { color: var(--text-3); font-size: 10.5px; flex-shrink: 0; }
+
 /* ---- PLAN.md progress (project cards + hero) ---- */
 .plan-progress {
   margin-top: 8px;
@@ -1497,6 +1632,36 @@
 .pv-hook-agent { color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pv-hook-kind { color: var(--text-3); font-size: 10.5px; }
 .pv-hook-detail { color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── Demoted DONE substrate agents on the Agents page (fix round 2, defect 4) ── */
+.agents-done { margin-top: 16px; }
+.agents-done-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  background: var(--bg-1);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-2);
+  cursor: pointer;
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: left;
+  transition: background 100ms ease;
+}
+.agents-done-toggle:hover { background: var(--bg-2); }
+.agents-done-caret { color: var(--text-3); font-size: 10px; width: 12px; flex-shrink: 0; }
+.agents-done-action { color: var(--text-3); font-weight: 500; }
+.agents-done-note {
+  font-size: 11px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  margin: 10px 2px 8px;
+}
+.agents-done .agents-grid { margin-top: 12px; }
 
 /* ===================================================================== */
 /* Mobile / narrow-viewport layout (≤640px).                             */

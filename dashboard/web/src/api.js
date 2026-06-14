@@ -139,6 +139,10 @@
         `/api/projects/${encodeURIComponent(projectId)}/agents/${encodeURIComponent(agentId)}`,
       ),
     tickets: (projectId) => getJSON(`/api/projects/${encodeURIComponent(projectId)}/tickets`),
+    // v4 (fix round 2): peek payload for one native session — recent central-
+    // journal events + milestones + best-effort transcript path.
+    nativeSessionPeek: (sessionId) =>
+      getJSON(`/api/native-sessions/${encodeURIComponent(sessionId)}/peek`),
     // Orchestrator intrusions (proxied to the golem MCP channel server).
     // sessionId routes the brief to a specific live CEO. Omit it (or pass null)
     // when there is exactly one CEO live — the server picks it up by default.
