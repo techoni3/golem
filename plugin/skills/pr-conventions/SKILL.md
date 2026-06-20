@@ -6,7 +6,7 @@ description: Branch naming, commit format + trailer, and PR body shape for golem
 # pr-conventions
 
 **Branch:** `<type>/<kebab-slug>` — type ∈ `feat | fix | refactor | infra | docs | spike`.
-One branch per PLAN.md item. e.g. `feat/stripe-webhook-handler`.
+One branch per tracker ticket. e.g. `feat/stripe-webhook-handler`.
 
 **Commits:** Conventional — `<type>(<scope>): <imperative subject>`. Subject ≤72 chars,
 no trailing period. `scope` optional (affected module: `api`, `db`, `webhooks`). Body
@@ -39,4 +39,4 @@ End the PR body with:
 ```
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 ```
-One item per PR — never bundle multiple PLAN.md items into one PR.
+One ticket per PR — never bundle multiple tracker tickets into one PR.

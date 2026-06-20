@@ -26,6 +26,7 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import * as tracker from './tracker-client.js';
 
 const VERSION = '0.1.0';
 // Port selection (multi-CEO safe by default):
@@ -254,6 +255,146 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ['text'],
       },
     },
+
+    // --- Golem tracker tools (thin HTTP clients of the dashboard REST API) ---
+    // The tracker is the cross-project source of truth for work — it REPLACES
+    // PLAN.md. The dashboard owns the SQLite DB (single writer); these tools speak
+    // HTTP to it. Identity (your session id, your project) is injected for you, so
+    // you rarely pass ids: `mine:true` resolves to YOUR session, `project` defaults
+    // to YOUR project.
+    {
+      name: 'ticket_list',
+      description:
+        'Golem tracker — the cross-project source of truth for work (replaces PLAN.md). List tickets. Pass mine:true to find work assigned to YOU (this session). Defaults to your current project; pass project:"<contract-id>" for another, or all:true (or project:"*") to list across every project. Optional filters: state (todo|in_progress|blocked|review|done|archived), assignee, kind (work-item|decision|spec|question|fix).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          project: { type: 'string', description: 'Contract project_id `<slug>-<6hex>`. Defaults to your current project. Use "*" to list across all projects.' },
+          all: { type: 'boolean', description: 'List across all projects (same as project:"*").' },
+          mine: { type: 'boolean', description: 'Only tickets assigned to you (this session).' },
+          state: { type: 'string', description: 'todo|in_progress|blocked|review|done|archived' },
+          assignee: { type: 'string', description: 'session_id | "human" | null. Overridden by mine:true.' },
+          kind: { type: 'string', description: 'work-item|decision|spec|question|fix' },
+        },
+      },
+    },
+    {
+      name: 'ticket_get',
+      description:
+        'Golem tracker — fetch one ticket by id, including its body, comments, links, and event history. Read this before starting work on a dispatched/assigned ticket.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Ticket id.' },
+        },
+        required: ['id'],
+      },
+    },
+    {
+      name: 'ticket_create',
+      description:
+        'Golem tracker — create a ticket (the unit of work; replaces a PLAN.md line item). Defaults to your current project and records you as created_by. Use parent_id to decompose larger work into sub-tickets; stream_id to group them. For a blocking human question, pass kind:"question" and assignee:"human", then pause that thread.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Short imperative title.' },
+          body: { type: 'string', description: 'Full description / acceptance criteria (markdown ok).' },
+          kind: { type: 'string', description: 'work-item|decision|spec|question|fix (default work-item).' },
+          priority: { type: 'string', description: 'Optional priority label.' },
+          state: { type: 'string', description: 'todo|in_progress|blocked|review|done (default todo).' },
+          stream_id: { type: 'string', description: 'Optional stream to group this ticket under.' },
+          parent_id: { type: 'string', description: 'Optional parent ticket id (sub-ticket).' },
+          assignee: { type: 'string', description: 'session_id | "human" | null. Use "human" for questions.' },
+          project: { type: 'string', description: 'Contract project_id. Defaults to your current project.' },
+        },
+        required: ['title'],
+      },
+    },
+    {
+      name: 'ticket_update',
+      description:
+        'Golem tracker — patch a ticket. The common case is a STATE transition (todo→in_progress→review→done, or →blocked). Records you as the actor. Verify work mechanically before moving to review/done (see golem:verify-done).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Ticket id.' },
+          state: { type: 'string', description: 'todo|in_progress|blocked|review|done|archived' },
+          title: { type: 'string' },
+          body: { type: 'string' },
+          kind: { type: 'string', description: 'work-item|decision|spec|question|fix' },
+          priority: { type: 'string' },
+          labels: { type: 'array', items: { type: 'string' }, description: 'Full replacement label set.' },
+          stream_id: { type: 'string' },
+          parent_id: { type: 'string' },
+          assignee: { type: 'string', description: 'session_id | "human" | null.' },
+        },
+        required: ['id'],
+      },
+    },
+    {
+      name: 'ticket_comment',
+      description:
+        'Golem tracker — append a progress comment to a ticket. Comment milestones with MECHANICAL evidence (commands you ran + their output), not claims. Records you as the author.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Ticket id.' },
+          body: { type: 'string', description: 'Comment text (markdown ok).' },
+        },
+        required: ['id', 'body'],
+      },
+    },
+    {
+      name: 'ticket_dispatch',
+      description:
+        'Golem tracker — assign a ticket to a live native session and push it a self-contained brief so that session picks the work up. Use sessions_dispatchable to find reachable session ids.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Ticket id.' },
+          session_id: { type: 'string', description: 'Target session id (from sessions_dispatchable).' },
+          note: { type: 'string', description: 'Optional brief note prepended to the dispatch.' },
+        },
+        required: ['id', 'session_id'],
+      },
+    },
+    {
+      name: 'stream_create',
+      description:
+        'Golem tracker — create a stream (a named group of tickets) in your current project. mode "sequential" = one in-progress at a time; "parallel" = independent sub-work. Defaults to your current project.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Stream name.' },
+          mode: { type: 'string', description: 'sequential|parallel (default sequential).' },
+          description: { type: 'string', description: 'Optional description.' },
+          project: { type: 'string', description: 'Contract project_id. Defaults to your current project.' },
+        },
+        required: ['name'],
+      },
+    },
+    {
+      name: 'stream_list',
+      description:
+        'Golem tracker — list streams for a project (defaults to your current project; omit project / pass nothing for all-project view depends on dashboard).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          project: { type: 'string', description: 'Contract project_id. Defaults to your current project.' },
+        },
+      },
+    },
+    {
+      name: 'sessions_dispatchable',
+      description:
+        'Golem tracker — list live native Claude sessions that can receive a dispatched ticket, in your current project (or pass project for another). Returns session ids + labels for use with ticket_dispatch.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          project: { type: 'string', description: 'Contract project_id. Defaults to your current project.' },
+        },
+      },
+    },
   ],
 }));
 
@@ -285,6 +426,112 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     };
     broadcast('response', payload);
     return { content: [{ type: 'text', text: 'response broadcast' }] };
+  }
+
+  // --- Golem tracker tools ---------------------------------------------------
+  // Each delegates to the HTTP client and returns compact JSON the agent can act
+  // on. Identity defaults are injected here so the agent rarely passes ids.
+  if (name.startsWith('ticket_') || name.startsWith('stream_') || name === 'sessions_dispatchable') {
+    const jsonResult = (value) => ({
+      content: [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+    });
+    try {
+      const sessionId = tracker.currentSessionId();
+      const defaultProject = tracker.currentProjectId();
+
+      // Resolve the `project` query value for LIST-style tools. `all:true` or
+      // project "*" ⇒ list across all projects (omit the filter). Otherwise an
+      // explicit project wins, else the session's current project.
+      const resolveListProject = () => {
+        if (args.all === true || args.project === '*') return undefined;
+        if (args.project) return args.project;
+        return defaultProject ?? undefined;
+      };
+
+      if (name === 'ticket_list') {
+        const params = {};
+        const proj = resolveListProject();
+        if (proj) params.project = proj;
+        if (args.mine === true) {
+          if (!sessionId) throw new Error('ticket_list mine:true — no current session id (GOLEM_CEO_SESSION_ID/CLAUDE_CODE_SESSION_ID unset)');
+          params.assignee = sessionId;
+        } else if (args.assignee != null) {
+          params.assignee = args.assignee;
+        }
+        if (args.state != null) params.state = args.state;
+        if (args.kind != null) params.kind = args.kind;
+        return jsonResult(await tracker.listTickets(params));
+      }
+
+      if (name === 'ticket_get') {
+        if (!args.id) throw new Error('ticket_get: id is required');
+        return jsonResult(await tracker.getTicket(args.id));
+      }
+
+      if (name === 'ticket_create') {
+        const project_id = args.project || defaultProject;
+        if (!project_id) throw new Error('ticket_create: could not resolve a project — pass project:"<contract-id>"');
+        const body = {
+          project_id,
+          title: args.title,
+          body: args.body,
+          kind: args.kind,
+          priority: args.priority,
+          state: args.state,
+          labels: args.labels,
+          stream_id: args.stream_id,
+          parent_id: args.parent_id,
+          assignee: args.assignee,
+          created_by: sessionId ?? undefined,
+        };
+        return jsonResult(await tracker.createTicket(body));
+      }
+
+      if (name === 'ticket_update') {
+        if (!args.id) throw new Error('ticket_update: id is required');
+        const patch = { actor: sessionId ?? undefined };
+        for (const k of ['state', 'title', 'body', 'kind', 'priority', 'labels', 'stream_id', 'parent_id', 'assignee']) {
+          if (args[k] !== undefined) patch[k] = args[k];
+        }
+        return jsonResult(await tracker.updateTicket(args.id, patch));
+      }
+
+      if (name === 'ticket_comment') {
+        if (!args.id) throw new Error('ticket_comment: id is required');
+        if (!sessionId) throw new Error('ticket_comment: no current session id to record as author');
+        return jsonResult(await tracker.addComment(args.id, { author: sessionId, body: args.body }));
+      }
+
+      if (name === 'ticket_dispatch') {
+        if (!args.id) throw new Error('ticket_dispatch: id is required');
+        if (!args.session_id) throw new Error('ticket_dispatch: session_id is required');
+        return jsonResult(await tracker.dispatchTicket(args.id, { session_id: args.session_id, note: args.note }));
+      }
+
+      if (name === 'stream_create') {
+        const project_id = args.project || defaultProject;
+        if (!project_id) throw new Error('stream_create: could not resolve a project — pass project:"<contract-id>"');
+        return jsonResult(await tracker.createStream({
+          project_id,
+          name: args.name,
+          mode: args.mode,
+          description: args.description,
+        }));
+      }
+
+      if (name === 'stream_list') {
+        const proj = args.project || defaultProject || undefined;
+        return jsonResult(await tracker.listStreams(proj));
+      }
+
+      if (name === 'sessions_dispatchable') {
+        const proj = args.project || defaultProject || undefined;
+        return jsonResult(await tracker.listDispatchable(proj));
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { isError: true, content: [{ type: 'text', text: msg }] };
+    }
   }
 
   throw new Error(`unknown tool: ${name}`);

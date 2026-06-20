@@ -13,7 +13,7 @@ function App() {
       const parts = h.split('/').filter(Boolean);
       if (parts[0] === 'project' && parts[1]) {
         setRoute({ kind: 'project', id: parts[1], tab: parts[2] || 'agents' });
-      } else if (['dashboard', 'projects', 'agents', 'logs'].includes(parts[0])) {
+      } else if (['dashboard', 'tracker', 'projects', 'agents', 'logs'].includes(parts[0])) {
         setRoute({ kind: parts[0] });
       }
     };
@@ -46,6 +46,7 @@ function App() {
       </div>
     );
   } else if (route.kind === 'dashboard') page = <Dashboard setRoute={setRoute}/>;
+  else if (route.kind === 'tracker') page = <TrackerBoard setRoute={setRoute}/>;
   else if (route.kind === 'projects') page = <ProjectsPage setRoute={setRoute}/>;
   else if (route.kind === 'agents') page = <AgentsPage setRoute={setRoute}/>;
   else if (route.kind === 'logs') page = <LogsPage/>;
@@ -64,6 +65,8 @@ function App() {
       </div>
       <CeoChatDrawer/>
       <NativeSessionDrawer/>
+      <CreateTicket/>
+      <TicketDrawer/>
     </div>
   );
 }

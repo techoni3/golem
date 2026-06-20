@@ -19,7 +19,16 @@ sub-agents, and the golem channel MCP.
   ping on needs-input / idle. No-op when no topic is configured.
 - **Agents** → `worker`, `reviewer`, `researcher` (all `model: opus`).
 - **Channel MCP** (`golem`) → `ack` / `respond` tools + an SSE `/events` stream
-  the dashboard subscribes to.
+  the dashboard subscribes to, **plus the tracker tools** (see below).
+- **Tracker tools** (on the same `golem` MCP) → live sessions read/write the
+  cross-project ticket tracker — the source of truth for work, **replacing
+  PLAN.md**. These are thin HTTP clients of the dashboard's REST API (the
+  dashboard owns the SQLite DB; single writer), so **the dashboard must be
+  running** (`golem dashboard`) for them to work. Tools: `ticket_list`,
+  `ticket_get`, `ticket_create`, `ticket_update`, `ticket_comment`,
+  `ticket_dispatch`, `stream_create`, `stream_list`, `sessions_dispatchable`.
+  Identity is injected — `ticket_list mine:true` finds your work, and `project`
+  defaults to your current project. See the `golem:tracker` skill.
 
 ## Install
 
@@ -46,6 +55,16 @@ Update after edits: updates are VERSION-GATED — bump `version` in
 (the cache won't recopy at an unchanged version). New sessions pick it up;
 running sessions need `/reload-plugins`.
 
+To activate the v4.1 tracker tools in an already-running session:
+
+```bash
+claude plugin update golem@golem-local   # recopies the v4.1.0 plugin into the cache
+```
+
+then `/reload-plugins` inside the session. New sessions get them automatically.
+The tracker tools target the live dashboard, so make sure `golem dashboard` is
+running (they read its URL from `~/.config/golem/dashboard.json`).
+
 ## Project identity
 
 `project_id = <dirname-slug>-<first 6 hex of sha256(absolute project path)>`,
@@ -69,15 +88,17 @@ resolved by walking up from the session cwd to the nearest `.git` or `CLAUDE.md`
 
 ```
 plugin/
-  .claude-plugin/plugin.json   # manifest: name "golem", version 4.0.0
+  .claude-plugin/plugin.json   # manifest: name "golem", version 4.1.0
   hooks/hooks.json             # event wiring (refs scripts via ${CLAUDE_PLUGIN_ROOT})
   hooks/session-register.sh    # SessionStart: registry upsert + session title
   hooks/journal-route.sh       # all events → central journal (+ legacy guard)
   hooks/notify.sh              # Notification → ntfy push (backgrounded)
-  agents/worker.md             # implements one PLAN.md item, reports evidence
+  agents/worker.md             # implements one tracker ticket, reports evidence
   agents/reviewer.md           # fresh-context diff review, findings only
   agents/researcher.md         # read-only investigation, structured summary
-  mcp/channel/index.js         # golem channel MCP server (copied from substrate)
+  skills/tracker/SKILL.md      # golem:tracker — tracker is the source of truth for work
+  mcp/channel/index.js         # golem channel MCP — ack/respond + tracker tools
+  mcp/channel/tracker-client.js# HTTP client of the dashboard tracker REST API
   mcp/channel/node_modules/    # bundled deps (@modelcontextprotocol/sdk)
   .mcp.json                    # wires the channel MCP via ${CLAUDE_PLUGIN_ROOT}
 ```

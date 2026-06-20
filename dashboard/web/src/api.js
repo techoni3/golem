@@ -26,6 +26,48 @@
     return json;
   }
 
+  async function patchJSON(path, body) {
+    const r = await fetch(base + path, {
+      method: 'PATCH',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: body == null ? '{}' : JSON.stringify(body),
+    });
+    let json = null;
+    try { json = await r.json(); } catch { /* response may be plain text */ }
+    if (!r.ok) {
+      const err = new Error(`${r.status} ${r.statusText} ${path}`);
+      err.payload = json;
+      throw err;
+    }
+    return json;
+  }
+
+  async function delJSON(path, body) {
+    const r = await fetch(base + path, {
+      method: 'DELETE',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: body == null ? undefined : JSON.stringify(body),
+    });
+    let json = null;
+    try { json = await r.json(); } catch { /* response may be plain text */ }
+    if (!r.ok) {
+      const err = new Error(`${r.status} ${r.statusText} ${path}`);
+      err.payload = json;
+      throw err;
+    }
+    return json;
+  }
+
+  // Build an encoded query string from a params object, skipping null/undefined.
+  function qs(params) {
+    const parts = [];
+    for (const [k, v] of Object.entries(params ?? {})) {
+      if (v == null || v === '') continue;
+      parts.push(`${encodeURIComponent(k)}=${encodeURIComponent(v)}`);
+    }
+    return parts.length ? `?${parts.join('&')}` : '';
+  }
+
   function wsUrl(path) {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${proto}//${window.location.host}${path}`;
@@ -126,6 +168,8 @@
   window.SubstrateAPI = {
     getJSON,
     postJSON,
+    patchJSON,
+    delJSON,
     wsUrl,
     createWS,
     snapshot: () => getJSON('/api/snapshot'),
@@ -160,5 +204,27 @@
     channels: () => getJSON('/api/channels'),
     channelHealth: (sessionId) =>
       getJSON(`/api/channel/health${sessionId ? `?session=${encodeURIComponent(sessionId)}` : ''}`),
+
+    // ---- Cross-project tracker (tracker.db) ----
+    // These are SEPARATE from the legacy markdown `tickets(projectId)` above.
+    // Tickets are filtered/posted by the CONTRACT `project_id` (`<slug>-<6hex>`).
+    listTickets: (params) => getJSON(`/api/tickets${qs(params)}`),
+    createTicket: (body) => postJSON('/api/tickets', body),
+    getTicket: (id) => getJSON(`/api/tickets/${encodeURIComponent(id)}`),
+    updateTicket: (id, patch) => patchJSON(`/api/tickets/${encodeURIComponent(id)}`, patch),
+    addComment: (id, { author, body }) =>
+      postJSON(`/api/tickets/${encodeURIComponent(id)}/comments`, { author, body }),
+    dispatchTicket: (id, { session_id, note }) =>
+      postJSON(`/api/tickets/${encodeURIComponent(id)}/dispatch`, { session_id, note }),
+    listDispatchable: (projectId) =>
+      getJSON(`/api/sessions/dispatchable${qs({ project: projectId })}`),
+    listStreams: (projectId) => getJSON(`/api/streams${qs({ project: projectId })}`),
+    createStream: (body) => postJSON('/api/streams', body),
+    updateStream: (id, patch) => patchJSON(`/api/streams/${encodeURIComponent(id)}`, patch),
+    // Ticket links (WS5b). `from` is the ticket id the link hangs off of.
+    addLink: (id, { to_ticket, type }) =>
+      postJSON(`/api/tickets/${encodeURIComponent(id)}/links`, { to_ticket, type }),
+    removeLink: (id, { to_ticket, type }) =>
+      delJSON(`/api/tickets/${encodeURIComponent(id)}/links`, { to_ticket, type }),
   };
 })();

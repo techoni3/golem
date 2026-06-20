@@ -61,6 +61,15 @@
     channels: [],
     // v4: cross-project milestone feed (newest first), each project-chipped.
     recentMilestones: [],
+    // WS5: cross-project tracker (tracker.db) — a FLAT ticket list across all
+    // projects, kept in a Map by id for O(1) upsert. Distinct from the legacy
+    // markdown `ticketsByProject` slice above. `streams` is the flat stream list.
+    trackerTickets: new Map(),
+    streams: [],
+    // WS5b: per-ticket comment threads, keyed by ticket id. Seeded by the
+    // ticket drawer after a getTicket() detail fetch, then kept live by the
+    // `ticket-comment` WS delta (append + dedupe by comment id).
+    ticketComments: new Map(),
   };
 
   const listeners = new Set();
@@ -108,7 +117,61 @@
     if (Array.isArray(snap.native_sessions)) state.nativeSessions = snap.native_sessions.slice();
     if (Array.isArray(snap.channels)) state.channels = snap.channels.slice();
     if (Array.isArray(snap.recent_milestones)) state.recentMilestones = snap.recent_milestones.slice();
+    // WS5: flat cross-project tracker slice (separate from ticketsByProject).
+    if (Array.isArray(snap.tickets)) {
+      const m = new Map();
+      for (const t of snap.tickets) if (t && t.id) m.set(t.id, t);
+      state.trackerTickets = m;
+    }
+    if (Array.isArray(snap.streams)) state.streams = snap.streams.slice();
     state.ready = true;
+    notify();
+  }
+
+  // ---- WS5: tracker deltas ----
+  function applyTicketCreated({ ticket }) {
+    if (!ticket || !ticket.id) return;
+    state.trackerTickets.set(ticket.id, ticket);
+    notify();
+  }
+  function applyTicketUpdated({ ticket }) {
+    if (!ticket || !ticket.id) return;
+    state.trackerTickets.set(ticket.id, ticket);
+    notify();
+  }
+  // WS5b: optimistic upsert from a REST response (getTicket / updateTicket /
+  // dispatch) so the open drawer reflects the new field values immediately,
+  // without waiting on the echoing ticket-updated WS delta. Same effect as the
+  // delta path (set + notify); the later delta is then a harmless idempotent set.
+  function upsertTrackerTicket(ticket) {
+    if (!ticket || !ticket.id) return;
+    state.trackerTickets.set(ticket.id, ticket);
+    notify();
+  }
+  // WS5b: the drawer seeds a ticket's comments after getTicket(); the live
+  // `ticket-comment` delta then appends to that Map. Seeding into a Map the
+  // selector reads keeps the open drawer reactive without a detail re-fetch.
+  function seedTicketComments(id, comments) {
+    if (!id) return;
+    state.ticketComments.set(id, Array.isArray(comments) ? comments.slice() : []);
+    notify();
+  }
+  function applyTicketComment({ ticket_id, comment }) {
+    if (!ticket_id || !comment || comment.id == null) return;
+    const cur = state.ticketComments.get(ticket_id) ?? [];
+    if (cur.some((c) => c.id === comment.id)) return; // dedupe by id
+    state.ticketComments.set(ticket_id, [...cur, comment]);
+    notify();
+  }
+  function applyStreamUpdated({ stream }) {
+    if (!stream || stream.id == null) return;
+    const idx = state.streams.findIndex((s) => s.id === stream.id);
+    if (idx === -1) state.streams = [...state.streams, stream];
+    else {
+      const next = state.streams.slice();
+      next[idx] = stream;
+      state.streams = next;
+    }
     notify();
   }
 
@@ -235,6 +298,38 @@
   function getProjectTickets(id) {
     return state.ticketsByProject.get(id) ?? [];
   }
+  // WS5: cross-project tracker tickets, filtered. `filter` keys:
+  //   project_id, state, kind, assignee, includeArchived.
+  // `archived` tickets are excluded unless includeArchived is truthy. Pure.
+  function getTrackerTickets(filter = {}) {
+    const { project_id, state: st, kind, assignee, includeArchived } = filter;
+    const out = [];
+    for (const t of state.trackerTickets.values()) {
+      if (!includeArchived && t.state === 'archived') continue;
+      if (project_id != null && t.project_id !== project_id) continue;
+      if (st != null && t.state !== st) continue;
+      if (kind != null && t.kind !== kind) continue;
+      if (assignee !== undefined && assignee !== null) {
+        if (assignee === '__unassigned__') {
+          if (t.assignee != null) continue;
+        } else if (t.assignee !== assignee) {
+          continue;
+        }
+      }
+      out.push(t);
+    }
+    return out;
+  }
+  // WS5b: the loaded comment thread for one ticket id (seeded by the drawer,
+  // kept live by ticket-comment deltas). Empty array when none loaded yet.
+  function getTicketComments(id) {
+    return state.ticketComments.get(id) ?? [];
+  }
+  // WS5: streams for one contract project_id (or all when omitted). Pure.
+  function getStreams(project_id) {
+    if (project_id == null) return state.streams.slice();
+    return state.streams.filter((s) => s.project_id === project_id);
+  }
   function getActiveAgents() {
     const out = [];
     for (const list of state.agentsByProject.values()) {
@@ -351,6 +446,18 @@
           case 'chat-message':
             applyChatMessage(msg);
             break;
+          case 'ticket-created':
+            applyTicketCreated(msg);
+            break;
+          case 'ticket-updated':
+            applyTicketUpdated(msg);
+            break;
+          case 'ticket-comment':
+            applyTicketComment(msg);
+            break;
+          case 'stream-updated':
+            applyStreamUpdated(msg);
+            break;
           case 'pong':
             state.serverTime = msg.ts;
             break;
@@ -386,9 +493,15 @@
     getState: () => state,
     getProject,
     getProjectByContractId,
+    getProjects: () => state.projects,
     getProjectAgents,
     getProjectActiveAgents,
     getProjectTickets,
+    getTrackerTickets,
+    getStreams,
+    getTicketComments,
+    seedTicketComments,
+    upsertTrackerTicket,
     getActiveAgents,
     getAllAgents,
     getAgent,

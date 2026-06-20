@@ -100,6 +100,12 @@ function ProjectView({ projectId, tab, setRoute, openAgentId }) {
         {/* ── 1. PLAN ── */}
         <ProjectPlanSection plan={plan} color={project.color}/>
 
+        {/* ── 1a. STREAMS — group tickets into sequential/parallel work (WS6) ── */}
+        {window.StreamsPanel && <window.StreamsPanel contractId={project.project_id || project.id}/>}
+
+        {/* ── 1b. TRACKER BOARD — per-project tracker.db tickets ── */}
+        <ProjectTrackerBoard contractId={project.project_id || project.id}/>
+
         {/* ── 2. MILESTONE TIMELINE ── */}
         <ProjectMilestoneTimeline milestones={milestones}/>
 
@@ -125,9 +131,9 @@ function ProjectView({ projectId, tab, setRoute, openAgentId }) {
             />
           </CollapsibleSection>
 
-          <CollapsibleSection key={`tracker-${projectId}`} title="Tracker" count={tickets.length} defaultOpen={!isV4}>
+          <CollapsibleSection key={`legacy-tracker-${projectId}`} title="Legacy tracker (markdown)" count={tickets.length} defaultOpen={false}>
             {tickets.length === 0
-              ? <EmptyCard label="no tickets" hint={<>This project's <span className="mono">tracker/</span> has no tickets yet.</>}/>
+              ? <EmptyCard label="no tickets" hint={<>This project's <span className="mono">tracker/</span> has no markdown tickets.</>}/>
               : <Kanban tickets={tickets} agents={agents}/>}
           </CollapsibleSection>
 
@@ -194,6 +200,78 @@ function ProjectPlanSection({ plan, color }) {
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+// ── 1b. TRACKER BOARD — per-project tracker.db tickets ─────────────────────
+// Reuses the shared TicketColumns renderer (exported from tracker-board.jsx) so
+// it never drifts from the consolidated board. Scoped to this project's CONTRACT
+// project_id (NOT the dashboard registry id). Cards fire `open-ticket-drawer`
+// identically; "+ New ticket" opens the create modal with this project
+// preselected. A "Show archived" toggle appends the archived column.
+function ProjectTrackerBoard({ contractId }) {
+  useStore();
+  const [showArchived, setShowArchived] = usePVState(false);
+
+  // Per-project assignee label resolver, sourced from this project's
+  // dispatchable sessions (session_id → friendly label where known).
+  const [dispatchable, setDispatchable] = usePVState([]);
+  React.useEffect(() => {
+    if (!contractId) { setDispatchable([]); return; }
+    let cancelled = false;
+    window.SubstrateAPI.listDispatchable(contractId)
+      .then((list) => { if (!cancelled) setDispatchable(Array.isArray(list) ? list : []); })
+      .catch(() => { if (!cancelled) setDispatchable([]); });
+    return () => { cancelled = true; };
+  }, [contractId]);
+
+  const labelBySession = React.useMemo(() => {
+    const m = new Map();
+    for (const s of dispatchable) if (s.session_id) m.set(s.session_id, s.label);
+    return m;
+  }, [dispatchable]);
+  const resolveAssignee = React.useCallback((a) => {
+    if (a === 'human') return 'You';
+    if (!a) return 'Unassigned';
+    return labelBySession.get(a) || `session ${String(a).slice(0, 8)}`;
+  }, [labelBySession]);
+
+  const tickets = window.Store.getTrackerTickets({ project_id: contractId, includeArchived: showArchived });
+  const base = window.TRACKER_COLUMNS || [];
+  const cols = showArchived && window.TRACKER_ARCHIVED_COL ? [...base, window.TRACKER_ARCHIVED_COL] : base;
+
+  const onNew = () => {
+    window.dispatchEvent(new CustomEvent('open-create-ticket', { detail: { project_id: contractId } }));
+  };
+
+  const Columns = window.TicketColumns;
+
+  return (
+    <div className="pv-section pv-tracker">
+      <div className="pv-section-head">
+        <span className="pv-section-title">Tickets</span>
+        <span className="pv-section-count tnum">{tickets.length}</span>
+        <div className="pv-tracker-tools">
+          <label className="tracker-toggle">
+            <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)}/>
+            Show archived
+          </label>
+          <button className="orch-btn primary" onClick={onNew}>+ New ticket</button>
+        </div>
+      </div>
+      {tickets.length === 0 && !showArchived ? (
+        <div className="pv-quiet-line">
+          no tracker tickets yet — click <span className="mono">+ New ticket</span> to create one in this project.
+        </div>
+      ) : Columns ? (
+        <Columns
+          cols={cols}
+          tickets={tickets}
+          projectByContract={null}
+          resolveAssignee={resolveAssignee}
+        />
+      ) : null}
     </div>
   );
 }

@@ -300,13 +300,22 @@ function SessionControls({ session: s, channel }) {
 
 // ── Zone 2: a project card built around PLAN progress + latest milestone ──
 function WorkCard({ project: p, gates, setRoute }) {
-  const plan = p.plan;
+  // v5b: home progress now comes from the cross-project tracker (tracker.db),
+  // not PLAN.md. done = state 'done'; total = non-archived tickets for this
+  // project's CONTRACT project_id. Falls back gracefully (no bar) when the
+  // project has zero tracker tickets.
+  const contractId = p.project_id || p.id;
+  const trackerTickets = window.Store.getTrackerTickets({ project_id: contractId });
+  const trackerTotal = trackerTickets.length;
+  const trackerDone = trackerTickets.filter((t) => t.state === 'done').length;
+  const hasTracker = trackerTotal > 0;
+
   const milestones = p.milestones || [];
   const latest = milestones.length ? milestones[milestones.length - 1] : null;
   const pendingGates = gates.filter((g) => g.workspace === p.id).length;
-  const hasActivity = (plan && plan.total > 0) || milestones.length > 0;
+  const hasActivity = hasTracker || milestones.length > 0;
   const live = window.Store.getProjectActiveAgents(p.id).length;
-  const pct = plan && plan.total ? Math.round((plan.done / plan.total) * 100) : 0;
+  const pct = hasTracker ? Math.round((trackerDone / trackerTotal) * 100) : 0;
 
   // Compact render for projects with no plan + no activity.
   if (!hasActivity) {
@@ -346,12 +355,12 @@ function WorkCard({ project: p, gates, setRoute }) {
         </div>
       </div>
 
-      {plan && plan.total > 0 && (
+      {hasTracker && (
         <div className="cc-plan">
           <div className="cc-plan-bar">
             <div className="cc-plan-fill" style={{ width: `${pct}%`, background: p.color }}/>
           </div>
-          <span className="cc-plan-count tnum">{plan.done}/{plan.total}</span>
+          <span className="cc-plan-count tnum">{trackerDone}/{trackerTotal}</span>
           <span className="cc-plan-pct tnum" style={{ color: p.color }}>{pct}%</span>
         </div>
       )}

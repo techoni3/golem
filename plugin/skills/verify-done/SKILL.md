@@ -1,6 +1,6 @@
 ---
 name: verify-done
-description: Evidence commands that prove a work item is actually done before checking its box — run after a worker subagent returns. Use before marking any PLAN.md item complete or accepting a "done"/"PR is open" claim.
+description: Evidence commands that prove a work item is actually done before advancing its tracker ticket — run after a worker subagent returns. Use before moving any ticket to review/done or accepting a "done"/"PR is open" claim.
 ---
 
 # verify-done
@@ -26,5 +26,5 @@ gh pr view <n> --json state,mergeable,statusCheckRollup
 Done requires `state:"OPEN"` (or `"MERGED"`), `mergeable:"MERGEABLE"`, and every
 `statusCheckRollup` entry `conclusion:"SUCCESS"`. Anything else is not done.
 
-If any check fails or the command can't be run, the item is NOT done — return it to
-the worker with the failing output.
+If any check fails or the command can't be run, the ticket is NOT done — leave it in
+progress (or move it to `blocked`) and return it to the worker with the failing output.

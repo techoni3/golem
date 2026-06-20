@@ -21,6 +21,13 @@ const Icon = {
       <path d="M9.5 13C9.5 11.5 10.5 10 12 10C13.4 10 14 11 14 12"/>
     </svg>
   ),
+  Tracker: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round">
+      <rect x="2" y="2.5" width="3.5" height="11" rx="1"/>
+      <rect x="6.5" y="2.5" width="3.5" height="7" rx="1"/>
+      <rect x="11" y="2.5" width="3.5" height="9" rx="1"/>
+    </svg>
+  ),
   Logs: ({ size = 14 }) => (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
       <path d="M3 4H13"/>

@@ -8,6 +8,7 @@ function Sidebar({ route, setRoute }) {
 
   const items = [
     { id: 'dashboard', label: 'Dashboard', icon: Icon.Dashboard },
+    { id: 'tracker', label: 'Tracker', icon: Icon.Tracker },
     { id: 'projects', label: 'Projects', icon: Icon.Projects, count: projectCount },
     { id: 'agents', label: 'Agents', icon: Icon.Agents, count: activeCount },
     { id: 'logs', label: 'Journals & Logs', icon: Icon.Logs },
@@ -104,6 +105,7 @@ function Topbar({ route, setRoute }) {
   const crumbs = [];
   crumbs.push({ label: 'Substrate', onClick: () => setRoute({ kind: 'dashboard' }) });
   if (route.kind === 'dashboard') crumbs.push({ label: 'Dashboard', current: true });
+  if (route.kind === 'tracker') crumbs.push({ label: 'Tracker', current: true });
   if (route.kind === 'projects') crumbs.push({ label: 'Projects', current: true });
   if (route.kind === 'agents') crumbs.push({ label: 'Agents', current: true });
   if (route.kind === 'logs') crumbs.push({ label: 'Journals & Logs', current: true });
