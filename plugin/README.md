@@ -65,6 +65,28 @@ then `/reload-plugins` inside the session. New sessions get them automatically.
 The tracker tools target the live dashboard, so make sure `golem dashboard` is
 running (they read its URL from `~/.config/golem/dashboard.json`).
 
+### Receiving dispatched tickets (channel consumer)
+
+A plain `claude` session loads the tracker **tools** but is NOT a channel
+**consumer** — so when you "Dispatch" a ticket to it from the dashboard, the
+pushed brief is delivered to the session's channel server (HTTP 202) but
+[silently dropped](https://code.claude.com/docs/en/channels-reference#notification-format)
+by Claude Code. The session can still *pull* its work (`ticket_list mine:true`),
+but to have dispatches *push* in, launch it as a channel consumer:
+
+```bash
+claude --dangerously-load-development-channels plugin:golem@golem-local
+```
+
+(There's a `golemc` shell alias for this.) The first run per project shows a
+one-time consent prompt. `--dangerously-load-development-channels` is required
+during the channels research preview because a self-hosted marketplace plugin
+isn't on Anthropic's allowlist; on Team/Enterprise an admin can instead add
+`{ "marketplace": "golem-local", "plugin": "golem" }` to `allowedChannelPlugins`
+in managed settings and use `--channels plugin:golem@golem-local`. Either way a
+per-session launch flag is required — there is no settings.json toggle that
+auto-consumes channels.
+
 ## Project identity
 
 `project_id = <dirname-slug>-<first 6 hex of sha256(absolute project path)>`,
