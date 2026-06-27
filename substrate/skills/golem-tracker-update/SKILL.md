@@ -2,142 +2,134 @@
 name: golem-tracker-update
 description: How to create, transition, and append to tickets in the project tracker. Use when filing a new ticket, moving one between states, or appending to its hand-off log.
 expects:
-  - The project's tracker/ directory exists with state subdirectories.
-  - Knowledge of the ticket schema (frontmatter + body sections).
+  - Access to the golem tracker MCP tools (ticket_create, ticket_get, ticket_update, ticket_comment, ticket_list, ticket_dispatch).
+  - Knowledge of the tracker schema: HTML bodies, states, kinds, labels, streams, parent_id.
   - For state transitions: authority to mutate state (only the orchestrator has this).
 produces:
-  - A new ticket file, or a moved/edited ticket file with updated frontmatter.
-  - An optional regeneration of tracker/INDEX.md.
+  - A new ticket row in the dashboard SQLite DB, or an updated ticket row.
+  - Comments appended to a ticket's thread.
 category: substrate
 ---
 
 # golem-tracker-update
 
-The tracker is the project's source of truth for work. One ticket = one markdown file. Filename: `tracker/<state>/<NNNN>-<kebab-slug>.md`.
+The tracker is the project's source of truth for work. It lives in the golem dashboard's SQLite database and is read/written through the tracker MCP tools. There is no `tracker/` directory in the project; the canonical ticket is a database row with an id like `TKT-0042`.
 
 ## State machine
 
 ```
-triage → open → in-progress → review → done
-                   ↑              ↓
-                   └─ blocked ←──┘
+todo → in_progress → review → done
+            ↑         ↓
+            └─ blocked ←┘
 ```
 
-- **triage**: just landed. The orchestrator routes / refines / decomposes.
-- **open**: ready to be picked up.
-- **in-progress**: actively being worked.
-- **review**: PR open; Code Reviewer to verdict.
-- **blocked**: waiting on something. Hand-off log records what.
+- **todo**: just landed. The orchestrator routes / refines / decomposes.
+- **in_progress**: actively being worked. One in-progress ticket at a time per work-stream.
+- **review**: verification passed; PR open; Code Reviewer to verdict.
+- **blocked**: waiting on something. The hand-off thread records what.
 - **done**: archived; final.
 
-`done` is final. Reopening creates a *new* ticket linked back via `parent_ticket`.
+`done` is final. Reopening creates a *new* ticket linked back via `parent_id`.
 
 ## Authority
 
-**Only the orchestrator mutates ticket state.** Other personas append to the hand-off log; the orchestrator reads and decides the transition. This is load-bearing — without it, two personas can race the same ticket.
+**Only the orchestrator mutates ticket state.** Other personas append comments; the orchestrator reads and decides the transition. This is load-bearing — without it, two personas can race the same ticket.
 
 Anyone can:
-- Create a ticket in `triage/` (the orchestrator processes from there).
-- Append to a ticket's hand-off log.
-- Read any ticket.
+- Create a ticket via `ticket_create`.
+- Append a comment via `ticket_comment`.
+- Read any ticket via `ticket_get` or list via `ticket_list`.
 
-## Frontmatter schema
+## Tracker tools
 
-```yaml
----
-id: TKT-NNNN                   # zero-padded, project-unique, never reused
-title: "<short imperative>"    # quoted to allow colons
-state: triage                  # one of: triage, open, in-progress, review, blocked, done
-category: feature              # feature | fix | infra | docs | spike
-created: YYYY-MM-DD
-updated: YYYY-MM-DD            # update on every mutation
-related_adrs: [ADR-0007]       # optional; list of ADR ids the ticket touches
-parent_ticket: TKT-0040        # optional; for sub-tickets
-assignee: <subagent_type or agent name>   # optional; who is working it. Stamped by the CEO on dispatch.
-team: <team_name>                          # optional; set when dispatched to an agent team, else empty.
-labels: [stripe, webhooks]     # optional; free-form tags
-afk_safe: true                 # OK to run unattended in parallel via worktree
----
-```
+| Tool | Purpose |
+|------|---------|
+| `ticket_create({title, body, …})` | Create a ticket. The server assigns the id (`TKT-NNNN`). |
+| `ticket_get({id})` | Read the full ticket: HTML body, comments, links. |
+| `ticket_update({id, state, …})` | Patch fields; state transitions go through this. |
+| `ticket_comment({id, body, …})` | Append a comment to the ticket thread. |
+| `ticket_list({mine: true})` | List tickets assigned to you, or filter by state/kind/labels. |
+| `ticket_dispatch({id, session_id})` | Hand a ticket to a live session. |
+| `stream_create({name, mode})` / `stream_list` | Group related tickets into sequential or parallel streams. |
 
-`afk_safe: false` only when the ticket touches an invariant or has a `parent_ticket` still in-progress. Default to `true`.
+Tool shape is provided by the dashboard MCP channel; the session and project are injected for you.
 
-`assignee` and `team` are empty/absent while the ticket is unassigned (triage/open). When the CEO transitions a ticket to `in-progress`, it stamps `assignee` (and `team` if dispatched to an agent team); these are cleared or left as history on `done`.
+## Ticket schema
 
-## Body sections
+- **id**: `TKT-NNNN`, assigned by the server on `ticket_create`. Never reused.
+- **kind**: `work-item | decision | spec | question | fix`.
+- **state**: `todo | in_progress | review | blocked | done | archived`.
+- **priority**: optional (`low`, `medium`, `high`, `critical`).
+- **labels**: array of free-form strings. Use for grouping and filtering.
+- **stream_id**: optional; groups tickets into a sequential or parallel stream.
+- **parent_id**: optional; links sub-tickets to a parent.
+- **assignee**: who is working it; stamped by dispatch or the orchestrator.
+- **title**: short imperative.
+- **body**: HTML using the html-report house style.
 
-```markdown
-# <Title>
-
-## Brief
-Original brief (from the user or parent ticket). Verbatim.
-
-## Acceptance criteria
-What does done look like? Observable behaviour, not implementation hints.
-
-## Hand-off log
-Append-only. Each persona appends one entry on hand-off:
-- Date & persona.
-- What you did in one or two sentences.
-- What you leave for the next persona.
-- Pointers (PR link, ADR file, agent-note file, file paths).
-
-## Diagnoser verdict (if fix ticket)
-Filled by Diagnoser. Reproduction, root cause, classification (code | architecture | infra), suggested routing.
-```
+For the HTML body vocabulary, see `plugin/skills/tracker/SKILL.md` and `~/.claude/skills/html-report/SKILL.md`. Agent-authored bodies should start with an HTML tag; the server tolerates plain text and Markdown from humans, but agents should always send HTML.
 
 ## Procedure: create a ticket
 
-1. Pick the next free `TKT-NNNN` (look at `tracker/done/`, `tracker/open/`, etc., max id + 1).
-2. Compose the slug: kebab-case, ≤6 words.
-3. Write the file at `tracker/triage/<NNNN>-<slug>.md` with full frontmatter and body sections (acceptance can be `<TBD by orchestrator>` if filed by the user).
-4. Update `tracker/INDEX.md` (or invoke the regeneration step).
+1. Compose the title (short imperative) and body (HTML, html-report house style).
+2. Choose `kind` and an initial `state` (usually `todo`).
+3. Set `labels` and `priority` if the orchestrator's routing depends on them.
+4. Call `ticket_create({title, body, kind, state, labels, priority, …})`.
+5. Use the returned `id` as the canonical reference from then on.
 
-Anyone can do this. The orchestrator handles routing from `triage/`.
+The server assigns the id; do not attempt to pick or guess a `TKT-NNNN`.
 
 ## Procedure: transition a ticket
 
-(Orchestrator only.)
+(Orchestrator only, unless the orchestrator has explicitly delegated a state change.)
 
-1. Read the current ticket; confirm hand-off log supports the transition.
-2. Update frontmatter: `state:` and `updated:`. If transitioning to `blocked`, append a "Reason: …" line to the hand-off log first.
-3. **Move the file** with `git mv` from the current state directory into the new one. Filename stays the same; only the directory changes. Git tracks the rename, preserving history.
-4. Regenerate `tracker/INDEX.md`.
+1. Read the ticket with `ticket_get({id})`; confirm the comment thread supports the transition.
+2. Call `ticket_update({id, state, actor})`. Always include `actor` so the event log records who moved it.
+3. If transitioning to `blocked`, first append a `ticket_comment` explaining the blocker, then update state.
+4. If the ticket is being assigned or dispatched, also call `ticket_dispatch({id, session_id})` or set `assignee`.
 
 Forbidden transitions:
-- `done` → anything. Reopen creates a new ticket.
-- Skip-step transitions (e.g. `triage → review`). Each step is meaningful; do not bypass.
+- `done → anything`. Reopen creates a new ticket.
+- Skip-step transitions (e.g. `todo → review`). Each step is meaningful; do not bypass.
 
-## Procedure: append to hand-off log
+## Procedure: append a comment
 
 Anyone with relevant context. No state change required.
 
-1. Read the current hand-off log.
-2. Append a new entry at the bottom in this shape:
+1. Read the ticket thread with `ticket_get({id})`.
+2. Call `ticket_comment({id, body, tag, …})`.
 
-   ```
-   ### YYYY-MM-DD · <persona>
-   Did X. Leaving Y for the next persona. <pointers>
-   ```
+Comment body rules:
+- Use HTML (html-report house style).
+- Include mechanical evidence: commands you ran and their real output. Bare claims are not evidence.
+- Use `tag` when the comment has a verdict: `confirmed`, `partial`, `disputed`, `fix`, `risk`, `question`, `note`.
+- For an anchored comment on the body, include `quote`, `prefix`, `suffix`, `section`, and `section_id`.
 
-3. Update `updated:` in frontmatter.
+## Procedure: decompose a ticket
 
-Do not edit prior entries. The log is append-only.
+For work too large for one ticket:
 
-## Procedure: regenerate INDEX.md
+1. Create sub-tickets with `ticket_create({parent_id: '<parent-id>', …})`.
+2. Optionally group them under a stream: `stream_create({name, mode})` returns a `stream_id`; pass it to each child `ticket_create`.
+3. Update the parent ticket's body or add a comment listing the sub-ticket ids so the thread stays coherent.
 
-Walk the state directories, count tickets per state, write a table per active state with id / title / category / updated. Footer line `Last regenerated: <ts>`. Never edit by hand.
+## Procedure: create a stream
+
+1. Call `stream_create({name, mode})` where `mode` is `sequential` or `parallel`.
+2. Pass the returned `stream_id` to related `ticket_create` calls.
+3. Sequential streams mean one child should be `in_progress` at a time; parallel streams allow multiple `in_progress` children.
 
 ## Anti-patterns
 
-- **Editing INDEX.md directly.** It is generated. Edits are overwritten on next regeneration.
-- **Mutating state without moving the file.** Frontmatter and directory must agree. If they disagree, treat the directory as authoritative and fix the frontmatter.
-- **Skipping the hand-off log entry on transition.** The log is the contract that lets the next persona pick up. Without an entry, the transition is unsafe.
-- **Reusing TKT-NNNN ids.** Once issued, never reused, even if the ticket was abandoned. Increment.
-- **Renaming the slug after creation.** The id is the canonical reference; renaming the file makes git history harder to follow.
+- **Guessing a ticket id.** Ids come from `ticket_create`; never synthesise `TKT-NNNN` yourself.
+- **Mutating state without commenting.** The thread is the contract that lets the next persona pick up. Without a comment, the transition is unsafe.
+- **Writing Markdown bodies as an agent.** Agent bodies should be HTML; use the html-report components.
+- **Skip-step state transitions.** `todo → review` bypasses the in-progress signal.
+- **Editing prior comments.** The thread is append-only; add a new comment if the picture changes.
+- **Using labels as free prose.** Labels are for filtering; keep them short and consistent.
 
 ## When this skill is wrong
 
-- You want to add a TODO to your future-self — append to a ticket or write to agent-notes; do not abuse triage as a TODO.
+- You want to add a TODO to your future-self — append a comment on your current ticket or write to agent-notes; do not create a ticket as a personal reminder.
 - You want to record a per-decision rationale — write an ADR.
 - You want to record session-level intent / outcome — that's `golem-summarise-session` writing to `journal/summary.jsonl`.

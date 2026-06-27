@@ -32,8 +32,8 @@ check "health endpoint    " "/api/health"
 check "snapshot endpoint  " "/api/snapshot"
 check "projects endpoint  " "/api/projects"
 check "workspaces endpoint" "/api/workspaces"
-check "orchestrator       " "/api/orchestrator"
 check "meta endpoint      " "/api/meta"
+check "native sessions    " "/api/native-sessions"
 check "static index       " "/"
 check "styles.css         " "/styles.css"
 check "store.js           " "/src/store.js"
@@ -42,17 +42,19 @@ check "orchestrator.jsx   " "/src/orchestrator.jsx"
 
 dim ""
 dim "Project summary:"
-curl -sf "${BASE}/api/projects" | python3 -c "
+curl -sf "${BASE}/api/projects" | python3 -c '
 import sys, json
 try:
     data = json.load(sys.stdin)
     if not data:
-        print('  (no projects discovered — set GOLEM_PROJECTS_ROOT or bootstrap one)')
+        print("  (no projects discovered — set GOLEM_PROJECTS_ROOT or bootstrap one)")
     for p in data:
-        print(f\"  • {p['id']:24s} agents={p['live_agents']}/{p['total_agents']:<3} tickets={p['total_tickets']:<3} progress={int(p['progress']*100):>3d}%\")
+        plan = p.get("plan") or {}
+        mcount = str(len(p.get("milestones", []))).rjust(3)
+        print("  • %-24s milestones=%s plan=%s/%s" % (p["id"], mcount, plan.get("done", 0), plan.get("total", 0)))
 except Exception as e:
-    print(f'  (could not parse projects response: {e})')
-" 2>/dev/null
+    print("  (could not parse projects response: %s)" % e)
+' 2>/dev/null
 
 if [[ $fail -gt 0 ]]; then
   echo

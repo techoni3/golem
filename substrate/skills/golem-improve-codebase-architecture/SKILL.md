@@ -73,10 +73,10 @@ For each finding:
 
 For each high finding:
 - Draft an ADR (status: Proposed) capturing the decision needed. The Tech Architecture Reviewer iterates with you until the ADR is sound, then it's Accepted.
-- File one or more dev stories in `tracker/triage/` referencing the ADR. The orchestrator routes them.
+- Create one or more work-item tickets via `ticket_create` with the ADR referenced in the body. The orchestrator routes them.
 
 For each medium finding:
-- File a remediation story (no ADR needed unless a decision is implicit). Mark `category: refactor` in the ticket frontmatter.
+- File a remediation story (no ADR needed unless a decision is implicit). Mark it with label `refactor` (kind stays `work-item`).
 
 For each low finding:
 - Append to the architecture-review note. Don't file a ticket; it'd be noise.

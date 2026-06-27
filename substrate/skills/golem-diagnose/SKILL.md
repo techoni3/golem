@@ -2,10 +2,10 @@
 name: golem-diagnose
 description: Structured fix-diagnosis routine — reproduce, root-cause, classify, recommend routing. Use when a fix ticket enters a project; the Diagnoser invokes this before any code is touched.
 expects:
-  - A fix ticket in tracker/triage/ or tracker/open/ with a brief.
+  - A fix ticket (state `todo` or `in_progress`, kind `fix`) with a brief.
   - Read access to the codebase, ARCH.md, ADRs, recent journal entries.
 produces:
-  - A "Diagnoser verdict" block written into the ticket body, plus frontmatter classification.
+  - A "Diagnoser verdict" comment or fix-ticket body in HTML, with classification.
   - A routing recommendation: code | architecture | infra.
 category: sop
 ---
@@ -55,31 +55,40 @@ When in doubt between code and architecture, lean toward **architecture** if a f
 
 ### Step 4 — Write the verdict
 
-Append a `## Diagnoser verdict` section to the ticket body. Update frontmatter `category: fix` (if not already) and add the classification.
+Create a fix ticket via `ticket_create({kind: 'fix', title, body, …})` with the verdict inside an HTML `<section>` in the body, or add a `ticket_comment` on an existing ticket with tag `fix` or `risk`. Use the html-report house style; see `plugin/skills/tracker/SKILL.md` and `~/.claude/skills/html-report/SKILL.md`.
 
 Verdict shape:
 
-```markdown
-## Diagnoser verdict
+```html
+<section>
+  <div class="kicker">Diagnoser · Verdict</div>
+  <h2>Diagnoser verdict</h2>
+  <p class="lead">One-sentence summary of the bug and its classification.</p>
 
-**Reproduction.** <how you reproduced; one paragraph or a code block>
+  <p><strong>Reproduction.</strong> [how you reproduced; one paragraph or a code block]</p>
 
-**Proximate cause.** <one or two sentences>
+  <p><strong>Proximate cause.</strong> [one or two sentences]</p>
 
-**Root cause.** <one paragraph>
+  <p><strong>Root cause.</strong> [one paragraph]</p>
 
-**Classification.** code | architecture | infra
+  <p><strong>Classification.</strong> code | architecture | infra</p>
 
-**Suggested routing.** <which persona / team>; <why>.
+  <p><strong>Suggested routing.</strong> [which persona / team]; [why].</p>
 
-**Notes for the fixer.** <anything the fixer needs upfront — invariants to preserve, related ADRs, prior similar bugs, files most likely to need changes>.
+  <p><strong>Notes for the fixer.</strong> [invariants to preserve, related ADRs, prior similar bugs, files most likely to need changes].</p>
 
-**Verified by.** <Diagnoser> on YYYY-MM-DD
+  <p><strong>Verified by.</strong> [Diagnoser] on YYYY-MM-DD</p>
+
+  <div class="note no">
+    <div class="h">Verdict: [classification]</div>
+    <p>Why this routing is right and what the fixer must not miss.</p>
+  </div>
+</section>
 ```
 
 ### Step 5 — Hand off
 
-Append a hand-off log entry pointing the orchestrator at the verdict. The orchestrator reads the verdict and routes per `Suggested routing`.
+Add a `ticket_comment` pointing the orchestrator at the verdict. The orchestrator reads the verdict and routes per `Suggested routing`.
 
 Diagnoser does **not** write the fix. Diagnosis and remediation are separated so the diagnostician's frame doesn't bias the fixer.
 

@@ -5,7 +5,32 @@ Real-time admin UI for the agentic harness. Discovers projects under
 `journal/summary.jsonl` + `tracker/<state>/*.md`, and streams updates over
 WebSocket.
 
+## Accessing the dashboard
+
+Once the dashboard is running (`golem dashboard` from the repo root, or
+`cd dashboard && npm start`), the canonical URL is:
+
+**`http://dashboard.golem.localhost:7420`**
+
+You don't need to edit `/etc/hosts` or run any DNS setup. Per [RFC 6761](https://www.rfc-editor.org/rfc/rfc6761), any hostname ending in `.localhost` resolves to `127.0.0.1` on macOS Sonoma+, modern Linux (with systemd-resolved), and Windows 10+. Chrome, Safari, curl, and Node all use the system resolver and pick this up automatically.
+
+If your environment ever fails to resolve `dashboard.golem.localhost` (older OS, a corporate DNS override, etc.), the fallback is a one-line `/etc/hosts` entry:
+
+```
+127.0.0.1 dashboard.golem.localhost
+```
+
+The port is fixed at 7420 — `golem dashboard` always reuses the same port, even across restarts (see the implementation in `dashboard/server/index.js`). If port 7420 is ever held by something that isn't a previous golem dashboard, the server will print a clear error rather than drift to a different port.
+
 ## Quick start
+
+With the new Node CLI installed (`npm link` from the repo root):
+
+```bash
+golem dashboard
+```
+
+Or manually:
 
 ```bash
 cd golem/dashboard
@@ -13,9 +38,10 @@ npm install
 npm start
 ```
 
-Open <http://127.0.0.1:7420>.
+Open <http://dashboard.golem.localhost:7420> (fallback: <http://127.0.0.1:7420>).
 
-To smoke-check a running instance: `npm run check`.
+To smoke-check a running instance: `npm run check` (inside `dashboard/`) or
+`golem status` (from the repo root).
 
 ## Configuration
 

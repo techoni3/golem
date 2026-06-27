@@ -26,6 +26,9 @@ const REGISTRY_FILE = path.join(
 
 const EXCLUDED = new Set(['archive', 'node_modules']);
 
+const STALE_DAYS = CONFIG.projectStaleDays;
+const STALE_MS = STALE_DAYS * 24 * 60 * 60 * 1000;
+
 async function dirExists(p) {
   try {
     const st = await fs.stat(p);
@@ -33,6 +36,120 @@ async function dirExists(p) {
   } catch {
     return false;
   }
+}
+
+async function fileExists(p) {
+  try {
+    const st = await fs.stat(p);
+    return st.isFile();
+  } catch {
+    return false;
+  }
+}
+
+// True for git worktrees: a .git file (not directory) points back to the main
+// repo, and the checkout sits under .claude/worktrees/.
+async function isWorktree(workspaceDir) {
+  // A git worktree is signalled by `.git` being a *file* containing a
+  // `gitdir:` pointer (created by `git worktree add`). A plain repo has
+  // `.git` as a directory — that's NOT a worktree, just the repo itself.
+  // The previous implementation treated both as worktrees, which incorrectly
+  // filtered out the golem repo root (and any other regular repo) from the
+  // sidebar when it was registered via the registry.
+  const gitPath = path.join(workspaceDir, '.git');
+  try {
+    const st = await fs.stat(gitPath);
+    if (st.isFile()) return true;
+  } catch {
+    /* no .git entry — not a worktree, not a repo */
+  }
+  if (workspaceDir.includes(path.sep + '.claude' + path.sep + 'worktrees' + path.sep)) return true;
+  return false;
+}
+
+async function getLastSeenAt(workspaceDir) {
+  try {
+    const st = await fs.stat(workspaceDir);
+    return st.mtime.getTime();
+  } catch {
+    return 0;
+  }
+}
+
+// TKT-0107: composite activity signal — the maximum of four real-work signals
+// so the sidebar can surface projects by recent activity rather than mtime.
+// Order of priority (highest first; first non-zero wins as the floor, then
+// everything else is taken as the max):
+//   1. Live native-session heartbeat (overrides everything — a session
+//      running means someone is actively working on the project right now).
+//   2. Latest ticket updated_at for this project (from tracker.db).
+//   3. Journal directory latest mtime (any file under the journal).
+//   4. Latest git commit timestamp (if the project is a git repo).
+//   5. Fallback: workspace directory mtime (existing behaviour).
+async function getLastActivityAt({ workspaceDir, projectId, tracker, nativeSessions }) {
+  let best = 0;
+  // 1. live session heartbeat
+  if (Array.isArray(nativeSessions)) {
+    for (const s of nativeSessions) {
+      const t = s?.last_seen_at ?? 0;
+      if (t > best) best = t;
+    }
+  }
+  // 2. latest ticket updated_at for this project
+  try {
+    if (tracker && typeof tracker.maxTicketUpdatedAt === 'function') {
+      const t = tracker.maxTicketUpdatedAt(projectId);
+      if (typeof t === 'number' && t > best) best = t;
+    }
+  } catch { /* ignore */ }
+  // 3. journal directory latest mtime
+  try {
+    const central = centralJournalDir(projectId);
+    const candidates = [];
+    if (await dirExists(central)) candidates.push(central);
+    if (await dirExists(path.join(workspaceDir, 'journal'))) {
+      candidates.push(path.join(workspaceDir, 'journal'));
+    }
+    for (const dir of candidates) {
+      const files = await fs.readdir(dir).catch(() => []);
+      for (const f of files) {
+        try {
+          const st = await fs.stat(path.join(dir, f));
+          if (st.mtimeMs && st.mtimeMs > best) best = st.mtimeMs;
+        } catch { /* skip */ }
+      }
+    }
+  } catch { /* ignore */ }
+  // 4. latest git commit timestamp
+  try {
+    const commitTs = await lastGitCommitMs(workspaceDir);
+    if (commitTs > best) best = commitTs;
+  } catch { /* ignore */ }
+  // 5. fallback: workspace mtime (only if everything else missed)
+  if (best === 0) {
+    best = await getLastSeenAt(workspaceDir);
+  }
+  return best;
+}
+
+// Run `git log -1 --format=%ct` to get the latest commit unix-seconds. Returns
+// 0 when the project isn't a git repo or git isn't available.
+async function lastGitCommitMs(workspaceDir) {
+  if (!workspaceDir) return 0;
+  try {
+    const { spawnSync } = await import('node:child_process');
+    const r = spawnSync('git', ['log', '-1', '--format=%ct'], {
+      cwd: workspaceDir, encoding: 'utf8', timeout: 1500,
+    });
+    if (r.status !== 0 || !r.stdout) return 0;
+    const sec = Number.parseInt(r.stdout.trim(), 10);
+    if (!Number.isFinite(sec) || sec <= 0) return 0;
+    return sec * 1000;
+  } catch { return 0; }
+}
+
+function isStale(lastSeenAt) {
+  return lastSeenAt > 0 && Date.now() - lastSeenAt > STALE_MS;
 }
 
 // v4: resolve journal/summary/hook paths. Prefer the central location
@@ -111,7 +228,7 @@ async function readDescription(projectDir) {
   return null;
 }
 
-async function discoverFromRoot(root, kind, { requireSubstrate }) {
+async function discoverFromRoot(root, kind, { requireSubstrate, tracker = null, nativeSessions = [] }) {
   let entries;
   try {
     entries = await fs.readdir(root, { withFileTypes: true });
@@ -124,6 +241,7 @@ async function discoverFromRoot(root, kind, { requireSubstrate }) {
     if (!e.isDirectory()) continue;
     if (e.name.startsWith('.') || EXCLUDED.has(e.name)) continue;
     const workspaceDir = path.join(root, e.name);
+    if (await isWorktree(workspaceDir)) continue;
     const journalDir = path.join(workspaceDir, 'journal');
     const claudeMd = path.join(workspaceDir, 'CLAUDE.md');
     let hasJournal = false;
@@ -139,6 +257,7 @@ async function discoverFromRoot(root, kind, { requireSubstrate }) {
     const contractId = projectIdFor(workspaceDir);
     const jp = await resolveJournalPaths(workspaceDir, contractId);
     const gd = await resolveGatesDir(workspaceDir, contractId);
+    const lastActivityAt = await getLastActivityAt({ workspaceDir, projectId: contractId, tracker, nativeSessions });
 
     out.push({
       id,
@@ -149,6 +268,12 @@ async function discoverFromRoot(root, kind, { requireSubstrate }) {
       color: colorFor(id),
       description,
       path: workspaceDir,
+      // TKT-0107: composite activity signal (live session > ticket > journal
+      // > git > workspace-mtime). Keep the legacy key name so the snapshot
+      // and consumer code stay unchanged; downstream readers can rename.
+      last_seen_at: lastActivityAt,
+      last_activity_at: lastActivityAt,
+      stale: isStale(lastActivityAt),
       journalDir: jp.journalDir,
       hookFile: jp.hookFile,
       summaryFile: jp.summaryFile,
@@ -163,58 +288,19 @@ async function discoverFromRoot(root, kind, { requireSubstrate }) {
   return out;
 }
 
-// Discover the CEO workspace ($GOLEM_ROOT itself, not its children). The CEO
-// session anchors cwd here, so its tool calls and sub-agent spawns journal
-// into $GOLEM_ROOT/journal/. We surface it as a special kind='root' workspace
-// alongside the per-project ones.
+// v4: the golem repo root is no longer treated as a special CEO workspace.
+// Each live session self-registers, so there is no single "root" project to
+// surface alongside the per-project workspaces. Keep this function as a no-op
+// tombstone so callers don't need to change and the kind='root' concept can
+// still be referenced in backwards-compatible filters.
 async function discoverRoot() {
-  const root = CONFIG.golemRoot;
-  const journalDir = path.join(root, 'journal');
-  const claudeMd = path.join(root, 'CLAUDE.md');
-  const hookScript = path.join(root, '.claude', 'hooks', 'journal-event.sh');
-  let hasJournal = false;
-  let hasClaudeMd = false;
-  let hasHook = false;
-  try { await fs.access(journalDir); hasJournal = true; } catch { /* ignore */ }
-  try { await fs.access(claudeMd); hasClaudeMd = true; } catch { /* ignore */ }
-  try { await fs.access(hookScript); hasHook = true; } catch { /* ignore */ }
-  // Only surface if at least the hook script is in place — otherwise it's an
-  // un-wired root and there will be no events to show.
-  if (!hasHook) return null;
-  const id = 'golem-root';
-  const title = (await readClaudeMdTitle(root)) || 'Golem Root';
-  const description = (await readDescription(root)) || 'CEO orchestration workspace — journals CEO + sub-agent activity.';
-  // The root is v3-wired (its own journal-event.sh owns it per the contract's
-  // legacy-coexistence rule), so the central dir won't exist and we fall back
-  // to the in-repo journal/ — which is exactly what we want here.
-  const contractId = projectIdFor(root);
-  const jp = await resolveJournalPaths(root, contractId);
-  const gd = await resolveGatesDir(root, contractId);
-  return {
-    id,
-    project_id: contractId,
-    kind: 'root',
-    name: title,
-    glyph: glyphFor(title),
-    color: colorFor(id),
-    description,
-    path: root,
-    journalDir: jp.journalDir,
-    hookFile: jp.hookFile,
-    summaryFile: jp.summaryFile,
-    journalCentral: jp.journalCentral,
-    trackerDir: path.join(root, 'tracker'),
-    gatesDir: gd.gatesDir,
-    gatesCentral: gd.gatesCentral,
-    agentNotesDir: path.join(root, 'docs', 'agent-notes'),
-    hasJournal: hasJournal || jp.journalCentral,
-  };
+  return null;
 }
 
 // Read ~/.config/golem/projects.json and surface any registered project whose
 // `path` isn't already discovered by the auto-scan. This is the v3 mechanism
 // for external projects (e.g. trialroomai outside golem/golem-projects/).
-async function discoverFromRegistry(alreadyDiscoveredPaths) {
+async function discoverFromRegistry({ alreadyDiscoveredPaths, tracker = null, nativeSessions = [] }) {
   let raw;
   try {
     raw = await fs.readFile(REGISTRY_FILE, 'utf8');
@@ -231,7 +317,12 @@ async function discoverFromRegistry(alreadyDiscoveredPaths) {
   const out = [];
   for (const entry of json.projects ?? []) {
     if (!entry?.path || !entry?.id) continue;
-    if (entry.kind === 'root') continue; // root is auto-discovered separately
+    // NOTE: previously `kind === 'root'` was filtered here on the assumption
+    // the root was surfaced separately by `discoverRoot()`. That synthetic
+    // path was removed in TKT-0008 — the registry entry is the only place
+    // the golem repo root is described, and skipping it makes the tracker
+    // invisible to anyone working at the root (the dashboard / substrate
+    // developer's primary workspace). Surface it like any other entry.
     if (alreadyDiscoveredPaths.has(entry.path)) continue;
 
     // Only surface if the path actually exists.
@@ -242,6 +333,7 @@ async function discoverFromRegistry(alreadyDiscoveredPaths) {
     }
 
     const workspaceDir = entry.path;
+    if (await isWorktree(workspaceDir)) continue;
     // v4: kind:"auto" entries are hook-registered (registered_by:"hook") and
     // carry the contract project_id as their `id`. They render like external
     // projects. Manual entries keep their registered kind. Either way the
@@ -251,6 +343,7 @@ async function discoverFromRegistry(alreadyDiscoveredPaths) {
     const contractId = projectIdFor(workspaceDir);
     const jp = await resolveJournalPaths(workspaceDir, contractId);
     const gd = await resolveGatesDir(workspaceDir, contractId);
+    const lastActivityAt = await getLastActivityAt({ workspaceDir, projectId: contractId, tracker, nativeSessions });
 
     // The registry `name` is user-supplied via `golem project register` and is
     // authoritative. Prefer it. An external project's own CLAUDE.md is NOT a
@@ -273,6 +366,12 @@ async function discoverFromRegistry(alreadyDiscoveredPaths) {
       color: colorFor(entry.id),
       description,
       path: workspaceDir,
+      // TKT-0107: composite activity signal (see getLastActivityAt above).
+      // Keep the legacy key name so the snapshot stays shape-compatible; new
+      // consumers should prefer last_activity_at.
+      last_seen_at: lastActivityAt,
+      last_activity_at: lastActivityAt,
+      stale: isStale(lastActivityAt),
       journalDir: jp.journalDir,
       hookFile: jp.hookFile,
       summaryFile: jp.summaryFile,
@@ -287,30 +386,35 @@ async function discoverFromRegistry(alreadyDiscoveredPaths) {
   return out;
 }
 
-// Backwards-compatible name. Returns the CEO root workspace, projects (from
-// auto-scan AND the v3 registry), and ideas with a `kind` field on each entry.
-export async function discoverProjects() {
-  const [rootWorkspace, projects, ideas] = await Promise.all([
-    discoverRoot(),
-    discoverFromRoot(CONFIG.projectsRoot, 'project', { requireSubstrate: true }),
-    discoverFromRoot(CONFIG.ideasRoot, 'idea', { requireSubstrate: false }),
+// Returns projects (from auto-scan AND the v3 registry) and ideas with a
+// `kind` field on each entry. The synthetic kind='root' CEO workspace is no
+// longer surfaced in v4.
+export async function discoverProjects({ tracker = null, nativeSessions = [] } = {}) {
+  const [projects, ideas] = await Promise.all([
+    discoverFromRoot(CONFIG.projectsRoot, 'project', { requireSubstrate: true, tracker, nativeSessions }),
+    discoverFromRoot(CONFIG.ideasRoot, 'idea', { requireSubstrate: false, tracker, nativeSessions }),
   ]);
   const alreadyDiscoveredPaths = new Set([
-    ...(rootWorkspace ? [rootWorkspace.path] : []),
     ...projects.map((p) => p.path),
     ...ideas.map((p) => p.path),
   ]);
-  const external = await discoverFromRegistry(alreadyDiscoveredPaths);
+  const external = await discoverFromRegistry({ alreadyDiscoveredPaths, tracker, nativeSessions });
 
-  const all = [];
-  if (rootWorkspace) all.push(rootWorkspace);
-  all.push(...projects, ...ideas, ...external);
-  // Stable order: root first, then projects (alpha), then external (alpha), then ideas.
-  const kindOrder = { root: 0, project: 1, external: 2, idea: 3 };
+  const all = [...projects, ...ideas, ...external];
+  // Order: the golem repo root (its registry kind is the literal string "root")
+  // sorts first — that's where dashboard / substrate work lives — then
+  // projects (active recency, then stale alpha), then external, then ideas.
+  const kindOrder = { root: -1, project: 0, external: 1, idea: 2 };
   all.sort((a, b) => {
     const oa = kindOrder[a.kind] ?? 9;
     const ob = kindOrder[b.kind] ?? 9;
     if (oa !== ob) return oa - ob;
+    // Stale sinks to the bottom within each kind bucket.
+    if (a.stale !== b.stale) return a.stale ? 1 : -1;
+    // Active projects by recency descending; stale/others tie-break by name.
+    if (!a.stale && a.last_seen_at && b.last_seen_at) {
+      return (b.last_seen_at ?? 0) - (a.last_seen_at ?? 0);
+    }
     return a.id.localeCompare(b.id);
   });
   // v4: stamp the PLAN.md path on every workspace so the watcher can observe

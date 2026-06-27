@@ -12,7 +12,7 @@ function App() {
       if (!h) return;
       const parts = h.split('/').filter(Boolean);
       if (parts[0] === 'project' && parts[1]) {
-        setRoute({ kind: 'project', id: parts[1], tab: parts[2] || 'agents' });
+        setRoute({ kind: 'project', id: parts[1] });
       } else if (['dashboard', 'tracker', 'projects', 'agents', 'logs'].includes(parts[0])) {
         setRoute({ kind: parts[0] });
       }
@@ -25,7 +25,7 @@ function App() {
   // Push route → hash.
   React.useEffect(() => {
     let h;
-    if (route.kind === 'project') h = `#project/${route.id}/${route.tab || 'agents'}`;
+    if (route.kind === 'project') h = `#project/${route.id}`;
     else h = `#${route.kind}`;
     if (window.location.hash !== h) {
       // Use replaceState to avoid spamming history during drawer open/close.
@@ -51,7 +51,7 @@ function App() {
   else if (route.kind === 'agents') page = <AgentsPage setRoute={setRoute}/>;
   else if (route.kind === 'logs') page = <LogsPage/>;
   else if (route.kind === 'project') page = (
-    <ProjectView projectId={route.id} tab={route.tab || 'agents'} setRoute={setRoute} openAgentId={route.agentId}/>
+    <ProjectView projectId={route.id} setRoute={setRoute}/>
   );
   else page = <Dashboard setRoute={setRoute}/>;
 
@@ -71,4 +71,17 @@ function App() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+// TKT-0103: defer the mount until window.__reactReady is set by the ESM
+// block in index.html. The ESM block also performs a mount via
+// ReactDOMClient.createRoot, so this becomes a no-op if it ran first. The
+// guard handles the case where babel-standalone processes this file before
+// the ESM block has finished (race) — without the guard, line below would
+// throw "Cannot read properties of undefined (reading 'createRoot')".
+function mount() {
+  if (!window.ReactDOM || !window.ReactDOMClient) {
+    return setTimeout(mount, 30);
+  }
+  const root = window.ReactDOMClient.createRoot(document.getElementById('root'));
+  root.render(window.React.createElement(App));
+}
+mount();

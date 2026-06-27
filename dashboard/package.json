@@ -2,7 +2,7 @@
   "name": "@golem/dashboard",
   "version": "0.1.0",
   "private": true,
-  "description": "Real-time admin dashboard for the golem agentic substrate.",
+  "description": "Real-time admin dashboard for golem.",
   "type": "module",
   "scripts": {
     "start": "node server/index.js",
@@ -18,6 +18,11 @@
     "better-sqlite3": "^11.10.0",
     "chokidar": "^3.6.0",
     "fastify": "^4.28.1",
-    "gray-matter": "^4.0.3"
+    "gray-matter": "^4.0.3",
+    "marked": "^14.1.4"
+  },
+  "devDependencies": {
+    "@babel/parser": "^7.29.7",
+    "playwright-core": "^1.61.0"
   }
 }

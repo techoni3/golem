@@ -1,8 +1,9 @@
 # Golem v4 Contract — "thin layer over native Claude Code"
 
 Binding decisions for the v4 build. All v4 work conforms to this file; deviations
-require updating this file first. v4 is ADDITIVE — nothing from v3 (substrate/,
-personas, teams, `golem session`) is deleted until v4 is proven on a real feature.
+require updating this file first. v4 is ADDITIVE — substrate/, personas, teams,
+and `golem session` remain untouched while v4 is proven. The `golem` CLI itself
+was retired and rewritten as a thin Node wrapper (`cli/golem.js`) in TKT-0011.
 
 ## Shape
 
@@ -45,8 +46,8 @@ schemas and install commands against current official docs
   `CLAUDE.md`; fallback `$CLAUDE_PROJECT_DIR`. Same rule as v3.
 - `projects.json` — entries auto-upserted by the SessionStart hook:
   `{id, name, path, kind: "auto", registered_by: "hook", first_seen, last_seen}`.
-  Manual `golem project register` entries keep `kind` as-is; hook never
-  overwrites a manual `name`.
+  Manual project entries created by the retired v3 `golem project register`
+  keep `kind` as-is; the hook never overwrites a manual `name`.
 - `sessions.json`, `channels.json` — unchanged v3 schemas (pid-based liveness,
   channel heartbeat).
 

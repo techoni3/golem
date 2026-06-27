@@ -35,11 +35,90 @@ function CreateTicket() {
   const [sessions, setSessions] = React.useState([]);
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState(null);
+  // TKT-0106: image paste/drop. Tracks in-flight + completed uploads so we can
+  // show previews above the textarea and clear them on submit/reset.
+  const [uploads, setUploads] = React.useState([]); // [{ id, name, status, url? }]
+  const bodyRef = React.useRef(null);
+
+  // Upload a single File via SubstrateAPI.uploadAsset. Returns the markdown
+  // image snippet on success, throws on failure.
+  const uploadOne = React.useCallback(async (file) => {
+    const id = `up_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    setUploads((u) => [...u, { id, name: file.name, status: 'uploading' }]);
+    try {
+      const res = await window.SubstrateAPI.uploadAsset(file);
+      setUploads((u) => u.map((x) => x.id === id ? { ...x, status: 'done', url: res.url } : x));
+      return { id, md: `![](${res.url})`, url: res.url };
+    } catch (err) {
+      setUploads((u) => u.map((x) => x.id === id ? { ...x, status: 'error', error: String(err?.message || err) } : x));
+      throw err;
+    }
+  }, []);
+
+  // Collect image Files from a ClipboardEvent or DragEvent. Skips non-image
+  // files silently — paste/drop of text or non-images shouldn't be intercepted.
+  const collectImages = (dt) => {
+    if (!dt) return [];
+    const out = [];
+    if (dt.items) {
+      for (const it of dt.items) {
+        if (it.kind === 'file') {
+          const f = it.getAsFile();
+          if (f && /^image\//.test(f.type)) out.push(f);
+        }
+      }
+    }
+    if (dt.files) {
+      for (const f of dt.files) {
+        if (f && /^image\//.test(f.type) && !out.includes(f)) out.push(f);
+      }
+    }
+    return out;
+  };
+
+  const onPaste = React.useCallback(async (e) => {
+    const files = collectImages(e.clipboardData);
+    if (files.length === 0) return; // let the default text paste through
+    e.preventDefault();
+    const before = bodyRef.current?.selectionStart ?? body.length;
+    const after = bodyRef.current?.selectionEnd ?? body.length;
+    for (const f of files) {
+      try {
+        const { md } = await uploadOne(f);
+        const insert = `${before === after ? '' : ''}\n${md}\n`;
+        setBody((cur) => {
+          const next = cur.slice(0, before) + insert + cur.slice(after);
+          // restore cursor after the inserted snippet on next tick
+          requestAnimationFrame(() => {
+            if (bodyRef.current) {
+              const pos = before + insert.length;
+              bodyRef.current.setSelectionRange(pos, pos);
+              bodyRef.current.focus();
+            }
+          });
+          return next;
+        });
+        break; // only insert first image per paste (cursor math gets fuzzy)
+      } catch (err) { /* error surfaced in uploads strip */ }
+    }
+  }, [body, uploadOne]);
+
+  const onDrop = React.useCallback(async (e) => {
+    const files = collectImages(e.dataTransfer);
+    if (files.length === 0) return;
+    e.preventDefault();
+    for (const f of files) {
+      try {
+        const { md } = await uploadOne(f);
+        setBody((cur) => cur + (cur.endsWith('\n') ? '' : '\n') + md + '\n');
+      } catch (err) { /* surfaced in uploads strip */ }
+    }
+  }, [uploadOne]);
 
   const reset = React.useCallback(() => {
     setKind('work-item'); setTitle(''); setBody(''); setPriority('');
     setStreamId(''); setAssignee(''); setDispatchSession('');
-    setError(null); setSubmitting(false);
+    setError(null); setSubmitting(false); setUploads([]);
   }, []);
 
   // Open on event; preselect project if provided.
@@ -169,9 +248,28 @@ function CreateTicket() {
         </div>
 
         <div className="ct-field">
-          <label className="ct-label">Body <span className="ct-label-hint">markdown</span></label>
-          <textarea className="orch-modal-textarea" rows={5} value={body} placeholder="Details, context, acceptance…"
-            onChange={(e) => setBody(e.target.value)} disabled={submitting}/>
+          <label className="ct-label">Body <span className="ct-label-hint">HTML · paste or drop images</span></label>
+          <textarea ref={bodyRef} className="orch-modal-textarea" rows={5} value={body} placeholder="Details, context, acceptance… (HTML is rendered; plain text auto-wraps into paragraphs)"
+            onChange={(e) => setBody(e.target.value)}
+            onPaste={onPaste}
+            onDrop={onDrop}
+            onDragOver={(e) => { if (e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.includes('Files')) e.preventDefault(); }}
+            disabled={submitting}/>
+          {/* TKT-0106: upload previews. Show while in-flight + after success so
+              the user can confirm what they attached before clicking Save. */}
+          {uploads.length > 0 && (
+            <div className="ct-uploads">
+              {uploads.map((u) => (
+                <div key={u.id} className={`ct-upload ct-upload-${u.status}`}>
+                  {u.status === 'uploading' && <span className="ct-upload-spinner" />}
+                  {u.status === 'done' && u.url && <img src={u.url} alt={u.name} className="ct-upload-thumb" />}
+                  {u.status === 'error' && <span className="ct-upload-err">×</span>}
+                  <span className="ct-upload-name">{u.name}</span>
+                  {u.status === 'error' && <span className="ct-upload-err-msg">{u.error}</span>}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="ct-row">

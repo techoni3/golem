@@ -44,8 +44,8 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-// Wait until the dashboard self-registers dashboard.json AND /healthz-style
-// readiness (we poll the tickets endpoint, which 200s once routes are up).
+// Wait until the dashboard self-registers dashboard.json and the API routes are
+// ready (we poll /api/tickets, which 200s once routes are up).
 async function waitForDashboard(timeoutMs = 15000) {
   const dashJson = path.join(tmpConfigHome, 'golem', 'dashboard.json');
   const deadline = Date.now() + timeoutMs;

@@ -79,7 +79,7 @@ function TweaksButton() {
             ))}
           </div>
           <div className="tweaks-pop-version">
-            Golem Substrate Admin · v0.1.0<br/>
+            Golem Dashboard · v0.1.0<br/>
             Toggle with <span className="kbd">⌘ ,</span> (Ctrl+, on linux/win)
           </div>
         </div>

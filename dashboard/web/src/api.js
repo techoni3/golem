@@ -176,31 +176,17 @@
     meta: () => getJSON('/api/meta'),
     projects: () => getJSON('/api/projects'),
     workspaces: () => getJSON('/api/workspaces'),
-    orchestrator: () => getJSON('/api/orchestrator'),
-    agents: (projectId) => getJSON(`/api/projects/${encodeURIComponent(projectId)}/agents`),
-    agentDetail: (projectId, agentId) =>
-      getJSON(
-        `/api/projects/${encodeURIComponent(projectId)}/agents/${encodeURIComponent(agentId)}`,
-      ),
-    tickets: (projectId) => getJSON(`/api/projects/${encodeURIComponent(projectId)}/tickets`),
     // v4 (fix round 2): peek payload for one native session — recent central-
     // journal events + milestones + best-effort transcript path.
     nativeSessionPeek: (sessionId) =>
       getJSON(`/api/native-sessions/${encodeURIComponent(sessionId)}/peek`),
-    // Orchestrator intrusions (proxied to the golem MCP channel server).
-    // sessionId routes the brief to a specific live CEO. Omit it (or pass null)
-    // when there is exactly one CEO live — the server picks it up by default.
+    // v4: brief / interrupt / halt delivered over per-session channels.
     pushBrief: (text, sessionId) =>
       postJSON('/api/brief', { brief: text, session_id: sessionId ?? null }),
     pushInterrupt: (text, sessionId) =>
       postJSON('/api/interrupt', { text, session_id: sessionId ?? null }),
     pushHalt: (reason, sessionId) =>
       postJSON('/api/halt', { reason: reason ?? '', session_id: sessionId ?? null }),
-    pushGate: (gateId, decision, note, sessionId) =>
-      postJSON(
-        `/api/gates/${encodeURIComponent(gateId)}/${encodeURIComponent(decision)}`,
-        { note: note ?? '', session_id: sessionId ?? null },
-      ),
     channels: () => getJSON('/api/channels'),
     channelHealth: (sessionId) =>
       getJSON(`/api/channel/health${sessionId ? `?session=${encodeURIComponent(sessionId)}` : ''}`),
@@ -212,8 +198,11 @@
     createTicket: (body) => postJSON('/api/tickets', body),
     getTicket: (id) => getJSON(`/api/tickets/${encodeURIComponent(id)}`),
     updateTicket: (id, patch) => patchJSON(`/api/tickets/${encodeURIComponent(id)}`, patch),
-    addComment: (id, { author, body }) =>
-      postJSON(`/api/tickets/${encodeURIComponent(id)}/comments`, { author, body }),
+    addComment: (id, body) => postJSON(`/api/tickets/${encodeURIComponent(id)}/comments`, body),
+    updateComment: (id, commentId, patch) =>
+      patchJSON(`/api/tickets/${encodeURIComponent(id)}/comments/${encodeURIComponent(commentId)}`, patch),
+    replyComment: (id, commentId, body) =>
+      postJSON(`/api/tickets/${encodeURIComponent(id)}/comments/${encodeURIComponent(commentId)}/reply`, body),
     dispatchTicket: (id, { session_id, note }) =>
       postJSON(`/api/tickets/${encodeURIComponent(id)}/dispatch`, { session_id, note }),
     listDispatchable: (projectId) =>
@@ -226,5 +215,16 @@
       postJSON(`/api/tickets/${encodeURIComponent(id)}/links`, { to_ticket, type }),
     removeLink: (id, { to_ticket, type }) =>
       delJSON(`/api/tickets/${encodeURIComponent(id)}/links`, { to_ticket, type }),
+    // TKT-0106: image asset upload. Posts the file as base64 alongside
+    // filename + mime. Server validates, stores content-addressed under
+    // ~/.config/golem/ticket-assets/<hash>.<ext>, returns {url, ...}.
+    uploadAsset: async (file) => {
+      const buf = await file.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      let bin = '';
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      const b64 = typeof btoa === 'function' ? btoa(bin) : Buffer.from(bytes).toString('base64');
+      return postJSON('/api/ticket-assets', { filename: file.name, mime: file.type, base64: b64 });
+    },
   };
 })();

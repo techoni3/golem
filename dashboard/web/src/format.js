@@ -39,5 +39,19 @@
     return (letters[0] + letters[1]).toUpperCase();
   }
 
-  window.SubstrateFmt = { fmtRuntime, fmtTimeAgo, fmtClock, glyphFor };
+  /**
+   * Render a ticket/comment body as HTML. If the text already starts with an
+   * HTML tag, return it unchanged; otherwise wrap blank-line-separated blocks
+   * in <p> tags and preserve single newlines as <br/>.
+   */
+  function htmlBody(text) {
+    if (!text) return '';
+    if (/^\s*<[a-zA-Z][^>]*>/.test(text)) return text;
+    return text
+      .split(/\n\n+/)
+      .map((p) => `<p>${p.trim().replace(/\n/g, '<br/>')}</p>`)
+      .join('');
+  }
+
+  window.SubstrateFmt = { fmtRuntime, fmtTimeAgo, fmtClock, glyphFor, htmlBody };
 })();

@@ -18,9 +18,9 @@ The mechanical steps to land work as a reviewable PR. Used by the Engineer at th
 
 `<category>/<ticket-id>-<kebab-slug>`
 
-- `category`: one of `feat`, `fix`, `infra`, `docs`, `spike` (matches ticket frontmatter `category`, with `feat` aliasing `feature`).
+- `category`: one of `feat`, `fix`, `infra`, `docs`, `spike` (matches the ticket's branch category, with `feat` aliasing `feature`).
 - `ticket-id`: e.g. `tkt-0042`.
-- `slug`: short kebab-case (≤6 words) — the same slug as the ticket's filename.
+- `slug`: short kebab-case (≤6 words) — usually derived from the ticket title.
 
 Examples:
 - `feat/tkt-0042-stripe-webhook-handler`
@@ -98,7 +98,7 @@ deferred follow-ups, trade-offs taken. Empty if there's nothing.
 3. Push the branch.
 4. Open the PR with the body shape above. Title: `<type>(<scope>): <subject>` matching the most representative commit.
 5. Append a hand-off log entry in the ticket: link to PR, summary line.
-6. Move the ticket to `tracker/review/` (the orchestrator does this; surface the request in the hand-off log).
+6. Call `ticket_update({id, state: 'review'})` (the orchestrator does this; surface the request in the hand-off log).
 
 ## Anti-patterns
 

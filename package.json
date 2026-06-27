@@ -1,0 +1,15 @@
+{
+  "name": "golem",
+  "version": "0.0.0",
+  "description": "Thin Node CLI for the golem v4 harness.",
+  "type": "module",
+  "bin": {
+    "golem": "./cli/golem.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "check": "node --check cli/golem.js"
+  }
+}

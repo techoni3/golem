@@ -45,6 +45,29 @@ const Icon = {
       <path d="M6 4L10 8L6 12"/>
     </svg>
   ),
+  // Drawer width presets — a viewport frame with a right-side panel that fills
+  // more (wide), half (half), or less (narrow) of the frame.
+  DrawerWide: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round">
+      <rect x="1.5" y="2" width="13" height="12" rx="1.5"/>
+      <rect x="3.5" y="3.5" width="9.5" height="9" rx="0.5" fill="currentColor" fillOpacity="0.28" stroke="none"/>
+      <line x1="3.5" y1="2" x2="3.5" y2="14"/>
+    </svg>
+  ),
+  DrawerHalf: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round">
+      <rect x="1.5" y="2" width="13" height="12" rx="1.5"/>
+      <rect x="8" y="3.5" width="5" height="9" rx="0.5" fill="currentColor" fillOpacity="0.28" stroke="none"/>
+      <line x1="8" y1="2" x2="8" y2="14"/>
+    </svg>
+  ),
+  DrawerNarrow: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round">
+      <rect x="1.5" y="2" width="13" height="12" rx="1.5"/>
+      <rect x="11.5" y="3.5" width="1.5" height="9" rx="0.5" fill="currentColor" fillOpacity="0.28" stroke="none"/>
+      <line x1="11.5" y1="2" x2="11.5" y2="14"/>
+    </svg>
+  ),
   Close: ({ size = 14 }) => (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
       <path d="M4 4L12 12M12 4L4 12"/>
@@ -83,6 +106,18 @@ const Icon = {
       <path d="M3 14V5L8 2L13 5V14"/>
       <path d="M3 14H13"/>
       <path d="M6.5 14V8.5H9.5V14"/>
+    </svg>
+  ),
+  Gear: ({ size = 16, className }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M12 15.5A3.5 3.5 0 0 1 8.5 12 3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5 3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97 0-.33-.03-.66-.07-1l2.11-1.63a.49.49 0 0 0 .12-.61l-2-3.46a.49.49 0 0 0-.59-.22l-2.49 1a7.49 7.49 0 0 0-1.72-1L14.94 2.5a.49.49 0 0 0-.49-.5H10.5a.49.49 0 0 0-.49.5l-.39 2.61c-.65.18-1.26.47-1.81.86l-2.48-1a.49.49 0 0 0-.6.22l-2 3.46c-.13.22-.07.49.12.61L5.6 11c-.04.34-.07.67-.07 1s.03.65.07.97l-2.11 1.63a.49.49 0 0 0-.12.61l2 3.46a.49.49 0 0 0 .59.22l2.49-1.01c.53.4 1.12.71 1.76.92L9.53 21.5c.04.27.27.5.49.5h3.88a.49.49 0 0 0 .49-.5l.39-2.61c.64-.21 1.23-.52 1.76-.92l2.49 1.01a.49.49 0 0 0 .59-.22l2-3.46a.49.49 0 0 0-.12-.61l-2.12-1.66Z"/>
+    </svg>
+  ),
+  Archive: ({ size = 16 }) => (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2 4.5V13C2 13.5 2.5 14 3 14H13C13.5 14 14 13.5 14 13V4.5"/>
+      <path d="M1 2.5H15"/>
+      <path d="M6 8H10"/>
     </svg>
   ),
 };

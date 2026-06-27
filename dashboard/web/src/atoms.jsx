@@ -43,24 +43,6 @@ function ProjectGlyph({ project, size = 32 }) {
   );
 }
 
-function StatusPill({ status }) {
-  const map = {
-    active: { cls: 'active', label: 'Active' },
-    running: { cls: 'running', label: 'Running' },
-    review: { cls: 'review', label: 'In Review' },
-    blocked: { cls: 'blocked', label: 'Blocked' },
-    done: { cls: 'done', label: 'Done' },
-    idle: { cls: 'idle', label: 'Idle' },
-  };
-  const m = map[status] || map.idle;
-  return (
-    <span className={`pill ${m.cls}`}>
-      <span className="dot"/>
-      {m.label}
-    </span>
-  );
-}
-
 function Carousel({ children, trackRef }) {
   const internalRef = React.useRef(null);
   const ref = trackRef ?? internalRef;
@@ -144,7 +126,6 @@ function useStore() {
 
 window.Avatar = Avatar;
 window.ProjectGlyph = ProjectGlyph;
-window.StatusPill = StatusPill;
 window.Carousel = Carousel;
 window.CarouselControls = CarouselControls;
 window.ConnectionPill = ConnectionPill;

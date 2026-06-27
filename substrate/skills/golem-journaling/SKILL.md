@@ -52,7 +52,7 @@ If the closing reflex fired, the SessionEnd hook is silent. If it didn't, a mark
 ## What does NOT belong in the journal
 
 - The conversation itself. The journal is a structured side-channel; the working harness keeps the conversation.
-- Per-ticket state. Tickets live in `tracker/`.
+- Per-ticket state. Tickets live in the golem tracker (dashboard SQLite DB) and are accessed via the tracker MCP tools.
 - Per-decision rationales. Those are ADRs.
 - Vocabulary or invariants. Those are CONTEXT and ARCH.
 

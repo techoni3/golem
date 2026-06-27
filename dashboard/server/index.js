@@ -3,15 +3,14 @@ import os from 'node:os';
 import fs from 'node:fs';
 import url from 'node:url';
 import crypto from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
 import { CONFIG } from './config.js';
 import { createState } from './state.js';
 import { ROLES } from './roles.js';
-import { TRACKER_COLUMNS } from './tracker.js';
-import { pushBrief, pushInterrupt, pushHalt, pushGate, channelHealth, listChannels } from './brief.js';
-import { writeGateVerdict, readChannels } from './orchestrator.js';
+import { pushBrief, pushInterrupt, pushHalt, channelHealth, listChannels } from './brief.js';
 import { createChat } from './chat.js';
 import { readNativeSessionPeek } from './native-session-peek.js';
 import { openTrackerDb } from './tracker-db.js';
@@ -19,7 +18,9 @@ import { openTrackerDb } from './tracker-db.js';
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const WEB_ROOT = path.resolve(__dirname, '..', 'web');
 
-const DECISION_PAST = { approve: 'approved', deny: 'denied', cancel: 'cancelled' };
+// Legacy markdown tracker columns (kept in /api/meta for API stability; the UI
+// no longer renders the markdown board).
+const TRACKER_COLUMNS = ['triage', 'open', 'in-progress', 'review', 'blocked', 'done'];
 
 // ── Canonical project_id scheme (WS2) ───────────────────────────────────────
 // Tickets, the projects list, and native sessions are reconciled on ONE id:
@@ -33,16 +34,70 @@ const DECISION_PAST = { approve: 'approved', deny: 'denied', cancel: 'cancelled'
 // this contract id. We tolerate a registry-`id` being passed by resolving it to
 // the contract id via the projects list before querying (resolveProjectId).
 
-// The golem config dir — same resolution as tracker-db.js / orchestrator.js
+// The golem config dir — same resolution as tracker-db.js / channels.js
 // (XDG_CONFIG_HOME ?? ~/.config, then /golem). Used for dashboard.json.
 function golemConfigDir() {
   return path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'), 'golem');
 }
 
+/** Read the pid previously recorded by a dashboard instance, if any. */
+function readPreviousDashboardPid() {
+  const target = path.join(golemConfigDir(), 'dashboard.json');
+  try {
+    const doc = JSON.parse(fs.readFileSync(target, 'utf8'));
+    if (doc && typeof doc.pid === 'number') return doc.pid;
+  } catch {}
+  return null;
+}
+
+/** Spawn lsof to find the pid listening on a TCP port. Falls back to fuser. */
+function findListenerPid(port) {
+  const lsof = spawnSync('lsof', ['-nP', '-iTCP:' + port, '-sTCP:LISTEN', '-FpcL'], { encoding: 'utf8' });
+  if (lsof.error) {
+    const fuser = spawnSync('fuser', [port + '/tcp'], { encoding: 'utf8' });
+    if (fuser.error) {
+      return { pid: null, error: `cannot identify process holding port ${port} (lsof/fuser unavailable)` };
+    }
+    const m = String(fuser.stdout).match(/\d+/);
+    return { pid: m ? Number(m[0]) : null, error: null };
+  }
+  for (const line of String(lsof.stdout).split('\n')) {
+    if (line.startsWith('p')) {
+      const pid = Number(line.slice(1));
+      if (!Number.isNaN(pid)) return { pid, error: null };
+    }
+  }
+  return { pid: null, error: `lsof found no LISTEN process on port ${port}` };
+}
+
+/** Return true if a process with this pid is still alive. */
+function isProcessAlive(pid) {
+  try {
+    return process.kill(pid, 0);
+  } catch {
+    return false;
+  }
+}
+
+/** Short sleep helper for polling during graceful shutdown waits. */
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Look up the command name of a process for clearer error messages. */
+function getProcessComm(pid) {
+  const result = spawnSync('ps', ['-p', String(pid), '-o', 'comm='], { encoding: 'utf8' });
+  return (result.stdout || '').trim() || 'unknown';
+}
+
 async function main() {
   const fastify = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
   const state = createState();
-  await state.init();
+  // TKT-0107: tracker is opened BEFORE state.init() so the composite
+  // last_activity_at signal in the sidebar can read maxTicketUpdatedAt.
+  // (state.init(tracker) needs the tracker reference; previously init()
+  // took no args and the tracker wasn't wired in.)
+  // WS2: the dashboard is the SINGLE WRITER of the tracker DB. Open it once
   const chat = createChat();
   chat.start();
 
@@ -50,6 +105,12 @@ async function main() {
   // here (it auto-inits / migrates). GOLEM_TRACKER_DB override flows through
   // openTrackerDb → defaultDbPath. Closed in shutdown() below.
   const tracker = openTrackerDb();
+
+  // Load the dashboard state (projects, plans, milestones, channels). State
+  // init does an initial rediscover that consumes the tracker reference for
+  // per-project last-ticket-updated lookup. The auto-archive sweep (TKT-0105)
+  // and the discoverProjects call (TKT-0107) both need it.
+  await state.init(tracker);
 
   // Resolve a caller-supplied `project` query value to the canonical contract
   // project_id. Accepts either the contract id (passed straight through) OR a
@@ -115,13 +176,10 @@ async function main() {
 
   fastify.get('/api/workspaces', async () => state.workspaces());
 
-  fastify.get('/api/orchestrator', async () => state.orchestrator());
-
   // WS2: fold the tracker tables into every snapshot so a fresh client renders
-  // the board immediately (no extra round-trip). NOTE: state.snapshot() already
-  // carries a `tickets` key (legacy markdown tickets). We deliberately overlay
-  // the tracker-DB tickets here — the new board reads these — while keeping all
-  // other snapshot fields intact, and add `streams`.
+  // the board immediately (no extra round-trip). v4 snapshot carries projects,
+  // native_sessions, channels, recent_milestones; the tracker DB adds tickets
+  // and streams.
   function trackerSnapshot() {
     return {
       tickets: tracker.listTickets({}),
@@ -209,48 +267,8 @@ async function main() {
     }
     return result;
   });
-  fastify.post('/api/gates/:gateId/:decision', async (req, reply) => {
-    const { gateId, decision } = req.params;
-    if (!['approve', 'deny', 'cancel'].includes(decision)) {
-      return reply.code(400).send({ error: `unknown gate decision: ${decision}` });
-    }
-    const body = extractBody(req);
-    const sessionId = extractSessionId(req);
-    const extras = { gate_id: gateId };
-    if (sessionId) extras.session_id = sessionId;
-    chat.record('system', `gate_${decision}`, bodyToText(body) || `${decision} ${gateId}`, extras);
-
-    // 1) Authoritatively flip the gate file's status. The dashboard owns the
-    //    gate files, so a verdict is recorded on disk regardless of whether a
-    //    CEO is live to consume the channel push. This is the source of truth.
-    const fileResult = await writeGateVerdict(state.rawWorkspaces(), gateId, decision);
-
-    // 2) Best-effort: wake a live CEO via the channel so it resumes from the
-    //    verdict. A missing/unreachable channel is NOT a hard failure when the
-    //    file already flipped — the CEO (or the user) picks it up on resume.
-    let channelResult = null;
-    try {
-      channelResult = await pushGate(gateId, decision, body, sessionId);
-    } catch (err) {
-      channelResult = { ok: false, error: String(err?.message ?? err) };
-    }
-
-    state.refreshOrchestrator().catch(() => {});
-
-    if (!fileResult.ok) {
-      // The file didn't flip. If the channel push also failed, surface the
-      // error; if the channel accepted it, a live CEO will action it.
-      if (channelResult && !channelResult.ok) {
-        chat.record('system', 'error', `gate ${decision} ${gateId} failed: ${fileResult.error}`);
-        return reply.code(404).send({ ok: false, error: fileResult.error, channel: channelResult });
-      }
-    } else if (channelResult && !channelResult.ok) {
-      // File flipped but no channel to notify — surface a soft note, still 200.
-      chat.record('system', `gate_${decision}`, `gate ${gateId} ${DECISION_PAST[decision]} (no live CEO to notify — will resume on next session)`, extras);
-    }
-
-    return { ok: true, gate_id: gateId, decision, file: fileResult, channel: channelResult };
-  });
+  // v4: brief / interrupt / halt are delivered over per-session channels.
+  // Gate verdicts (v3 docs/agent-notes/gates/ flow) were removed in TKT-0009.
   fastify.get('/api/channel/health', async (req) => channelHealth(typeof req.query?.session === 'string' ? req.query.session : null));
   fastify.get('/api/channels', async () => listChannels());
 
@@ -260,26 +278,6 @@ async function main() {
     return state
       .projects()
       .find((x) => x.id === req.params.id);
-  });
-
-  fastify.get('/api/projects/:id/agents', async (req, reply) => {
-    const p = state.project(req.params.id);
-    if (!p) return reply.code(404).send({ error: 'not_found' });
-    return state.projectAgents(req.params.id);
-  });
-
-  fastify.get('/api/projects/:id/agents/:agentId', async (req, reply) => {
-    const p = state.project(req.params.id);
-    if (!p) return reply.code(404).send({ error: 'not_found' });
-    const a = state.agentDetail(req.params.id, req.params.agentId);
-    if (!a) return reply.code(404).send({ error: 'agent_not_found' });
-    return a;
-  });
-
-  fastify.get('/api/projects/:id/tickets', async (req, reply) => {
-    const p = state.project(req.params.id);
-    if (!p) return reply.code(404).send({ error: 'not_found' });
-    return state.projectTickets(req.params.id);
   });
 
   // v4: PLAN.md progress for a single project. Returns {total, done, items}
@@ -307,8 +305,7 @@ async function main() {
   });
 
   // ---- WS2: tracker REST (the dashboard is the SINGLE WRITER) ----
-  // Every mutation persists via `tracker` then broadcasts a WS delta. The
-  // legacy markdown routes (/api/projects/:id/tickets, /plan) stay untouched.
+  // Every mutation persists via `tracker` then broadcasts a WS delta.
 
   // GET /api/tickets — consolidated/filtered board feed. No `project` = all
   // projects. The DB filter key is `project_id`; the REST param is `project`.
@@ -370,20 +367,154 @@ async function main() {
     }
   });
 
+  // TKT-0105: POST /api/tickets/:id/move — atomic state + rank change used by
+  // drag-and-drop. Body: { state, before_id?, after_id?, actor? }. The endpoint
+  // computes the new rank from the neighbour tickets (midpoint if both given,
+  // otherwise appends to the target state). Replaces the old "PATCH with
+  // {state}" path for drag operations (Phase B tracker-board.jsx still calls
+  // PATCH; follow-up ticket will switch it to /move).
+  fastify.post('/api/tickets/:id/move', async (req, reply) => {
+    const id = req.params.id;
+    if (!tracker.getTicket(id)) return reply.code(404).send({ error: 'not_found' });
+    try {
+      const ticket = tracker.moveTicket(id, req.body ?? {});
+      broadcastWS({ type: 'ticket-updated', ticket });
+      return ticket;
+    } catch (err) {
+      return reply.code(400).send({ error: String(err?.message ?? err) });
+    }
+  });
+
+  // TKT-0105: POST /api/tickets/auto-archive/sweep — manual trigger for the
+  // 14-day done → archived sweep. Returns the list of archived ticket ids.
+  // The same sweep runs automatically every 6 hours (see setInterval below).
+  fastify.post('/api/tickets/auto-archive/sweep', async (req) => {
+    const ids = runAutoArchiveSweep();
+    if (ids.length > 0) {
+      broadcastWS({ type: 'tickets-batch-archived', ids });
+    }
+    return { archived: ids.length, ids };
+  });
+
+  // TKT-0106: ticket asset upload. Validates MIME, size, and filename; stores
+  // content-addressed under CONFIG.assetsDir; returns the public URL.
+  fastify.post('/api/ticket-assets', async (req, reply) => {
+    const b = req.body ?? {};
+    const { filename, mime, base64 } = b;
+    if (!filename || typeof filename !== 'string') return reply.code(400).send({ error: 'filename required' });
+    if (!mime || !CONFIG.assetAllowedMime.includes(mime)) {
+      return reply.code(400).send({ error: `mime must be one of ${CONFIG.assetAllowedMime.join(', ')}` });
+    }
+    if (typeof base64 !== 'string' || !base64) return reply.code(400).send({ error: 'base64 required' });
+    // Decode + size check (raw bytes, NOT the base64 string length).
+    const buf = Buffer.from(base64, 'base64');
+    if (buf.length === 0) return reply.code(400).send({ error: 'empty payload' });
+    if (buf.length > CONFIG.assetMaxBytes) {
+      return reply.code(413).send({ error: `payload too large (${buf.length} > ${CONFIG.assetMaxBytes})` });
+    }
+    // Sanitise filename to extension (rest ignored). Map mime → ext.
+    const ext = ({
+      'image/png':  'png',
+      'image/jpeg': 'jpg',
+      'image/gif':  'gif',
+      'image/webp': 'webp',
+    })[mime];
+    const hash = crypto.createHash('sha256').update(buf).digest('hex');
+    fs.mkdirSync(CONFIG.assetsDir, { recursive: true });
+    const relPath = `${hash}.${ext}`;
+    const fullPath = path.join(CONFIG.assetsDir, relPath);
+    if (!fs.existsSync(fullPath)) fs.writeFileSync(fullPath, buf);
+    return { url: `/api/ticket-assets/${relPath}`, filename, mime, size: buf.length };
+  });
+
+  // TKT-0106: serve a content-addressed asset. Reject anything that doesn't
+  // match the hash.ext pattern (defends against ../etc/passwd etc.).
+  fastify.get('/api/ticket-assets/:name', async (req, reply) => {
+    const name = req.params.name;
+    if (!/^[a-f0-9]{64}\.(png|jpg|gif|webp)$/.test(name)) {
+      return reply.code(400).send({ error: 'invalid asset name' });
+    }
+    const fullPath = path.join(CONFIG.assetsDir, name);
+    if (!fullPath.startsWith(CONFIG.assetsDir + path.sep) && fullPath !== CONFIG.assetsDir) {
+      return reply.code(400).send({ error: 'path traversal' });
+    }
+    if (!fs.existsSync(fullPath)) return reply.code(404).send({ error: 'not_found' });
+    const ext = name.split('.').pop();
+    const mime = ({ png: 'image/png', jpg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' })[ext];
+    const stream = fs.createReadStream(fullPath);
+    reply.header('Content-Type', mime);
+    reply.header('Cache-Control', 'public, max-age=31536000, immutable'); // hash-based, safe to cache forever
+    return reply.send(stream);
+  });
+
   // POST /api/tickets/:id/comments — add a comment. Broadcasts both the comment
   // delta AND a ticket-updated (addComment bumps the ticket's updated_at).
+  // POST /api/tickets/:id/comments — add a comment (plain or inline anchored).
+  // Body: { author, body, quote?, prefix?, suffix?, section?, section_id?, tag?, status?, parent_id? }
   fastify.post('/api/tickets/:id/comments', async (req, reply) => {
     const id = req.params.id;
     const b = req.body ?? {};
     try {
-      const comment = tracker.addComment(id, { author: b.author, body: b.body });
+      const comment = tracker.addComment(id, {
+        author: b.author,
+        body: b.body,
+        quote: b.quote,
+        prefix: b.prefix,
+        suffix: b.suffix,
+        section: b.section,
+        section_id: b.section_id,
+        tag: b.tag,
+        status: b.status,
+        parent_id: b.parent_id,
+      });
       broadcastWS({ type: 'ticket-comment', ticket_id: id, comment });
       const ticket = tracker.getTicket(id);
       if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
       return reply.code(201).send(comment);
     } catch (err) {
-      // addComment throws on unknown ticket / missing author|body. Treat a
-      // missing ticket as 404, everything else as 400.
+      const msg = String(err?.message ?? err);
+      const code = /not found/i.test(msg) ? 404 : 400;
+      return reply.code(code).send({ error: msg });
+    }
+  });
+
+  // PATCH /api/tickets/:id/comments/:cid — update a comment (status, tag, body).
+  fastify.patch('/api/tickets/:id/comments/:cid', async (req, reply) => {
+    const { id, cid } = req.params;
+    const b = req.body ?? {};
+    try {
+      const comment = tracker.updateComment(id, cid, {
+        body: b.body,
+        tag: b.tag,
+        status: b.status,
+      });
+      broadcastWS({ type: 'ticket-comment-updated', ticket_id: id, comment });
+      const ticket = tracker.getTicket(id);
+      if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
+      return comment;
+    } catch (err) {
+      const msg = String(err?.message ?? err);
+      const code = /not found/i.test(msg) ? 404 : 400;
+      return reply.code(code).send({ error: msg });
+    }
+  });
+
+  // POST /api/tickets/:id/comments/:cid/reply — add a reply to a comment.
+  fastify.post('/api/tickets/:id/comments/:cid/reply', async (req, reply) => {
+    const { id, cid } = req.params;
+    const b = req.body ?? {};
+    try {
+      const comment = tracker.addComment(id, {
+        author: b.author,
+        body: b.body,
+        parent_id: cid,
+        tag: 'note',
+      });
+      broadcastWS({ type: 'ticket-comment', ticket_id: id, comment });
+      const ticket = tracker.getTicket(id);
+      if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
+      return reply.code(201).send(comment);
+    } catch (err) {
       const msg = String(err?.message ?? err);
       const code = /not found/i.test(msg) ? 404 : 400;
       return reply.code(code).send({ error: msg });
@@ -581,19 +712,7 @@ async function main() {
           }
           return;
         }
-        if (msg.type === 'subscribe-agent' && msg.projectId && msg.agentId) {
-          const a = state.agentDetail(msg.projectId, msg.agentId);
-          if (a) {
-            socket.send(
-              JSON.stringify({
-                type: 'agent-detail',
-                projectId: msg.projectId,
-                agent: a,
-                ts: Date.now(),
-              }),
-            );
-          }
-        }
+        // v3 subscribe-agent removed in TKT-0009.
       });
 
       socket.on('close', () => sockets.delete(socket));
@@ -645,29 +764,97 @@ async function main() {
     }
   });
 
-  // Try to bind on configured port; if busy, increment up to +20.
-  const tryListen = async (startPort) => {
-    let lastErr;
-    for (let port = startPort; port < startPort + 20; port++) {
+  // TKT-0105: 14-day done → archived auto-archive sweep. Runs once on
+  // startup, then every 6 hours. The endpoint POST /api/tickets/auto-archive/sweep
+  // triggers the same function on demand for tests and admin overrides.
+  function runAutoArchiveSweep() {
+    try {
+      const ids = tracker.autoArchiveDone();
+      if (ids.length > 0) {
+        fastify.log.info({ count: ids.length }, 'auto-archived done tickets');
+        broadcastWS({ type: 'tickets-batch-archived', ids });
+      }
+      return ids;
+    } catch (err) {
+      fastify.log.warn({ err }, 'auto-archive sweep failed');
+      return [];
+    }
+  }
+  // Run once on startup so a freshly-restarted dashboard catches up.
+  setImmediate(() => runAutoArchiveSweep());
+  // Periodic sweep every 6 hours. Unref so it doesn't keep the event loop
+  // alive on shutdown.
+  const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
+  const sweepTimer = setInterval(runAutoArchiveSweep, SIX_HOURS_MS);
+  sweepTimer.unref();
+
+  // Pin to the canonical dashboard URL http://dashboard.golem.localhost:7420.
+  // If 7420 is busy, check whether the occupying process is the previous
+  // dashboard recorded in ~/.config/golem/dashboard.json. If so, terminate it
+  // gracefully and retry once. If it is any other process, refuse to kill it
+  // and exit with a clear error. We never walk to higher ports.
+  const tryListen = async (port) => {
+    const previousPid = readPreviousDashboardPid();
+
+    let bound = false;
+    try {
+      await fastify.listen({ host: CONFIG.host, port });
+      bound = true;
+    } catch (err) {
+      if (err.code !== 'EADDRINUSE') throw err;
+    }
+
+    if (bound) {
+      fastify.log.info(`dashboard listening on http://${CONFIG.host}:${port}`);
+      return port;
+    }
+
+    const holder = findListenerPid(port);
+    if (!holder.pid) {
+      throw new Error(holder.error || `port ${port} is in use but no listener was found`);
+    }
+
+    const { pid } = holder;
+    if (previousPid && pid === previousPid && isProcessAlive(previousPid)) {
+      fastify.log.info(`replacing previous dashboard pid=${previousPid}`);
+      try {
+        process.kill(previousPid, 'SIGTERM');
+      } catch (err) {
+        fastify.log.warn({ err }, `SIGTERM to previous dashboard pid=${previousPid} failed`);
+      }
+      const deadline = Date.now() + 3000;
+      while (Date.now() < deadline) {
+        if (!isProcessAlive(previousPid)) break;
+        await sleep(200);
+      }
+      if (isProcessAlive(previousPid)) {
+        fastify.log.warn(`previous dashboard pid=${previousPid} did not exit after 3s; sending SIGKILL`);
+        try {
+          process.kill(previousPid, 'SIGKILL');
+        } catch (err) {
+          fastify.log.warn({ err }, `SIGKILL to previous dashboard pid=${previousPid} failed`);
+        }
+        await sleep(1000);
+      }
       try {
         await fastify.listen({ host: CONFIG.host, port });
+        fastify.log.info(`dashboard listening on http://${CONFIG.host}:${port}`);
         return port;
       } catch (err) {
-        if (err.code === 'EADDRINUSE') {
-          lastErr = err;
-          continue;
-        }
-        throw err;
+        throw new Error(`port ${port} still in use after replacing previous dashboard: ${err.message}`);
       }
     }
-    throw lastErr ?? new Error('Could not bind any port');
+
+    const comm = getProcessComm(pid);
+    console.error(
+      `port ${port} is held by pid ${pid} (${comm}) — not the previous dashboard; refusing to kill it. Stop that process and retry.`,
+    );
+    process.exit(1);
   };
 
+  // Canonical URL is http://dashboard.golem.localhost:7420 (RFC 6761 *.localhost
+  // resolves to 127.0.0.1 — no /etc/hosts edit needed).
   const boundPort = await tryListen(CONFIG.port);
-  fastify.log.info(
-    `Substrate dashboard listening on http://${CONFIG.host}:${boundPort}` +
-      ` — projects root: ${CONFIG.projectsRoot}`,
-  );
 
   // WS2: self-register so WS3's MCP discovery can find the live dashboard.
   // Atomic write (tmp + rename) into ~/.config/golem/dashboard.json. Best-effort
@@ -679,7 +866,10 @@ async function main() {
     const target = path.join(dir, 'dashboard.json');
     const tmp = path.join(dir, `.dashboard.json.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`);
     const doc = {
-      url: `http://${CONFIG.host}:${boundPort}`,
+      url:
+        CONFIG.host === '127.0.0.1' && boundPort === 7420
+          ? `http://dashboard.golem.localhost:${boundPort}`
+          : `http://${CONFIG.host}:${boundPort}`,
       host: CONFIG.host,
       port: boundPort,
       pid: process.pid,

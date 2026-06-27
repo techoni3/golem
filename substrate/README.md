@@ -2,6 +2,11 @@
 
 The substrate is the global, project-agnostic layer of golem. It contains personas, skills, hook scripts, and the project-bootstrap template. Edited rarely. Used by every project.
 
+> **v4 CLI note:** The unified `golem` bash CLI (`substrate/bin/golem`) was
+> retired in TKT-0011. The surviving commands live in the Node-based
+> [`../cli/golem.js`](../cli/golem.js). Run `npm link` from the repo root to
+> expose `golem` on PATH, or use `npx golem <command>` from the repo root.
+
 Authoritative design: [`../project_management/design/design_v1.md`](../project_management/design/design_v1.md).
 
 ## Layout

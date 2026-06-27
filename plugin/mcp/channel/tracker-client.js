@@ -27,14 +27,15 @@ function golemConfigDir() {
   );
 }
 
-const DEFAULT_BASE_URL = 'http://127.0.0.1:7420';
+const DEFAULT_BASE_URL = 'http://dashboard.golem.localhost:7420';
 
 /**
  * Resolve the dashboard base URL.
  * Reads `<config>/golem/dashboard.json` (written by the dashboard's self-
  * registration block, shape `{url,host,port,pid,started_at}`) and returns its
- * `url`. Falls back to the dashboard's default bind (http://127.0.0.1:7420)
- * when the file is missing/unreadable or carries no usable url.
+ * `url`. Falls back to the dashboard's canonical URL
+ * (http://dashboard.golem.localhost:7420) when the file is missing/unreadable
+ * or carries no usable url.
  * @returns {string}
  */
 export function dashboardBaseUrl() {
@@ -61,11 +62,19 @@ export function dashboardBaseUrl() {
  * @returns {string|null}
  */
 export function currentSessionId() {
-  return (
-    process.env.GOLEM_CEO_SESSION_ID ||
-    process.env.CLAUDE_CODE_SESSION_ID ||
-    null
-  );
+  // Explicit launcher override wins; otherwise the LOGICAL id from the parent
+  // claude process's session file (~/.claude/sessions/<ppid>.json) — this MCP
+  // child is a direct child of it. CLAUDE_CODE_SESSION_ID is a per-run id that
+  // diverges from the logical id on resume, so it's only a last resort. Keep in
+  // lockstep with index.js deriveSessionId() so ticket actor ids match the
+  // channel registry and the dashboard.
+  if (process.env.GOLEM_CEO_SESSION_ID) return process.env.GOLEM_CEO_SESSION_ID;
+  try {
+    const f = path.join(os.homedir(), '.claude', 'sessions', `${process.ppid}.json`);
+    const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+    if (j && typeof j.sessionId === 'string' && j.sessionId) return j.sessionId;
+  } catch { /* missing / unreadable — fall through */ }
+  return process.env.CLAUDE_CODE_SESSION_ID || null;
 }
 
 /**
@@ -212,12 +221,24 @@ export function updateTicket(id, patch) {
   return request('PATCH', `/api/tickets/${encodeURIComponent(id)}`, { body: patch });
 }
 
-/** POST /api/tickets/:id/comments {author,body} */
-export function addComment(id, { author, body } = {}) {
+/** POST /api/tickets/:id/comments {author,body,quote?,prefix?,suffix?,section?,section_id?,tag?,status?,parent_id?} */
+export function addComment(id, input = {}) {
   if (!id) throw new Error('addComment: id is required');
-  return request('POST', `/api/tickets/${encodeURIComponent(id)}/comments`, {
-    body: { author, body },
-  });
+  return request('POST', `/api/tickets/${encodeURIComponent(id)}/comments`, { body: input });
+}
+
+/** PATCH /api/tickets/:id/comments/:cid {body?,tag?,status?} */
+export function updateComment(id, commentId, patch) {
+  if (!id) throw new Error('updateComment: id is required');
+  if (!commentId) throw new Error('updateComment: commentId is required');
+  return request('PATCH', `/api/tickets/${encodeURIComponent(id)}/comments/${encodeURIComponent(commentId)}`, { body: patch });
+}
+
+/** POST /api/tickets/:id/comments/:cid/reply {author,body} */
+export function replyComment(id, commentId, body) {
+  if (!id) throw new Error('replyComment: id is required');
+  if (!commentId) throw new Error('replyComment: commentId is required');
+  return request('POST', `/api/tickets/${encodeURIComponent(id)}/comments/${encodeURIComponent(commentId)}/reply`, { body });
 }
 
 /** POST /api/tickets/:id/dispatch {session_id,note?} */

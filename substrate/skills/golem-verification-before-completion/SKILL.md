@@ -81,7 +81,7 @@ Append to the ticket's hand-off log:
 - Result: pass
 ```
 
-If the result is `fail`, the ticket stays in `tracker/in-progress/` until verification passes. Do not open the PR.
+If the result is `fail`, the ticket stays in `state: 'in_progress'` in the dashboard tracker until verification passes. Do not open the PR.
 
 ## Anti-patterns
 
@@ -95,5 +95,5 @@ If the result is `fail`, the ticket stays in `tracker/in-progress/` until verifi
 ## When this skill is wrong
 
 - The ticket is a spike, explicitly marked as such, where the deliverable is "what we learned" rather than working code. Write the spike outcome instead.
-- The ticket is `category: docs` and has no behaviour to verify — verification reduces to "lint passes" + "the doc is published".
+- The ticket has label `docs` and has no behaviour to verify — verification reduces to "lint passes" + "the doc is published".
 - The change is genuinely too small to warrant the full procedure (e.g. a typo in a string literal). The hand-off log should still note that verification was abbreviated and why.

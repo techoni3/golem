@@ -1,90 +1,73 @@
-// Owns in-memory dashboard state for ALL projects.
-// - Maintains one journal store per project.
-// - Loads tickets per project (re-read on tracker/ change).
-// - Exposes snapshot() for REST + WS-init.
-// - Watches files via chokidar; on change, refreshes minimal state and emits
-//   delta events that the WS layer broadcasts.
+// Owns in-memory dashboard state for ALL projects (v4 only).
+//
+// v4 state surface:
+//   - Discovered projects + PLAN.md progress per project.
+//   - Native Claude Code sessions on this machine.
+//   - Live channel registrations (for brief/interrupt routing).
+//   - Cross-project milestone feed from the central journal.
+//
+// What was removed with the v3 journal-agent pipeline:
+//   - per-project journal stores and synthesized agents
+//   - markdown tracker/ tickets
+//   - v3 orchestrator snapshot, gates, CEO session registry
 //
 // Event taxonomy emitted to listeners:
 //   { type: 'project-update', project }
-//   { type: 'agents-update',  projectId, agents }      // full agent list for that project
-//   { type: 'agent-detail',   projectId, agent }       // a single agent's full record (journal+hooks)
-//   { type: 'tickets-update', projectId, tickets }
-//   { type: 'projects-list',  projects }               // when discovery rescans
-//
-// Coarse-grained agents-update + tickets-update are simpler than per-event
-// diffs and are still cheap given the data sizes we expect.
+//   { type: 'projects-list',  projects }
+//   { type: 'native-sessions-update', native_sessions, channels }
 
 import { EventEmitter } from 'node:events';
 import path from 'node:path';
 import chokidar from 'chokidar';
 import { CONFIG } from './config.js';
 import { discoverProjects } from './projects.js';
-import { createJournalStore } from './journal.js';
-import { readTickets, ticketProgress } from './tracker.js';
-import { orchestratorSnapshot, readDeadSessionIds, readLiveTeammates, readChannels } from './orchestrator.js';
-import { readNativeSessions } from './native-sessions.js';
 import { readPlan } from './plan.js';
+import { readNativeSessions } from './native-sessions.js';
+import { readChannels } from './channels.js';
+import { readProjectMilestones } from './milestones.js';
 
 export function createState() {
   const ee = new EventEmitter();
   ee.setMaxListeners(64);
 
-  /** @type {Map<string, ReturnType<typeof createJournalStore>>} */
-  const stores = new Map();
-  /** @type {Map<string, any[]>} */
-  const tickets = new Map();
-  /** v4: parsed PLAN.md per project id ({title,total,done,items}|null). */
-  const plans = new Map();
-  /** @type {any[]} */
+  /** @type {Array} */
   let projects = [];
   /** @type {Map<string, any>} */
   const projectsById = new Map();
-  /** v4: latest native_sessions[] (all Claude Code sessions, not just golem). */
+  /** @type {Map<string, {title,total,done,items}|null>} */
+  const plans = new Map();
+  /** @type {Map<string, Array<{t:number,text:string,session_id:string|null}>>} */
+  const milestonesByProject = new Map();
+
+  /** @type {any[]} */
   let nativeSessions = [];
-  /** v4: live channel registrations (session_id → {host,port,url}). Polled on
-   *  the orchestrator tick so the command-center home can decide, per native
-   *  session, whether a brief/interrupt can be delivered — without a per-route
-   *  fetch. Each: {session_id, pid, host, port, url, version, started_at}. */
+  /** @type {any[]} */
   let channels = [];
 
   let watcher = null;
   let rediscoverTimer = null;
-  let orchestratorTimer = null;
-  /** Last computed orchestrator snapshot (so REST can return without async). */
-  let orchestratorState = { ceo: null, sessions: [], workspaces: [], headlineMemo: null, gates: [], gateCounts: { awaiting: 0, approved: 0, denied: 0, cancelled: 0, total: 0 } };
-  /** Session_ids the registry has marked dead — used to demote ghost CEO agents. */
-  let deadSessionIds = new Set();
-  /** "<team> <member>" keys for teammates the team registry reports isActive — keeps idle-but-alive teammates from being demoted to 'done' on mtime. */
-  let liveTeammates = new Set();
-  // Coalesce file events (chokidar fires "change" for every fs.write tick).
+  let nativeSessionsTimer = null;
   const refreshTimers = new Map();
 
   function projectSummary(p) {
-    const store = stores.get(p.id);
-    const ts = tickets.get(p.id) ?? [];
-    const agents = store ? store.snapshotAgents({ deadSessionIds, liveTeammates }) : [];
-    const live = agents.filter((a) => a.status === 'active' || a.status === 'running').length;
     const plan = plans.get(p.id) ?? null;
-    const milestones = store ? store.snapshotMilestones() : [];
+    const milestones = milestonesByProject.get(p.id) ?? [];
     return {
       id: p.id,
       project_id: p.project_id ?? null,
       kind: p.kind,
-      // v4: hook-registered (kind:"auto" in the registry) projects render like
-      // external ones but keep this flag so the UI can badge them.
       auto: !!p.auto,
       name: p.name,
       glyph: p.glyph,
       color: p.color,
       description: p.description,
-      progress: ticketProgress(ts),
-      total_agents: agents.length,
-      live_agents: live,
-      total_tickets: ts.length,
-      has_journal: !!p.hasJournal,
-      journal_central: !!p.journalCentral,
-      gates_central: !!p.gatesCentral,
+      // TKT-0010: recency used for ordering and stale demotion.
+      // TKT-0107: now derives from the composite last_activity_at (live
+      // session heartbeat > ticket updated_at > journal mtime > git commit
+      // > workspace mtime). Kept under both keys for backward compat.
+      last_seen_at: p.last_activity_at ?? p.last_seen_at ?? 0,
+      last_activity_at: p.last_activity_at ?? 0,
+      stale: !!p.stale,
       // v4: PLAN.md progress (null when the project has no PLAN.md).
       plan: plan ? { title: plan.title, total: plan.total, done: plan.done, items: plan.items } : null,
       // v4: project-level milestone feed (primary progress signal).
@@ -93,9 +76,7 @@ export function createState() {
   }
 
   // v4: merge every project's milestone feed into one newest-first list,
-  // stamped with the owning project's id / name / color / glyph so the
-  // command-center home can render a cross-project feed with NO per-project
-  // fetches. Capped to keep the snapshot payload bounded.
+  // stamped with the owning project's id / name / color / glyph.
   function recentMilestones(summaries, cap = 40) {
     const merged = [];
     for (const p of summaries) {
@@ -116,37 +97,23 @@ export function createState() {
   }
 
   function snapshot() {
+    // The dashboard / substrate developer's primary workspace is the golem
+    // repo root, registered with kind: 'root'. Include it alongside projects
+    // and externals so the tracker / sidebar can find it. (TKT-0008 removed
+    // the synthetic discoverRoot() but left the registry entry stranded.)
     const projectSummaries = projects
-      .filter((p) => (p.kind === 'project' || p.kind === 'root' || p.kind === 'external'))
+      .filter((p) => p.kind === 'project' || p.kind === 'external' || p.kind === 'root')
       .map(projectSummary);
     return {
       projects: projectSummaries,
       workspaces: projects.map(projectSummary),
-      orchestrator: orchestratorState,
-      agents: [].concat(...[...stores.values()].map((s) => s.snapshotAgents({ deadSessionIds, liveTeammates }))),
-      tickets: [].concat(...tickets.values()),
-      // v4: ALL Claude Code sessions on this machine (not just substrated).
+      // v4: ALL Claude Code sessions on this machine.
       native_sessions: nativeSessions,
-      // v4: live channel registrations — lets the home rail decide per session
-      // whether briefs/interrupts can be delivered without a /api/channels call.
+      // v4: live channel registrations.
       channels,
       // v4: cross-project milestone feed (primary progress signal), newest first.
       recent_milestones: recentMilestones(projectSummaries),
     };
-  }
-
-  function projectAgents(projectId) {
-    const s = stores.get(projectId);
-    return s ? s.snapshotAgents({ deadSessionIds, liveTeammates }) : [];
-  }
-
-  function agentDetail(projectId, agentId) {
-    const s = stores.get(projectId);
-    return s ? s.snapshotAgentDetail(agentId) : null;
-  }
-
-  function projectTickets(projectId) {
-    return tickets.get(projectId) ?? [];
   }
 
   function projectPlan(projectId) {
@@ -157,13 +124,7 @@ export function createState() {
     return projectsById.get(id) ?? null;
   }
 
-  // v4: decide whether a native session belongs to a registered project. Used
-  // for the "unregistered" UI badge. Pure/sync over the in-memory project list.
-  // Matches in priority order:
-  //   1. the resolved project root path equals a registered project path
-  //   2. the session cwd equals, or is nested under, a registered project path
-  //      (catches the case where the contract root-walk overshoots a registered
-  //      subdir to a parent .git/CLAUDE.md, e.g. a home-level CLAUDE.md).
+  // v4: decide whether a native session belongs to a registered project.
   function registeredIdForPath(rootPath, cwd) {
     for (const p of projects) {
       if (rootPath && p.path === rootPath) return p.id;
@@ -176,30 +137,6 @@ export function createState() {
     return null;
   }
 
-  async function refreshTickets(projectId) {
-    const p = projectsById.get(projectId);
-    if (!p) return;
-    const ts = await readTickets(p);
-    tickets.set(projectId, ts);
-    ee.emit('event', { type: 'tickets-update', projectId, tickets: ts });
-    ee.emit('event', { type: 'project-update', project: projectSummary(p) });
-  }
-
-  async function refreshJournal(projectId) {
-    const s = stores.get(projectId);
-    const p = projectsById.get(projectId);
-    if (!s || !p) return;
-    await s.refresh();
-    ee.emit('event', {
-      type: 'agents-update',
-      projectId,
-      agents: s.snapshotAgents({ deadSessionIds, liveTeammates }),
-    });
-    ee.emit('event', { type: 'project-update', project: projectSummary(p) });
-  }
-
-  // v4: re-read a single project's PLAN.md (on chokidar change) and re-emit the
-  // project summary so the progress bar updates live.
   async function refreshPlan(projectId) {
     const p = projectsById.get(projectId);
     if (!p) return;
@@ -207,9 +144,14 @@ export function createState() {
     ee.emit('event', { type: 'project-update', project: projectSummary(p) });
   }
 
-  // v4: poll all native Claude Code sessions on the orchestrator tick. Merged
-  // into the snapshot as native_sessions[]; broadcast as its own event so the
-  // UI updates without a full snapshot.
+  async function refreshMilestones(projectId) {
+    const p = projectsById.get(projectId);
+    if (!p) return;
+    const ms = await readProjectMilestones(p);
+    milestonesByProject.set(projectId, ms);
+    ee.emit('event', { type: 'project-update', project: projectSummary(p) });
+  }
+
   async function refreshNativeSessions() {
     try {
       const [sessions, chans] = await Promise.all([
@@ -243,80 +185,37 @@ export function createState() {
   function watchedPaths() {
     const paths = [];
     for (const p of projects) {
-      if ((p.kind === 'project' || p.kind === 'root' || p.kind === 'external')) {
-        paths.push(p.hookFile);
-        paths.push(p.summaryFile);
-        paths.push(p.trackerDir);
-        // v4: watch PLAN.md so the progress bar updates live. chokidar watches
-        // a not-yet-existing path fine and fires `add` when it appears.
+      if ((p.kind === 'project' || p.kind === 'external')) {
+        // v4: watch PLAN.md so the progress bar updates live.
         if (p.planFile) paths.push(p.planFile);
+        // v4: watch central/legacy journal files so the milestone feed updates live.
+        if (p.hookFile) paths.push(p.hookFile);
+        if (p.summaryFile) paths.push(p.summaryFile);
       }
-      paths.push(p.gatesDir);
     }
     return paths;
   }
 
-  async function refreshOrchestrator() {
-    try {
-      const [snap, dead, liveTm] = await Promise.all([
-        orchestratorSnapshot(projects),
-        readDeadSessionIds(),
-        readLiveTeammates(),
-      ]);
-      orchestratorState = snap;
-      // Detect transitions so we can poke agent panels that newly have ghosts.
-      const newlyDead = new Set();
-      for (const sid of dead) if (!deadSessionIds.has(sid)) newlyDead.add(sid);
-      deadSessionIds = dead;
-      liveTeammates = liveTm;
-      ee.emit('event', { type: 'orchestrator-update', orchestrator: orchestratorState });
-      if (newlyDead.size > 0) {
-        for (const p of projects) {
-          if (p.kind !== 'project' && p.kind !== 'root' && p.kind !== 'external') continue;
-          ee.emit('event', {
-            type: 'agents-update',
-            projectId: p.id,
-            agents: projectAgents(p.id),
-          });
-        }
-      }
-    } catch (err) {
-      console.error('[orchestrator]', err);
-    }
-  }
-
   async function rediscover() {
-    const next = await discoverProjects();
+    const next = await discoverProjects({ tracker: trackerRef, nativeSessions });
     const nextIds = new Set(next.map((p) => p.id));
     const prevIds = new Set(projects.map((p) => p.id));
 
     // Remove projects that disappeared.
     for (const id of prevIds) {
       if (!nextIds.has(id)) {
-        stores.delete(id);
-        tickets.delete(id);
         plans.delete(id);
+        milestonesByProject.delete(id);
         projectsById.delete(id);
       }
     }
-    // Add new workspaces. Only kind='project'/'root'/'external' gets a journal
-    // store + tickets. Every workspace gets a PLAN.md read (v4).
+
+    // Read PLAN.md + milestones for every project (new ones only to avoid
+    // clobbering a fresher chokidar read).
     for (const p of next) {
       if (!prevIds.has(p.id)) {
-        if ((p.kind === 'project' || p.kind === 'root' || p.kind === 'external')) {
-          const s = createJournalStore(p);
-          await s.bootstrap();
-          stores.set(p.id, s);
-          const ts = await readTickets(p);
-          tickets.set(p.id, ts);
-        } else {
-          tickets.set(p.id, []);
-        }
-      }
-      // Read PLAN.md for new projects (and re-read on rediscovery is cheap;
-      // restrict to first-seen to avoid clobbering a fresher chokidar read).
-      if (!prevIds.has(p.id)) {
         plans.set(p.id, await readPlan(p.path));
+        milestonesByProject.set(p.id, await readProjectMilestones(p));
       }
       projectsById.set(p.id, p);
     }
@@ -330,75 +229,51 @@ export function createState() {
     watcher = chokidar.watch(watchedPaths(), {
       persistent: true,
       ignoreInitial: true,
-      depth: 4,
-      // Tracker dirs see lots of file moves; smooth them out.
+      // Journal files see lots of appends; smooth them out.
       awaitWriteFinish: { stabilityThreshold: 80, pollInterval: 40 },
     });
 
     watcher
-      .on('add', onTrackerOrJournalChange)
-      .on('change', onTrackerOrJournalChange)
-      .on('unlink', onTrackerOrJournalChange)
-      .on('addDir', onTrackerOrJournalChange)
-      .on('unlinkDir', onTrackerOrJournalChange)
+      .on('add', onProjectFileChange)
+      .on('change', onProjectFileChange)
+      .on('unlink', onProjectFileChange)
       .on('error', (err) => console.error('[watcher]', err));
 
     ee.emit('event', { type: 'projects-list', projects: projects.map(projectSummary) });
   }
 
-  function onTrackerOrJournalChange(filePath) {
-    // Determine which workspace this path belongs to and which subsystem.
+  function onProjectFileChange(filePath) {
     for (const p of projects) {
-      if ((p.kind === 'project' || p.kind === 'root' || p.kind === 'external')) {
-        if (filePath === p.hookFile || filePath === p.summaryFile) {
-          debouncedRefresh(`journal:${p.id}`, () => refreshJournal(p.id));
-          return;
-        }
+      if ((p.kind === 'project' || p.kind === 'external')) {
         if (p.planFile && filePath === p.planFile) {
           debouncedRefresh(`plan:${p.id}`, () => refreshPlan(p.id));
           return;
         }
-        if (filePath.startsWith(p.trackerDir + path.sep) || filePath === p.trackerDir) {
-          debouncedRefresh(`tracker:${p.id}`, () => refreshTickets(p.id));
+        if ((p.hookFile && filePath === p.hookFile) || (p.summaryFile && filePath === p.summaryFile)) {
+          debouncedRefresh(`milestones:${p.id}`, () => refreshMilestones(p.id));
           return;
         }
-      }
-      if (filePath === p.gatesDir || filePath.startsWith(p.gatesDir + path.sep)) {
-        debouncedRefresh('orchestrator', refreshOrchestrator, 200);
-        return;
       }
     }
   }
 
-  async function init() {
+  // TKT-0107: tracker reference is set by main() before init() runs. We keep
+  // it as a closure variable rather than a module export so dashboard server
+  // keeps single-owner semantics on the DB connection.
+  let trackerRef = null;
+
+  async function init(tracker = null) {
+    trackerRef = tracker;
     await rediscover();
-    await refreshOrchestrator();
     await refreshNativeSessions();
-    // Polling rediscovery every 30s catches new projects added under
-    // GOLEM_PROJECTS_ROOT after the dashboard starts.
+
+    // Periodic rediscovery catches new projects added after the dashboard starts.
     rediscoverTimer = setInterval(() => {
       rediscover().catch((err) => console.error('[rediscover]', err));
     }, 30_000);
 
-    // Periodic refresh tick: status transitions from "active" → "done" are
-    // time-driven (no explicit event), so we re-emit at low frequency.
-    setInterval(() => {
-      for (const p of projects) {
-        if (p.kind !== 'project') continue;
-        ee.emit('event', {
-          type: 'agents-update',
-          projectId: p.id,
-          agents: projectAgents(p.id),
-        });
-      }
-    }, 5_000);
-
-    // Orchestrator tick: CEO session liveness + memo discovery is poll-based
-    // (we don't watch ~/.claude/projects/ — sessions append constantly). v4:
-    // native session discovery rides the same tick (pid + native status, not
-    // mtime, so polling is cheap and correct).
-    orchestratorTimer = setInterval(() => {
-      refreshOrchestrator();
+    // Native session + channel liveness is poll-based.
+    nativeSessionsTimer = setInterval(() => {
       refreshNativeSessions();
     }, 3_000);
   }
@@ -406,7 +281,7 @@ export function createState() {
   async function close() {
     if (watcher) await watcher.close();
     if (rediscoverTimer) clearInterval(rediscoverTimer);
-    if (orchestratorTimer) clearInterval(orchestratorTimer);
+    if (nativeSessionsTimer) clearInterval(nativeSessionsTimer);
     for (const t of refreshTimers.values()) clearTimeout(t);
     refreshTimers.clear();
   }
@@ -417,19 +292,11 @@ export function createState() {
     on: (...args) => ee.on(...args),
     off: (...args) => ee.off(...args),
     snapshot,
-    projects: () => projects.filter((p) => (p.kind === 'project' || p.kind === 'root' || p.kind === 'external')).map(projectSummary),
+    projects: () => projects.filter((p) => (p.kind === 'project' || p.kind === 'external')).map(projectSummary),
     workspaces: () => projects.map(projectSummary),
     project,
-    projectAgents,
-    agentDetail,
-    projectTickets,
     projectPlan,
     nativeSessions: () => nativeSessions,
     channels: () => channels,
-    orchestrator: () => orchestratorState,
-    refreshOrchestrator,
-    // Raw discovered workspace records (carry gatesDir / journalDir / paths).
-    // Used by the gate route to flip a gate file's status authoritatively.
-    rawWorkspaces: () => projects,
   };
 }

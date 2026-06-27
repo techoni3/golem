@@ -3,17 +3,63 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Substrate · Admin</title>
+  <title>Golem · Dashboard</title>
   <link rel="stylesheet" href="styles.css"/>
   <link rel="stylesheet" href="extra.css"/>
 </head>
 <body>
   <div id="root"></div>
 
-  <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
+  <!-- Babel-standalone transforms <script type="text/babel"> tags at runtime.
+       Loaded synchronously BEFORE the ESM React block so babel is available
+       to discover and transform the JSX components. The mount happens inside
+       the ESM block (after window.React is set). -->
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js"></script>
-  <script src="https://unpkg.com/marked@14.1.4/marked.min.js"></script>
+
+  <!-- TKT-0103: load React/ReactDOM as ESM modules and assign them to
+       window.React/window.ReactDOM. This is the SINGLE source of truth for
+       React — every other script (babel-transformed JSX, @dnd-kit) reads
+       from these globals, so there's only one React instance (avoids the
+       "two Reacts" anti-pattern that hooks "useMemo of null" against). -->
+  <script type="module">
+    import * as ReactNS from 'https://esm.sh/react@18.3.1';
+    import * as ReactDOMNS from 'https://esm.sh/react-dom@18.3.1';
+    import * as ReactDOMClientNS from 'https://esm.sh/react-dom@18.3.1/client';
+    window.React = ReactNS.default || ReactNS;
+    window.ReactDOM = ReactDOMNS.default || ReactDOMNS;
+    window.ReactDOMClient = ReactDOMClientNS;
+    window.__reactReady = true;
+    window.dispatchEvent(new CustomEvent('react-ready'));
+    // The mount itself is performed by app.jsx (which polls for
+    // window.ReactDOMClient) so we have exactly one mount point.
+  </script>
+
+  <!-- TKT-0103: import map so the @dnd-kit/core ESM module can resolve its
+       bare "react" / "react-dom" imports to esm.sh instances that share
+       state with the UMD React loaded above (via `external=react,react-dom`). -->
+  <script type="importmap">
+  {
+    "imports": {
+      "react": "https://esm.sh/react@18.3.1",
+      "react-dom": "https://esm.sh/react-dom@18.3.1",
+      "@dnd-kit/core": "https://esm.sh/@dnd-kit/core@6.3.1?external=react,react-dom",
+      "@dnd-kit/sortable": "https://esm.sh/@dnd-kit/sortable@10.0.0?external=react,react-dom",
+      "@dnd-kit/utilities": "https://esm.sh/@dnd-kit/utilities@3.2.2?external=react,react-dom"
+    }
+  }
+  </script>
+
+  <!-- TKT-0103: load @dnd-kit/core as a real ES module and re-export onto
+       window so babel-standalone (which transforms `import` → `require` and
+       thus cannot use bare ESM specifiers itself) can reach the bindings
+       via plain globals. Must run BEFORE tracker-board.jsx's babel script. -->
+  <script type="module">
+    import * as dnd from 'https://esm.sh/@dnd-kit/core@6.3.1?external=react,react-dom';
+    window.__dndkit = dnd;
+    // Signal so tracker-board.jsx can wait for this before reading the globals.
+    window.__dndkitReady = true;
+    window.dispatchEvent(new CustomEvent('dndkit-ready'));
+  </script>
 
   <!-- Live data store (plain JS, must load before babel-transformed components) -->
   <script src="src/api.js"></script>
@@ -25,16 +71,17 @@
   <script type="text/babel" data-presets="env,react" src="src/atoms.jsx"></script>
   <script type="text/babel" data-presets="env,react" src="src/shell.jsx"></script>
   <script type="text/babel" data-presets="env,react" src="src/dashboard.jsx"></script>
-  <script type="text/babel" data-presets="env,react" src="src/drawer.jsx"></script>
   <script type="text/babel" data-presets="env,react" src="src/streams-panel.jsx"></script>
   <script type="text/babel" data-presets="env,react" src="src/project-view.jsx"></script>
   <script type="text/babel" data-presets="env,react" src="src/tracker-board.jsx"></script>
   <script type="text/babel" data-presets="env,react" src="src/create-ticket.jsx"></script>
+  <script type="text/babel" data-presets="env,react" src="src/td-annotate.jsx"></script>
   <script type="text/babel" data-presets="env,react" src="src/ticket-drawer.jsx"></script>
   <script type="text/babel" data-presets="env,react" src="src/other-pages.jsx"></script>
   <script type="text/babel" data-presets="env,react" src="src/tweaks.jsx"></script>
   <script type="text/babel" data-presets="env,react" src="src/orchestrator.jsx"></script>
   <script type="text/babel" data-presets="env,react" src="src/drawer-ceo.jsx"></script>
+  <script type="text/babel" data-presets="env,react" src="src/native-session-drawer.jsx"></script>
   <script type="text/babel" data-presets="env,react" src="src/app.jsx"></script>
 </body>
 </html>

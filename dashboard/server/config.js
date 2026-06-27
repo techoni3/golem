@@ -33,8 +33,19 @@ export const CONFIG = {
   // Cap on retained tool events per agent.
   hookCapPerAgent: parseInt(process.env.GOLEM_HOOK_CAP ?? '500', 10),
   journalCapPerAgent: parseInt(process.env.GOLEM_JOURNAL_CAP ?? '200', 10),
+  // TKT-0106: ticket asset directory. Content-addressed image storage used by
+  // /api/ticket-assets (upload + serve).
+  assetsDir:
+    process.env.GOLEM_ASSETS_DIR ??
+    path.join(HOME, '.config', 'golem', 'ticket-assets'),
+  // TKT-0106: max asset size in bytes. Defaults to 10 MB.
+  assetMaxBytes: parseInt(process.env.GOLEM_ASSET_MAX_BYTES ?? `${10 * 1024 * 1024}`, 10),
+  // TKT-0106: allowed MIME types for upload.
+  assetAllowedMime: ['image/png', 'image/jpeg', 'image/gif', 'image/webp'],
   // Cap on retained CEO chat messages (user briefs + CEO acks/responses).
   chatCap: parseInt(process.env.GOLEM_CHAT_CAP ?? '200', 10),
   // How often the SSE consumer retries when the channel server is unreachable.
   chatReconnectMs: parseInt(process.env.GOLEM_CHAT_RECONNECT_MS ?? '3000', 10),
+  // Number of days since last project activity before it is considered stale.
+  projectStaleDays: parseInt(process.env.GOLEM_PROJECT_STALE_DAYS ?? '30', 10),
 };

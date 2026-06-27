@@ -1,128 +1,172 @@
 // Agents / Projects / Logs pages. All read live store.
 
-// Cap on how many DONE/legacy substrate agents we ever render at once. The
-// harness can carry hundreds of historical agents (this repo's v3 journal had
-// ~400 DONE); rendering all of them buries the live view and is pointless.
-const DONE_AGENTS_RENDER_CAP = 50;
-
-function AgentCard({ agent: a, setRoute }) {
-  const role = window.Store.getRole(a.role);
-  const project = window.Store.getProject(a.project);
-  const isLive = ['active', 'running', 'review'].includes(a.status);
-  const runtime = a.started && isLive ? (Date.now() - a.started) / 1000 : a.runtime;
-  return (
-    <div
-      className="agent-card"
-      onClick={() => setRoute({ kind: 'project', id: a.project, tab: 'agents', agentId: a.id })}
-    >
-      <Avatar role={a.role} size={36} pulse={a.status === 'running'}/>
-      <div className="agent-card-body">
-        <div className="agent-card-row1">
-          <div>
-            <div className="agent-card-name">{a.name}</div>
-            <div className="agent-card-role">
-              {role.label} · {project?.name ?? a.project}
-            </div>
-          </div>
-          <StatusPill status={a.status}/>
-        </div>
-        <div className="agent-card-action" title={a.action || ''}>
-          {a.action || <span style={{ color: 'var(--text-4)' }}>—</span>}
-        </div>
-        <div className="agent-card-meta">
-          <span className="agent-card-meta-item"><Icon.Clock/>{window.SubstrateFmt.fmtRuntime(runtime)}</span>
-          <span className="agent-card-meta-item"><Icon.Tool/>{a.tools} hooks</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function AgentsPage({ setRoute }) {
   useStore();
-  const [showDone, setShowDone] = React.useState(false);
+  const all = window.Store.getNativeSessions();
 
-  const all = window.Store.getAllAgents();
-  // v4 (fix round 2, defect 4): the harness accumulates hundreds of historical
-  // (DONE) agents. Surface LIVE ones (active/running/review) ungated; collapse
-  // the rest behind a toggle that renders at most the 50 most-recent. Mirrors
-  // the project-page legacy demotion pattern.
-  const liveAgents = all
-    .filter((a) => ['active', 'running', 'review'].includes(a.status))
-    .sort((a, b) => {
-      const order = { active: 0, running: 1, review: 2 };
-      const d = (order[a.status] ?? 9) - (order[b.status] ?? 9);
-      if (d !== 0) return d;
-      return (b.last_seen ?? b.started ?? 0) - (a.last_seen ?? a.started ?? 0);
-    });
-  const doneAgents = all
-    .filter((a) => !['active', 'running', 'review'].includes(a.status))
-    .sort((a, b) => (b.last_seen ?? b.started ?? 0) - (a.last_seen ?? a.started ?? 0));
-  const doneShown = doneAgents.slice(0, DONE_AGENTS_RENDER_CAP);
+  // v4: the server already pid-checks native sessions and marks them .alive.
+  // Drop anything not alive so dead registry rows / stale CLI entries never
+  // render on the Agents page.
+  const alive = all.filter((s) => s.alive);
 
-  const nativeSessions = window.Store.getNativeSessions();
+  // Disambiguate duplicate session names by appending project name + short sid.
+  const nameCounts = {};
+  for (const s of alive) {
+    const key = s.name || '';
+    nameCounts[key] = (nameCounts[key] || 0) + 1;
+  }
+  const formatName = (s) => {
+    const base = s.name || s.session_id?.slice(0, 8) || `pid ${s.pid}`;
+    if ((nameCounts[s.name || ''] || 0) <= 1) return base;
+    const project = window.Store.getProjectByContractId(s.project_id);
+    const suffix = project?.name || s.project_id || s.session_id?.slice(0, 8) || String(s.pid);
+    return `${base} · ${suffix}`;
+  };
+
+  const isWorking = (s) => s.status === 'busy' || s.status === 'waiting';
+  const byRecency = (a, b) => (b.updated_at ?? b.started_at ?? 0) - (a.updated_at ?? a.started_at ?? 0);
+  const working = alive.filter(isWorking).sort(byRecency);
+  const idle = alive.filter((s) => !isWorking(s)).sort(byRecency);
 
   return (
     <div className="page">
       <div className="page-header">
         <div>
           <h1 className="page-title">Agents</h1>
-          <div className="page-subtitle">All agents across the harness, sorted by liveness.</div>
+          <div className="page-subtitle">{alive.length} native Claude Code session{alive.length === 1 ? '' : 's'} online.</div>
         </div>
       </div>
 
-      {/* v4: every native Claude Code session on the machine, not just golem. */}
-      <div className="row-section">
-        <div className="row-header">
-          <div className="row-title">
-            Native Sessions
-            <span className="row-title-count">{nativeSessions.length}</span>
-          </div>
-        </div>
-        <NativeSessions/>
-      </div>
-
-      <div className="row-header" style={{ marginTop: 4 }}>
-        <div className="row-title">
-          Substrate Agents
-          <span className="row-title-count">{liveAgents.length}</span>
-        </div>
-      </div>
-      {liveAgents.length === 0 ? (
+      {alive.length === 0 ? (
         <EmptyCard
-          label="no live substrate agents"
-          hint={<>Start a <span className="mono">/golem</span> session in any project to bring agents online. Completed agents are tucked below.</>}
+          label="no native sessions online"
+          hint={<>Start a <span className="mono">claude</span> session to bring agents online.</>}
         />
       ) : (
-        <div className="agents-grid">
-          {liveAgents.map((a) => <AgentCard key={a.id} agent={a} setRoute={setRoute}/>)}
-        </div>
-      )}
-
-      {/* Demoted: historical DONE agents, collapsed by default, capped render. */}
-      {doneAgents.length > 0 && (
-        <div className="agents-done">
-          <button
-            className="agents-done-toggle"
-            onClick={() => setShowDone((v) => !v)}
-          >
-            <span className="agents-done-caret">{showDone ? '▾' : '▸'}</span>
-            <span>{doneAgents.length} completed</span>
-            <span className="agents-done-action">{showDone ? '— hide' : '— show'}</span>
-          </button>
-          {showDone && (
-            <>
-              {doneAgents.length > DONE_AGENTS_RENDER_CAP && (
-                <div className="agents-done-note">
-                  showing {DONE_AGENTS_RENDER_CAP} of {doneAgents.length} (most recent)
-                </div>
-              )}
-              <div className="agents-grid">
-                {doneShown.map((a) => <AgentCard key={a.id} agent={a} setRoute={setRoute}/>)}
+        <>
+          {working.length > 0 && (
+            <div className="agents-section">
+              <div className="agents-section-head">
+                <Icon.Gear size={16} className="gear gear-working"/>
+                <span className="agents-section-title">Working</span>
+                <span className="agents-section-count">{working.length}</span>
               </div>
-            </>
+              <div className="native-sessions">
+                {working.map((s) => (
+                  <SessionCard key={s.session_id || s.pid} session={s} name={formatName(s)}/>
+                ))}
+              </div>
+            </div>
           )}
+
+          {idle.length > 0 && (
+            <div className="agents-section">
+              <div className="agents-section-head">
+                <Icon.Gear size={16} className="gear gear-idle"/>
+                <span className="agents-section-title">Idle</span>
+                <span className="agents-section-count">{idle.length}</span>
+              </div>
+              <div className="native-sessions">
+                {idle.map((s) => (
+                  <SessionCard key={s.session_id || s.pid} session={s} name={formatName(s)}/>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function SessionCard({ session, name }) {
+  const working = session.status === 'busy' || session.status === 'waiting';
+  const registered = session.registered || !!window.Store.getProjectByContractId(session.project_id);
+  const openPeek = () => {
+    if (session.session_id) window.openNativeSessionDrawer(session.session_id);
+  };
+  return (
+    <div
+      className={`native-session-card ${working ? 'busy' : 'idle'} cc-clickable`}
+      onClick={openPeek}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPeek(); } }}
+      title="open session details"
+    >
+      <div className="native-session-top">
+        <Icon.Gear size={16} className={`gear gear-${working ? 'working' : 'idle'}`}/>
+        <span className="native-session-name">{name}</span>
+        <span className={`native-session-status status-${working ? 'busy' : 'idle'}`}>
+          {session.status || 'idle'}
+          {session.waiting_for ? ` · ${session.waiting_for}` : ''}
+        </span>
+        {!registered && (
+          <span className="native-session-badge" title="this project is not registered with the dashboard">
+            unregistered
+          </span>
+        )}
+      </div>
+      <div className="native-session-cwd mono" title={session.cwd || ''}>
+        {session.cwd || '—'}
+      </div>
+      <div className="native-session-meta">
+        <span className="mono">pid {session.pid ?? '?'}</span>
+        {session.session_id && <span className="mono" title={session.session_id}>{session.session_id.slice(0, 8)}</span>}
+        {session.project_id && <span className="mono" title="derived project_id">{session.project_id}</span>}
+        {session.updated_at && (
+          <span title="last updated">
+            {window.SubstrateFmt?.fmtClock?.(session.updated_at) || ''}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ProjectCard({ p, setRoute }) {
+  const live = window.Store.getProjectAliveSessions(p).length;
+  return (
+    <div
+      key={p.id}
+      className={`project-card ${p.stale ? 'project-card-stale' : ''}`}
+      onClick={() => setRoute({ kind: 'project', id: p.id, tab: 'agents' })}
+    >
+      <div className="project-card-top">
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <ProjectGlyph project={p}/>
+          <div>
+            <div className="project-card-name">{p.name}</div>
+            <div className="project-card-id mono">{p.id}</div>
+          </div>
         </div>
+        {live > 0
+          ? <span className="pill active"><span className="dot"/>Active</span>
+          : <span className="pill idle"><span className="dot"/>Idle</span>}
+      </div>
+      <div style={{ fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.5,
+                    display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                    overflow: 'hidden' }}>
+        {p.description || <span style={{ color: 'var(--text-4)' }}>no description</span>}
+      </div>
+      <div className="project-card-stats">
+        <div className="project-stat">
+          <div className="project-stat-value tnum">{live}</div>
+          <div className="project-stat-label">live sessions</div>
+        </div>
+        <div className="project-stat" style={{ marginLeft: 'auto' }}>
+          <div className="project-stat-value tnum" style={{ color: p.color }}>
+            {Math.round((p.progress || 0) * 100)}%
+          </div>
+          <div className="project-stat-label">{p.total_tickets} tickets</div>
+        </div>
+      </div>
+      <div className="project-card-progress">
+        <div className="project-card-progress-fill"
+          style={{ width: `${(p.progress || 0) * 100}%`, background: p.color }}/>
+      </div>
+      {p.plan && p.plan.total > 0 && (
+        <PlanProgress plan={p.plan} color={p.color}/>
       )}
     </div>
   );
@@ -130,75 +174,49 @@ function AgentsPage({ setRoute }) {
 
 function ProjectsPage({ setRoute }) {
   useStore();
+  const [includeStale, setIncludeStale] = React.useState(false);
   const projects = window.Store.getState().projects;
+  const active = projects.filter((p) => !p.stale);
+  const stale = projects.filter((p) => p.stale);
   return (
     <div className="page">
       <div className="page-header">
         <div>
           <h1 className="page-title">Projects</h1>
-          <div className="page-subtitle">{projects.length} projects under the harness.</div>
+          <div className="page-subtitle">{active.length} active · {stale.length} stale</div>
         </div>
+        <label className="tracker-toggle stale-toggle">
+          <input
+            type="checkbox"
+            checked={includeStale}
+            onChange={(e) => setIncludeStale(e.target.checked)}
+          />
+          Include stale
+        </label>
       </div>
       {projects.length === 0 ? (
         <EmptyCard
           label="no projects discovered"
-          hint={<>Ask the CEO to bootstrap one under <span className="mono">~/Documents/software/experiments/golem/golem-projects/</span> — the Substrator agent will scaffold it in-session.</>}
+          hint={<>Bootstrap a project under <span className="mono">~/Documents/software/experiments/golem/golem-projects/</span> — the harness will scaffold and register it in-session.</>}
         />
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
-          {projects.map(p => {
-            const live = window.Store.getProjectActiveAgents(p.id).length;
-            const all = window.Store.getProjectAgents(p.id).length;
-            return (
-              <div
-                key={p.id}
-                className="project-card"
-                onClick={() => setRoute({ kind: 'project', id: p.id, tab: 'agents' })}
-              >
-                <div className="project-card-top">
-                  <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                    <ProjectGlyph project={p}/>
-                    <div>
-                      <div className="project-card-name">{p.name}</div>
-                      <div className="project-card-id mono">substrate/{p.id}</div>
-                    </div>
-                  </div>
-                  {live > 0
-                    ? <span className="pill active"><span className="dot"/>Active</span>
-                    : <span className="pill idle"><span className="dot"/>Idle</span>}
-                </div>
-                <div style={{ fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.5,
-                              display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-                              overflow: 'hidden' }}>
-                  {p.description || <span style={{ color: 'var(--text-4)' }}>no description</span>}
-                </div>
-                <div className="project-card-stats">
-                  <div className="project-stat">
-                    <div className="project-stat-value tnum">{live}</div>
-                    <div className="project-stat-label">live</div>
-                  </div>
-                  <div className="project-stat">
-                    <div className="project-stat-value tnum">{all}</div>
-                    <div className="project-stat-label">total</div>
-                  </div>
-                  <div className="project-stat" style={{ marginLeft: 'auto' }}>
-                    <div className="project-stat-value tnum" style={{ color: p.color }}>
-                      {Math.round((p.progress || 0) * 100)}%
-                    </div>
-                    <div className="project-stat-label">{p.total_tickets} tickets</div>
-                  </div>
-                </div>
-                <div className="project-card-progress">
-                  <div className="project-card-progress-fill"
-                    style={{ width: `${(p.progress || 0) * 100}%`, background: p.color }}/>
-                </div>
-                {p.plan && p.plan.total > 0 && (
-                  <PlanProgress plan={p.plan} color={p.color}/>
-                )}
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
+            {active.map(p => <ProjectCard key={p.id} p={p} setRoute={setRoute}/>)}
+          </div>
+          {includeStale && stale.length > 0 && (
+            <div className="stale-section">
+              <div className="stale-section-head">
+                <Icon.Archive size={16}/>
+                <span className="stale-section-title">Stale</span>
+                <span className="stale-section-count">{stale.length}</span>
               </div>
-            );
-          })}
-        </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
+                {stale.map(p => <ProjectCard key={p.id} p={p} setRoute={setRoute}/>)}
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -206,97 +224,45 @@ function ProjectsPage({ setRoute }) {
 
 function LogsPage() {
   useStore();
-  const ref = React.useRef(null);
-  const [recent, setRecent] = React.useState([]);
-
-  // Poll all live agents' detail to gather rolling log lines. Cheap because
-  // detail responses are bounded by hook/journal caps server-side.
-  React.useEffect(() => {
-    let cancelled = false;
-    async function tick() {
-      const agents = window.Store.getActiveAgents();
-      const events = [];
-      // Limit fan-out to ~8 most recent agents to keep log fetches modest.
-      const sample = agents.slice(0, 8);
-      const details = await Promise.all(
-        sample.map((a) =>
-          window.Store
-            .loadAgentDetail(a.project, a.id)
-            .catch(() => null)
-            .then((d) => d || window.Store.getAgentDetail(a.id))
-        )
-      );
-      // Also pull cached details for any agent we already loaded.
-      for (const a of window.Store.getAllAgents()) {
-        const d = window.Store.getAgentDetail(a.id);
-        if (d) detail2events(d, events);
-      }
-      detailsToEvents(details.filter(Boolean), events);
-      events.sort((a, b) => a.t - b.t);
-      if (!cancelled) setRecent(events.slice(-300));
-    }
-    tick();
-    const id = setInterval(tick, 3000);
-    return () => { cancelled = true; clearInterval(id); };
-  }, []);
-
-  React.useEffect(() => {
-    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-  });
+  const milestones = window.Store.getRecentMilestones();
 
   return (
     <div className="page">
       <div className="page-header">
         <div>
-          <h1 className="page-title">Journals & Logs</h1>
-          <div className="page-subtitle">Combined event stream across active agents · auto-scrolling.</div>
+          <h1 className="page-title">Activity</h1>
+          <div className="page-subtitle">Cross-project milestone feed from native Claude Code sessions.</div>
         </div>
         <div className="topbar-meta">
           <ConnectionPill status={window.Store.getState().connection}/>
         </div>
       </div>
-      {recent.length === 0 ? (
+      {milestones.length === 0 ? (
         <EmptyCard
-          label="no recent events"
-          hint={<>The combined log fills as agents fire hooks and append journal entries.</>}
+          label="no recent activity"
+          hint={<>Sessions append milestones as work lands — they appear here and on the command center home.</>}
         />
       ) : (
-        <div className="log-stream" ref={ref}>
-          {recent.map((e, i) => (
-            <div key={i} className="log-line">
-              <span className="log-time">{window.SubstrateFmt.fmtClock(e.t)}</span>
-              <span className={`log-level ${e.kind === 'hook' ? (e.status === 'err' ? 'err' : 'ok') : 'info'}`}>
-                {e.kind === 'hook' ? e.status : 'msg'}
-              </span>
-              <span className="log-source">{e.agent}</span>
-              <span>
-                {e.kind === 'hook'
-                  ? <><span style={{ color: 'var(--accent)' }}>{e.tool}</span> <span style={{ color: 'var(--text-2)' }}>{e.args}</span></>
-                  : <span style={{ color: 'var(--text-1)' }}>{e.text}</span>}
-              </span>
-            </div>
-          ))}
-        </div>
+        <ul className="cc-feed">
+          {milestones.map((m, i) => {
+            const project = window.Store.getProjectByContractId(m.project);
+            return (
+              <li key={`${m.t}-${i}`} className="cc-feed-item">
+                <span className="cc-feed-dot" style={{ background: m.project_color || 'var(--accent)' }}/>
+                <div className="cc-feed-body">
+                  <div className="cc-feed-text">{m.text}</div>
+                  <div className="cc-feed-meta">
+                    <ProjectChip project={project} projectId={m.project} registered/>
+                    <span className="cc-feed-ts mono">{window.SubstrateFmt.fmtTimeAgo(m.t)}</span>
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
       )}
     </div>
   );
-}
-
-function detail2events(d, out) {
-  // Flatten an agent detail's recent journal+hooks into the log feed.
-  if (!d) return;
-  const recentJournal = (d.journal || []).slice(-12);
-  for (const j of recentJournal) {
-    out.push({ t: j.t, kind: 'journal', agent: d.name, text: j.text });
-  }
-  const recentHooks = (d.hooks || []).slice(-12);
-  for (const h of recentHooks) {
-    out.push({ t: h.t, kind: 'hook', agent: d.name, tool: h.tool, args: h.args, status: h.status });
-  }
-}
-
-function detailsToEvents(details, out) {
-  for (const d of details) detail2events(d, out);
 }
 
 window.AgentsPage = AgentsPage;

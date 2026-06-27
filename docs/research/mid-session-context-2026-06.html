@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mid-session context — what actually works · Claude Code research probe</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,900&family=Newsreader:opsz,wght@6..72,300;6..72,400;6..72,500;6..72,600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#0a0d14; --ink-2:#0e121c; --panel:#121826; --panel-2:#161d2e;
+    --line:#243049; --line-soft:#1b2336;
+    --fg:#e9e6db; --fg-dim:#aab2c4; --fg-faint:#6f7890;
+    --ctm:#b394ff; --shopify:#7bd389; --api:#43c6f0; --b2c:#f5a623;
+    --go:#34d3b8; --no:#fb6f92; --solid:#9be39a;
+    --radius:14px; --maxw:1720px;
+  }
+  *{ box-sizing:border-box; }
+  html{ scroll-behavior:smooth; scroll-padding-top:32px; }
+  body{
+    margin:0;
+    background:
+      radial-gradient(1200px 760px at 80% -8%, rgba(179,148,255,.10), transparent 60%),
+      radial-gradient(1000px 700px at 0% 8%, rgba(67,198,240,.05), transparent 55%),
+      var(--ink);
+    color:var(--fg); font-family:"Newsreader", Georgia, serif; font-size:18.5px; line-height:1.66;
+    -webkit-font-smoothing:antialiased; overflow-x:hidden;
+  }
+  body::before{ content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
+    background-image:linear-gradient(rgba(120,140,180,.03) 1px, transparent 1px),linear-gradient(90deg, rgba(120,140,180,.03) 1px, transparent 1px);
+    background-size:42px 42px; mask-image:radial-gradient(circle at 50% 18%, #000 0%, transparent 90%); }
+  ::selection{ background:rgba(179,148,255,.32); color:#fff; }
+
+  .shell{ position:relative; z-index:1; display:grid; grid-template-columns:300px 1fr; max-width:var(--maxw); margin:0 auto; }
+  nav.toc{ position:sticky; top:0; align-self:start; height:100vh; overflow-y:auto; padding:34px 22px 38px 30px; border-right:1px solid var(--line-soft); }
+  nav.toc .brand{ font-family:"Fraunces"; font-weight:900; font-size:21px; letter-spacing:-.4px; color:var(--fg); line-height:1.14; }
+  nav.toc .brand .dot{ color:var(--ctm); }
+  nav.toc .sub{ font-family:"JetBrains Mono"; font-size:9.5px; letter-spacing:1.8px; text-transform:uppercase; color:var(--fg-faint); margin-top:8px; }
+  nav.toc ol{ list-style:none; padding:0; margin:22px 0 0; counter-reset:s; }
+  nav.toc a{ display:block; padding:5px 0 5px 26px; color:var(--fg-dim); text-decoration:none; font-size:13.5px; transition:.18s; position:relative; }
+  nav.toc a::before{ counter-increment:s; content:counter(s,decimal-leading-zero); position:absolute; left:0; font-family:"JetBrains Mono"; font-size:9.5px; color:var(--fg-faint); top:8px; }
+  nav.toc a:hover,nav.toc a.active{ color:var(--fg); }
+  nav.toc a.active::before{ color:var(--ctm); }
+  nav.toc .tnote{ margin-top:26px; font-family:"JetBrains Mono"; font-size:10px; line-height:1.7; color:var(--fg-faint); border-top:1px solid var(--line-soft); padding-top:16px; }
+
+  main{ padding:0 0 140px; min-width:0; }
+  section{ padding:54px 78px; border-bottom:1px solid var(--line-soft); }
+  section.sub{ padding-top:30px; border-bottom:none; }
+
+  h1,h2,h3,h4,h5{ font-family:"Fraunces"; font-weight:500; letter-spacing:-.5px; line-height:1.1; color:var(--fg); }
+  h2{ font-size:37px; margin:0 0 6px; font-weight:600; }
+  h3{ font-size:24px; margin:40px 0 6px; font-weight:600; }
+  h4{ font-size:19px; margin:28px 0 6px; font-weight:600; color:#fff; }
+  h5{ font-size:16px; margin:18px 0 4px; font-weight:600; font-family:"JetBrains Mono"; letter-spacing:.5px; text-transform:uppercase; color:var(--fg-dim); }
+  .kicker{ font-family:"JetBrains Mono"; font-size:11px; letter-spacing:3px; text-transform:uppercase; color:var(--ctm); margin-bottom:12px; }
+  p{ margin:13px 0; } p.lead{ font-size:20.5px; line-height:1.56; color:var(--fg-dim); }
+  strong{ color:#fff; font-weight:600; }
+  em{ color:var(--fg); }
+  code{ font-family:"JetBrains Mono"; font-size:.74em; background:var(--panel); border:1px solid var(--line); padding:1px 6px; border-radius:6px; color:#dfe6f5; }
+  a.ref{ color:var(--api); text-decoration:none; border-bottom:1px dotted rgba(67,198,240,.4); }
+  ul.clean,ol.clean{ padding-left:0; list-style:none; }
+  ul.clean li{ position:relative; padding-left:22px; margin:8px 0; color:var(--fg-dim); font-size:16px; }
+  ul.clean li::before{ content:"→"; position:absolute; left:0; color:var(--fg-faint); font-family:"JetBrains Mono"; font-size:.85em; top:2px; }
+  ul.dot li{ position:relative; padding-left:18px; margin:7px 0; color:var(--fg-dim); font-size:16px; list-style:none; }
+  ul.dot{ padding-left:0; }
+  ul.dot li::before{ content:"·"; position:absolute; left:4px; color:var(--ctm); font-weight:700; }
+
+  .hero{ padding:84px 78px 50px; }
+  .hero h1{ font-size:clamp(40px,5vw,72px); font-weight:900; letter-spacing:-2px; line-height:1.0; margin:0; }
+  .hero h1 .l2{ display:block; color:var(--ctm); font-weight:300; font-style:italic; }
+  .hero .blurb{ max-width:880px; margin-top:22px; font-size:20px; color:var(--fg-dim); }
+
+  figure{ margin:26px 0 8px; }
+  figcaption{ font-family:"JetBrains Mono"; font-size:12.5px; color:var(--fg-faint); margin-top:12px; line-height:1.5; }
+  svg text{ font-family:"JetBrains Mono", monospace; }
+  .svc-title{ font-family:"Fraunces", serif !important; }
+  figure svg{ width:100%; height:auto; display:block; border:1px solid var(--line); border-radius:var(--radius); background:var(--ink-2); }
+
+  .note{ border-left:3px solid var(--ctm); background:linear-gradient(90deg,rgba(179,148,255,.07),transparent); padding:15px 22px; margin:22px 0; border-radius:0 10px 10px 0; }
+  .note .h{ font-family:"JetBrains Mono"; font-size:10.5px; letter-spacing:2px; text-transform:uppercase; color:var(--ctm); margin-bottom:5px; }
+  .note p{ margin:6px 0 0; font-size:15.5px; color:var(--fg-dim); }
+  .note.no{ border-left-color:var(--no); background:linear-gradient(90deg,rgba(251,111,146,.08),transparent); } .note.no .h{ color:var(--no); }
+  .note.go{ border-left-color:var(--go); background:linear-gradient(90deg,rgba(52,211,184,.08),transparent); } .note.go .h{ color:var(--go); }
+  .note.solid{ border-left-color:var(--solid); background:linear-gradient(90deg,rgba(155,227,154,.08),transparent); } .note.solid .h{ color:var(--solid); }
+
+  table{ width:100%; border-collapse:collapse; margin:22px 0; font-size:14px; }
+  th,td{ text-align:left; padding:9px 13px; border-bottom:1px solid var(--line-soft); vertical-align:top; }
+  th{ font-family:"JetBrains Mono"; font-size:10px; letter-spacing:1.2px; text-transform:uppercase; color:var(--fg-faint); font-weight:500; }
+  td{ color:var(--fg-dim); }
+  td.num{ font-family:"JetBrains Mono"; color:var(--fg); white-space:nowrap; font-size:13px; }
+  td strong{ color:#fff; }
+  tr:hover td{ background:rgba(255,255,255,.014); }
+  caption{ caption-side:top; text-align:left; font-family:"JetBrains Mono"; font-size:11px; color:var(--fg-faint); letter-spacing:1px; text-transform:uppercase; padding-bottom:6px; }
+
+  .badge{ font-family:"JetBrains Mono"; font-size:9px; letter-spacing:.8px; text-transform:uppercase; padding:2px 8px; border-radius:20px; white-space:nowrap; display:inline-block; }
+  .b-go{ color:var(--go); border:1px solid rgba(52,211,184,.45); background:rgba(52,211,184,.06); }
+  .b-ctm{ color:var(--ctm); border:1px solid rgba(179,148,255,.4); background:rgba(179,148,255,.06); }
+  .b-no{ color:var(--no); border:1px solid rgba(251,111,146,.4); background:rgba(251,111,146,.06); }
+  .b-shopify{ color:var(--shopify); border:1px solid rgba(123,211,137,.4); background:rgba(123,211,137,.06); }
+  .b-api{ color:var(--api); border:1px solid rgba(67,198,240,.4); background:rgba(67,198,240,.06); }
+  .b-b2c{ color:var(--b2c); border:1px solid rgba(245,166,35,.4); background:rgba(245,166,35,.06); }
+
+  /* confidence chips */
+  .conf{ font-family:"JetBrains Mono"; font-size:9px; letter-spacing:.6px; text-transform:uppercase; padding:1px 7px; border-radius:4px; white-space:nowrap; }
+  .conf-h{ color:var(--solid); background:rgba(155,227,154,.1); border:1px solid rgba(155,227,154,.35); }
+  .conf-m{ color:var(--b2c); background:rgba(245,166,35,.1); border:1px solid rgba(245,166,35,.32); }
+  .conf-l{ color:var(--no); background:rgba(251,111,146,.1); border:1px solid rgba(251,111,146,.32); }
+
+  .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+  .grid3{ display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }
+  .card{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px 20px; }
+  .card h4{ margin:0 0 6px; }
+  .card p{ margin:5px 0 0; font-size:14.5px; color:var(--fg-dim); }
+
+  /* profile */
+  .profile{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px 20px; margin:14px 0; }
+  .profile.lead{ border-left:3px solid var(--ctm); }
+  .profile .top{ display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .profile .nm{ font-family:"Fraunces"; font-size:19px; font-weight:600; color:#fff; }
+  .profile .tl{ font-family:"JetBrains Mono"; font-size:11px; color:var(--fg-faint); }
+  .profile dl{ display:grid; grid-template-columns:auto 1fr; gap:3px 14px; margin:12px 0 0; font-size:14px; }
+  .profile dt{ font-family:"JetBrains Mono"; font-size:10px; letter-spacing:.5px; text-transform:uppercase; color:var(--fg-faint); padding-top:3px; }
+  .profile dd{ margin:0; color:var(--fg-dim); }
+  .profile dd b{ color:#fff; }
+  .profile .gap{ color:var(--no); }
+
+  .quote{ font-family:"JetBrains Mono"; font-size:13px; color:#cdd6e6; background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--no); padding:12px 16px; border-radius:0 8px 8px 0; margin:16px 0; line-height:1.55; }
+  .quote .src{ color:var(--fg-faint); font-size:11px; display:block; margin-top:6px; }
+
+  .statgrid{ display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin:24px 0; }
+  .stat{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  .stat .n{ font-family:"Fraunces"; font-size:27px; font-weight:600; color:#fff; line-height:1; }
+  .stat .l{ font-family:"JetBrains Mono"; font-size:10px; letter-spacing:.8px; text-transform:uppercase; color:var(--fg-faint); margin-top:7px; line-height:1.4; }
+  .stat.ctm .n{ color:var(--ctm); } .stat.no .n{ color:var(--no); } .stat.go .n{ color:var(--go); } .stat.b2c .n{ color:var(--b2c); }
+
+  .method{ background:linear-gradient(120deg,rgba(67,198,240,.05),rgba(179,148,255,.04)); border:1px solid var(--line); border-radius:var(--radius); padding:22px 26px; margin:26px 0; }
+  .method h4{ margin-top:0; }
+  .method .legend{ display:flex; gap:18px; flex-wrap:wrap; margin-top:12px; font-family:"JetBrains Mono"; font-size:11px; color:var(--fg-dim); align-items:center; }
+
+  @media(max-width:1100px){ .shell{ grid-template-columns:1fr; } nav.toc{ position:relative; height:auto; border-right:none; border-bottom:1px solid var(--line-soft); } section,.hero{ padding:40px 24px; } .grid2,.grid3,.statgrid{ grid-template-columns:1fr; } .profile dl{ grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<div class="shell">
+<nav class="toc">
+  <div class="brand">Mid-session context<span class="dot">.</span></div>
+  <div class="sub">What actually works · 2026-06-16</div>
+  <ol>
+    <li><a href="#thesis">The drain moved</a></li>
+    <li><a href="#verdict">The verdict board</a></li>
+    <li><a href="#economics">Delegation economics</a></li>
+    <li><a href="#antipatterns">Abandoned anti-patterns</a></li>
+    <li><a href="#levers">Levers on the shelf</a></li>
+    <li><a href="#sources">Sources &amp; confidence</a></li>
+    <li><a href="#top">Back to top</a></li>
+  </ol>
+  <div class="tnote">A read-and-watch brief, not a work order. Five parallel research probes, deduped. Each line carries a confidence chip — lean on HIGH, treat SOFT as directional. Nothing here is a current action item.</div>
+</nav>
+
+<main>
+
+<!-- HERO -->
+<header class="hero" id="top">
+  <div class="kicker">Research probe · Claude Code · solo-dev lens</div>
+  <h1>Where the context<span class="l2">actually goes — and which fixes are real.</span></h1>
+  <p class="blurb">Boot context is already near its floor; almost all of it is platform overhead you can't touch. The fight that's left is <em>mid-session</em> — big file reads, verbose agent and tool returns, long shell output, compaction churn. Five probes across native features, community tooling, workflow habits, delegation economics, and abandoned anti-patterns converge on one quiet conclusion: the wins are behavioural and nearly free, and most of the tools you could install are a wash.</p>
+</header>
+
+<!-- 1 · THE DRAIN MOVED -->
+<section id="thesis">
+  <div class="kicker">01 — The drain moved</div>
+  <h2>The cleanup already won. The cost is elsewhere.</h2>
+  <p class="lead">At load, ~15% of a 200k window is gone — but ~68% of that is Anthropic-fixed system prompt and tool schemas, and the slice genuinely under your control is about <strong>1.5% of the window</strong>. Pruning more agents and skills is finished work with diminishing returns.</p>
+  <p>So the question stops being "what's loaded at boot" and becomes "what bloats the window <em>while I work</em>." That drain has four named sources: a single full read of a large file, a subagent or tool that returns its whole transcript, an unfiltered shell dump, and lossy <code>/compact</code> churn that quietly drops your conventions. None of them are config — they're how the session is driven.</p>
+
+  <div class="statgrid">
+    <div class="stat ctm"><div class="n">15%</div><div class="l">Window gone at boot (mostly fixed)</div></div>
+    <div class="stat no"><div class="n">~68%</div><div class="l">Of that load is Anthropic-fixed: prompt + tool schemas</div></div>
+    <div class="stat go"><div class="n">~1.5%</div><div class="l">Of the window actually yours to optimise at load</div></div>
+    <div class="stat b2c"><div class="n">25k</div><div class="l">Default per-call tool-return cap — the mid-session ceiling</div></div>
+  </div>
+
+  <div class="note solid"><div class="h">The shape of it</div><p>Boot context is a solved, near-floor problem. Mid-session context is an unsolved, behavioural one. Everything below is about the second.</p></div>
+  <div class="note"><div class="h">You already own the biggest lever</div><p>Subagent isolation — pushing read-heavy and exploratory work into a child window so only a short answer returns — is the single highest-impact technique in every probe. Your worker / reviewer / researcher setup is exactly this. The rest is incremental.</p></div>
+</section>
+
+<!-- 2 · THE VERDICT BOARD -->
+<section id="verdict">
+  <div class="kicker">02 — The verdict board</div>
+  <h2>Works, situational, or hype.</h2>
+  <p class="lead">Every lever the community talks about, deduped across the five probes and rated. The pattern is stark: the things that work are habits and one or two cheap hooks; the things you'd <em>install</em> are situational at best, and several are net-negative for a lean solo repo.</p>
+
+  <div class="method">
+    <h4>How to read the confidence chips</h4>
+    <p style="margin-top:4px;color:var(--fg-dim);font-size:15.5px">The verdict says whether to care; the chip says how hard you can lean on the evidence behind it.</p>
+    <div class="legend">
+      <span><span class="conf conf-h">HIGH</span> primary Anthropic docs or multiple independent sources</span>
+      <span><span class="conf conf-m">MED</span> credible single source / verified on-repo</span>
+      <span><span class="conf conf-l">SOFT</span> vendor or single-author self-report</span>
+    </div>
+  </div>
+
+  <table>
+    <caption>Mid-session context levers — rated</caption>
+    <thead><tr><th>Lever</th><th>Verdict</th><th>What the evidence says</th><th>Conf</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Subagent context firewall</strong></td><td><span class="badge b-go">Works</span></td><td>Read / grep / explore burns the <em>child's</em> window; only the final message returns. The core design of Anthropic's own multi-agent system.</td><td><span class="conf conf-h">HIGH</span></td></tr>
+      <tr><td><strong>Conclusion-only structured returns</strong></td><td><span class="badge b-go">Works</span></td><td>A 6,100-token read comes back as a ~420-token summary. Returning raw transcripts re-pollutes the main window and defeats the firewall.</td><td><span class="conf conf-h">HIGH</span></td></tr>
+      <tr><td><strong>Scoped reads (offset/limit, grep-first)</strong></td><td><span class="badge b-go">Works</span></td><td>A 15k-token whole-file read becomes ~500 tokens targeted. Anthropic endorses just-in-time search over preloading.</td><td><span class="conf conf-h">HIGH</span></td></tr>
+      <tr><td><strong>External memory + <code>/clear</code> over <code>/compact</code></strong></td><td><span class="badge b-go">Works</span></td><td>Write plan/progress to disk, then reset; a fresh session seeded from notes beats a lossy auto-summary. Practitioners distrust auto-compaction.</td><td><span class="conf conf-h">HIGH</span></td></tr>
+      <tr><td><strong>Trim noisy Bash / tool output</strong></td><td><span class="badge b-go">Works</span></td><td>Pipe through <code>head</code>/<code>tail</code>/<code>grep</code>; output-trimming proxies claim to cut <strong>60–90% of shell-output tokens</strong>. The habit is zero-risk; the magnitude is vendor-reported.</td><td><span class="conf conf-l">SOFT</span></td></tr>
+      <tr><td><strong>Deferred MCP tool loading (Tool Search)</strong></td><td><span class="badge b-b2c">Situational</span></td><td>~85% cut on large tool libraries (77k → 8.7k upfront) — but already automatic in CC, and the saving scales only with how many MCP servers you run.</td><td><span class="conf conf-h">HIGH</span></td></tr>
+      <tr><td><strong>API context-editing (<code>clear_tool_uses</code>)</strong></td><td><span class="badge b-b2c">Situational</span></td><td>84% token reduction on a 100-turn eval, +29% perf alone. But it's an SDK/API knob, not a Claude Code toggle — relevant only if you build your own agents.</td><td><span class="conf conf-h">HIGH</span></td></tr>
+      <tr><td><strong>RAG / semantic-code MCP (Serena, claude-context)</strong></td><td><span class="badge b-b2c">Situational</span></td><td>Pays off on big <em>unfamiliar</em> codebases; on a lean repo the per-turn tool-definition tax cancels the retrieval saving. Grep/Read wins until scale flips it.</td><td><span class="conf conf-m">MED</span></td></tr>
+      <tr><td><strong>Ralph / ratchet loop</strong></td><td><span class="badge b-b2c">Situational</span></td><td>Fresh context per iteration, state in files/git. Great for greenfield overnight batches; expensive and risky in normal interactive work. Borrow the ratchet idea, skip the infinite loop.</td><td><span class="conf conf-m">MED</span></td></tr>
+      <tr><td><strong>Cheaper subagent models</strong></td><td><span class="badge b-b2c">Situational</span></td><td>Cuts cost and latency, not parent-context tokens — isolation already protects the window. A money lever, not a context one.</td><td><span class="conf conf-h">HIGH</span></td></tr>
+      <tr><td><strong>claude-mem &amp; persistent-memory layers</strong></td><td><span class="badge b-no">Skip</span></td><td>A session-<em>start</em> loader (82.6k★), orthogonal to mid-session drain, and it adds its own injection tax + signal-to-noise risk on an already-lean load.</td><td><span class="conf conf-m">MED</span></td></tr>
+      <tr><td><strong>context-mode / CBM / Headroom stacks</strong></td><td><span class="badge b-no">Skip</span></td><td>Eye-popping self-reported reductions, single-author, and hooks that <em>block</em> Read/Grep until they run — friction and lock-in for a wash.</td><td><span class="conf conf-l">SOFT</span></td></tr>
+      <tr><td><strong><code>skillListingBudgetFraction</code> knobs</strong></td><td><span class="badge b-no">Skip</span></td><td>Placebo at 6 skills — you're far under the 1% listing budget. These are for 100+ skill setups.</td><td><span class="conf conf-m">MED</span></td></tr>
+      <tr><td><strong>Output styles as a context tool</strong></td><td><span class="badge b-no">Skip</span></td><td>They append to the system prompt at load time — they shape tone, not mid-session drain. Wrong tool for this target.</td><td><span class="conf conf-h">HIGH</span></td></tr>
+    </tbody>
+  </table>
+
+  <div class="note no"><div class="h">The tell</div><p>Every "Skip" row is something you'd <em>install</em>; every "Works" row is something you'd <em>do</em>. The same MCP tools that save read-tokens add per-turn tool-definition tax that several sources flag as a wash on small repos. On a lean solo setup, no-install beats always-on almost every time.</p></div>
+</section>
+
+<!-- 3 · DELEGATION ECONOMICS -->
+<section id="economics">
+  <div class="kicker">03 — Delegation economics</div>
+  <h2>The firewall, and what it really costs.</h2>
+  <p class="lead">Subagents <em>save</em> main-thread context and <em>cost</em> more total tokens — both true at once. You spend cheap, disposable child-window tokens to protect the one scarce resource: your main thread's attention.</p>
+
+  <figure>
+    <svg viewBox="0 0 1200 360" role="img" aria-label="Context firewall: noisy work dies in a disposable subagent window; only a terse summary crosses back to the main thread">
+      <defs>
+        <marker id="arrow-fw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#6f7890"/>
+        </marker>
+        <marker id="arrow-fw-go" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#34d3b8"/>
+        </marker>
+      </defs>
+
+      <text x="40" y="44" class="svc-title" fill="#e9e6db" font-size="22">The context firewall</text>
+      <text x="40" y="68" fill="#6f7890" font-size="12">noisy work dies in the child window · only the conclusion crosses back</text>
+
+      <!-- main thread (left) -->
+      <rect x="40" y="110" width="210" height="150" rx="12" fill="#121826" stroke="#b394ff" stroke-width="1.6"/>
+      <text x="145" y="150" fill="#b394ff" font-size="14" text-anchor="middle">MAIN THREAD</text>
+      <text x="145" y="171" fill="#aab2c4" font-size="11" text-anchor="middle">Opus 4.8 · stays lean</text>
+      <rect x="70" y="200" width="150" height="10" rx="5" fill="#0e121c" stroke="#243049"/>
+      <rect x="70" y="200" width="38" height="10" rx="5" fill="#b394ff" opacity=".7"/>
+      <text x="145" y="232" fill="#6f7890" font-size="10" text-anchor="middle">window barely moves</text>
+
+      <!-- dispatch arrow -->
+      <line x1="250" y1="170" x2="372" y2="170" stroke="#6f7890" stroke-width="1.5" marker-end="url(#arrow-fw)"/>
+      <text x="311" y="158" fill="#aab2c4" font-size="10.5" text-anchor="middle">dispatch</text>
+      <text x="311" y="190" fill="#6f7890" font-size="9.5" text-anchor="middle">task + done-condition</text>
+
+      <!-- subagent window (center, large) -->
+      <rect x="372" y="92" width="372" height="190" rx="12" fill="#0e121c" stroke="#f5a623" stroke-width="1.6"/>
+      <text x="392" y="120" fill="#f5a623" font-size="13">SUBAGENT WINDOW</text>
+      <text x="392" y="138" fill="#6f7890" font-size="10">disposable · burns its own context</text>
+      <text x="392" y="170" fill="#fb6f92" font-size="11.5">✕ whole-file reads</text>
+      <text x="392" y="192" fill="#fb6f92" font-size="11.5">✕ grep sweeps &amp; dead-ends</text>
+      <text x="392" y="214" fill="#fb6f92" font-size="11.5">✕ web-fetch transcripts</text>
+      <text x="392" y="236" fill="#fb6f92" font-size="11.5">✕ verbose tool / bash dumps</text>
+      <rect x="372" y="252" width="372" height="0.6" fill="#243049"/>
+      <text x="392" y="270" fill="#9be39a" font-size="11">↳ distils to a short answer</text>
+
+      <!-- firewall wall -->
+      <line x1="772" y1="84" x2="772" y2="292" stroke="#34d3b8" stroke-width="1.4" stroke-dasharray="5 5"/>
+      <text x="772" y="80" fill="#34d3b8" font-size="10" text-anchor="middle">context firewall</text>
+
+      <!-- return arrow -->
+      <line x1="744" y1="170" x2="900" y2="170" stroke="#34d3b8" stroke-width="1.5" marker-end="url(#arrow-fw-go)"/>
+      <text x="822" y="158" fill="#34d3b8" font-size="10.5" text-anchor="middle">returns</text>
+      <text x="822" y="190" fill="#6f7890" font-size="9.5" text-anchor="middle">≤ small summary</text>
+
+      <!-- main thread, still lean (right) -->
+      <rect x="900" y="110" width="260" height="150" rx="12" fill="#121826" stroke="#b394ff" stroke-width="1.6"/>
+      <text x="1030" y="150" fill="#b394ff" font-size="14" text-anchor="middle">MAIN THREAD</text>
+      <text x="1030" y="171" fill="#aab2c4" font-size="11" text-anchor="middle">only the summary landed</text>
+      <text x="1030" y="206" fill="#34d3b8" font-size="22" text-anchor="middle">✓</text>
+      <text x="1030" y="232" fill="#6f7890" font-size="10" text-anchor="middle">high-signal, low-token</text>
+    </svg>
+    <figcaption>Read left to right: the main thread hands a child a scoped task; the child's window absorbs all the noise; only a short summary crosses the firewall back. Run ×3 in parallel and total token spend rises 3–4× — while main-thread tokens barely move.</figcaption>
+  </figure>
+
+  <div class="statgrid">
+    <div class="stat no"><div class="n">15×</div><div class="l">Multi-agent vs a chat <em>message</em> — the scary figure, in context</div></div>
+    <div class="stat go"><div class="n">3–4×</div><div class="l">Honest multiplier vs a normal single-agent session</div></div>
+    <div class="stat ctm"><div class="n">80%</div><div class="l">Of performance variance explained by token spend alone</div></div>
+    <div class="stat b2c"><div class="n">44%</div><div class="l">Of multi-agent failures are system-design / spec (MAST)</div></div>
+  </div>
+
+  <p>The widely-quoted "15× tokens" is multi-agent versus a single <em>chat message</em> — not versus a coding agent. Against your normal single-agent session the real multiplier is roughly 3–4×. You're not being wasteful; you're buying main-thread cleanliness and wall-clock (parallel fan-out cut research latency up to 90%) with cheap child tokens.</p>
+
+  <div class="note go"><div class="h">Delegate when</div><p>Work is independent / breadth-first / noisy / read-heavy and a short summary suffices — research, parallel lookups, throwaway exploration, anything that would otherwise dump raw text into your window.</p></div>
+  <div class="note no"><div class="h">Stay single-thread when</div><p>Work is sequential, decision-dense, or shares one mutable artifact — coding, refactors, anything where two children could make conflicting choices. Cognition's "Flappy Bird becomes Mario" failure is exactly this.</p></div>
+
+  <div class="quote">"Most coding tasks involve fewer truly parallelizable tasks than research." Anthropic and Cognition don't actually disagree — they disagree on <em>task type</em>, and both land on: keep dependent / coding work single-threaded.
+  <span class="src">— Anthropic, <em>Building a multi-agent research system</em> · Cognition, <em>Don't Build Multi-Agents</em>, 2025</span></div>
+
+  <div class="note solid"><div class="h">Where your leverage actually is</div><p>MAST found 44% of multi-agent failures are bad orchestration and specs, not weak models. The fix a solo dev fully controls: tight task scopes and explicit done-conditions on every delegated child. That's a habit, not a tool.</p></div>
+</section>
+
+<!-- 4 · ABANDONED ANTI-PATTERNS -->
+<section id="antipatterns">
+  <div class="kicker">04 — Abandoned anti-patterns</div>
+  <h2>What the community stopped doing.</h2>
+  <p class="lead">A watch-list, not a chore-list. These are the moves that quietly bloat context and have already been corrected away in 2025–2026 practice. Recognise them so you don't drift back into one.</p>
+
+  <div class="grid2">
+    <div class="card"><h4>Eager-loading many MCP servers</h4><p>Each server injects large tool schemas at startup — the "MCP context bloat" complaint. <strong>Replaced by</strong> on-demand / deferred tool loading and pruning to the few servers a session needs.</p></div>
+    <div class="card"><h4>Oversized CLAUDE.md / AGENTS.md</h4><p>Mega-prompts of rules make agents fragile and unpredictable. <strong>Replaced by</strong> lean files that link out to scoped references — context as a curated budget, not a dumping ground.</p></div>
+    <div class="card"><h4>Too many always-on skills / agents</h4><p>Every description loads each turn. <strong>Replaced by</strong> progressive disclosure (only the matched body loads), short descriptions, and isolating work in subagents.</p></div>
+    <div class="card"><h4>Over-aggressive <code>/compact</code></h4><p>Compaction amnesia silently drops conventions. <strong>Replaced by</strong> fresh-session-over-compact plus durable memory in files re-read on demand.</p></div>
+    <div class="card"><h4>Dumping whole large files</h4><p>All-or-nothing reads waste thousands of tokens. <strong>Replaced by</strong> line-ranged reads and search-first retrieval — a 15k read becomes ~500 targeted tokens.</p></div>
+    <div class="card"><h4>Giant unfiltered tool / test output</h4><p>Raw logs pollute the retrieval loop. <strong>Replaced by</strong> narrow searches and condensed subagent digests (1–2k tokens, not raw dumps).</p></div>
+  </div>
+
+  <h3>The one that underwrites all of them: context rot</h3>
+  <p>"More context = better" is false. The reason every anti-pattern above is an anti-pattern is that attention is not uniform across a long window.</p>
+
+  <figure>
+    <svg viewBox="0 0 1200 300" role="img" aria-label="Model accuracy declines as input grows: a downward curve with a lost-in-the-middle dip">
+      <defs>
+        <marker id="arrow-rot" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#6f7890"/>
+        </marker>
+      </defs>
+      <text x="40" y="42" class="svc-title" fill="#e9e6db" font-size="20">Context rot — accuracy vs. input length</text>
+
+      <!-- axes -->
+      <line x1="90" y1="80" x2="90" y2="240" stroke="#6f7890" stroke-width="1.3" marker-start="url(#arrow-rot)"/>
+      <line x1="90" y1="240" x2="1140" y2="240" stroke="#6f7890" stroke-width="1.3" marker-end="url(#arrow-rot)"/>
+      <text x="64" y="96" fill="#aab2c4" font-size="11" text-anchor="end">acc.</text>
+      <text x="1130" y="262" fill="#aab2c4" font-size="11" text-anchor="end">input tokens →</text>
+      <text x="120" y="262" fill="#6f7890" font-size="10">short</text>
+      <text x="1060" y="262" fill="#6f7890" font-size="10">long</text>
+
+      <!-- ideal (flat, faint) -->
+      <line x1="90" y1="104" x2="1110" y2="104" stroke="#243049" stroke-width="1.2" stroke-dasharray="4 5"/>
+      <text x="1104" y="98" fill="#6f7890" font-size="10" text-anchor="end">the myth: uniform attention</text>
+
+      <!-- reality curve: declines, with a mid dip -->
+      <path d="M100,108 C300,118 380,128 470,150 C540,168 590,196 660,196 C730,196 770,166 850,176 C940,188 1020,212 1100,224"
+            fill="none" stroke="#fb6f92" stroke-width="2.4"/>
+      <text x="640" y="226" fill="#fb6f92" font-size="10.5" text-anchor="middle">lost-in-the-middle dip</text>
+      <text x="1096" y="218" fill="#fb6f92" font-size="10.5" text-anchor="end">monotonic decline</text>
+
+      <text x="150" y="135" fill="#9be39a" font-size="11">high-signal,</text>
+      <text x="150" y="151" fill="#9be39a" font-size="11">small window</text>
+    </svg>
+    <figcaption>Chroma's "Context Rot" (2025) found all 18 frontier models tested — including Claude 4 — degrade as input grows, even on easy tasks; the classic lost-in-the-middle effect compounds it. A minimal, high-signal window beats a full one. This is <em>why</em> trimming pays.</figcaption>
+  </figure>
+
+  <div class="note no"><div class="h">The softening edge</div><p>One nuance to hold loosely: compaction is being actively improved (faster, smarter preservation in recent CC versions), so "always prefer a fresh session" is drifting toward "durable memory + selective compaction." Don't treat the blanket ban as permanent.</p></div>
+</section>
+
+<!-- 5 · LEVERS ON THE SHELF -->
+<section id="levers">
+  <div class="kicker">05 — Levers on the shelf</div>
+  <h2>For golem v4 — pre-loaded, not pending.</h2>
+  <p class="lead">You're in understanding-and-watch mode, so this is deliberately not a to-do list. It's the set of moves already mapped, each paired with the <em>trigger</em> that would make it worth reaching for. When a pressing need shows up, the decision is already made.</p>
+
+  <div class="note"><div class="h">Standing position</div><p>You already run the highest-ROI technique (the subagent firewall). Nothing below is a current action item — these are decisions parked until a real symptom appears.</p></div>
+
+  <table>
+    <caption>Available levers · trigger · effort</caption>
+    <thead><tr><th>Lever</th><th>What it buys</th><th>The trigger that makes it worth it</th><th>Effort</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Terse-return contract in the 3 agent defs</strong></td><td>Stops subagents re-polluting the main thread with transcripts / file bodies; locks in the firewall's payoff.</td><td>When you notice returns coming back as raw dumps instead of conclusions.</td><td class="num">~5 min</td></tr>
+      <tr><td><strong>Bash-output trimmer (PostToolUse hook)</strong></td><td>Caps shell stdout (keep head+tail, mark the truncation) — kills the "long Bash output" drain at source.</td><td>When noisy commands — test runners, installers — repeatedly bloat sessions.</td><td class="num">~30 min</td></tr>
+      <tr><td><strong>One-line habit note</strong> in work-loop + CLAUDE.md</td><td>Reinforces scoped reads (offset/limit, grep-first) and <code>/clear</code> at task boundaries.</td><td>When you catch whole-file reads or <code>/compact</code> churn becoming routine. Keep it to one line — bloat is the anti-pattern.</td><td class="num">~2 min</td></tr>
+      <tr><td><strong>RAG / semantic-code MCP</strong></td><td>Symbol-level retrieval instead of whole-file scans on a large codebase.</td><td>Only when a repo gets big and unfamiliar enough that search-vs-scan is the real bottleneck.</td><td class="num">setup tax</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note go"><div class="h">If you only ever do one thing</div><p>Keep subagent returns terse. It's the cheapest move that protects the lever you already built — and it's the one most likely to quietly erode if left unspecified.</p></div>
+  <div class="note no"><div class="h">Explicitly not worth it here</div><p>No persistent-memory layer, no context-compression MCP stack, no skill-budget knobs, no extra always-on servers. For a lean solo setup they add tax or friction for a wash.</p></div>
+</section>
+
+<!-- 6 · SOURCES -->
+<section id="sources" class="sub">
+  <div class="kicker">06 — Sources &amp; confidence</div>
+  <h2>Where this came from.</h2>
+  <p class="lead">Five parallel opus research subagents, each on a distinct angle, deduped and rated. High confidence on the Anthropic primary-source numbers; treat the headline reduction percentages from tools as directional.</p>
+
+  <ul class="clean">
+    <li>Anthropic — <em>How we built our multi-agent research system</em> (the 15× / 4× / 80%-variance figures, breadth-vs-coding). <a class="ref" href="https://www.anthropic.com/engineering/built-multi-agent-research-system">anthropic.com/engineering</a> <span class="conf conf-h">HIGH</span></li>
+    <li>Anthropic — <em>Effective context engineering for AI agents</em> (scoped reads, external memory, delegation). <a class="ref" href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">anthropic.com/engineering</a> <span class="conf conf-h">HIGH</span></li>
+    <li>Anthropic — <em>Advanced tool use / Tool Search</em> (deferred loading, ~85% on large tool libs). <a class="ref" href="https://www.anthropic.com/engineering/advanced-tool-use">anthropic.com/engineering</a> <span class="conf conf-h">HIGH</span></li>
+    <li>Anthropic — <em>Context management / context editing</em> (<code>clear_tool_uses</code>, 84% / +29% / +39%). <a class="ref" href="https://www.claude.com/blog/context-management">claude.com/blog</a> <span class="conf conf-h">HIGH</span></li>
+    <li>Cognition — <em>Don't Build Multi-Agents</em> (single-threaded, shared-context failures). <a class="ref" href="https://cognition.ai/blog/dont-build-multi-agents">cognition.ai/blog</a> <span class="conf conf-h">HIGH</span></li>
+    <li>Cemri et al. — <em>Why Do Multi-Agent LLM Systems Fail?</em> (MAST; 44.2% system-design). <a class="ref" href="https://arxiv.org/abs/2503.13657">arXiv:2503.13657</a> <span class="conf conf-m">MED</span></li>
+    <li>Chroma — <em>Context Rot</em> (monotonic degradation across 18 models). <a class="ref" href="https://www.trychroma.com/research/context-rot">trychroma.com/research</a> <span class="conf conf-h">HIGH</span></li>
+    <li>Shankar — <em>How I use every Claude Code feature</em> ("Document &amp; Clear", distrust of <code>/compact</code>). <a class="ref" href="https://blog.sshh.io/p/how-i-use-every-claude-code-feature">blog.sshh.io</a> <span class="conf conf-m">MED</span></li>
+    <li>Tools surveyed — claude-mem (82.6k★), RTK output-trimmer, Serena (25.4k★), claude-context (11.9k★), ralph-wiggum. Star counts verified on-repo; reduction percentages are vendor/author self-reports. <span class="conf conf-l">SOFT</span></li>
+  </ul>
+
+  <div class="note solid"><div class="h">Standing caveat</div><p>The same MCP tools that save read-tokens add per-turn tool-definition tax — flagged across sources as a wash on small repos. The no-install levers (terse returns, scoped reads, a trimmer hook) are the robust bets. Re-check the tool landscape as it moves; the native features are catching up fast.</p></div>
+</section>
+
+</main>
+</div>
+
+<p style="margin:26px 78px 0;font-family:'JetBrains Mono';font-size:11.5px;color:var(--fg-faint)">Mid-session context — what actually works · golem research probe · 2026-06-16 · five-probe synthesis. Verdicts are point-in-time; native context features are moving fast — re-check before leaning hard on a tool row.</p>
+
+<script type="application/json" id="annotations">[
+  {"id":"a-seed-rtk","quote":"60–90% of shell-output tokens","prefix":"output-trimming proxies claim to cut ","suffix":". The habit is zero-risk","section":"The verdict board","sectionId":"verdict","author":"claude_opus","text":"SOFT confidence flag: this 60–90% figure is a single-author/vendor self-report (RTK), measured on the author's own command set — no independent benchmark. The piping habit is risk-free regardless; only the magnitude is uncertain. Worth treating as directional, not a target.","status":"open","ts":"2026-06-16T00:00:00Z","replies":[]},
+  {"id":"a-seed-micro","quote":"durable memory in files re-read on demand","prefix":"Replaced by</strong> fresh-session-over-compact plus ","suffix":".","section":"Abandoned anti-patterns","sectionId":"antipatterns","author":"claude_opus","text":"Open question for you: how aggressively do you want to lean on fresh-session-over-compact now that CC's compaction is improving? The probe flagged this as the one verdict actively softening. If you'd rather standardise on selective /compact, the §05 one-line habit note would change wording.","status":"open","ts":"2026-06-16T00:00:00Z","replies":[]}
+]</script>
+
+<script>
+  const links=[...document.querySelectorAll('nav.toc a')];
+  const map=new Map(links.map(a=>[a.getAttribute('href').slice(1),a]));
+  const obs=new IntersectionObserver(es=>{es.forEach(e=>{const a=map.get(e.target.id);if(a&&e.isIntersecting){links.forEach(l=>l.classList.remove('active'));a.classList.add('active');}});},{rootMargin:'-25% 0px -70% 0px'});
+  document.querySelectorAll('section[id]').forEach(s=>obs.observe(s));
+</script>
+</body>
+</html>

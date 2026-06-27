@@ -2,14 +2,44 @@
 
 function Sidebar({ route, setRoute }) {
   useStore();
+  const [includeStale, setIncludeStale] = React.useState(false);
   const projects = window.Store.getState().projects;
-  const activeCount = window.Store.getActiveAgents().length;
-  const projectCount = projects.length;
+  const activeCount = window.Store.getAliveSessionCount();
+  // TKT-0107: bucket by last_activity_at instead of the binary stale flag.
+  // Thresholds: ≤7d = Active, ≤30d = Recent, ≤90d = Stale, >90d = Archived (only
+  // shown when "Include stale" is on).
+  const now = Date.now();
+  const DAY = 86400_000;
+  const buckets = React.useMemo(() => {
+    const active = [], recent = [], stale = [], archived = [];
+    for (const p of projects) {
+      const la = p.last_activity_at || p.last_seen_at || 0;
+      const age = la > 0 ? (now - la) / DAY : Infinity;
+      if (age <= 7) active.push(p);
+      else if (age <= 30) recent.push(p);
+      else if (age <= 90) stale.push(p);
+      else archived.push(p);
+    }
+    // Within each bucket, sort by live-session-count desc, then by
+    // last_activity_at desc.
+    const sortFn = (a, b) => {
+      const la = window.Store.getProjectAliveSessions(a).length;
+      const lb = window.Store.getProjectAliveSessions(b).length;
+      if (la !== lb) return lb - la;
+      return (b.last_activity_at || 0) - (a.last_activity_at || 0);
+    };
+    active.sort(sortFn); recent.sort(sortFn); stale.sort(sortFn); archived.sort(sortFn);
+    return { active, recent, stale, archived };
+  }, [projects, now]);
+  const visibleProjects = includeStale
+    ? [...buckets.active, ...buckets.recent, ...buckets.stale, ...buckets.archived]
+    : [...buckets.active, ...buckets.recent, ...buckets.stale];
+  const projectCount = visibleProjects.length;
 
   const items = [
     { id: 'dashboard', label: 'Dashboard', icon: Icon.Dashboard },
     { id: 'tracker', label: 'Tracker', icon: Icon.Tracker },
-    { id: 'projects', label: 'Projects', icon: Icon.Projects, count: projectCount },
+    { id: 'projects', label: 'Projects', icon: Icon.Projects, count: buckets.active.length },
     { id: 'agents', label: 'Agents', icon: Icon.Agents, count: activeCount },
     { id: 'logs', label: 'Journals & Logs', icon: Icon.Logs },
   ];
@@ -19,13 +49,43 @@ function Sidebar({ route, setRoute }) {
     return route.kind === id;
   };
 
+  // Render one bucket as a labeled section.
+  const renderBucket = (label, list, klass) => {
+    if (list.length === 0) return null;
+    return (
+      <div className={`sidebar-bucket ${klass}`}>
+        <div className="sidebar-bucket-label">{label} <span className="tnum">{list.length}</span></div>
+        {list.map(p => {
+          const active = route.kind === 'project' && route.id === p.id;
+          const live = window.Store.getProjectAliveSessions(p).length;
+          return (
+            <button
+              key={p.id}
+              className={`sidebar-link ${active ? 'active' : ''}`}
+              onClick={() => setRoute({ kind: 'project', id: p.id, tab: 'agents' })}
+            >
+              <span className="sidebar-link-icon" style={{ color: p.color }}>
+                <span style={{
+                  width: 8, height: 8, borderRadius: 2, background: p.color, display: 'inline-block',
+                  boxShadow: live ? `0 0 6px ${p.color}` : 'none'
+                }}/>
+              </span>
+              <span>{p.name}</span>
+              <span className="sidebar-link-count">{live}</span>
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
         <div className="sidebar-brand-mark">G</div>
         <div>
           <div className="sidebar-brand-text">Golem</div>
-          <div className="sidebar-brand-sub">substrate · admin</div>
+          <div className="sidebar-brand-sub">golem · command center</div>
         </div>
       </div>
 
@@ -52,33 +112,26 @@ function Sidebar({ route, setRoute }) {
       <div className="sidebar-section">
         <div className="sidebar-section-label">Projects</div>
         <nav className="sidebar-nav">
-          {projects.length === 0 && (
+          <label className="sidebar-stale-toggle">
+            <input
+              type="checkbox"
+              checked={includeStale}
+              onChange={(e) => setIncludeStale(e.target.checked)}
+            />
+            Include stale
+          </label>
+          {visibleProjects.length === 0 && (
             <div style={{ padding: '8px 8px 0', fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>
               no projects discovered
             </div>
           )}
-          {projects.map(p => {
-            const active = route.kind === 'project' && route.id === p.id;
-            // v4 (fix round 2, defect 3): liveness = alive native sessions in
-            // this project, not stale v3 journal agents.
-            const live = window.Store.getProjectAliveSessions(p).length;
-            return (
-              <button
-                key={p.id}
-                className={`sidebar-link ${active ? 'active' : ''}`}
-                onClick={() => setRoute({ kind: 'project', id: p.id, tab: 'agents' })}
-              >
-                <span className="sidebar-link-icon" style={{ color: p.color }}>
-                  <span style={{
-                    width: 8, height: 8, borderRadius: 2, background: p.color, display: 'inline-block',
-                    boxShadow: live ? `0 0 6px ${p.color}` : 'none'
-                  }}/>
-                </span>
-                <span>{p.name}</span>
-                <span className="sidebar-link-count">{live}</span>
-              </button>
-            );
-          })}
+          {/* TKT-0107: bucketed groups by 7/30/90-day activeness. Each bucket
+              renders as its own labeled section; live sessions bubble to the
+              top of their bucket. */}
+          {renderBucket('Active', buckets.active, 'bucket-active')}
+          {renderBucket('Recent', buckets.recent, 'bucket-recent')}
+          {renderBucket('Stale', buckets.stale, 'bucket-stale')}
+          {includeStale && renderBucket('Archived', buckets.archived, 'bucket-archived')}
         </nav>
       </div>
 
@@ -103,7 +156,7 @@ function Topbar({ route, setRoute }) {
   }, []);
 
   const crumbs = [];
-  crumbs.push({ label: 'Substrate', onClick: () => setRoute({ kind: 'dashboard' }) });
+  crumbs.push({ label: 'Workspace', onClick: () => setRoute({ kind: 'dashboard' }) });
   if (route.kind === 'dashboard') crumbs.push({ label: 'Dashboard', current: true });
   if (route.kind === 'tracker') crumbs.push({ label: 'Tracker', current: true });
   if (route.kind === 'projects') crumbs.push({ label: 'Projects', current: true });

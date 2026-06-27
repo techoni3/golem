@@ -10,7 +10,8 @@
 #      NEVER overwriting an existing entry's name/kind (manual entries win),
 #      only bumping last_seen.
 #   4. Atomically upsert ~/.config/golem/sessions.json with this session.
-#   5. Emit SessionStart hook output JSON setting sessionTitle = repo dirname.
+#   5. Emit NO sessionTitle — naming is left entirely to the user's /rename
+#      (auto-titling clobbered the chosen name on every resume).
 #
 # Safety: set -u, bash-3.2 compatible (macOS default), every failure exits 0
 # and never blocks the session. Uses the same atomic mkdir-lock pattern as
@@ -199,16 +200,12 @@ if command -v jq >/dev/null 2>&1; then
   with_lock "$SESSIONS_JSON.lock" upsert_sessions || true
 fi
 
-# --- emit SessionStart output: set the session title -----------------------
-# Verified against the SessionStart hook output schema: top-level `sessionTitle`
-# is honoured (equivalent to /rename); also mirrored under hookSpecificOutput.
-if command -v jq >/dev/null 2>&1; then
-  jq -cn --arg title "$DIRNAME" \
-    '{sessionTitle: $title,
-      hookSpecificOutput: {hookEventName: "SessionStart", sessionTitle: $title}}' \
-    2>/dev/null || printf '%s\n' "{\"sessionTitle\":\"$DIRNAME\"}"
-else
-  printf '%s\n' "{\"sessionTitle\":\"$DIRNAME\"}"
-fi
+# --- naming: intentionally NONE --------------------------------------------
+# We deliberately do NOT emit sessionTitle. SessionStart fires on resume/compact
+# too, so auto-titling to the repo dirname clobbered the user's /rename on every
+# `/resume` (and forced a re-rename). Sessions are now named only by the user via
+# /rename; the channel server reads that name from ~/.claude/sessions/<pid>.json
+# and stamps it into the channel registry, so the dashboard and consult
+# name-resolution pick it up without this hook setting a title.
 
 exit 0

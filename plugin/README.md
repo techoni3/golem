@@ -8,8 +8,9 @@ sub-agents, and the golem channel MCP.
 ## What it does
 
 - **SessionStart** → registers the project in `~/.config/golem/projects.json`
-  (auto entry; never overwrites a manual one), records the session in
-  `sessions.json`, and sets the session title to the repo's directory name.
+  (auto entry; never overwrites a manual one) and records the session in
+  `sessions.json`. It does **not** auto-name the session: `/rename` is the single
+  source of the name (auto-titling clobbered it on every `/resume`).
 - **Lifecycle + tool events** → a single line per event in a central journal at
   `~/.config/golem/journals/<project_id>/hook.jsonl`, carrying `project_id` and
   `project_path` so readers never re-derive. (Legacy guard: a v3-wired repo that
@@ -19,7 +20,13 @@ sub-agents, and the golem channel MCP.
   ping on needs-input / idle. No-op when no topic is configured.
 - **Agents** → `worker`, `reviewer`, `researcher` (all `model: opus`).
 - **Channel MCP** (`golem`) → `ack` / `respond` tools + an SSE `/events` stream
-  the dashboard subscribes to, **plus the tracker tools** (see below).
+  the dashboard subscribes to, **plus the tracker tools** and the
+  **session-to-session consult tools** (see below).
+- **Consult tools** (on the same `golem` MCP) → `consult_request`, `consult_reply`,
+  `consult_status`. One live session asks ANOTHER for a fresh pair of eyes on a
+  hard problem (a second opinion, not delegation) over the channel transport —
+  fully async, the asker never blocks. See the `golem:get-consult` /
+  `golem:provide-consult` skills and the section below.
 - **Tracker tools** (on the same `golem` MCP) → live sessions read/write the
   cross-project ticket tracker — the source of truth for work, **replacing
   PLAN.md**. These are thin HTTP clients of the dashboard's REST API (the
@@ -87,6 +94,42 @@ in managed settings and use `--channels plugin:golem@golem-local`. Either way a
 per-session launch flag is required — there is no settings.json toggle that
 auto-consumes channels.
 
+## Session-to-session consult
+
+A live session can ask **another** live session for a *fresh pair of eyes* on a
+hard problem — a second opinion, not delegation, and not a subagent (the peer
+keeps its own context, often on a different backend: claude or an ollama model
+like glm-5.2). It rides the same channel transport as dispatch:
+
+1. The asker calls **`consult_request({ to, question, context })`** — `to` is the
+   peer's `/rename` name (resolved via `claude agents --json` ∩ live channels) or
+   a `session_id`. The tool POSTs to the peer's channel **`/consult`** route and
+   returns a `consult_id` immediately. **The asker never blocks.**
+2. The consult arrives at the peer as `<channel kind="consult" consult_id=…
+   from_session=…>`. Its `golem:provide-consult` skill investigates independently
+   (code, web), forms a proposal, and calls **`consult_reply({ to_session,
+   consult_id, text })`**.
+3. The reply POSTs to the asker's channel **`/consult/reply`** route and pushes in
+   as `<channel kind="consult_reply" consult_id=…>` — like a subagent result
+   landing. The asker (`golem:get-consult`) weighs it as advice and keeps the
+   final say. `consult_status` nudges a pending consult without blocking.
+
+Both routes are gated by `X-Sender: consult` (in the default allow-list).
+Requirements:
+
+- **v4.3.0+ on both ends** — the `/consult` routes and `consult_*` tools ship in
+  this version. A running session needs `claude plugin update golem@golem-local`
+  then `/reload-plugins` to pick them up; new sessions get them automatically.
+- **Both ends must be channel _consumers_.** A plain `claude` session can *send* a
+  consult (it has the tools) but will **not receive** the pushed `consult` request
+  or `consult_reply` — Claude Code silently drops channel notifications unless the
+  session was launched as a consumer (`claude --dangerously-load-development-channels
+  plugin:golem@golem-local`, i.e. the `golemc` alias). So the consultant must be a
+  consumer to get the request, **and the asker must be a consumer to get the reply.**
+
+Consult traffic also surfaces in the dashboard chat (a short audit marker on each
+session's lane).
+
 ## Project identity
 
 `project_id = <dirname-slug>-<first 6 hex of sha256(absolute project path)>`,
@@ -101,8 +144,8 @@ resolved by walking up from the session cwd to the nearest `.git` or `CLAUDE.md`
 | `GOLEM_NTFY_TOPIC` | ntfy.sh topic for push notifications | falls back to `~/.config/golem/ntfy_topic` file; unset → notifications are a silent no-op |
 | `XDG_CONFIG_HOME` | base for the `golem/` config/registry dir | `~/.config` |
 | `GOLEM_CHANNEL_PORT` | channel HTTP port (`0` = random free port) | `7421` |
-| `GOLEM_CEO_SESSION_ID` | session id the channel registers under for dashboard routing | `CLAUDE_CODE_SESSION_ID` fallback |
-| `GOLEM_CHANNEL_ALLOWED_SENDERS` | comma list of accepted `X-Sender` values | `dashboard,cli,curl` |
+| `GOLEM_CEO_SESSION_ID` | explicit override for the id the channel registers under | unset → derived **logical** id (see below) |
+| `GOLEM_CHANNEL_ALLOWED_SENDERS` | comma list of accepted `X-Sender` values | `dashboard,cli,curl,consult` |
 
 `CLAUDE_PLUGIN_ROOT` is provided by Claude Code and resolves hook/MCP paths.
 
@@ -119,7 +162,9 @@ plugin/
   agents/reviewer.md           # fresh-context diff review, findings only
   agents/researcher.md         # read-only investigation, structured summary
   skills/tracker/SKILL.md      # golem:tracker — tracker is the source of truth for work
-  mcp/channel/index.js         # golem channel MCP — ack/respond + tracker tools
+  skills/get-consult/SKILL.md  # golem:get-consult — ask a peer session for a fresh pair of eyes
+  skills/provide-consult/SKILL.md # golem:provide-consult — answer a peer's consult
+  mcp/channel/index.js         # golem channel MCP — ack/respond + tracker + consult tools, /consult routes
   mcp/channel/tracker-client.js# HTTP client of the dashboard tracker REST API
   mcp/channel/node_modules/    # bundled deps (@modelcontextprotocol/sdk)
   .mcp.json                    # wires the channel MCP via ${CLAUDE_PLUGIN_ROOT}

@@ -13,7 +13,7 @@
 // /api/channel/health, but is no longer used for brief routing.
 
 import { CONFIG } from './config.js';
-import { readChannels } from './orchestrator.js';
+import { readChannels } from './channels.js';
 
 const DEFAULT_TIMEOUT_MS = 5000;
 
@@ -84,14 +84,6 @@ export async function pushInterrupt(body, sessionId) {
 
 export async function pushHalt(body, sessionId) {
   return forward('POST', '/halt', body ?? 'halt requested by dashboard', sessionId);
-}
-
-export async function pushGate(gateId, decision, body, sessionId) {
-  if (!['approve', 'deny', 'cancel'].includes(decision)) {
-    throw new Error(`unknown gate decision: ${decision}`);
-  }
-  const safe = encodeURIComponent(gateId);
-  return forward('POST', `/gates/${safe}/${decision}`, body ?? '', sessionId);
 }
 
 export async function channelHealth(sessionId) {

@@ -1,54 +1,26 @@
-// Live data store. Replaces the design's static `data.js` simulation with a
-// real-time store backed by REST snapshot + WS deltas.
+// Live data store (v4 only).
 //
-// Public surface (mirrors what the JSX components expect):
+// Backed by REST snapshot + WebSocket deltas. v4 surface:
+//   - projects with PLAN.md progress + milestone feeds
+//   - native Claude Code sessions
+//   - live channel registrations
+//   - cross-project tracker.db tickets + streams + comments
+//   - chat messages
 //
-//   window.Store = {
-//     subscribe(fn) → unsubscribe                  // fires after every state change
-//     getState()                                   // returns the current snapshot
-//     getProject(id), getAgent(agentId),           // selectors
-//     getProjectAgents(id), getProjectActiveAgents(id),
-//     getActiveAgents(), getProjectTickets(id),
-//     loadAgentDetail(projectId, agentId) → agent  // hits REST for full journal/hooks
-//   }
-//
-// State shape:
-//   {
-//     ready: bool,                         // first snapshot received
-//     connection: 'connecting'|'connected'|'disconnected',
-//     projects: [ProjectSummary],
-//     agentsByProject: Map<projectId, Agent[]>,
-//     ticketsByProject: Map<projectId, Ticket[]>,
-//     agentDetail: Map<agentId, FullAgent>,  // populated lazily on drawer open
-//     roles: Map<roleKey, RoleInfo>,
-//     columns: ['triage','open',...],
-//   }
+// v3 journal-synthesized agents, markdown tickets, agent detail, and the v3
+// orchestrator snapshot were removed in TKT-0009.
 
 (function () {
   const ROLES_FALLBACK = {
     UNK: { label: 'Agent', color: '#8a909c', glyph: '··' },
   };
 
-  const ORCH_EMPTY = {
-    ceo: null,
-    sessions: [],
-    workspaces: [],
-    headlineMemo: null,
-    gates: [],
-    gateCounts: { awaiting: 0, approved: 0, denied: 0, cancelled: 0, total: 0 },
-  };
-
   const state = {
     ready: false,
     connection: 'connecting',
     projects: [],
-    agentsByProject: new Map(),
-    ticketsByProject: new Map(),
-    agentDetail: new Map(),
     // v4 (fix round 2): per-native-session peek cache, keyed by session_id.
-    // Populated lazily on drawer open, mirroring agentDetail.
     nativeSessionPeek: new Map(),
-    orchestrator: ORCH_EMPTY,
     chat: [],
     chatCap: 200,
     roles: { ...ROLES_FALLBACK },
@@ -56,19 +28,15 @@
     serverTime: null,
     // v4: all native Claude Code sessions (not just substrated/golem ones).
     nativeSessions: [],
-    // v4: live channel registrations keyed by CEO session_id. Lets the command
-    // center decide, per native session, whether a brief can be delivered.
+    // v4: live channel registrations keyed by CEO session_id.
     channels: [],
     // v4: cross-project milestone feed (newest first), each project-chipped.
     recentMilestones: [],
     // WS5: cross-project tracker (tracker.db) — a FLAT ticket list across all
-    // projects, kept in a Map by id for O(1) upsert. Distinct from the legacy
-    // markdown `ticketsByProject` slice above. `streams` is the flat stream list.
+    // projects, kept in a Map by id for O(1) upsert.
     trackerTickets: new Map(),
     streams: [],
-    // WS5b: per-ticket comment threads, keyed by ticket id. Seeded by the
-    // ticket drawer after a getTicket() detail fetch, then kept live by the
-    // `ticket-comment` WS delta (append + dedupe by comment id).
+    // WS5b: per-ticket comment threads, keyed by ticket id.
     ticketComments: new Map(),
   };
 
@@ -96,28 +64,11 @@
   function applySnapshot(snap) {
     if (!snap || typeof snap !== 'object') return;
     state.projects = Array.isArray(snap.projects) ? snap.projects : [];
-    state.agentsByProject = new Map();
-    state.ticketsByProject = new Map();
-    if (Array.isArray(snap.agents)) {
-      for (const a of snap.agents) {
-        const list = state.agentsByProject.get(a.project) ?? [];
-        list.push(a);
-        state.agentsByProject.set(a.project, list);
-      }
-    }
-    if (Array.isArray(snap.tickets)) {
-      for (const t of snap.tickets) {
-        const list = state.ticketsByProject.get(t.project) ?? [];
-        list.push(t);
-        state.ticketsByProject.set(t.project, list);
-      }
-    }
-    if (snap.orchestrator) state.orchestrator = snap.orchestrator;
     if (Array.isArray(snap.chat)) state.chat = snap.chat.slice();
     if (Array.isArray(snap.native_sessions)) state.nativeSessions = snap.native_sessions.slice();
     if (Array.isArray(snap.channels)) state.channels = snap.channels.slice();
     if (Array.isArray(snap.recent_milestones)) state.recentMilestones = snap.recent_milestones.slice();
-    // WS5: flat cross-project tracker slice (separate from ticketsByProject).
+    // WS5: flat cross-project tracker slice.
     if (Array.isArray(snap.tickets)) {
       const m = new Map();
       for (const t of snap.tickets) if (t && t.id) m.set(t.id, t);
@@ -139,18 +90,11 @@
     state.trackerTickets.set(ticket.id, ticket);
     notify();
   }
-  // WS5b: optimistic upsert from a REST response (getTicket / updateTicket /
-  // dispatch) so the open drawer reflects the new field values immediately,
-  // without waiting on the echoing ticket-updated WS delta. Same effect as the
-  // delta path (set + notify); the later delta is then a harmless idempotent set.
   function upsertTrackerTicket(ticket) {
     if (!ticket || !ticket.id) return;
     state.trackerTickets.set(ticket.id, ticket);
     notify();
   }
-  // WS5b: the drawer seeds a ticket's comments after getTicket(); the live
-  // `ticket-comment` delta then appends to that Map. Seeding into a Map the
-  // selector reads keeps the open drawer reactive without a detail re-fetch.
   function seedTicketComments(id, comments) {
     if (!id) return;
     state.ticketComments.set(id, Array.isArray(comments) ? comments.slice() : []);
@@ -159,8 +103,21 @@
   function applyTicketComment({ ticket_id, comment }) {
     if (!ticket_id || !comment || comment.id == null) return;
     const cur = state.ticketComments.get(ticket_id) ?? [];
-    if (cur.some((c) => c.id === comment.id)) return; // dedupe by id
+    if (cur.some((c) => c.id === comment.id)) return;
     state.ticketComments.set(ticket_id, [...cur, comment]);
+    notify();
+  }
+  function applyTicketCommentUpdated({ ticket_id, comment }) {
+    if (!ticket_id || !comment || comment.id == null) return;
+    const cur = state.ticketComments.get(ticket_id) ?? [];
+    const idx = cur.findIndex((c) => c.id === comment.id);
+    if (idx === -1) {
+      state.ticketComments.set(ticket_id, [...cur, comment]);
+    } else {
+      const next = cur.slice();
+      next[idx] = comment;
+      state.ticketComments.set(ticket_id, next);
+    }
     notify();
   }
   function applyStreamUpdated({ stream }) {
@@ -183,17 +140,10 @@
 
   function applyChatMessage({ message }) {
     if (!message || typeof message !== 'object') return;
-    // De-dup by id if present (snapshot may include messages we already saw).
     if (message.id && state.chat.some((m) => m.id === message.id)) return;
     const next = state.chat.concat(message);
     while (next.length > state.chatCap) next.shift();
     state.chat = next;
-    notify();
-  }
-
-  function applyOrchestratorUpdate({ orchestrator }) {
-    if (!orchestrator) return;
-    state.orchestrator = orchestrator;
     notify();
   }
 
@@ -218,17 +168,6 @@
     }
     merged.sort((a, b) => (b.t ?? 0) - (a.t ?? 0));
     state.recentMilestones = merged.slice(0, cap);
-  }
-
-  function applyAgentsUpdate({ projectId, agents }) {
-    if (!projectId) return;
-    state.agentsByProject.set(projectId, Array.isArray(agents) ? agents : []);
-    notify();
-  }
-
-  function applyTicketsUpdate({ projectId, tickets }) {
-    if (!projectId) return;
-    state.ticketsByProject.set(projectId, Array.isArray(tickets) ? tickets : []);
     notify();
   }
 
@@ -242,32 +181,12 @@
       state.projects = next;
     }
     recomputeMilestones();
-    notify();
   }
 
   function applyProjectsList({ projects }) {
     if (!Array.isArray(projects)) return;
     state.projects = projects;
-    // Drop agents/tickets for projects that no longer exist.
-    const ids = new Set(projects.map((p) => p.id));
-    for (const id of [...state.agentsByProject.keys()]) {
-      if (!ids.has(id)) state.agentsByProject.delete(id);
-    }
-    for (const id of [...state.ticketsByProject.keys()]) {
-      if (!ids.has(id)) state.ticketsByProject.delete(id);
-    }
     recomputeMilestones();
-    notify();
-  }
-
-  function applyAgentDetail({ agent }) {
-    if (!agent) return;
-    state.agentDetail.set(agent.id, agent);
-    notify();
-  }
-
-  function isLive(a) {
-    return a.status === 'active' || a.status === 'running' || a.status === 'review';
   }
 
   // ---- Selectors used by components ----
@@ -276,11 +195,6 @@
     return state.projects.find((p) => p.id === id) ?? null;
   }
   // Resolve the dashboard project record for a derived contract project_id.
-  // Native sessions / gates / milestones carry the CONTRACT project_id
-  // (`<slug>-<6hex>`), but a project's dashboard `id` is its registry id
-  // (e.g. "trialroom-ai") which often differs from the contract id
-  // ("trialroomai-74ac11"). Match on `project_id` first, then fall back to `id`
-  // (covers entries discovered without a registry, where id === contract id).
   function getProjectByContractId(contractId) {
     if (!contractId) return null;
     return (
@@ -289,18 +203,8 @@
       null
     );
   }
-  function getProjectAgents(id) {
-    return state.agentsByProject.get(id) ?? [];
-  }
-  function getProjectActiveAgents(id) {
-    return getProjectAgents(id).filter(isLive);
-  }
-  function getProjectTickets(id) {
-    return state.ticketsByProject.get(id) ?? [];
-  }
-  // WS5: cross-project tracker tickets, filtered. `filter` keys:
-  //   project_id, state, kind, assignee, includeArchived.
-  // `archived` tickets are excluded unless includeArchived is truthy. Pure.
+
+  // WS5: cross-project tracker tickets, filtered.
   function getTrackerTickets(filter = {}) {
     const { project_id, state: st, kind, assignee, includeArchived } = filter;
     const out = [];
@@ -320,60 +224,18 @@
     }
     return out;
   }
-  // WS5b: the loaded comment thread for one ticket id (seeded by the drawer,
-  // kept live by ticket-comment deltas). Empty array when none loaded yet.
   function getTicketComments(id) {
     return state.ticketComments.get(id) ?? [];
   }
-  // WS5: streams for one contract project_id (or all when omitted). Pure.
   function getStreams(project_id) {
     if (project_id == null) return state.streams.slice();
     return state.streams.filter((s) => s.project_id === project_id);
-  }
-  function getActiveAgents() {
-    const out = [];
-    for (const list of state.agentsByProject.values()) {
-      for (const a of list) if (isLive(a)) out.push(a);
-    }
-    return out;
-  }
-  function getAllAgents() {
-    const out = [];
-    for (const list of state.agentsByProject.values()) {
-      for (const a of list) out.push(a);
-    }
-    return out;
-  }
-  function getAgent(agentId) {
-    for (const list of state.agentsByProject.values()) {
-      for (const a of list) if (a.id === agentId) return a;
-    }
-    return null;
   }
   function getRole(role) {
     if (!role) return state.roles.UNK;
     return state.roles[role] ?? state.roles.UNK;
   }
 
-  async function loadAgentDetail(projectId, agentId) {
-    try {
-      const a = await window.SubstrateAPI.agentDetail(projectId, agentId);
-      state.agentDetail.set(agentId, a);
-      notify();
-      return a;
-    } catch (err) {
-      console.error('loadAgentDetail failed', err);
-      return null;
-    }
-  }
-
-  function getAgentDetail(agentId) {
-    return state.agentDetail.get(agentId) ?? null;
-  }
-
-  // v4 (fix round 2): fetch + cache a native session's peek payload (recent
-  // central-journal events, milestones, transcript path). Mirrors
-  // loadAgentDetail — fetches over REST, caches by session_id, notifies.
   async function loadNativeSessionPeek(sessionId) {
     if (!sessionId) return null;
     try {
@@ -406,7 +268,7 @@
       applySnapshot(snap);
     } catch (err) {
       console.error('snapshot fetch failed', err);
-      state.ready = true; // still let UI render empty state
+      state.ready = true;
       notify();
     }
     // Open WS for live updates.
@@ -422,23 +284,11 @@
           case 'snapshot':
             applySnapshot(msg.payload);
             break;
-          case 'agents-update':
-            applyAgentsUpdate(msg);
-            break;
-          case 'tickets-update':
-            applyTicketsUpdate(msg);
-            break;
           case 'project-update':
             applyProjectUpdate(msg);
             break;
           case 'projects-list':
             applyProjectsList(msg);
-            break;
-          case 'agent-detail':
-            applyAgentDetail(msg);
-            break;
-          case 'orchestrator-update':
-            applyOrchestratorUpdate(msg);
             break;
           case 'native-sessions-update':
             applyNativeSessionsUpdate(msg);
@@ -455,6 +305,9 @@
           case 'ticket-comment':
             applyTicketComment(msg);
             break;
+          case 'ticket-comment-updated':
+            applyTicketCommentUpdated(msg);
+            break;
           case 'stream-updated':
             applyStreamUpdated(msg);
             break;
@@ -462,30 +315,18 @@
             state.serverTime = msg.ts;
             break;
           default:
+            // v3 agents-update / tickets-update / agent-detail / orchestrator-update
+            // are intentionally ignored.
             break;
         }
       },
     });
   }
 
-  // Per-session chat filter. Messages without a session_id are surfaced in
-  // every lane (system errors that pre-date routing fall into this bucket).
+  // Per-session chat filter.
   function getChatForSession(sessionId) {
     if (!sessionId) return state.chat.slice();
     return state.chat.filter((m) => !m.session_id || m.session_id === sessionId);
-  }
-
-  // The CEO session list, deduped + sorted: live sessions first, claimed
-  // projects before unbound. Each row carries channel_url so the UI can show a
-  // "channel" badge / link.
-  function getSessions() {
-    const list = state.orchestrator?.sessions ?? [];
-    return list.slice().sort((a, b) => {
-      const aClaim = a.claimed_project ? 0 : 1;
-      const bClaim = b.claimed_project ? 0 : 1;
-      if (aClaim !== bClaim) return aClaim - bClaim;
-      return (a.boot_time || '').localeCompare(b.boot_time || '');
-    });
   }
 
   window.Store = {
@@ -494,62 +335,38 @@
     getProject,
     getProjectByContractId,
     getProjects: () => state.projects,
-    getProjectAgents,
-    getProjectActiveAgents,
-    getProjectTickets,
     getTrackerTickets,
     getStreams,
     getTicketComments,
     seedTicketComments,
     upsertTrackerTicket,
-    getActiveAgents,
-    getAllAgents,
-    getAgent,
     getRole,
-    loadAgentDetail,
-    getAgentDetail,
     loadNativeSessionPeek,
     getNativeSessionPeek,
     getNativeSessionById: (sessionId) =>
       sessionId ? (state.nativeSessions.find((s) => s.session_id === sessionId) ?? null) : null,
-    getOrchestrator: () => state.orchestrator,
     getChat: () => state.chat,
     getChatForSession,
-    getSessions,
     getNativeSessions: () => state.nativeSessions,
     getChannels: () => state.channels,
-    // The live channel for a given session_id, or null. A native session has a
-    // deliverable channel iff a channel-server registered under its session_id.
+    // The live channel for a given session_id, or null.
     getChannelForSession: (sessionId) =>
       sessionId ? (state.channels.find((c) => c.session_id === sessionId) ?? null) : null,
     getRecentMilestones: () => state.recentMilestones,
-    // Every awaiting gate across all workspaces (already aggregated server-side
-    // in orchestrator.gates — central + legacy both surface there).
-    getPendingGates: () =>
-      (state.orchestrator?.gates ?? []).filter((g) => g.status === 'awaiting'),
-    // All gates (any status) for one workspace, newest first (server already
-    // sorts orchestrator.gates by mtime desc). `workspace` on a gate is the
-    // dashboard registry id.
-    getProjectGates: (workspaceId) =>
-      (state.orchestrator?.gates ?? []).filter((g) => g.workspace === workspaceId),
     // Native Claude Code sessions whose derived contract project_id maps to this
-    // dashboard project (match the project's own contract project_id, falling
-    // back to its registry id for registry-less discoveries).
+    // dashboard project.
     getProjectSessions: (project) => {
       if (!project) return [];
       const ids = new Set([project.project_id, project.id].filter(Boolean));
       return state.nativeSessions.filter((s) => s.project_id && ids.has(s.project_id));
     },
-    // v4 (fix round 2, defect 3): alive native sessions belonging to a project.
-    // The sidebar/per-project liveness dot keys off this instead of the stale
-    // v3 journal-agent count.
+    // v4: alive native sessions belonging to a project.
     getProjectAliveSessions: (project) => {
       if (!project) return [];
       const ids = new Set([project.project_id, project.id].filter(Boolean));
       return state.nativeSessions.filter((s) => s.alive && s.project_id && ids.has(s.project_id));
     },
-    // v4 (fix round 2, defect 3): count of ALL alive native Claude Code sessions
-    // on the machine — the real "what is running" signal for the topbar.
+    // v4: count of ALL alive native Claude Code sessions on the machine.
     getAliveSessionCount: () => state.nativeSessions.filter((s) => s.alive).length,
   };
 

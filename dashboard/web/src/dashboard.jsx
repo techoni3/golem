@@ -18,7 +18,6 @@ function Dashboard({ setRoute }) {
   const state = window.Store.getState();
   const sessions = window.Store.getNativeSessions();
   const projects = state.projects;
-  const gates = window.Store.getPendingGates();
   const milestones = window.Store.getRecentMilestones();
 
   const aliveCount = sessions.filter((s) => s.alive).length;
@@ -38,7 +37,6 @@ function Dashboard({ setRoute }) {
           <CCStat value={aliveCount} label="sessions live" tone="active"/>
           <CCStat value={busyCount} label="working" tone="running"/>
           <CCStat value={waitingCount} label="waiting" tone="review"/>
-          <CCStat value={gates.length} label="gates" tone={gates.length ? 'review' : 'muted'}/>
         </div>
       </div>
 
@@ -77,15 +75,14 @@ function Dashboard({ setRoute }) {
           ) : (
             <div className="cc-project-list">
               {projects.map((p) => (
-                <WorkCard key={p.id} project={p} gates={gates} setRoute={setRoute}/>
+                <WorkCard key={p.id} project={p} setRoute={setRoute}/>
               ))}
             </div>
           )}
         </section>
 
-        {/* ── Zone 3: Control & feed ── */}
+        {/* ── Zone 3: Milestone feed ── */}
         <section className="cc-zone cc-control">
-          <PendingGatesPanel gates={gates} setRoute={setRoute}/>
           <MilestoneFeed milestones={milestones} setRoute={setRoute}/>
         </section>
       </div>
@@ -299,7 +296,7 @@ function SessionControls({ session: s, channel }) {
 }
 
 // ── Zone 2: a project card built around PLAN progress + latest milestone ──
-function WorkCard({ project: p, gates, setRoute }) {
+function WorkCard({ project: p, setRoute }) {
   // v5b: home progress now comes from the cross-project tracker (tracker.db),
   // not PLAN.md. done = state 'done'; total = non-archived tickets for this
   // project's CONTRACT project_id. Falls back gracefully (no bar) when the
@@ -312,9 +309,8 @@ function WorkCard({ project: p, gates, setRoute }) {
 
   const milestones = p.milestones || [];
   const latest = milestones.length ? milestones[milestones.length - 1] : null;
-  const pendingGates = gates.filter((g) => g.workspace === p.id).length;
   const hasActivity = hasTracker || milestones.length > 0;
-  const live = window.Store.getProjectActiveAgents(p.id).length;
+  const live = window.Store.getProjectAliveSessions(p).length;
   const pct = hasTracker ? Math.round((trackerDone / trackerTotal) * 100) : 0;
 
   // Compact render for projects with no plan + no activity.
@@ -323,7 +319,7 @@ function WorkCard({ project: p, gates, setRoute }) {
       <button
         className="cc-work-card compact"
         style={{ '--card-color': p.color }}
-        onClick={() => setRoute({ kind: 'project', id: p.id, tab: 'agents' })}
+        onClick={() => setRoute({ kind: 'project', id: p.id })}
       >
         <ProjectGlyph project={p} size={26}/>
         <span className="cc-work-name">{p.name}</span>
@@ -337,7 +333,7 @@ function WorkCard({ project: p, gates, setRoute }) {
     <div
       className="cc-work-card"
       style={{ '--card-color': p.color }}
-      onClick={() => setRoute({ kind: 'project', id: p.id, tab: 'agents' })}
+      onClick={() => setRoute({ kind: 'project', id: p.id })}
     >
       <div className="cc-work-top">
         <ProjectGlyph project={p} size={30}/>
@@ -346,11 +342,6 @@ function WorkCard({ project: p, gates, setRoute }) {
           <div className="cc-work-id mono">{p.id}</div>
         </div>
         <div className="cc-work-badges">
-          {pendingGates > 0 && (
-            <span className="cc-gate-badge" title={`${pendingGates} gate(s) awaiting`}>
-              <Icon.Gate size={11}/> {pendingGates}
-            </span>
-          )}
           {live > 0 && <span className="cc-work-live"><span className="orch-dot live"/>{live}</span>}
         </div>
       </div>
@@ -378,74 +369,7 @@ function WorkCard({ project: p, gates, setRoute }) {
   );
 }
 
-// ── Zone 3a: pending gates across all projects ──
-function PendingGatesPanel({ gates, setRoute }) {
-  return (
-    <div className="cc-panel">
-      <div className="cc-zone-head">
-        <span className="cc-zone-title">Pending Gates</span>
-        <span className={`cc-zone-count ${gates.length ? 'attn' : ''}`}>{gates.length}</span>
-      </div>
-      {gates.length === 0 ? (
-        <div className="cc-panel-empty">No gates awaiting a decision.</div>
-      ) : (
-        <div className="cc-gate-list">
-          {gates.map((g) => <GateRow key={g.gate_id} gate={g} setRoute={setRoute}/>)}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function GateRow({ gate: g, setRoute }) {
-  const [busy, setBusy] = useDState(false);
-  const [toast, setToast] = useDState(null);
-  // Gate `workspace` is the dashboard registry id; resolve by id (with contract
-  // fallback, harmless here). Gates always come from a registered workspace.
-  const project = window.Store.getProjectByContractId(g.workspace);
-
-  const flash = (msg, kind = 'ok') => {
-    setToast({ msg, kind, id: Math.random() });
-    setTimeout(() => setToast(null), 2600);
-  };
-
-  const decide = useDCallback(async (decision) => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      await window.SubstrateAPI.pushGate(g.gate_id, decision, '', null);
-      flash(`${decision}d`, decision === 'deny' ? 'err' : 'ok');
-    } catch (err) {
-      console.error(`gate ${decision} failed`, err);
-      flash(`${decision} failed`, 'err');
-    } finally {
-      setBusy(false);
-    }
-  }, [busy, g.gate_id]);
-
-  const kind = g.kind || (String(g.gate_id).startsWith('input-') ? 'input' : 'approval');
-
-  return (
-    <div className="cc-gate-row">
-      <div className="cc-gate-row-top">
-        <ProjectChip project={project} projectId={g.workspace} registered setRoute={setRoute}/>
-        <span className="cc-gate-kind">{kind}</span>
-      </div>
-      <div className="cc-gate-flow">
-        {g.phase_just_completed || '?'} <span className="cc-gate-arrow">→</span> {g.next_phase || '?'}
-      </div>
-      <div className="cc-gate-id mono" title={g.gate_id}>{g.gate_id}</div>
-      <div className="cc-gate-actions">
-        <button className="orch-btn small ok" disabled={busy} onClick={() => decide('approve')}>Approve</button>
-        <button className="orch-btn small" disabled={busy} onClick={() => decide('deny')}>Deny</button>
-        <button className="orch-btn small ghost" disabled={busy} onClick={() => decide('cancel')}>Cancel</button>
-      </div>
-      {toast && <div className={`orch-toast ${toast.kind} cc-toast`} key={toast.id}>{toast.msg}</div>}
-    </div>
-  );
-}
-
-// ── Zone 3b: cross-project milestone feed (primary progress signal) ──
+// ── Zone 3: cross-project milestone feed (primary progress signal) ──
 function MilestoneFeed({ milestones, setRoute }) {
   return (
     <div className="cc-panel">
@@ -493,7 +417,5 @@ window.Dashboard = Dashboard;
 window.EmptyCard = EmptyCard;
 window.SessionCard = SessionCard;
 window.WorkCard = WorkCard;
-window.PendingGatesPanel = PendingGatesPanel;
-window.GateRow = GateRow;
 window.MilestoneFeed = MilestoneFeed;
 window.ProjectChip = ProjectChip;

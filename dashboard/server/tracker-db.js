@@ -15,13 +15,15 @@ import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import Database from 'better-sqlite3';
+import { marked } from 'marked';
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 4;
 
 const KINDS = new Set(['work-item', 'decision', 'spec', 'question', 'fix']);
 const STATES = new Set(['todo', 'in_progress', 'blocked', 'review', 'done', 'archived']);
 const STREAM_MODES = new Set(['sequential', 'parallel']);
 const LINK_TYPES = new Set(['blocks', 'relates', 'duplicates']);
+const COMMENT_TAGS = new Set(['confirmed', 'partial', 'disputed', 'fix', 'risk', 'question', 'note']);
 
 const HOME = os.homedir();
 
@@ -56,6 +58,46 @@ function serializeLabels(labels) {
     return JSON.stringify(parsed.length ? parsed : []);
   }
   return JSON.stringify(Array.isArray(labels) ? labels : []);
+}
+
+/**
+ * Detect text that is probably Markdown (headings, lists, blockquotes, links,
+ * fenced code, emphasis). Used to decide whether to run marked on plain text.
+ */
+function looksLikeMarkdown(text) {
+  if (!text) return false;
+  // Headings, lists, blockquotes, numbered lists at line start.
+  if (/^\s{0,3}(#{1,6}\s|[-*+]\s|\d+\.\s|\>\s|```)/m.test(text)) return true;
+  // Inline / block markdown patterns.
+  if (/\[([^\]]+)\]\(([^)]+)\)/.test(text)) return true; // links
+  if (/!\[([^\]]*)\]\(([^)]+)\)/.test(text)) return true; // images
+  if (/```[\s\S]*```/.test(text)) return true; // fenced code
+  if (/\*\*[^*]+\*\*|__[^_]+__|~~[^~]+~~|`[^`]+`/.test(text)) return true; // bold/italic/strike/code
+  return false;
+}
+
+/**
+ * Normalize a ticket/comment body to canonical HTML.
+ * - Existing HTML (starts with a tag) passes through.
+ * - Markdown-looking plain text is converted via marked.
+ * - Otherwise plain text is split into paragraphs (blank-line separated) with
+ *   single newlines preserved as <br/>.
+ * This lets agents continue to send plain text or Markdown while the UI always
+ * renders HTML.
+ */
+function toHtmlBody(raw) {
+  if (raw == null) return '';
+  const text = String(raw).trim();
+  if (!text) return '';
+  // Heuristic: if it starts with an HTML tag, treat as HTML.
+  if (/^\s*<[a-zA-Z][^>]*>/.test(text)) return text;
+  if (looksLikeMarkdown(text)) {
+    return marked(text, { gfm: true, breaks: false, headerIds: false, mangle: false });
+  }
+  return text
+    .split(/\n\n+/)
+    .map((p) => `<p>${p.trim().replace(/\n/g, '<br/>')}</p>`)
+    .join('');
 }
 
 // Hydrate a raw ticket row into a plain object with labels parsed to an array.
@@ -99,18 +141,37 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
         dispatched_at TEXT,
         source_ref    TEXT,
         created_at    TEXT NOT NULL,
-        updated_at    TEXT NOT NULL
+        updated_at    TEXT NOT NULL,
+        -- TKT-0105 (v4 schema): lifecycle columns for rank ordering and
+        -- the 14-day done→archived auto-archive sweep.
+        rank              INTEGER NOT NULL DEFAULT 0,
+        state_changed_at  TEXT,
+        done_at           TEXT,
+        archived_at       TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_tickets_project  ON tickets(project_id);
       CREATE INDEX IF NOT EXISTS idx_tickets_state    ON tickets(state);
       CREATE INDEX IF NOT EXISTS idx_tickets_assignee ON tickets(assignee);
+      -- The two indexes that depend on lifecycle columns (state_rank, done_at)
+      -- are created LATER in the migration block, AFTER the ALTER TABLE that
+      -- adds those columns to pre-existing DBs. Doing them here would fail on
+      -- any DB that pre-dates v4 because the columns don't exist yet.
 
       CREATE TABLE IF NOT EXISTS comments (
-        id         TEXT PRIMARY KEY,
-        ticket_id  TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
-        author     TEXT NOT NULL,
-        body       TEXT NOT NULL,
-        created_at TEXT NOT NULL
+        id          TEXT PRIMARY KEY,
+        ticket_id   TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+        author      TEXT NOT NULL,
+        body        TEXT NOT NULL,
+        quote       TEXT,
+        prefix      TEXT,
+        suffix      TEXT,
+        section     TEXT,
+        section_id  TEXT,
+        tag         TEXT NOT NULL DEFAULT 'note',
+        status      TEXT NOT NULL DEFAULT 'open',
+        parent_id   TEXT,
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_comments_ticket ON comments(ticket_id);
 
@@ -153,7 +214,74 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
     const seed = db.prepare('INSERT OR IGNORE INTO meta(key, value) VALUES (?, ?)');
     seed.run('schema_version', String(SCHEMA_VERSION));
     seed.run('ticket_seq', '0');
-  }
+
+    // Schema migration v1 -> v2: add annotation columns to comments.
+    const columns = db.prepare("PRAGMA table_info(comments)").all().map((c) => c.name);
+    const needed = ['quote', 'prefix', 'suffix', 'section', 'section_id', 'tag', 'status', 'parent_id', 'updated_at'];
+    for (const col of needed) {
+      if (!columns.includes(col)) {
+        db.exec(`ALTER TABLE comments ADD COLUMN ${col} TEXT`);
+      }
+    }
+    // tag/status have defaults; backfill any nulls from pre-v2 rows.
+    db.prepare("UPDATE comments SET tag = COALESCE(tag, 'note'), status = COALESCE(status, 'open'), updated_at = COALESCE(updated_at, created_at) WHERE tag IS NULL OR status IS NULL OR updated_at IS NULL").run();
+
+    // Schema migration v2 -> v3: canonical HTML bodies. Convert any ticket or
+    // comment body that is not already HTML into HTML (Markdown -> HTML via
+    // marked, plain text -> wrapped paragraphs).
+    const schemaVersion = db.prepare('SELECT value FROM meta WHERE key = ?').get('schema_version')?.value;
+    if (schemaVersion && Number(schemaVersion) < 3) {
+      const updateTicketBody = db.prepare('UPDATE tickets SET body = ?, updated_at = ? WHERE id = ?');
+      for (const { id, body } of db.prepare('SELECT id, body FROM tickets').all()) {
+        const html = toHtmlBody(body);
+        if (html !== body) updateTicketBody.run(html, now(), id);
+      }
+      const updateCommentBody = db.prepare('UPDATE comments SET body = ?, updated_at = ? WHERE id = ?');
+      for (const { id, body } of db.prepare('SELECT id, body FROM comments').all()) {
+        const html = toHtmlBody(body);
+        if (html !== body) updateCommentBody.run(html, now(), id);
+      }
+    }
+
+    // Schema migration v3 -> v4 (TKT-0105): lifecycle columns. ALTER TABLE
+    // adds them to existing rows (NULL by default). The backfill below writes
+    // state_changed_at, done_at, archived_at, and rank so the new columns are
+    // immediately useful (sortable by rank, sweep-able by done_at).
+    const ticketCols = db.prepare("PRAGMA table_info(tickets)").all().map((c) => c.name);
+    for (const [col, def] of [
+      ['rank',             'INTEGER NOT NULL DEFAULT 0'],
+      ['state_changed_at', 'TEXT'],
+      ['done_at',          'TEXT'],
+      ['archived_at',      'TEXT'],
+    ]) {
+      if (!ticketCols.includes(col)) {
+        db.exec(`ALTER TABLE tickets ADD COLUMN ${col} ${def}`);
+      }
+    }
+    // Backfill rank: seq * 1000 leaves gaps between sequential tickets so
+    // manual reorders can drop cards between without rewriting every row.
+    db.prepare(`UPDATE tickets SET rank = seq * 1000 WHERE rank = 0`).run();
+    // state_changed_at from event rows where present; fall back to updated_at.
+    db.prepare(`UPDATE tickets
+SET state_changed_at = COALESCE(
+  (SELECT MAX(e.created_at) FROM events e
+     WHERE e.ticket_id = tickets.id AND e.type = 'state_change'),
+  updated_at
+)
+WHERE state_changed_at IS NULL`).run();
+    db.prepare(`UPDATE tickets SET done_at = state_changed_at
+      WHERE state = 'done' AND done_at IS NULL`).run();
+    db.prepare(`UPDATE tickets SET archived_at = state_changed_at
+      WHERE state = 'archived' AND archived_at IS NULL`).run();
+
+    // Indexes that depend on lifecycle columns. Idempotent: no-op on fresh
+    // DBs (CREATE TABLE above already created them), first-time-create on
+    // existing DBs (where the ALTER TABLE above just added the columns).
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_state_rank ON tickets(state, rank)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_done_at ON tickets(done_at) WHERE done_at IS NOT NULL`);
+    // Update schema_version to v4.
+    db.prepare('UPDATE meta SET value = ? WHERE key = ?').run(String(SCHEMA_VERSION), 'schema_version');
+}
 
   // ---- prepared statements (built lazily after migrate) ----------------
   let stmts = null;
@@ -172,8 +300,12 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
       getTicket: db.prepare('SELECT * FROM tickets WHERE id = ?'),
       getComments: db.prepare('SELECT * FROM comments WHERE ticket_id = ? ORDER BY created_at ASC, id ASC'),
       insertComment: db.prepare(`
-        INSERT INTO comments (id, ticket_id, author, body, created_at)
-        VALUES (@id, @ticket_id, @author, @body, @created_at)
+        INSERT INTO comments
+          (id, ticket_id, author, body, quote, prefix, suffix, section, section_id,
+           tag, status, parent_id, created_at, updated_at)
+        VALUES
+          (@id, @ticket_id, @author, @body, @quote, @prefix, @suffix, @section, @section_id,
+           @tag, @status, @parent_id, @created_at, @updated_at)
       `),
       touchTicket: db.prepare('UPDATE tickets SET updated_at = ? WHERE id = ?'),
       insertStream: db.prepare(`
@@ -278,6 +410,7 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
       if (!STATES.has(state)) throw new Error(`createTicket: invalid state '${state}'`);
 
       const ts = now();
+      const htmlBody = toHtmlBody(body);
       const txn = db.transaction(() => {
         const { id, seq } = allocateTicketId();
         const row = {
@@ -286,7 +419,7 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
           project_id,
           kind,
           title,
-          body,
+          body: htmlBody,
           state,
           priority,
           labels: serializeLabels(labels),
@@ -319,6 +452,20 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
       const comments = stmts.getComments.all(id);
       const links = stmts.listLinks.all(id, id);
       return { ...hydrateTicket(row), comments, links };
+    },
+
+    // TKT-0107: maximum updated_at across all tickets for a project. Powers
+    // the composite last_activity_at signal in the sidebar ordering.
+    // Returns 0 when the project has no tickets.
+    maxTicketUpdatedAt(projectId) {
+      if (!projectId) return 0;
+      const row = db.prepare(
+        'SELECT MAX(updated_at) AS m FROM tickets WHERE project_id = ?'
+      ).get(projectId);
+      if (!row?.m) return 0;
+      // updated_at is stored as ISO text; parse to ms.
+      const t = Date.parse(row.m);
+      return Number.isFinite(t) ? t : 0;
     },
 
     listTickets(filter = {}) {
@@ -377,6 +524,9 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
       if ('labels' in updates) {
         updates.labels = serializeLabels(updates.labels);
       }
+      if ('body' in updates) {
+        updates.body = toHtmlBody(updates.body);
+      }
 
       const ts = now();
       const txn = db.transaction(() => {
@@ -415,6 +565,117 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
       return hydrateTicket(txn());
     },
 
+    // TKT-0105: state + rank move in a single transaction. Used by the
+    // /api/tickets/:id/move endpoint (drag-and-drop, archive drop, etc.).
+    //   { state, before_id?, after_id?, actor? }
+    //   - state      — new state (required).
+    //   - before_id  — drop position: the moved ticket is placed after this
+    //                  ticket within the target state (NULL = top).
+    //   - after_id   — drop position: the moved ticket is placed before this
+    //                  ticket within the target state (NULL = bottom).
+    //   - actor      — recorded on the audit event.
+    // Rank is computed as the midpoint of the neighbour ranks; if both
+    // before_id and after_id are NULL, the moved ticket gets max(rank)+1000
+    // (appended to end of target state).
+    moveTicket(id, { state, before_id = null, after_id = null, actor = 'human' } = {}) {
+      const existing = stmts.getTicket.get(id);
+      if (!existing) throw new Error(`moveTicket: ticket '${id}' not found`);
+      if (!STATES.has(state)) throw new Error(`moveTicket: invalid state '${state}'`);
+      const ts = now();
+      const txn = db.transaction(() => {
+        // Compute new rank based on neighbours within the target state.
+        const beforeRank = before_id
+          ? (db.prepare('SELECT rank FROM tickets WHERE id = ?').get(before_id)?.rank ?? null)
+          : null;
+        const afterRank = after_id
+          ? (db.prepare('SELECT rank FROM tickets WHERE id = ?').get(after_id)?.rank ?? null)
+          : null;
+        let newRank;
+        if (before_id && after_id && beforeRank !== null && afterRank !== null) {
+          newRank = (beforeRank + afterRank) / 2;
+        } else if (beforeRank !== null && afterRank !== null) {
+          newRank = (beforeRank + afterRank) / 2;
+        } else if (beforeRank !== null) {
+          newRank = beforeRank + 500;
+        } else if (afterRank !== null) {
+          newRank = afterRank - 500;
+        } else {
+          // Append to end of target state.
+          const maxRow = db.prepare(
+            "SELECT MAX(rank) AS m FROM tickets WHERE state = ? AND id != ?"
+          ).get(state, id);
+          newRank = (maxRow?.m ?? 0) + 1000;
+        }
+        // Build the SET clause: state + rank + lifecycle stamps.
+        const setDoneAt = state === 'done' ? ', done_at = @ts' : '';
+        const setArchivedAt = state === 'archived' ? ', archived_at = @ts' : '';
+        db.prepare(`UPDATE tickets SET
+          state = @state,
+          rank = @rank,
+          state_changed_at = @ts,
+          updated_at = @ts
+          ${setDoneAt}
+          ${setArchivedAt}
+        WHERE id = @id`).run({ state, rank: newRank, ts, id });
+        // Audit event for the state change. Rank-only moves within the
+        // same state still record an event for traceability.
+        if (state !== existing.state) {
+          recordEvent({
+            ticket_id: id,
+            project_id: existing.project_id,
+            type: 'state_change',
+            actor,
+            data: { from: existing.state, to: state, before_id, after_id, new_rank: newRank },
+          });
+        } else {
+          recordEvent({
+            ticket_id: id,
+            project_id: existing.project_id,
+            type: 'rank_change',
+            actor,
+            data: { before_id, after_id, new_rank: newRank },
+          });
+        }
+        return stmts.getTicket.get(id);
+      });
+      return hydrateTicket(txn());
+    },
+
+    // TKT-0105: 14-day done → archived sweep. Returns the list of ids
+    // that were auto-archived so the caller can broadcast a single
+    // batch-updated WS delta instead of one per ticket.
+    autoArchiveDone(nowTs = now(), olderThanDays = 14) {
+      const cutoff = new Date(Date.parse(nowTs) - olderThanDays * 86400_000).toISOString();
+      const txn = db.transaction(() => {
+        const rows = db.prepare(
+          "SELECT id FROM tickets WHERE state = 'done' AND done_at IS NOT NULL AND done_at < ?"
+        ).all(cutoff);
+        if (rows.length === 0) return [];
+        const ts = now();
+        const update = db.prepare(
+          "UPDATE tickets SET state = 'archived', archived_at = @ts, state_changed_at = @ts, updated_at = @ts WHERE id = @id"
+        );
+        const record = db.prepare(
+          "INSERT INTO events(ticket_id, project_id, type, actor, data, created_at) VALUES (@ticket_id, @project_id, 'auto_archived', 'system', @data, @ts)"
+        );
+        const updated = [];
+        for (const { id } of rows) {
+          const t = stmts.getTicket.get(id);
+          if (!t) continue;
+          update.run({ id, ts });
+          record.run({
+            ticket_id: id,
+            project_id: t.project_id,
+            ts,
+            data: JSON.stringify({ from: 'done', to: 'archived', done_at: t.done_at }),
+          });
+          updated.push(id);
+        }
+        return updated;
+      });
+      return txn();
+    },
+
     setDispatched(id, { session_id, actor = 'human' } = {}) {
       const existing = stmts.getTicket.get(id);
       if (!existing) throw new Error(`setDispatched: ticket '${id}' not found`);
@@ -436,13 +697,31 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
       return hydrateTicket(txn());
     },
 
-    addComment(ticket_id, { author, body } = {}) {
+    addComment(ticket_id, input = {}) {
       const existing = stmts.getTicket.get(ticket_id);
       if (!existing) throw new Error(`addComment: ticket '${ticket_id}' not found`);
+      const {
+        author, body, quote, prefix, suffix, section, section_id,
+        tag = 'note', status = 'open', parent_id,
+      } = input;
       if (!author) throw new Error('addComment: author is required');
       if (body == null) throw new Error('addComment: body is required');
+      if (tag && !COMMENT_TAGS.has(tag)) throw new Error(`addComment: invalid tag '${tag}'`);
       const ts = now();
-      const row = { id: crypto.randomUUID(), ticket_id, author, body, created_at: ts };
+      const row = {
+        id: crypto.randomUUID(), ticket_id, author,
+        body: toHtmlBody(body),
+        quote: quote ?? null,
+        prefix: prefix ?? null,
+        suffix: suffix ?? null,
+        section: section ?? null,
+        section_id: section_id ?? null,
+        tag,
+        status,
+        parent_id: parent_id ?? null,
+        created_at: ts,
+        updated_at: ts,
+      };
       const txn = db.transaction(() => {
         stmts.insertComment.run(row);
         stmts.touchTicket.run(ts, ticket_id);
@@ -456,6 +735,40 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
         return row;
       });
       return txn();
+    },
+
+    updateComment(ticket_id, comment_id, patch = {}) {
+      const existingTicket = stmts.getTicket.get(ticket_id);
+      if (!existingTicket) throw new Error(`updateComment: ticket '${ticket_id}' not found`);
+      const existing = db.prepare('SELECT * FROM comments WHERE id = ? AND ticket_id = ?').get(comment_id, ticket_id);
+      if (!existing) throw new Error(`updateComment: comment '${comment_id}' not found`);
+      const ALLOWED = ['body', 'tag', 'status'];
+      const updates = {};
+      for (const key of ALLOWED) {
+        if (Object.prototype.hasOwnProperty.call(patch, key)) updates[key] = patch[key];
+      }
+      if ('body' in updates) updates.body = toHtmlBody(updates.body);
+      if ('tag' in updates && updates.tag && !COMMENT_TAGS.has(updates.tag)) {
+        throw new Error(`updateComment: invalid tag '${updates.tag}'`);
+      }
+      if (!Object.keys(updates).length) return existing;
+      const setClause = Object.keys(updates).map((k) => `${k} = @${k}`).join(', ');
+      const ts = now();
+      db.prepare(`UPDATE comments SET ${setClause}, updated_at = @updated_at WHERE id = @id AND ticket_id = @ticket_id`).run({
+        ...updates,
+        updated_at: ts,
+        id: comment_id,
+        ticket_id,
+      });
+      stmts.touchTicket.run(ts, ticket_id);
+      recordEvent({
+        ticket_id,
+        project_id: existingTicket.project_id,
+        type: 'comment_updated',
+        actor: patch.actor ?? existing.author,
+        data: { comment_id },
+      });
+      return db.prepare('SELECT * FROM comments WHERE id = ?').get(comment_id);
     },
 
     createStream(input = {}) {

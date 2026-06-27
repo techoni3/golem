@@ -47,7 +47,7 @@ Output: a numbered list of test scenarios, each with:
 - **Then.** The observable outcome.
 - **Notes.** Edge cases, error paths, performance assertions.
 
-Specs are in the ticket body under `## Test specs` or in a separate file referenced from the ticket. They are prose, not code.
+Specs are in the ticket body inside an HTML `<section>` (see the `html-report` skill for the house style). They are prose, not code.
 
 ### Step 2 — Test Writer (red)
 

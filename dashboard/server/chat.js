@@ -29,7 +29,7 @@
 
 import { EventEmitter } from 'node:events';
 import { CONFIG } from './config.js';
-import { readChannels } from './orchestrator.js';
+import { readChannels } from './channels.js';
 
 let nextId = 1;
 function makeId() {
@@ -151,6 +151,31 @@ export function createChat() {
         text: typeof data.text === 'string' ? data.text : '',
         event_kind: data.kind || undefined,
         gate_id: data.gate_id || undefined,
+        ts: data.ts || undefined,
+      });
+    } else if (event === 'consult') {
+      // A peer asked THIS session for a fresh pair of eyes. Log a short audit
+      // marker on its lane — the full problem text stays in the session.
+      push({
+        role: 'system',
+        kind: 'consult',
+        session_id: sid,
+        text:
+          (data.status_ping ? '🔁 consult status-ping from ' : '🔍 consult request from ') +
+          `"${data.from_name || '?'}"` +
+          (data.consult_id ? ` (${data.consult_id})` : ''),
+        event_kind: 'consult',
+        ts: data.ts || undefined,
+      });
+    } else if (event === 'consult_reply') {
+      push({
+        role: 'system',
+        kind: 'consult_reply',
+        session_id: sid,
+        text:
+          `💡 consult reply from "${data.from_name || '?'}"` +
+          (data.consult_id ? ` (${data.consult_id})` : ''),
+        event_kind: 'consult_reply',
         ts: data.ts || undefined,
       });
     }

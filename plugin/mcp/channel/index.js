@@ -20,6 +20,8 @@ import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
 import { URL } from 'node:url';
+import { execFile } from 'node:child_process';
+import crypto from 'node:crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -45,21 +47,49 @@ const PORT =
     : 0;
 const HOST = '127.0.0.1';
 const ALLOWED_SENDERS = new Set(
-  (process.env.GOLEM_CHANNEL_ALLOWED_SENDERS || 'dashboard,cli,curl')
+  (process.env.GOLEM_CHANNEL_ALLOWED_SENDERS || 'dashboard,cli,curl,consult')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
 );
 
-// Identity for chat-routing. Verified empirically: Claude Code does NOT
-// stamp `CLAUDE_CODE_SESSION_ID` onto MCP-child env (despite some docs
-// implying so) — only user-set env like GOLEM_CHANNEL_PORT propagates. The
-// golem session launcher (substrate/bin/golem) explicitly exports
-// `GOLEM_CEO_SESSION_ID` before exec'ing claude so the value reaches the
-// MCP child. The `CLAUDE_CODE_SESSION_ID` fallback covers any future runtime
-// where claude-code does propagate it.
-const SESSION_ID =
-  process.env.GOLEM_CEO_SESSION_ID || process.env.CLAUDE_CODE_SESSION_ID || '';
+// Identity for chat-routing, dispatch, and consult.
+//
+// The id everything else keys by — `/rename`, `claude agents --json`, the
+// dashboard, the tracker — is the session's LOGICAL id. On a RESUMED session
+// Claude Code spawns this MCP child with a FRESH per-run `CLAUDE_CODE_SESSION_ID`
+// that does NOT equal that logical id; keying the channel off the env var then
+// makes channels.json diverge from every other registry (breaking name lookup,
+// dispatch, and chat routing for resumed sessions).
+//
+// The logical id (and the user's chosen /rename name) live in the parent claude
+// process's per-session file at ~/.claude/sessions/<pid>.json. This MCP child is
+// a DIRECT child of that claude process, so process.ppid points straight at it.
+// Prefer that file; fall back to the env ids only when it is unreadable.
+function readParentSessionFile() {
+  try {
+    const f = path.join(os.homedir(), '.claude', 'sessions', `${process.ppid}.json`);
+    const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+    if (j && typeof j === 'object') return j;
+  } catch { /* missing / unreadable — fall through */ }
+  return null;
+}
+function deriveSessionId() {
+  // Explicit launcher override wins; else the logical id from the parent session
+  // file; else the per-run CLAUDE_CODE_SESSION_ID (last resort — diverges on resume).
+  if (process.env.GOLEM_CEO_SESSION_ID) return process.env.GOLEM_CEO_SESSION_ID;
+  const j = readParentSessionFile();
+  if (j && typeof j.sessionId === 'string' && j.sessionId) return j.sessionId;
+  return process.env.CLAUDE_CODE_SESSION_ID || '';
+}
+function deriveSessionName() {
+  const j = readParentSessionFile();
+  return j && typeof j.name === 'string' && j.name ? j.name : null;
+}
+// Mutable: re-derived on each (re)register so a session file that wasn't written
+// yet at module load, or a later /rename, is picked up within one heartbeat.
+let SESSION_ID = deriveSessionId();
+let SESSION_NAME = deriveSessionName();
 
 const CHANNELS_REGISTRY = path.join(
   process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'),
@@ -139,15 +169,23 @@ function writeChannelsRegistry(reg) {
 const STARTED_AT = new Date().toISOString();
 
 function registerChannel(port) {
+  // Re-derive each call: the parent session file may not have existed at module
+  // load, and the name changes on /rename. Correcting SESSION_ID here also
+  // self-heals a channel that first registered under a fallback run-id.
+  SESSION_ID = deriveSessionId() || SESSION_ID;
+  SESSION_NAME = deriveSessionName();
   if (!SESSION_ID) {
-    process.stderr.write('[golem-channel] CLAUDE_CODE_SESSION_ID empty; channel will not register for multi-CEO routing\n');
+    process.stderr.write('[golem-channel] no session id (parent session file + GOLEM_CEO_SESSION_ID/CLAUDE_CODE_SESSION_ID all empty); channel will not register\n');
     return;
   }
   withChannelLock(() => {
     const reg = readChannelsRegistry();
-    reg.channels = reg.channels.filter((c) => c.session_id !== SESSION_ID);
+    // Drop any prior row for THIS process (covers an id corrected from a run-id
+    // to the logical id between heartbeats) and any stale row under our id.
+    reg.channels = reg.channels.filter((c) => c.pid !== process.pid && c.session_id !== SESSION_ID);
     reg.channels.push({
       session_id: SESSION_ID,
+      name: SESSION_NAME,
       pid: process.pid,
       host: HOST,
       port,
@@ -178,6 +216,111 @@ function unregisterChannel() {
   }
 }
 
+// --- Session-to-session consult -------------------------------------------
+// A live session can ask ANOTHER live session for a "fresh pair of eyes" on a
+// hard problem. It rides the same channel transport: the asker POSTs to the
+// consultant's /consult route; the consultant investigates and POSTs its
+// proposal back to the asker's /consult/reply route. Fully async — the asker
+// never blocks. Targeting is by /rename name (resolved to a session_id that has
+// a live channel) or by session_id directly.
+
+function channelUrlForSession(sessionId) {
+  if (!sessionId) return null;
+  const reg = readChannelsRegistry();
+  const ch = reg.channels.find((c) => c.session_id === sessionId);
+  return ch ? `http://${ch.host}:${ch.port}` : null;
+}
+
+// `claude agents --json` — a FALLBACK name source only now (the channel registry
+// carries names directly). Bounded and never-throws.
+function runClaudeAgentsJson() {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    try {
+      const child = execFile(
+        'claude', ['agents', '--json'],
+        { timeout: 4000, maxBuffer: 4 * 1024 * 1024, windowsHide: true },
+        (err, stdout) => {
+          if (err) return finish(null);
+          const t = (stdout ?? '').trim();
+          if (!t) return finish([]);
+          try { const p = JSON.parse(t); return finish(Array.isArray(p) ? p : null); }
+          catch { return finish(null); }
+        },
+      );
+      child?.on?.('error', () => finish(null));
+    } catch { finish(null); }
+  });
+}
+
+// Resolve a consult target (`to` = a /rename name OR a session_id) to a live
+// channel. Primary source is the channel registry's own `name` field (kept fresh
+// by the heartbeat); `agents` (a preloaded `claude agents --json` array, or null)
+// is only a fallback for channels registered before names were stored.
+function resolveConsultTarget(toRaw, agents) {
+  const to = String(toRaw || '').trim();
+  if (!to) return { ok: false, error: 'consult: `to` is required (a session name or session_id).' };
+  const reg = readChannelsRegistry();
+  // 1) direct session_id match
+  const direct = reg.channels.find((c) => c.session_id === to);
+  if (direct) return { ok: true, session_id: to, name: direct.name || to, url: `http://${direct.host}:${direct.port}` };
+  // 2) by the name stored in the channel registry (reliable, no external call)
+  const byName = reg.channels.filter((c) => (c.name || '') === to);
+  if (byName.length === 1) {
+    const c = byName[0];
+    return { ok: true, session_id: c.session_id, name: to, url: `http://${c.host}:${c.port}` };
+  }
+  if (byName.length > 1) {
+    return { ok: false, error: `consult: multiple live channels named "${to}" (${byName.map((c) => c.session_id).join(', ')}) — pass an exact session_id as \`to\`.` };
+  }
+  // 3) fallback: claude agents --json ∩ live channels (older channels w/o a name)
+  if (Array.isArray(agents)) {
+    const live = new Set(reg.channels.map((c) => c.session_id));
+    const named = agents.filter((a) => a && (a.name || '') === to && a.sessionId);
+    const consultable = named.filter((a) => live.has(a.sessionId));
+    if (consultable.length === 1) {
+      const a = consultable[0];
+      const ch = reg.channels.find((c) => c.session_id === a.sessionId);
+      return { ok: true, session_id: a.sessionId, name: to, url: `http://${ch.host}:${ch.port}` };
+    }
+    if (consultable.length > 1) {
+      return { ok: false, error: `consult: multiple live sessions named "${to}" — pass an exact session_id as \`to\`.` };
+    }
+  }
+  return { ok: false, error: `consult: no live channel named "${to}". Check the name in the dashboard, or pass an exact session_id as \`to\`.` };
+}
+
+// Resolve a target, trying the registry first and only spawning `claude agents
+// --json` if the registry name lookup comes up empty.
+async function resolveTargetWithFallback(to) {
+  let t = resolveConsultTarget(to, null);
+  if (!t.ok && /no live channel named/.test(t.error || '')) {
+    t = resolveConsultTarget(to, await runClaudeAgentsJson());
+  }
+  return t;
+}
+
+async function postToChannel(baseUrl, pathSuffix, bodyObj) {
+  const url = `${baseUrl.replace(/\/$/, '')}${pathSuffix}`;
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 5000);
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'X-Sender': 'consult', 'Content-Type': 'application/json' },
+      body: JSON.stringify(bodyObj),
+      signal: ctl.signal,
+    });
+    const text = await resp.text();
+    return { ok: resp.ok, status: resp.status, body: text };
+  } catch (err) {
+    return { ok: false, status: 0, error: String((err && err.message) || err) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // --- MCP server ------------------------------------------------------------
 const mcp = new Server(
   { name: 'golem', version: VERSION },
@@ -195,10 +338,13 @@ const mcp = new Server(
       '  - gate_approve: a verdict on a pending human gate. The gate_id meta attribute names the gate file under docs/agent-notes/gates/. Update its status to approved and resume per skills/golem-gates.',
       '  - gate_deny: same, but set status to denied (hard stop for that journey).',
       '  - gate_cancel: same, but set status to cancelled.',
+      '  - consult: a peer session asking YOU for a fresh pair of eyes on a hard problem (meta: consult_id, from_session). This is NOT delegation — read the golem:provide-consult skill, investigate the problem independently (their question, the code, web research), and reply with the `consult_reply` tool. Do not enter the work-loop or edit their repo.',
+      '  - consult_reply: a consultant\'s proposal returning for a consult YOU asked (meta: consult_id). Treat it as advice to weigh critically — keep what holds up, discard the rest; you keep the final say. See golem:get-consult.',
       'You have TWO reply tools — both fire over the same SSE channel and surface in the dashboard chat:',
       '  • `ack` — fires IMMEDIATELY on receipt of every inbound event, no exceptions. One short sentence describing what the CEO understood and is about to do. Pass the same kind; include gate_id for gate_* events.',
       '  • `respond` — fires when the CEO has something user-facing to say BACK to the user (chat answers, clarification questions, decision asks, final results of short briefs). Body is the actual reply text. Skip it when the brief just enters the autonomy loop and has nothing immediate to communicate — the dashboard timeline shows progress in that case.',
       'Order of operations for any inbound channel event: 1) call ack on receipt, 2) do the work, 3) optionally call respond with the user-facing answer, 4) yield.',
+      'Peer help (separate from ack/respond): `consult_request` asks another live session for a fresh pair of eyes — you do NOT block, the reply returns later as a consult_reply event; `consult_reply` returns your proposal to an asker; `consult_status` nudges a pending consult.',
     ].join(' '),
   },
 );
@@ -240,7 +386,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           text: {
             type: 'string',
             description:
-              'The user-facing reply, in markdown. Keep it concise — the dashboard chat is a thin client, not a full transcript.',
+              'The user-facing reply text. Keep it concise — the dashboard chat is a thin client, not a full transcript. Plain text is wrapped into paragraphs; existing HTML is rendered as-is.',
           },
           kind: {
             type: 'string',
@@ -281,7 +427,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'ticket_get',
       description:
-        'Golem tracker — fetch one ticket by id, including its body, comments, links, and event history. Read this before starting work on a dispatched/assigned ticket.',
+        'Golem tracker — fetch one ticket by id, including its HTML body, anchored comments, links, and event history. Read this before starting work on a dispatched/assigned ticket.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -293,12 +439,12 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'ticket_create',
       description:
-        'Golem tracker — create a ticket (the unit of work; replaces a PLAN.md line item). Defaults to your current project and records you as created_by. Use parent_id to decompose larger work into sub-tickets; stream_id to group them. For a blocking human question, pass kind:"question" and assignee:"human", then pause that thread.',
+        'Golem tracker — create a ticket (the unit of work; replaces a PLAN.md line item). The body should be HTML using the html-report house style (see the html-report skill for the full template). Plain text and markdown are also accepted and rendered — agents should default to HTML, humans can use markdown. Defaults to your current project and records you as created_by. Use parent_id to decompose larger work; stream_id to group. For a blocking human question, pass kind:"question" and assignee:"human", then pause.',
       inputSchema: {
         type: 'object',
         properties: {
           title: { type: 'string', description: 'Short imperative title.' },
-          body: { type: 'string', description: 'Full description / acceptance criteria (markdown ok).' },
+          body: { type: 'string', description: 'Full description / acceptance criteria. Agents: send HTML using the html-report house style. Plain text and markdown are also accepted and rendered.' },
           kind: { type: 'string', description: 'work-item|decision|spec|question|fix (default work-item).' },
           priority: { type: 'string', description: 'Optional priority label.' },
           state: { type: 'string', description: 'todo|in_progress|blocked|review|done (default todo).' },
@@ -313,14 +459,14 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'ticket_update',
       description:
-        'Golem tracker — patch a ticket. The common case is a STATE transition (todo→in_progress→review→done, or →blocked). Records you as the actor. Verify work mechanically before moving to review/done (see golem:verify-done).',
+        'Golem tracker — patch a ticket. The common case is a STATE transition (todo→in_progress→review→done, or →blocked). The body field is HTML. Records you as the actor. Verify work mechanically before moving to review/done (see golem:verify-done).',
       inputSchema: {
         type: 'object',
         properties: {
           id: { type: 'string', description: 'Ticket id.' },
           state: { type: 'string', description: 'todo|in_progress|blocked|review|done|archived' },
           title: { type: 'string' },
-          body: { type: 'string' },
+          body: { type: 'string', description: 'HTML body replacement.' },
           kind: { type: 'string', description: 'work-item|decision|spec|question|fix' },
           priority: { type: 'string' },
           labels: { type: 'array', items: { type: 'string' }, description: 'Full replacement label set.' },
@@ -334,32 +480,56 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'ticket_comment',
       description:
-        'Golem tracker — append a progress comment to a ticket. Comment milestones with MECHANICAL evidence (commands you ran + their output), not claims. Records you as the author.',
+        'Golem tracker — append a progress comment to a ticket. Comment milestones with MECHANICAL evidence (commands you ran + their output), not claims. Records you as the author. For inline anchored comments, include quote (selected text), prefix/suffix context, section, and a tag (confirmed|partial|disputed|fix|risk|question|note).',
       inputSchema: {
         type: 'object',
         properties: {
           id: { type: 'string', description: 'Ticket id.' },
-          body: { type: 'string', description: 'Comment text (markdown ok).' },
+          body: { type: 'string', description: 'Comment text.' },
+          quote: { type: 'string', description: 'Optional: exact selected text being commented on.' },
+          prefix: { type: 'string', description: 'Optional: text immediately before quote, for anchoring.' },
+          suffix: { type: 'string', description: 'Optional: text immediately after quote, for anchoring.' },
+          section: { type: 'string', description: 'Optional: section title where quote appears.' },
+          section_id: { type: 'string', description: 'Optional: section id where quote appears.' },
+          tag: { type: 'string', description: 'confirmed|partial|disputed|fix|risk|question|note (default note).' },
+          status: { type: 'string', description: 'open|resolved (default open).' },
+          parent_id: { type: 'string', description: 'Optional: parent comment id for threading.' },
         },
         required: ['id', 'body'],
       },
     },
     {
-      name: 'ticket_dispatch',
+      name: 'ticket_comment_update',
       description:
-        'Golem tracker — assign a ticket to a live native session and push it a self-contained brief so that session picks the work up. Use sessions_dispatchable to find reachable session ids.',
+        'Golem tracker — update an existing comment (change status to resolved/reopen, change tag, or edit body).',
       inputSchema: {
         type: 'object',
         properties: {
           id: { type: 'string', description: 'Ticket id.' },
-          session_id: { type: 'string', description: 'Target session id (from sessions_dispatchable).' },
-          note: { type: 'string', description: 'Optional brief note prepended to the dispatch.' },
+          comment_id: { type: 'string', description: 'Comment id to update.' },
+          body: { type: 'string', description: 'Replacement comment text.' },
+          tag: { type: 'string', description: 'confirmed|partial|disputed|fix|risk|question|note' },
+          status: { type: 'string', description: 'open|resolved' },
         },
-        required: ['id', 'session_id'],
+        required: ['id', 'comment_id'],
       },
     },
     {
-      name: 'stream_create',
+      name: 'ticket_comment_reply',
+      description:
+        'Golem tracker — add a reply to an existing comment.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Ticket id.' },
+          comment_id: { type: 'string', description: 'Parent comment id.' },
+          body: { type: 'string', description: 'Reply text.' },
+        },
+        required: ['id', 'comment_id', 'body'],
+      },
+    },
+    {
+      name: 'ticket_dispatch',
       description:
         'Golem tracker — create a stream (a named group of tickets) in your current project. mode "sequential" = one in-progress at a time; "parallel" = independent sub-work. Defaults to your current project.',
       inputSchema: {
@@ -395,6 +565,50 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         },
       },
     },
+
+    // --- Session-to-session consult ----------------------------------------
+    {
+      name: 'consult_request',
+      description:
+        'Ask ANOTHER live golem session for a fresh pair of eyes on a hard problem — a second opinion, NOT delegation. Use when you are genuinely stuck (a bug you cannot crack, a suspected architectural blind spot, tunnel vision) and your own subagents have not cracked it. Fire-and-forget: you keep working; the consultant investigates independently and its proposal pushes back to you later as a `consult_reply` channel event. Target by /rename name (e.g. "ogolem") or session_id.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          to: { type: 'string', description: 'The session to consult: its /rename name (e.g. "ogolem") or an exact session_id. Must be a live session running the golem plugin.' },
+          question: { type: 'string', description: 'The problem: what you are stuck on, what you have already tried, and the specific question / what a fresh perspective should focus on.' },
+          context: { type: 'string', description: 'Optional supporting context — error output, key file paths or snippets, the relevant repo/branch, constraints. The consultant does its own investigation, so give it enough to start.' },
+        },
+        required: ['to', 'question'],
+      },
+    },
+    {
+      name: 'consult_reply',
+      description:
+        'Deliver your proposal back to a session that asked YOU for a consult. Call this when you (as the consultant) have investigated and formed a fresh-perspective analysis. The reply pushes into the asker as a `consult_reply` channel event. Read the consult event for the to_session (its from_session) and consult_id.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          to_session: { type: 'string', description: 'The asker session id — the `from_session` carried on the consult event you are answering.' },
+          consult_id: { type: 'string', description: 'The consult_id from the consult event, so the asker can correlate the reply.' },
+          text: { type: 'string', description: 'Your analysis + proposal: suspected root cause(s), blind spots, and a concrete recommended approach. It is advice — the asker weighs it and keeps the final say.' },
+        },
+        required: ['to_session', 'text'],
+      },
+    },
+    {
+      name: 'consult_status',
+      description:
+        'Nudge a session you previously consulted for progress on a pending consult, without blocking. Optional — only when a reply is taking a while and you want a status check.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          to: { type: 'string', description: 'The consultant session: /rename name or session_id (the one you sent consult_request to).' },
+          consult_id: { type: 'string', description: 'The consult_id returned by consult_request.' },
+          note: { type: 'string', description: 'Optional extra note for the nudge.' },
+        },
+        required: ['to'],
+      },
+    },
   ],
 }));
 
@@ -426,6 +640,55 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     };
     broadcast('response', payload);
     return { content: [{ type: 'text', text: 'response broadcast' }] };
+  }
+
+  // --- Session-to-session consult tools --------------------------------------
+  if (name === 'consult_request') {
+    if (!args.to) return { isError: true, content: [{ type: 'text', text: 'consult_request: `to` is required (the session name to consult, e.g. "ogolem", or a session_id).' }] };
+    if (!args.question || !String(args.question).trim()) return { isError: true, content: [{ type: 'text', text: 'consult_request: `question` is required — describe what you are stuck on and what you have tried.' }] };
+    const target = await resolveTargetWithFallback(args.to);
+    if (!target.ok) return { isError: true, content: [{ type: 'text', text: target.error }] };
+    const consult_id = `cns-${crypto.randomBytes(3).toString('hex')}`;
+    const r = await postToChannel(target.url, '/consult', {
+      consult_id,
+      from_name: SESSION_NAME || SESSION_ID || 'unknown',
+      from_session: SESSION_ID,
+      question: String(args.question),
+      context: args.context ? String(args.context) : '',
+    });
+    if (!r.ok) return { isError: true, content: [{ type: 'text', text: `consult_request: could not deliver to "${target.name}" (${r.status} ${r.error || r.body}). Is it still running with the golem plugin?` }] };
+    return { content: [{ type: 'text', text: JSON.stringify({ ok: true, consult_id, to: target.name, to_session: target.session_id, note: 'Consult sent. Keep working — the reply pushes back asynchronously as a consult_reply channel event.' }, null, 2) }] };
+  }
+
+  if (name === 'consult_reply') {
+    if (!args.to_session) return { isError: true, content: [{ type: 'text', text: 'consult_reply: `to_session` is required (the from_session id carried on the consult event you are answering).' }] };
+    if (!args.text || !String(args.text).trim()) return { isError: true, content: [{ type: 'text', text: 'consult_reply: `text` (your proposal) is required.' }] };
+    const url = channelUrlForSession(String(args.to_session));
+    if (!url) return { isError: true, content: [{ type: 'text', text: `consult_reply: asker session ${args.to_session} has no live channel (it may have ended) — the reply cannot be delivered.` }] };
+    const r = await postToChannel(url, '/consult/reply', {
+      consult_id: args.consult_id ? String(args.consult_id) : '',
+      from_name: SESSION_NAME || SESSION_ID || 'consultant',
+      from_session: SESSION_ID,
+      text: String(args.text),
+    });
+    if (!r.ok) return { isError: true, content: [{ type: 'text', text: `consult_reply: delivery failed (${r.status} ${r.error || r.body}).` }] };
+    return { content: [{ type: 'text', text: JSON.stringify({ ok: true, delivered_to: String(args.to_session), consult_id: args.consult_id || null }, null, 2) }] };
+  }
+
+  if (name === 'consult_status') {
+    if (!args.to) return { isError: true, content: [{ type: 'text', text: 'consult_status: `to` is required.' }] };
+    const target = await resolveTargetWithFallback(args.to);
+    if (!target.ok) return { isError: true, content: [{ type: 'text', text: target.error }] };
+    const r = await postToChannel(target.url, '/consult', {
+      consult_id: args.consult_id ? String(args.consult_id) : '',
+      from_name: SESSION_NAME || SESSION_ID || 'unknown',
+      from_session: SESSION_ID,
+      question: `Any progress on consult ${args.consult_id || ''}?${args.note ? ' ' + String(args.note) : ''}`.trim(),
+      context: '',
+      status_ping: true,
+    });
+    if (!r.ok) return { isError: true, content: [{ type: 'text', text: `consult_status: ping failed (${r.status} ${r.error || r.body}).` }] };
+    return { content: [{ type: 'text', text: JSON.stringify({ ok: true, pinged: target.name, consult_id: args.consult_id || null }, null, 2) }] };
   }
 
   // --- Golem tracker tools ---------------------------------------------------
@@ -499,7 +762,39 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       if (name === 'ticket_comment') {
         if (!args.id) throw new Error('ticket_comment: id is required');
         if (!sessionId) throw new Error('ticket_comment: no current session id to record as author');
-        return jsonResult(await tracker.addComment(args.id, { author: sessionId, body: args.body }));
+        const comment = {
+          author: sessionId,
+          body: args.body,
+          quote: args.quote,
+          prefix: args.prefix,
+          suffix: args.suffix,
+          section: args.section,
+          section_id: args.section_id,
+          tag: args.tag,
+          status: args.status,
+          parent_id: args.parent_id,
+        };
+        return jsonResult(await tracker.addComment(args.id, comment));
+      }
+
+      if (name === 'ticket_comment_update') {
+        if (!args.id) throw new Error('ticket_comment_update: id is required');
+        if (!args.comment_id) throw new Error('ticket_comment_update: comment_id is required');
+        const patch = {};
+        for (const k of ['body', 'tag', 'status']) {
+          if (args[k] !== undefined) patch[k] = args[k];
+        }
+        return jsonResult(await tracker.updateComment(args.id, args.comment_id, patch));
+      }
+
+      if (name === 'ticket_comment_reply') {
+        if (!args.id) throw new Error('ticket_comment_reply: id is required');
+        if (!args.comment_id) throw new Error('ticket_comment_reply: comment_id is required');
+        if (!sessionId) throw new Error('ticket_comment_reply: no current session id to record as author');
+        return jsonResult(await tracker.replyComment(args.id, args.comment_id, {
+          author: sessionId,
+          body: args.body,
+        }));
       }
 
       if (name === 'ticket_dispatch') {
@@ -635,6 +930,62 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       await pushEvent('halt', extractContent(body) || 'halt requested');
       return sendJson(res, 202, { ok: true, kind: 'halt' });
+    }
+
+    // POST /consult — a peer asks THIS session for a fresh pair of eyes.
+    if (method === 'POST' && path === '/consult') {
+      const raw = await readBody(req);
+      let p = {};
+      try { p = JSON.parse(raw || '{}'); } catch { p = {}; }
+      const consult_id = String(p.consult_id || '');
+      const fromName = String(p.from_name || 'a peer session');
+      const fromSession = String(p.from_session || '');
+      const question = String(p.question || extractContent(raw) || '');
+      const context = String(p.context || '');
+      const isPing = !!p.status_ping;
+      const content = isPing
+        ? [
+            `CONSULT STATUS PING from session "${fromName}" (consult_id ${consult_id}).`,
+            '',
+            question,
+            '',
+            'If you are still investigating, a brief consult_reply with your current status is courteous; otherwise send your final proposal.',
+          ].join('\n')
+        : [
+            `CONSULT REQUEST from session "${fromName}" (consult_id ${consult_id}).`,
+            '',
+            'A peer session is stuck and wants a FRESH PAIR OF EYES — this is NOT delegation. Read the golem:provide-consult skill, investigate INDEPENDENTLY (their problem, the code, web research), look for root causes and blind spots they may be tunnel-visioned past, and reply with a proposal. Do NOT edit their repo, create tickets, or enter the work-loop.',
+            '',
+            'PROBLEM:',
+            question,
+            context ? '\nCONTEXT THEY PROVIDED:\n' + context : '',
+            '',
+            `When ready, deliver your proposal with the consult_reply tool: consult_reply({ to_session: "${fromSession}", consult_id: "${consult_id}", text: "<your analysis + proposal>" }).`,
+          ].join('\n');
+      await pushEvent('consult', content, { consult_id, from_name: fromName, from_session: fromSession });
+      broadcast('consult', { consult_id, from_name: fromName, from_session: fromSession, status_ping: isPing, text: content });
+      return sendJson(res, 202, { ok: true, kind: 'consult', consult_id });
+    }
+
+    // POST /consult/reply — a consultant returns its proposal to THIS asker.
+    if (method === 'POST' && path === '/consult/reply') {
+      const raw = await readBody(req);
+      let p = {};
+      try { p = JSON.parse(raw || '{}'); } catch { p = {}; }
+      const consult_id = String(p.consult_id || '');
+      const fromName = String(p.from_name || 'the consultant');
+      const fromSession = String(p.from_session || '');
+      const text = String(p.text || extractContent(raw) || '');
+      const content = [
+        `CONSULT REPLY from session "${fromName}" (consult_id ${consult_id}) — your consult came back.`,
+        '',
+        'This is ADVICE: a second opinion / fresh perspective to weigh, not orders. Read it critically, keep what holds up, discard what does not, and decide for yourself. You have the final say.',
+        '',
+        text,
+      ].join('\n');
+      await pushEvent('consult_reply', content, { consult_id, from_name: fromName, from_session: fromSession });
+      broadcast('consult_reply', { consult_id, from_name: fromName, from_session: fromSession, text });
+      return sendJson(res, 202, { ok: true, kind: 'consult_reply', consult_id });
     }
 
     // /gates/:id/(approve|deny|cancel)
