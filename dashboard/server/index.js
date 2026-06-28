@@ -14,6 +14,7 @@ import { pushBrief, pushInterrupt, pushHalt, channelHealth, listChannels } from 
 import { createChat } from './chat.js';
 import { readNativeSessionPeek } from './native-session-peek.js';
 import { openTrackerDb } from './tracker-db.js';
+import { readChannels } from './channels.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const WEB_ROOT = path.resolve(__dirname, '..', 'web');
@@ -649,7 +650,11 @@ async function main() {
     let channels = [];
     try {
       channels = await readChannels();
-    } catch {
+    } catch (err) {
+      // Don't let a registration/channel read failure go silently latent —
+      // the previous bare catch hid a missing-import ReferenceError for ~1 day
+      // and presented as a permanently-disabled dispatch field.
+      console.error('[dispatchable] readChannels failed:', err);
       channels = [];
     }
     const channelBySession = new Map();
