@@ -65,7 +65,7 @@ function App() {
       </div>
       <CeoChatDrawer/>
       <NativeSessionDrawer/>
-      <CreateTicket/>
+      <CreateTicketDrawer/>
       <TicketDrawer/>
     </div>
   );

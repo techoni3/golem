@@ -358,43 +358,13 @@
 .orch-gate-ws { color: var(--text-3); font-size: 11px; }
 .orch-gate-actions { display: flex; gap: 5px; }
 
-/* Modal */
-.orch-modal-backdrop {
-  position: fixed; inset: 0;
-  background: rgba(0,0,0,0.55);
-  z-index: 80;
-  display: grid;
-  place-items: center;
-  animation: orch-fade-in 120ms ease-out;
-}
-.orch-modal {
-  width: min(640px, calc(100vw - 32px));
-  background: var(--bg-1);
-  border: 1px solid var(--border-2);
-  border-radius: var(--radius-2);
-  box-shadow: var(--shadow-2);
-  padding: 18px 20px;
-  display: flex; flex-direction: column; gap: 12px;
-  animation: orch-modal-in 160ms ease-out;
-}
+/* Modal-textarea (shared by the create-ticket drawer body, ticket-drawer edit
+   buffer, and streams-panel description). The center-screen modal shell that
+   used to live here was retired when the composer moved into the right drawer
+   — only the textarea + the orch-modal-in keyframe (still used by .tweaks-pop)
+   remain. */
 @keyframes orch-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes orch-modal-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-.orch-modal-header { display: flex; justify-content: space-between; align-items: center; }
-.orch-modal-title { font-size: 14px; font-weight: 600; color: var(--text-0); }
-.orch-modal-close {
-  background: transparent; border: none; color: var(--text-3);
-  font-size: 22px; line-height: 1; cursor: pointer;
-}
-.orch-modal-close:hover { color: var(--text-1); }
-.orch-modal-hint { font-size: 11.5px; color: var(--text-3); line-height: 1.5; }
-.orch-modal-hint .mono {
-  font-family: var(--font-mono);
-  background: var(--bg-2);
-  border: 1px solid var(--border-2);
-  border-radius: 3px;
-  padding: 1px 5px;
-  font-size: 10.5px;
-}
 .orch-modal-textarea {
   width: 100%;
   resize: vertical;
@@ -408,7 +378,6 @@
   line-height: 1.55;
 }
 .orch-modal-textarea:focus { outline: none; border-color: var(--accent-border); }
-.orch-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
 /* ===== Orchestrator rail (clickable variant) ===== */
 .orch-rail.clickable {
@@ -1830,7 +1799,6 @@
 }
 
 /* ===== WS5: Create-ticket modal ===== */
-.ct-modal { width: min(560px, calc(100vw - 32px)); gap: 14px; }
 .ct-row { display: flex; gap: 12px; }
 .ct-row .ct-field { flex: 1; min-width: 0; }
 .ct-field { display: flex; flex-direction: column; gap: 5px; }
@@ -1888,6 +1856,65 @@ select.ct-input { appearance: none; cursor: pointer; padding-right: 26px;
   border-radius: var(--radius-1);
   padding: 8px 10px;
 }
+
+/* ===== Create-ticket drawer (right-drawer composer, TKT-0137) ===== */
+/* Distinct from .drawer-ticket: td-annotate.jsx portals its annotation pill to
+   .drawer-ticket, so the composer must use its own class to avoid that selector
+   resolving against the wrong drawer. */
+.drawer-compose {
+  width: min(92vw, 1100px);
+  display: flex;
+  flex-direction: column;
+}
+.ct-header { padding-bottom: 12px; }
+.ct-header .drawer-title-row { margin-bottom: 0; }
+.ct-header .drawer-title { font-size: 15px; }
+
+/* Scrollable field region between the header and the sticky action bar. */
+.ct-scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 16px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Sticky action bar pinned to the drawer's bottom edge. */
+.ct-actions {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 22px;
+  border-top: 1px solid var(--border-1);
+  background: var(--bg-1);
+}
+
+/* "Restored unsaved draft · Discard" banner shown above the fields when the
+   opened composer was hydrated from a saved draft. */
+.ct-draft-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11.5px;
+  color: var(--text-2);
+  background: color-mix(in oklab, var(--accent, #6b8cff) 10%, var(--bg-2));
+  border: 1px solid color-mix(in oklab, var(--accent, #6b8cff) 28%, transparent);
+  border-radius: var(--radius-1);
+  padding: 7px 10px;
+}
+.ct-draft-discard {
+  background: transparent;
+  border: 1px solid var(--border-2);
+  color: var(--text-2);
+  border-radius: var(--radius-1);
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.ct-draft-discard:hover { color: var(--status-blocked); border-color: var(--status-blocked); }
 
 /* ===== WS5b: Ticket detail drawer ===== */
 .drawer-ticket {
