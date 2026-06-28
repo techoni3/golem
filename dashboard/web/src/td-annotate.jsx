@@ -277,12 +277,12 @@ function TdAnnotate({ html, comments, currentAuthor = 'you', onCreate, onUpdate,
       if (range.collapsed || !range.toString().trim()) { pill.style.display = 'none'; return; }
       if (!wrap.contains(range.commonAncestorContainer)) { pill.style.display = 'none'; return; }
       pendingRangeRef.current = range.cloneRange();
-      // TKT-0108: the pill is portaled to the drawer root with `position:
-      // fixed`. Express coords in viewport space (`getBoundingClientRect()`
-      // returns viewport-relative), and keep the pill clamped inside the
-      // drawer's content area so it doesn't escape the right edge when the
-      // rail is open. The previous math was wrap-relative and broke once the
-      // pill moved out of the scrolling wrap.
+      // TKT-0108: the pill is portaled to .drawer-ticket. The drawer is
+      // `position: fixed` and the pill is `position: absolute`, so the pill's
+      // containing block is the *drawer*, not the viewport. getBoundingClientRect()
+      // returns viewport-relative coords; we clamp the pill inside the drawer's
+      // content area (so it never escapes the right edge) and then subtract the
+      // drawer origin to express the result in drawer-relative space.
       const rangeRect = range.getBoundingClientRect();
       const drawerEl = document.querySelector('.drawer-ticket');
       const drawerRect = drawerEl ? drawerEl.getBoundingClientRect() : wrap.getBoundingClientRect();
@@ -292,8 +292,11 @@ function TdAnnotate({ html, comments, currentAuthor = 'you', onCreate, onUpdate,
       const minX = drawerRect.left + pillWidth / 2 + 4;
       const maxX = drawerRect.right - pillWidth / 2 - 4;
       const x = Math.max(minX, Math.min(maxX, desiredX));
-      pill.style.left = `${x}px`;
-      pill.style.top = `${desiredY}px`;
+      // #anno-pill is position:absolute inside .drawer-ticket (position:fixed),
+      // so its containing block is the drawer, not the viewport. Subtract the
+      // drawer origin so the viewport-space clamp value lands in drawer space.
+      pill.style.left = `${x - drawerRect.left}px`;
+      pill.style.top = `${desiredY - drawerRect.top}px`;
       pill.style.display = 'flex';
     }
 
@@ -305,25 +308,16 @@ function TdAnnotate({ html, comments, currentAuthor = 'you', onCreate, onUpdate,
         const pill = document.getElementById('anno-pill'); if (pill) pill.style.display = 'none';
         return;
       }
-      if (!typing && (e.key === 'c' || e.key === 'C')) {
-        const sel = window.getSelection();
-        if (sel && !sel.isCollapsed && sel.rangeCount) {
-          const range = sel.getRangeAt(0);
-          if (root.contains(range.commonAncestorContainer) && range.toString().trim()) {
-            e.preventDefault();
-            pendingRangeRef.current = range.cloneRange();
-            startNewComment();
-          }
-        }
-      }
+      // Cmd+C / bare "c" removed: native copy must not be hijacked, and the
+      // comment composer is opened by clicking the pill, not by typing c.
     }
 
     document.addEventListener('mouseup', onSelect);
     // TKT-0108: instead of hiding the pill on scroll, re-run the positioning
     // math against the still-cached pendingRangeRef. The pill is portaled to
-    // the drawer and positioned with `position: fixed`, so its coordinates
-    // need to track the selection's new viewport position when the body
-    // scrolls underneath.
+    // the drawer (containing block = drawer, not viewport), so its coords must
+    // track the selection's new viewport position minus the drawer origin
+    // when the body scrolls underneath.
     document.addEventListener('scroll', () => {
       const p = document.getElementById('anno-pill');
       const r = pendingRangeRef.current;
@@ -336,8 +330,8 @@ function TdAnnotate({ html, comments, currentAuthor = 'you', onCreate, onUpdate,
       let desiredX = rangeRect.left + rangeRect.width / 2;
       const minX = drawerRect.left + pillWidth / 2 + 4;
       const maxX = drawerRect.right - pillWidth / 2 - 4;
-      p.style.left = `${Math.max(minX, Math.min(maxX, desiredX))}px`;
-      p.style.top = `${rangeRect.top}px`;
+      p.style.left = `${Math.max(minX, Math.min(maxX, desiredX)) - drawerRect.left}px`;
+      p.style.top = `${rangeRect.top - drawerRect.top}px`;
     }, { passive: true });
     document.addEventListener('mousedown', (e) => { const p = document.getElementById('anno-pill'); if (p && p.style.display === 'flex' && !p.contains(e.target)) p.style.display = 'none'; });
     document.addEventListener('keydown', onKey);

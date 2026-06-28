@@ -2444,8 +2444,8 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
    positioned `absolute` use the drawer as their containing block — `right:
    0` therefore means drawer's right edge (not the viewport edge), so the
    rail tracks the drawer's 30/50/90% width. The pill's coords are JS-set
-   in viewport space; clamp inside the drawer's content area so it never
-   escapes. */
+   in drawer-relative space (viewport rect minus drawer origin); clamp
+   inside the drawer's content area so it never escapes. */
 #anno-pill {
   position: absolute; z-index: 70; transform: translate(-50%, -100%);
   display: none; align-items: center; gap: 6px;
