@@ -164,6 +164,7 @@ button {
   border-radius: var(--radius-1);
   color: var(--text-1);
   font-size: 13px;
+  text-decoration: none;
   cursor: pointer;
   transition: background 80ms ease, color 80ms ease;
   text-align: left;
@@ -266,6 +267,7 @@ button {
 
 .crumb-link {
   color: var(--text-2);
+  text-decoration: none;
   cursor: pointer;
 }
 

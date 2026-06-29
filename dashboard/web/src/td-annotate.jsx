@@ -32,6 +32,27 @@ function bodyHtml(text) {
   return text.split(/\n\n+/).map((p) => `<p>${p.trim().replace(/\n/g, '<br/>')}</p>`).join('');
 }
 
+// Inverse of toHtmlBody's plain-text branch: render a stored HTML body back
+// into editable plain text for the comment editor. Round-trips simple human
+// comments (paragraphs / line breaks) losslessly; rich agent HTML loses
+// inline formatting, which is an accepted v1 tradeoff for "edit my comment".
+function htmlToEditableText(html) {
+  if (!html) return '';
+  return String(html)
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>\s*<p[^>]*>/gi, '\n\n')
+    .replace(/<\/?p[^>]*>/gi, '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;/g, "'")
+    .replace(/&#39;/g, "'")
+    .trim();
+}
+
 function hexA(hex, a) {
   const m = hex.replace('#', '');
   const r = parseInt(m.slice(0, 2), 16), g = parseInt(m.slice(2, 4), 16), b = parseInt(m.slice(4, 6), 16);
@@ -422,6 +443,7 @@ function TdAnnotate({ html, comments, currentAuthor = 'you', onCreate, onUpdate,
               onDelete={() => deleteComment(ann.id)}
               onReply={(text, author) => addReply(ann.id, text, author)}
               onTagChange={(tag) => updateComment(ann.id, { tag })}
+              onEditBody={(text) => updateComment(ann.id, { body: text })}
             />
           ))}
         </div>
@@ -447,11 +469,29 @@ function TdAnnotate({ html, comments, currentAuthor = 'you', onCreate, onUpdate,
   );
 }
 
-function CommentCard({ ann, active, currentAuthor, onFocus, onResolve, onDelete, onReply, onTagChange }) {
+function CommentCard({ ann, active, currentAuthor, onFocus, onResolve, onDelete, onReply, onTagChange, onEditBody }) {
   const [replying, setReplying] = React.useState(false);
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState('');
   const [showTagPicker, setShowTagPicker] = React.useState(false);
   const c = authorMeta(ann.author);
   const tm = tagMeta(ann.tag);
+  const editRef = React.useRef(null);
+
+  const startEdit = (e) => {
+    e.stopPropagation();
+    setDraft(htmlToEditableText(ann.body));
+    setEditing(true);
+    setReplying(false);
+    setTimeout(() => editRef.current?.focus(), 0);
+  };
+  const saveEdit = () => {
+    const t = draft.trim();
+    if (!t) return;
+    onEditBody(t);
+    setEditing(false);
+  };
+  const cancelEdit = () => { setEditing(false); setDraft(''); };
 
   return (
     <div
@@ -469,7 +509,21 @@ function CommentCard({ ann, active, currentAuthor, onFocus, onResolve, onDelete,
       </div>
       {showTagPicker && <TagChipRow inline current={ann.tag} onPick={(tag) => { onTagChange(tag); setShowTagPicker(false); }}/>}
       {ann.quote && <div className="quote">{esc(ann.quote)}</div>}
-      <div className="body" dangerouslySetInnerHTML={{ __html: bodyHtml(ann.body) }}/>
+      {editing ? (
+        <div className="anno-composer anno-edit">
+          <textarea ref={editRef} value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Edit comment…"
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); saveEdit(); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelEdit(); } }}/>
+          <div className="row">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
+              <button className="cancel" onClick={cancelEdit}>esc</button>
+              <button className="send" onClick={saveEdit} disabled={!draft.trim()}>Save</button>
+            </div>
+          </div>
+          <div className="hint">Enter to save · Shift+Enter newline · Esc cancel</div>
+        </div>
+      ) : (
+        <div className="body" dangerouslySetInnerHTML={{ __html: bodyHtml(ann.body) }}/>
+      )}
       {(ann.replies || []).map((rep, i) => (
         <div className="reply" key={i}>
           <div className="ch">
@@ -482,6 +536,7 @@ function CommentCard({ ann, active, currentAuthor, onFocus, onResolve, onDelete,
       {replying && <AnnoComposer hideTag currentAuthor={currentAuthor} onSend={(text, author) => { onReply(text, author); setReplying(false); }} onCancel={() => setReplying(false)}/>}
       <div className="acts">
         <button onClick={(e) => { e.stopPropagation(); setReplying(true); }}>Reply</button>
+        <button onClick={(e) => { e.stopPropagation(); startEdit(e); }}>Edit</button>
         <button onClick={(e) => { e.stopPropagation(); onResolve(); }}>{ann.status === 'resolved' ? 'Reopen' : 'Resolve'}</button>
         <button className="danger" onClick={(e) => { e.stopPropagation(); onDelete(); }}>Delete</button>
       </div>
@@ -527,7 +582,7 @@ function AnnoComposer({ quote, hideTag, currentAuthor, onSend, onCancel }) {
     <div className="anno-composer">
       {quote && <div className="quote">{esc(quote)}</div>}
       <textarea ref={taRef} value={text} onChange={(e) => setText(e.target.value)} placeholder="Comment…"
-        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fire(); } else if (e.key === 'Escape') { e.preventDefault(); onCancel && onCancel(); } }}/>
+        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); fire(); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onCancel && onCancel(); } }}/>
       <div className="row">
         {!hideTag && <TagChipRow current={tag} onPick={setTag}/>}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>

@@ -2571,6 +2571,7 @@ mark.anno.anno-tail::after {
 
 /* composer */
 .anno-composer { margin: 0 0 10px; }
+.anno-composer.anno-edit { margin: 6px 0 8px; }
 .anno-composer .quote {
   font-size: 11.5px; color: #aab2c4; border-left: 2px solid var(--_ac, #f5a623);
   padding-left: 8px; margin: 0 0 7px; line-height: 1.45; font-style: italic;
