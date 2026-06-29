@@ -1873,12 +1873,16 @@ select.ct-input { appearance: none; cursor: pointer; padding-right: 26px;
 /* ===== Standalone ticket page (/tickets/<id>, TKT-0154) ===== */
 /* Reuses the drawer's .drawer-header + .td-scroll content but in a normal page
    layout (no fixed shell). position:relative so the annotation pill + rail
-   (portaled to .ticket-page by td-annotate.jsx) anchor against it. */
+   (portaled to .ticket-page by td-annotate.jsx) anchor against it. Fills the
+   main area and scrolls internally like other pages (TKT-0155). */
 .ticket-page {
   position: relative;
   padding: 24px 32px 80px;
   max-width: 1600px;
   width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 .ticket-page .td-scroll { overflow: visible; padding-top: 14px; }
 .td-back-link {
@@ -2859,6 +2863,34 @@ mark.anno.anno-tail::after {
   outline-offset: -2px;
   border-radius: var(--radius-1);
   transition: background 120ms ease;
+}
+
+/* ===== Bounded board + per-column scroll (TKT-0155) ===== */
+/* The consolidated tracker board: lay out as a flex column so the toolbar stays
+   fixed and the .kanban fills the rest; columns stretch to that height and each
+   .kanban-list scrolls independently. When the viewport is too short for the
+   toolbar + min column height, the page's overflow:auto scrolls the whole
+   thing. */
+.page.tracker-board {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 14px;
+}
+.page.tracker-board .kanban {
+  flex: 1 1 auto;
+  /* No min-height:0 here — let the columns' min-height (240px) be the kanban's
+     floor so that when the viewport is too short for toolbar + a column, the
+     page's overflow:auto scrolls the whole board instead of clipping. */
+}
+/* Per-project board (inside the project command center): bound the kanban so
+   columns scroll within the section instead of growing the whole page. */
+.pv-tracker .kanban {
+  max-height: 70vh;
+}
+/* Column needs a definite height for the list's flex:1 + overflow to take. */
+.kanban-col {
+  min-height: 240px;
+  height: 100%;
 }
 .kanban-col.is-drop-over .kanban-col-header .kanban-col-title { color: var(--accent); }
 
