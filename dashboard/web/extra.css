@@ -1870,6 +1870,35 @@ select.ct-input { appearance: none; cursor: pointer; padding-right: 26px;
 .ct-header .drawer-title-row { margin-bottom: 0; }
 .ct-header .drawer-title { font-size: 15px; }
 
+/* ===== Standalone ticket page (/tickets/<id>, TKT-0154) ===== */
+/* Reuses the drawer's .drawer-header + .td-scroll content but in a normal page
+   layout (no fixed shell). position:relative so the annotation pill + rail
+   (portaled to .ticket-page by td-annotate.jsx) anchor against it. */
+.ticket-page {
+  position: relative;
+  padding: 24px 32px 80px;
+  max-width: 1600px;
+  width: 100%;
+}
+.ticket-page .td-scroll { overflow: visible; padding-top: 14px; }
+.td-back-link {
+  color: var(--text-2);
+  font-size: 13px;
+  text-decoration: none;
+  margin-right: 4px;
+  white-space: nowrap;
+}
+.td-back-link:hover { color: var(--text-0); }
+.td-open-page {
+  color: var(--text-3);
+  font-size: 14px;
+  line-height: 1;
+  text-decoration: none;
+  padding: 2px 6px;
+  border-radius: var(--radius-1);
+}
+.td-open-page:hover { background: var(--bg-3); color: var(--text-0); }
+
 /* Scrollable field region between the header and the sticky action bar. */
 .ct-scroll {
   flex: 1 1 auto;

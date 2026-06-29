@@ -163,7 +163,11 @@ function nearestSection(range) {
 }
 
 // ---- React component ----------------------------------------------------
-function TdAnnotate({ html, comments, currentAuthor = 'you', onCreate, onUpdate, onReply }) {
+// `containerSelector` is the CSS selector of the positioned ancestor the
+// annotation pill portals into. The ticket drawer passes `.drawer-ticket`
+// (position:fixed); the standalone ticket page passes `.ticket-page`. Defaults
+// to `.drawer-ticket` for backward compatibility.
+function TdAnnotate({ html, comments, currentAuthor = 'you', onCreate, onUpdate, onReply, containerSelector = '.drawer-ticket' }) {
   const rootRef = React.useRef(null);
   const railRef = React.useRef(null);
   const [annotations, setAnnotations] = React.useState(comments || []);
@@ -284,7 +288,7 @@ function TdAnnotate({ html, comments, currentAuthor = 'you', onCreate, onUpdate,
       // content area (so it never escapes the right edge) and then subtract the
       // drawer origin to express the result in drawer-relative space.
       const rangeRect = range.getBoundingClientRect();
-      const drawerEl = document.querySelector('.drawer-ticket');
+      const drawerEl = document.querySelector(containerSelector);
       const drawerRect = drawerEl ? drawerEl.getBoundingClientRect() : wrap.getBoundingClientRect();
       const pillWidth = pill.offsetWidth || 90;
       let desiredX = rangeRect.left + rangeRect.width / 2;
@@ -323,7 +327,7 @@ function TdAnnotate({ html, comments, currentAuthor = 'you', onCreate, onUpdate,
       const r = pendingRangeRef.current;
       if (!p || p.style.display !== 'flex' || !r) return;
       const rangeRect = r.getBoundingClientRect();
-      const drawerEl = document.querySelector('.drawer-ticket');
+      const drawerEl = document.querySelector(containerSelector);
       const drawerRect = drawerEl ? drawerEl.getBoundingClientRect() : null;
       if (!drawerRect) return;
       const pillWidth = p.offsetWidth || 90;
@@ -355,7 +359,7 @@ function TdAnnotate({ html, comments, currentAuthor = 'you', onCreate, onUpdate,
   // body scroll; the existing code only hid the pill on scroll as a
   // workaround).
   const drawerHost = typeof document !== 'undefined'
-    ? document.querySelector('.drawer-ticket')
+    ? document.querySelector(containerSelector)
     : null;
   const railAndFab = drawerHost ? ReactDOM.createPortal(
     <>

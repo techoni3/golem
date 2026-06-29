@@ -46,7 +46,7 @@ const TD_STATE_PILL = {
 };
 
 
-function TicketDrawer({ open, ticketId, onClose }) {
+function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
   useStore();
   const [loading, setLoading] = React.useState(false);
   const [loadError, setLoadError] = React.useState(null);
@@ -300,16 +300,32 @@ function TicketDrawer({ open, ticketId, onClose }) {
 
   const statePill = ticket ? (TD_STATE_PILL[ticket.state] || 'idle') : 'idle';
 
+  // variant='page' renders the same ticket content in a standalone page layout
+  // (no fixed drawer shell / backdrop / width presets) so /tickets/<id> can be
+  // a dedicated screen. The annotation pill portals to containerSelector.
+  const isPage = variant === 'page';
+  const containerSelector = isPage ? '.ticket-page' : '.drawer-ticket';
+  const projectHref = project
+    ? window.Router.buildHref({ kind: 'project', id: project.id, tab: 'agents' })
+    : null;
+  const Shell = isPage ? 'div' : 'aside';
+  const shellClass = isPage
+    ? 'ticket-page'
+    : `drawer ${open ? 'open' : ''} drawer-ticket`;
+  const shellStyle = isPage ? undefined : { width: `${widthPct}vw` };
+
   return (
     <>
-      <div className={`drawer-backdrop ${open ? 'open' : ''}`} onClick={close}/>
-      <aside className={`drawer ${open ? 'open' : ''} drawer-ticket`} style={{ width: `${widthPct}vw` }}>
-        {!open ? null : loading && !ticket ? (
+      {isPage ? null : (
+        <div className={`drawer-backdrop ${open ? 'open' : ''}`} onClick={close}/>
+      )}
+      <Shell className={shellClass} style={shellStyle}>
+        {!open && !isPage ? null : loading && !ticket ? (
           <div className="td-loading">
             <div className="drawer-header">
               <div className="drawer-title-row">
                 <h2 className="drawer-title">Ticket</h2>
-                <button className="drawer-close" onClick={close}><Icon.Close/></button>
+                {isPage ? null : <button className="drawer-close" onClick={close}><Icon.Close/></button>}
               </div>
             </div>
             <div className="td-loading-body">loading ticket…</div>
@@ -319,7 +335,7 @@ function TicketDrawer({ open, ticketId, onClose }) {
             <div className="drawer-header">
               <div className="drawer-title-row">
                 <h2 className="drawer-title">Ticket</h2>
-                <button className="drawer-close" onClick={close}><Icon.Close/></button>
+                {isPage ? null : <button className="drawer-close" onClick={close}><Icon.Close/></button>}
               </div>
             </div>
             <div className="td-loading-body td-error">{loadError}</div>
@@ -329,6 +345,13 @@ function TicketDrawer({ open, ticketId, onClose }) {
             {/* ── Header ── */}
             <div className="drawer-header td-header">
               <div className="drawer-title-row">
+                {isPage && projectHref && (
+                  <a className="td-back-link" href={projectHref}
+                    onClick={(e) => { e.preventDefault(); window.Router.go({ kind: 'project', id: project.id, tab: 'agents' }); }}
+                    title={`Back to ${project?.name}`}>
+                    ← {project?.name}
+                  </a>
+                )}
                 <span className="td-id mono">{ticket.id}</span>
                 <span className="pill td-kind-pill">{ticket.kind}</span>
                 {project && (
@@ -339,18 +362,24 @@ function TicketDrawer({ open, ticketId, onClose }) {
                 )}
                 <span className={`pill ${statePill}`}>{ticket.state}</span>
                 {isQuestion && <span className="pill td-answer-badge">❓ needs answer</span>}
-                <div className="td-width-group" role="group" aria-label="Drawer width">
-                  {TD_WIDTHS.map((w) => (
-                    <button
-                      key={w.v}
-                      className={`td-width-btn ${widthPct === w.v ? 'active' : ''}`}
-                      onClick={() => setWidth(w.v)}
-                      title={w.label}
-                      aria-pressed={widthPct === w.v}
-                    >{w.icon()}</button>
-                  ))}
-                </div>
-                <button className="drawer-close" onClick={close}><Icon.Close/></button>
+                {isPage ? null : (
+                  <div className="td-width-group" role="group" aria-label="Drawer width">
+                    {TD_WIDTHS.map((w) => (
+                      <button
+                        key={w.v}
+                        className={`td-width-btn ${widthPct === w.v ? 'active' : ''}`}
+                        onClick={() => setWidth(w.v)}
+                        title={w.label}
+                        aria-pressed={widthPct === w.v}
+                      >{w.icon()}</button>
+                    ))}
+                  </div>
+                )}
+                {isPage ? null : (
+                  <a className="td-open-page" href={window.Router.buildHref({ kind: 'ticket', id: ticket.id })}
+                    target="_blank" rel="noopener" title="Open as standalone page (new tab)">↗</a>
+                )}
+                {isPage ? null : <button className="drawer-close" onClick={close}><Icon.Close/></button>}
               </div>
               <div className="drawer-meta td-meta">
                 <div className="drawer-meta-item" title={ticket.created_at || ''}>
@@ -413,6 +442,7 @@ function TicketDrawer({ open, ticketId, onClose }) {
                     onCreate={onAddComment}
                     onUpdate={onUpdateComment}
                     onReply={onReplyComment}
+                    containerSelector={containerSelector}
                   />
                 ) : (
                   <div className="td-body-empty">No description.</div>
@@ -554,7 +584,7 @@ function TicketDrawer({ open, ticketId, onClose }) {
             ) : null}
           </>
         )}
-      </aside>
+      </Shell>
     </>
   );
 }

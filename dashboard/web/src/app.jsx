@@ -45,6 +45,13 @@ function App() {
   else if (route.kind === 'project') page = (
     <ProjectView projectId={route.id} tab={route.tab} showArchived={route.showArchived} q={route.q} setRoute={navigate}/>
   );
+  else if (route.kind === 'ticket') page = (
+    // Standalone ticket page (TKT-0154): reuses TicketDrawer in page variant so
+    // the full interactive detail (body, annotations, field controls, dispatch,
+    // comments) lives at /tickets/<id> — deep-linkable, refresh-safe.
+    <TicketDrawer variant="page" open={true} ticketId={route.id}
+      onClose={() => window.history.back()}/>
+  );
   else page = <Dashboard setRoute={navigate}/>;
 
   return (
