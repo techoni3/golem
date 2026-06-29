@@ -3,9 +3,9 @@
 // per-project markdown Kanban in project-view.jsx.
 //
 // Header: project / kind / assignee filters + "Show archived" toggle +
-// "+ New ticket" (fires `open-create-ticket`). Board: state columns reusing
-// the .kanban / .ticket markup. Cards fire `open-ticket-drawer` on click
-// (the drawer itself is WS5b — wiring the event now is correct).
+// "+ New ticket" (Router.openComposer → ?compose=1). Board: state columns
+// reusing the .kanban / .ticket markup. Cards call Router.openTicket on click
+// (pushes ?ticket=<id>; the drawer is URL-driven, TKT-0153).
 
 // State columns in board order. `archived` is appended only when the toggle
 // is on. Each maps to a --status-* color var (see styles.css tokens).
@@ -142,9 +142,7 @@ function TrackerBoard() {
   const allProjects = !projectFilter;
 
   const onNewTicket = () => {
-    window.dispatchEvent(new CustomEvent('open-create-ticket', {
-      detail: { project_id: projectFilter || null },
-    }));
+    window.Router.openComposer(projectFilter || null);
   };
 
   return (
@@ -347,7 +345,7 @@ function NoopUseDraggable() { return { attributes: {}, listeners: {}, setNodeRef
 
 function TrackerCard({ ticket: t, project, assigneeLabel }) {
   const open = () => {
-    window.dispatchEvent(new CustomEvent('open-ticket-drawer', { detail: { id: t.id } }));
+    window.Router.openTicket(t.id);
   };
   const prio = t.priority ? String(t.priority).toLowerCase() : null;
   const needsAnswer = isQuestionForHuman(t);

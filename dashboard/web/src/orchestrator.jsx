@@ -7,7 +7,7 @@
 const { useCallback } = React;
 
 function openCeoDrawer(sessionId) {
-  window.dispatchEvent(new CustomEvent('open-ceo-drawer', { detail: { sessionId: sessionId ?? null } }));
+  window.Router.openChat(sessionId ?? null);
 }
 
 function OrchestratorRail() {

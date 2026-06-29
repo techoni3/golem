@@ -156,7 +156,7 @@ function ProjectTrackerBoard({ contractId }) {
   const cols = showArchived && window.TRACKER_ARCHIVED_COL ? [...base, window.TRACKER_ARCHIVED_COL] : base;
 
   const onNew = () => {
-    window.dispatchEvent(new CustomEvent('open-create-ticket', { detail: { project_id: contractId } }));
+    window.Router.openComposer(contractId);
   };
 
   const Columns = window.TicketColumns;

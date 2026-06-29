@@ -55,10 +55,26 @@ function App() {
         <OrchestratorRail/>
         {page}
       </div>
-      <CeoChatDrawer/>
-      <NativeSessionDrawer/>
-      <CreateTicketDrawer/>
-      <TicketDrawer/>
+      {/* Drawers are URL overlays (TKT-0153): App owns their open state, derived
+          from route.overlays (?ticket=, ?compose=1&project=, ?chat=, ?ns=).
+          Openers call Router.open* (push a history entry); close calls
+          Router.closeOverlay (history.back), so Back closes each drawer. */}
+      <CeoChatDrawer
+        open={!!route.overlays.chat}
+        sessionId={route.overlays.chat}
+        onClose={() => window.Router.closeOverlay('chat')}/>
+      <NativeSessionDrawer
+        open={!!route.overlays.ns}
+        sessionId={route.overlays.ns}
+        onClose={() => window.Router.closeOverlay('ns')}/>
+      <CreateTicketDrawer
+        open={!!route.overlays.compose}
+        preselectProject={route.overlays.composeProject || ''}
+        onClose={() => window.Router.closeOverlay('compose')}/>
+      <TicketDrawer
+        open={!!route.overlays.ticket}
+        ticketId={route.overlays.ticket}
+        onClose={() => window.Router.closeOverlay('ticket')}/>
     </div>
   );
 }

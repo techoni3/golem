@@ -1,8 +1,10 @@
 // Create-ticket DRAWER (replaces the center-screen modal in create-ticket.jsx).
 //
-// Same `open-create-ticket` CustomEvent contract (detail may carry a
-// `project_id` to preselect), so the two "+ New ticket" buttons in
-// tracker-board.jsx and project-view.jsx need no change.
+// URL-driven (TKT-0153): App passes `open` + `preselectProject` from the
+// ?compose=1&project=<pid> overlay. Openers call Router.openComposer(pid); the
+// two "+ New ticket" buttons in tracker-board.jsx and project-view.jsx do that
+// directly. Close (Esc / backdrop / × / submit) → onClose → Router.closeOverlay
+// → history.back, so Back closes the drawer.
 //
 // GitHub-issue-style drafts: every field is autosaved (debounced 300ms) to
 // localStorage per project via window.CtDraft (ct-draft.js). Closing the drawer
@@ -58,9 +60,11 @@ function snapshot(fields) {
   };
 }
 
-// Apply a loaded draft (or a blank default) to the field setters.
-function applyDraft(d, setProjectId, setters) {
-  setProjectId(d?.project_id || '');
+// Apply a loaded draft (or a blank default) to the field setters. `fallbackPid`
+// is the opener's preselect — used when there's no draft so the project dropdown
+// is still preselected (not blank).
+function applyDraft(d, setProjectId, setters, fallbackPid) {
+  setProjectId(d?.project_id || fallbackPid || '');
   setters.setKind(d?.kind || 'work-item');
   setters.setTitle(d?.title || '');
   setters.setBody(d?.body || '');
@@ -78,11 +82,13 @@ function applyDraft(d, setProjectId, setters) {
   setters.setSubmitting(false);
 }
 
-function CreateTicketDrawer() {
+function CreateTicketDrawer({ open, preselectProject, onClose }) {
   useStore();
   const projects = window.Store.getProjects();
 
-  const [open, setOpen] = React.useState(false);
+  // `open` is URL-driven (?compose=1, owned by App). `projectId` is a composer
+  // FIELD (the ticket's project), so it stays internal — seeded from the
+  // preselect prop on open, then mutable via the dropdown.
   const [projectId, setProjectId] = React.useState('');
   const [kind, setKind] = React.useState('work-item');
   const [title, setTitle] = React.useState('');
@@ -184,27 +190,29 @@ function CreateTicketDrawer() {
   }, [uploadOne]);
 
   // ── Open / project-restore ─────────────────────────────────────────────────
-  // On open: preselect project from the event, migrate any unscoped draft into
-  // the project bucket, then load that project's draft (or blank). The draft is
-  // the source of truth — closing no longer wipes state, and reopening re-syncs
-  // from the flushed localStorage draft.
+  // open is URL-driven (App passes it from ?compose=1). On open, migrate any
+  // unscoped draft into the preselect project bucket, then load that project's
+  // draft (or blank, with the project preselected). The draft is the source of
+  // truth — closing no longer wipes state, and reopening re-syncs from the
+  // flushed localStorage draft.
   const restore = React.useCallback((pid) => {
     let draft = null;
     if (pid) draft = window.CtDraft.migrateToProject(pid) || window.CtDraft.load(pid);
     else draft = window.CtDraft.load('');
-    applyDraft(draft, setProjectId, setters);
+    applyDraft(draft, setProjectId, setters, pid);
     setRestored(!!(draft && ((draft.title && draft.title.trim()) || (draft.body && draft.body.trim()))));
   }, []);
 
+  // Restore on open. Uses a ref so a re-render with the same `open`/preselect
+  // doesn't clobber in-progress edits.
+  const openedFor = React.useRef(null);
   React.useEffect(() => {
-    const opener = (e) => {
-      const pre = e?.detail?.project_id || '';
-      restore(pre);
-      setOpen(true);
-    };
-    window.addEventListener('open-create-ticket', opener);
-    return () => window.removeEventListener('open-create-ticket', opener);
-  }, [restore]);
+    if (!open) { openedFor.current = null; return; }
+    const key = `${preselectProject}`;
+    if (openedFor.current === key) return;
+    openedFor.current = key;
+    restore(preselectProject);
+  }, [open, preselectProject, restore]);
 
   // When the user changes project while the drawer is open, load that project's
   // own draft (after flushing the previous one). This is the per-project swap.
@@ -218,15 +226,20 @@ function CreateTicketDrawer() {
     }
   }, [projectId, open, restore]);
 
-  // Esc closes (flushing the draft).
+  // Esc closes (→ App pops ?compose via onClose). Draft flush happens in the
+  // close effect below when `open` flips false.
   React.useEffect(() => {
     if (!open) return;
-    const onKey = (e) => { if (e.key === 'Escape') { window.CtDraft.flush(); setOpen(false); } };
+    const onKey = (e) => { if (e.key === 'Escape') onClose && onClose(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open]);
+  }, [open, onClose]);
 
-  // Flush the draft on tab close / refresh.
+  // Flush the draft whenever the drawer closes (Esc / backdrop / × / Back / submit)
+  // and on tab close / refresh — so in-progress work always lands in localStorage.
+  React.useEffect(() => {
+    if (!open) window.CtDraft.flush();
+  }, [open]);
   React.useEffect(() => {
     const onUnload = () => window.CtDraft.flush();
     window.addEventListener('beforeunload', onUnload);
@@ -281,8 +294,7 @@ function CreateTicketDrawer() {
 
   const close = () => {
     if (submitting) return;
-    window.CtDraft.flush();
-    setOpen(false);
+    onClose && onClose();
   };
 
   const discard = () => {
@@ -306,7 +318,7 @@ function CreateTicketDrawer() {
     try {
       await window.SubstrateAPI.createTicket(buildBody());
       window.CtDraft.discard(projectId);
-      setOpen(false);
+      onClose && onClose();
     } catch (err) {
       setError(err?.payload?.error || err?.message || 'Failed to create ticket');
       setSubmitting(false);
@@ -320,7 +332,7 @@ function CreateTicketDrawer() {
       const ticket = await window.SubstrateAPI.createTicket(buildBody());
       await window.SubstrateAPI.dispatchTicket(ticket.id, { session_id: dispatchSession });
       window.CtDraft.discard(projectId);
-      setOpen(false);
+      onClose && onClose();
     } catch (err) {
       setError(err?.payload?.error || err?.message || 'Failed to create & dispatch ticket');
       setSubmitting(false);

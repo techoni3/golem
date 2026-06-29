@@ -5,9 +5,8 @@
 
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
-function CeoChatDrawer() {
+function CeoChatDrawer({ open, sessionId, onClose }) {
   useStore();
-  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState(null);
   const [activeSessionId, setActiveSessionId] = useState(null);
@@ -44,22 +43,19 @@ function CeoChatDrawer() {
 
   const messages = window.Store.getChatForSession(activeSessionId);
 
+  // open is URL-driven (?chat=<sid>, owned by App). When opened with a specific
+  // session, select it; otherwise the default-selection effect below picks the
+  // first available session.
   useEffect(() => {
-    const opener = (e) => {
-      setOpen(true);
-      const wanted = e?.detail?.sessionId;
-      if (wanted) setActiveSessionId(wanted);
-    };
-    window.addEventListener('open-ceo-drawer', opener);
-    return () => window.removeEventListener('open-ceo-drawer', opener);
-  }, []);
+    if (open && sessionId) setActiveSessionId(sessionId);
+  }, [open, sessionId]);
 
   useEffect(() => {
     if (!open) return;
-    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') onClose && onClose(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open]);
+  }, [open, onClose]);
 
   const pushToast = (text, kind = 'ok') => {
     setToast({ text, kind, id: Math.random() });
@@ -97,7 +93,7 @@ function CeoChatDrawer() {
 
   return (
     <>
-      <div className={`drawer-backdrop ${open ? 'open' : ''}`} onClick={() => setOpen(false)}/>
+      <div className={`drawer-backdrop ${open ? 'open' : ''}`} onClick={() => onClose && onClose()}/>
       <aside className={`drawer ${open ? 'open' : ''} drawer-ceo`}>
         <div className="drawer-header">
           <div className="drawer-title-row">
@@ -106,7 +102,7 @@ function CeoChatDrawer() {
               <h2 className="drawer-title">Session</h2>
               <span className="drawer-status-pill">{statusLabel}</span>
             </div>
-            <button className="drawer-close" onClick={() => setOpen(false)}><Icon.Close/></button>
+            <button className="drawer-close" onClick={() => onClose && onClose()}><Icon.Close/></button>
           </div>
 
           {sessions.length > 1 && (

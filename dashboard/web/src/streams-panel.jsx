@@ -135,7 +135,7 @@ function StreamCard({ stream, members }) {
 // `ordinal` shows the 1-based position on sequential streams.
 function StreamTicketRow({ ticket: t, isNext, ordinal }) {
   const open = () => {
-    window.dispatchEvent(new CustomEvent('open-ticket-drawer', { detail: { id: t.id } }));
+    window.Router.openTicket(t.id);
   };
   const terminal = SP_TERMINAL.has(t.state);
   return (

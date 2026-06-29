@@ -2,31 +2,24 @@
 // card is clicked. Body = metadata + recent central-journal activity +
 // milestones, fetched on open via Store.loadNativeSessionPeek().
 
+// Thin wrapper kept for existing call sites (dashboard.jsx, other-pages.jsx).
+// Now routes through the URL overlay (?ns=<sid>) so Back closes the drawer.
 function openNativeSessionDrawer(sessionId) {
-  window.dispatchEvent(new CustomEvent('open-native-session-drawer', { detail: { sessionId: sessionId ?? null } }));
+  window.Router.openNativeSession(sessionId ?? null);
 }
 
-function NativeSessionDrawer() {
+function NativeSessionDrawer({ open, sessionId, onClose }) {
   useStore();
-  const [open, setOpen] = React.useState(false);
-  const [sessionId, setSessionId] = React.useState(null);
 
+  // open + sessionId are URL-driven (?ns=<sid>, owned by App). On open, fetch
+  // the session's recent activity + milestones.
   React.useEffect(() => {
-    const opener = (e) => {
-      const sid = e?.detail?.sessionId ?? null;
-      setSessionId(sid);
-      setOpen(true);
-      if (sid) window.Store.loadNativeSessionPeek(sid);
-    };
-    window.addEventListener('open-native-session-drawer', opener);
-    return () => window.removeEventListener('open-native-session-drawer', opener);
-  }, []);
-
-  const onClose = React.useCallback(() => setOpen(false), []);
+    if (open && sessionId) window.Store.loadNativeSessionPeek(sessionId);
+  }, [open, sessionId]);
 
   React.useEffect(() => {
     if (!open) return;
-    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e) => { if (e.key === 'Escape') onClose && onClose(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);

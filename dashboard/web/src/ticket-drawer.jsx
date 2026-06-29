@@ -46,10 +46,8 @@ const TD_STATE_PILL = {
 };
 
 
-function TicketDrawer() {
+function TicketDrawer({ open, ticketId, onClose }) {
   useStore();
-  const [open, setOpen] = React.useState(false);
-  const [ticketId, setTicketId] = React.useState(null);
   const [loading, setLoading] = React.useState(false);
   const [loadError, setLoadError] = React.useState(null);
 
@@ -110,45 +108,43 @@ function TicketDrawer() {
     ? (window.Store.getProjectByContractId(ticket.project_id) ?? null)
     : null;
 
-  // Open on event; fetch full detail; seed comments into the store.
+  // Open state is URL-driven (App passes open + ticketId from ?ticket=<id>).
+  // When the drawer opens (or switches tickets), fetch full detail + seed
+  // comments into the store so field controls have fresh values.
   React.useEffect(() => {
-    const opener = (e) => {
-      const id = e?.detail?.id;
-      if (!id) return;
-      setTicketId(id);
-      setOpen(true);
-      setEditBuf(null);
-      setDispatchSession('');
-      setDispatchNote(null);
-      setReturnSession('');
-      setReturnNote(null);
-      setLoadError(null);
-      setLoading(true);
-      window.SubstrateAPI.getTicket(id)
-        .then((full) => {
-          if (full && full.id) {
-            // Land the full ticket in the store so field controls have fresh values.
-            window.Store.upsertTrackerTicket(full);
-            window.Store.seedTicketComments(full.id, full.comments || []);
-          }
-          setLoading(false);
-        })
-        .catch((err) => {
-          setLoadError(err?.message || 'Failed to load ticket');
-          setLoading(false);
-        });
-    };
-    window.addEventListener('open-ticket-drawer', opener);
-    return () => window.removeEventListener('open-ticket-drawer', opener);
-  }, []);
+    if (!open || !ticketId) return;
+    setEditBuf(null);
+    setDispatchSession('');
+    setDispatchNote(null);
+    setReturnSession('');
+    setReturnNote(null);
+    setLoadError(null);
+    setLoading(true);
+    let cancelled = false;
+    window.SubstrateAPI.getTicket(ticketId)
+      .then((full) => {
+        if (cancelled) return;
+        if (full && full.id) {
+          window.Store.upsertTrackerTicket(full);
+          window.Store.seedTicketComments(full.id, full.comments || []);
+        }
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setLoadError(err?.message || 'Failed to load ticket');
+        setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [open, ticketId]);
 
-  // Esc closes.
+  // Esc closes (→ App pops the ?ticket overlay via onClose).
   React.useEffect(() => {
     if (!open) return;
-    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') onClose && onClose(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open]);
+  }, [open, onClose]);
 
   // Fetch dispatchable sessions + streams for the ticket's project.
   const projectId = ticket?.project_id || null;
@@ -300,7 +296,7 @@ function TicketDrawer() {
       });
   }, [ticketId, returnSession, doReturn]);
 
-  const close = () => setOpen(false);
+  const close = () => onClose && onClose();
 
   const statePill = ticket ? (TD_STATE_PILL[ticket.state] || 'idle') : 'idle';
 
