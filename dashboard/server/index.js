@@ -150,6 +150,30 @@ async function main() {
     },
   });
 
+  // SPA fallback (TKT-0146): client-side routes are path-based now
+  // (/tickets/<id>, /project/<id>, /dashboard, …). A refresh or deep link on
+  // such a path would otherwise 404 because the static plugin only serves real
+  // files. For non-API GETs, serve index.html and let the router boot the right
+  // view. API/websocket misses still get a real 404.
+  fastify.setNotFoundHandler(async (req, reply) => {
+    const url = (req.url || '').split('?')[0];
+    if (url.startsWith('/api/') || url.startsWith('/ws')) {
+      return reply.code(404).send({ error: 'not found' });
+    }
+    if (req.method !== 'GET') {
+      return reply.code(404).send({ error: 'not found' });
+    }
+    try {
+      const idx = fs.readFileSync(path.join(WEB_ROOT, 'index.html'));
+      reply.type('text/html; charset=utf-8');
+      reply.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+      return reply.send(idx);
+    } catch (err) {
+      req.log.error({ err }, 'SPA fallback: index.html missing');
+      return reply.code(500).send({ error: 'index.html not found' });
+    }
+  });
+
   // ---- REST API ----
 
   fastify.get('/api/health', async () => ({

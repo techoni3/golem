@@ -2,36 +2,28 @@
 
 function App() {
   useStore();
-  const [route, setRoute] = React.useState({ kind: 'dashboard' });
+  // Route state is driven by window.Router (path-based). The router pushes
+  // history on navigation (so Back traverses pages) and dispatches `route-change`
+  // on every change; popstate fires on Back/Forward. Both keep this state in
+  // sync with the URL. Replaces the old hash+replaceState model that never
+  // pushed, so Back used to exit the SPA.
+  const [route, setRoute] = React.useState(() => window.Router.parseLocation());
   const state = window.Store.getState();
 
-  // Handle deep links via hash.
   React.useEffect(() => {
-    const fromHash = () => {
-      const h = window.location.hash.replace(/^#/, '');
-      if (!h) return;
-      const parts = h.split('/').filter(Boolean);
-      if (parts[0] === 'project' && parts[1]) {
-        setRoute({ kind: 'project', id: parts[1] });
-      } else if (['dashboard', 'tracker', 'projects', 'agents', 'logs'].includes(parts[0])) {
-        setRoute({ kind: parts[0] });
-      }
+    const sync = () => setRoute(window.Router.parseLocation());
+    window.addEventListener('popstate', sync);
+    window.addEventListener('route-change', sync);
+    return () => {
+      window.removeEventListener('popstate', sync);
+      window.removeEventListener('route-change', sync);
     };
-    fromHash();
-    window.addEventListener('hashchange', fromHash);
-    return () => window.removeEventListener('hashchange', fromHash);
   }, []);
 
-  // Push route → hash.
-  React.useEffect(() => {
-    let h;
-    if (route.kind === 'project') h = `#project/${route.id}`;
-    else h = `#${route.kind}`;
-    if (window.location.hash !== h) {
-      // Use replaceState to avoid spamming history during drawer open/close.
-      history.replaceState(null, '', h);
-    }
-  }, [route]);
+  // setRoute navigates (push) — real links + in-app nav both go through this.
+  // Callers that want replace semantics (filter typing) call window.Router.go
+  // directly with {replace:true}.
+  const navigate = (r) => window.Router.go(r);
 
   let page;
   if (!state.ready) {
@@ -45,21 +37,21 @@ function App() {
         </div>
       </div>
     );
-  } else if (route.kind === 'dashboard') page = <Dashboard setRoute={setRoute}/>;
-  else if (route.kind === 'tracker') page = <TrackerBoard setRoute={setRoute}/>;
-  else if (route.kind === 'projects') page = <ProjectsPage setRoute={setRoute}/>;
-  else if (route.kind === 'agents') page = <AgentsPage setRoute={setRoute}/>;
+  } else if (route.kind === 'dashboard') page = <Dashboard setRoute={navigate}/>;
+  else if (route.kind === 'tracker') page = <TrackerBoard setRoute={navigate}/>;
+  else if (route.kind === 'projects') page = <ProjectsPage setRoute={navigate}/>;
+  else if (route.kind === 'agents') page = <AgentsPage setRoute={navigate}/>;
   else if (route.kind === 'logs') page = <LogsPage/>;
   else if (route.kind === 'project') page = (
-    <ProjectView projectId={route.id} setRoute={setRoute}/>
+    <ProjectView projectId={route.id} tab={route.tab} showArchived={route.showArchived} q={route.q} setRoute={navigate}/>
   );
-  else page = <Dashboard setRoute={setRoute}/>;
+  else page = <Dashboard setRoute={navigate}/>;
 
   return (
     <div className="app">
-      <Sidebar route={route} setRoute={setRoute}/>
+      <Sidebar route={route} setRoute={navigate}/>
       <div className="main">
-        <Topbar route={route} setRoute={setRoute}/>
+        <Topbar route={route} setRoute={navigate}/>
         <OrchestratorRail/>
         {page}
       </div>

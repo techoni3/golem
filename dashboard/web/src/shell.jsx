@@ -58,11 +58,13 @@ function Sidebar({ route, setRoute }) {
         {list.map(p => {
           const active = route.kind === 'project' && route.id === p.id;
           const live = window.Store.getProjectAliveSessions(p).length;
+          const href = window.Router.buildHref({ kind: 'project', id: p.id, tab: 'agents' });
           return (
-            <button
+            <a
               key={p.id}
+              href={href}
               className={`sidebar-link ${active ? 'active' : ''}`}
-              onClick={() => setRoute({ kind: 'project', id: p.id, tab: 'agents' })}
+              onClick={(e) => { e.preventDefault(); setRoute({ kind: 'project', id: p.id, tab: 'agents' }); }}
             >
               <span className="sidebar-link-icon" style={{ color: p.color }}>
                 <span style={{
@@ -72,7 +74,7 @@ function Sidebar({ route, setRoute }) {
               </span>
               <span>{p.name}</span>
               <span className="sidebar-link-count">{live}</span>
-            </button>
+            </a>
           );
         })}
       </div>
@@ -94,16 +96,18 @@ function Sidebar({ route, setRoute }) {
         <nav className="sidebar-nav">
           {items.map(item => {
             const I = item.icon;
+            const href = window.Router.buildHref({ kind: item.id });
             return (
-              <button
+              <a
                 key={item.id}
+                href={href}
                 className={`sidebar-link ${isActive(item.id) ? 'active' : ''}`}
-                onClick={() => setRoute({ kind: item.id })}
+                onClick={(e) => { e.preventDefault(); setRoute({ kind: item.id }); }}
               >
                 <span className="sidebar-link-icon"><I /></span>
                 <span>{item.label}</span>
                 {item.count != null && <span className="sidebar-link-count">{item.count}</span>}
-              </button>
+              </a>
             );
           })}
         </nav>
@@ -156,14 +160,14 @@ function Topbar({ route, setRoute }) {
   }, []);
 
   const crumbs = [];
-  crumbs.push({ label: 'Workspace', onClick: () => setRoute({ kind: 'dashboard' }) });
+  crumbs.push({ label: 'Workspace', href: window.Router.buildHref({ kind: 'dashboard' }), onClick: () => setRoute({ kind: 'dashboard' }) });
   if (route.kind === 'dashboard') crumbs.push({ label: 'Dashboard', current: true });
   if (route.kind === 'tracker') crumbs.push({ label: 'Tracker', current: true });
   if (route.kind === 'projects') crumbs.push({ label: 'Projects', current: true });
   if (route.kind === 'agents') crumbs.push({ label: 'Agents', current: true });
   if (route.kind === 'logs') crumbs.push({ label: 'Journals & Logs', current: true });
   if (route.kind === 'project') {
-    crumbs.push({ label: 'Projects', onClick: () => setRoute({ kind: 'projects' }) });
+    crumbs.push({ label: 'Projects', href: window.Router.buildHref({ kind: 'projects' }), onClick: () => setRoute({ kind: 'projects' }) });
     const p = window.Store.getProject(route.id);
     crumbs.push({ label: p?.name || route.id, current: true });
   }
@@ -181,7 +185,7 @@ function Topbar({ route, setRoute }) {
             {i > 0 && <span className="crumb-sep">/</span>}
             {c.current
               ? <span className="crumb-current">{c.label}</span>
-              : <span className="crumb-link" onClick={c.onClick}>{c.label}</span>}
+              : <a href={c.href} className="crumb-link" onClick={(e) => { e.preventDefault(); c.onClick && c.onClick(); }}>{c.label}</a>}
           </React.Fragment>
         ))}
       </div>
