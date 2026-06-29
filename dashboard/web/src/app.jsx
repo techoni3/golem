@@ -59,7 +59,6 @@ function App() {
       <Sidebar route={route} setRoute={navigate}/>
       <div className="main">
         <Topbar route={route} setRoute={navigate}/>
-        <OrchestratorRail/>
         {page}
       </div>
       {/* Drawers are URL overlays (TKT-0153): App owns their open state, derived

@@ -158,17 +158,8 @@
   text-overflow: unset;
 }
 
-/* ===== Orchestrator rail ===== */
-.orch-rail {
-  display: grid;
-  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr) minmax(120px, 160px) auto;
-  align-items: center;
-  gap: 18px;
-  padding: 10px 22px;
-  background: linear-gradient(180deg, var(--bg-1) 0%, var(--bg-0) 100%);
-  border-bottom: 1px solid var(--border-2);
-  position: relative;
-}
+/* ===== Orchestrator rail (removed TKT-0146 follow-up) — shared status/dot
+   styles kept below; the rail itself is no longer mounted. ===== */
 .orch-status { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .orch-dot {
   width: 9px; height: 9px; border-radius: 50%;
@@ -378,15 +369,6 @@
   line-height: 1.55;
 }
 .orch-modal-textarea:focus { outline: none; border-color: var(--accent-border); }
-
-/* ===== Orchestrator rail (clickable variant) ===== */
-.orch-rail.clickable {
-  cursor: pointer;
-  transition: background 120ms;
-}
-.orch-rail.clickable:hover {
-  background: linear-gradient(180deg, var(--bg-2) 0%, var(--bg-1) 100%);
-}
 
 /* ===== CEO chat drawer ===== */
 .drawer-ceo {
@@ -745,17 +727,7 @@
 }
 
 
-/* ===== v3 multi-CEO rail ===== */
-.orch-rail-v3 {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 22px;
-  background: linear-gradient(180deg, var(--bg-1) 0%, var(--bg-0) 100%);
-  border-bottom: 1px solid var(--border-2);
-  /* override the v2 grid */
-  grid-template-columns: none;
-}
+/* ===== v3 multi-CEO rail (removed TKT-0146 follow-up) ===== */
 .orch-sessions {
   display: flex;
   flex-wrap: wrap;
@@ -1725,9 +1697,6 @@
   .topbar { padding: 0 12px; gap: 8px; height: auto; min-height: var(--topbar-h); flex-wrap: wrap; }
   .topbar-meta { gap: 8px; flex-wrap: wrap; }
 
-  /* Orchestrator rail: stack its four columns. */
-  .orch-rail { grid-template-columns: 1fr; gap: 10px; padding: 10px 14px; }
-
   /* Page padding down from 28/32 so cards fill the narrow width. */
   .page { padding: 16px 12px 64px; }
 
@@ -1969,8 +1938,8 @@ select.ct-input { appearance: none; cursor: pointer; padding-right: 26px;
 }
 .td-loading-body.td-error { color: var(--status-blocked); }
 
-.td-header { padding-bottom: 12px; }
-.td-header .drawer-title-row { flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.td-header { padding: 12px 22px 10px; }
+.td-header .drawer-title-row { flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
 .td-id {
   font-size: 12px;
   color: var(--text-1);
@@ -1981,7 +1950,7 @@ select.ct-input { appearance: none; cursor: pointer; padding-right: 26px;
 }
 .td-kind-pill { text-transform: none; letter-spacing: 0.02em; color: var(--text-2); }
 .td-project-chip { font-size: 10.5px; padding: 2px 7px; cursor: default; }
-.td-meta { gap: 14px; }
+.td-meta { gap: 10px; }
 
 .td-scroll {
   flex: 1 1 auto;
@@ -1997,9 +1966,9 @@ select.ct-input { appearance: none; cursor: pointer; padding-right: 26px;
 .td-title {
   flex: 1;
   min-width: 0;
-  font-size: 17px;
+  font-size: 20px;
   font-weight: 600;
-  line-height: 1.3;
+  line-height: 1.25;
   letter-spacing: -0.01em;
   margin: 0;
   color: var(--text-0);
@@ -2102,15 +2071,7 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
 .td-count { color: var(--text-3); font-size: 11px; }
 
 /* Dispatch */
-.td-dispatch { display: flex; flex-direction: column; gap: 7px; }
-.td-dispatch-current { font-size: 11.5px; color: var(--text-2); }
-.td-dispatch-row { display: flex; gap: 8px; align-items: center; }
-.td-dispatch-row .td-select { flex: 1; }
-.td-dispatch-hint { font-size: 11px; color: var(--text-3); line-height: 1.5; }
-.td-dispatch-hint .mono {
-  font-family: var(--font-mono); background: var(--bg-2);
-  border: 1px solid var(--border-2); border-radius: 3px; padding: 1px 5px; font-size: 10.5px;
-}
+/* Dispatch note (rendered inside the action tray when a soft note is set). */
 .td-dispatch-note {
   font-size: 11.5px; line-height: 1.5;
   color: var(--status-review);
@@ -2118,21 +2079,8 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
   border: 1px solid color-mix(in oklab, var(--status-review) 30%, transparent);
   border-radius: var(--radius-1);
   padding: 7px 10px;
+  margin-top: 6px;
 }
-
-/* Links */
-.td-links { display: flex; flex-direction: column; }
-.td-links .td-section-title { justify-content: flex-start; }
-.td-link-add-btn { margin-left: auto; }
-.td-link-list { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-direction: column; gap: 5px; }
-.td-link-row { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
-.td-link-type { color: var(--text-2); }
-.td-link-target { color: var(--text-1); }
-.td-link-remove { color: var(--text-3); padding: 0 4px; line-height: 1; cursor: pointer; background: none; border: none; font-size: 14px; }
-.td-link-remove:hover { color: var(--status-blocked); }
-.td-link-add { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
-.td-link-input { flex: 1; min-width: 0; }
-.td-link-err { font-size: 11px; color: var(--status-blocked); margin-top: 6px; }
 
 /* Comment thread — reuses .ceo-chat/.ceo-msg, scoped tweaks here */
 .td-comments { display: flex; flex-direction: column; }
@@ -2679,7 +2627,7 @@ mark.anno.anno-tail::after {
 
 /* Adjust drawer layout: body area hosts the annotation wrap. */
 .td-scroll { padding: 0; gap: 0; }
-.td-titlebody { padding: 16px 22px; flex: 0 0 auto; }
+.td-titlebody { padding: 10px 22px; flex: 0 0 auto; }
 .td-body-area {
   flex: 1 1 auto;
   min-height: 0;
@@ -2688,7 +2636,7 @@ mark.anno.anno-tail::after {
   border-top: 1px solid var(--border-1);
   border-bottom: 1px solid var(--border-1);
 }
-.td-fields, .td-dispatch, .td-links, .td-comments { padding: 14px 22px; }
+.td-fields, .td-comments { padding: 14px 22px; }
 .td-composer { padding: 12px 22px; border-top: 1px solid var(--border-1); }
 
 /* When the rail is open, the body column needs right padding so prose isn't hidden. */
@@ -2819,35 +2767,22 @@ mark.anno.anno-tail::after {
 .td-tray-extra-key { font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-3); font-family: var(--font-mono); min-width: 92px; }
 .td-tray-extra-meta { color: var(--text-3); }
 
-/* Slim dispatch — drops the section title and the giant hint block. */
-.td-dispatch.td-dispatch-slim {
-  padding: 10px 22px;
-  border-bottom: 1px solid var(--border-1);
-}
-.td-dispatch.td-dispatch-slim .td-dispatch-row { gap: 6px; }
-
-/* Collapsible links */
-.td-links.closed { padding: 8px 22px; }
-.td-links.open { padding: 8px 22px 12px; }
-.td-links-toggle {
+/* Dispatch group folded into the action-tray row (TKT-0146 follow-up): wraps
+   with the field chips, separated by a left rule so it stands out without its
+   own row. */
+.td-tray-dispatch {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  background: transparent;
-  border: none;
-  color: var(--text-2);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  cursor: pointer;
-  padding: 0;
-  font-family: var(--font-sans);
+  gap: 6px;
+  margin-left: 6px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border-2);
 }
-.td-links-toggle:hover { color: var(--text-0); }
-.td-links-toggle .td-chevron { display: inline-flex; color: var(--text-3); transition: transform .15s; }
-.td-links.open .td-links-toggle .td-chevron { transform: rotate(90deg); }
-.td-links-head { display: flex; align-items: center; gap: 8px; }
-.td-links-head .td-link-add-btn { margin-left: auto; }
+.td-tray-dispatch .td-dispatch-go {
+  height: 22px;
+  padding: 0 10px;
+  font-size: 11px;
+}
 
 /* ===== TKT-0103: Board drag-and-drop ===== */
 .ticket.is-dragging {

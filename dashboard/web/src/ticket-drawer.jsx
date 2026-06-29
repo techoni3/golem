@@ -16,7 +16,6 @@ const TD_PRIORITIES = [
   { value: 'P2', label: 'P2' },
   { value: 'P3', label: 'P3' },
 ];
-const TD_LINK_TYPES = ['blocks', 'blocked-by', 'relates-to', 'parent-of', 'child-of', 'duplicates'];
 
 // Drawer width presets (percentage of viewport width). Persisted in
 // localStorage so a refresh keeps the user's choice. Order is wide→narrow,
@@ -515,6 +514,32 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                     </select>
                   </label>
 
+                  {/* Dispatch — folded into the same row as the field chips
+                      (wraps to the next line on narrow widths), separated by a
+                      left rule so it stands out without claiming its own row. */}
+                  <div className="td-tray-dispatch">
+                    <label className="td-tray-chip">
+                      <span className="td-tray-key">Dispatch</span>
+                      <select className="td-chip" value={dispatchSession}
+                        onChange={(e) => setDispatchSession(e.target.value)}
+                        disabled={dispatching || dispatchable.length === 0}
+                        aria-label="Dispatch to session">
+                        <option value="">
+                          {dispatchable.length === 0 ? 'No session' : 'Session…'}
+                        </option>
+                        {dispatchable.map((s) => (
+                          <option key={s.session_id} value={s.session_id}>{s.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <button className="orch-btn small td-dispatch-go"
+                      onClick={onDispatch}
+                      disabled={dispatching || !dispatchSession || dispatchable.length === 0}
+                      title={dispatchable.length === 0 ? 'No live session in this project — start one with `cd <project> && claude`' : 'Dispatch to the selected session'}>
+                      {dispatching ? '…' : 'Dispatch'}
+                    </button>
+                  </div>
+
                   <button
                     className="td-tray-more"
                     onClick={() => setFieldsExpanded((e) => !e)}
@@ -539,33 +564,9 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                     </div>
                   </div>
                 )}
-              </div>
 
-              {/* ── Slim dispatch ── */}
-              <div className="td-dispatch td-dispatch-slim">
-                <div className="td-dispatch-row">
-                  <select className="td-select" value={dispatchSession}
-                    onChange={(e) => setDispatchSession(e.target.value)}
-                    disabled={dispatching || dispatchable.length === 0}>
-                    <option value="">
-                      {dispatchable.length === 0 ? 'No live session in this project' : 'Select a live session…'}
-                    </option>
-                    {dispatchable.map((s) => (
-                      <option key={s.session_id} value={s.session_id}>{s.label}</option>
-                    ))}
-                  </select>
-                  <button className="orch-btn"
-                    onClick={onDispatch}
-                    disabled={dispatching || !dispatchSession || dispatchable.length === 0}
-                    title={dispatchable.length === 0 ? 'No live session in this project — start one with `cd <project> && claude`' : 'Dispatch to the selected session'}>
-                    {dispatching ? 'Dispatching…' : 'Dispatch'}
-                  </button>
-                </div>
                 {dispatchNote && <div className="td-dispatch-note">{dispatchNote}</div>}
               </div>
-
-              {/* ── Links (compact, secondary) ── */}
-              <TicketLinks ticketId={ticket.id} links={ticket.links || []}/>
             </div>
 
             {isQuestion ? (
@@ -729,93 +730,6 @@ function QuestionReturn({
           Answer &amp; return
         </button>
       </div>
-    </div>
-  );
-}
-
-// Compact links section — list existing links + a minimal add form.
-// TKT-0101: section is collapsed by default; auto-opens only when links exist
-// (so a fresh ticket isn't hiding an empty Links header).
-function TicketLinks({ ticketId, links }) {
-  const [adding, setAdding] = React.useState(false);
-  const [toTicket, setToTicket] = React.useState('');
-  const [type, setType] = React.useState(TD_LINK_TYPES[0]);
-  const [busy, setBusy] = React.useState(false);
-  const [err, setErr] = React.useState(null);
-  const [expanded, setExpanded] = React.useState(links.length > 0);
-
-  const onAdd = () => {
-    const to = toTicket.trim();
-    if (!to || busy) return;
-    setBusy(true); setErr(null);
-    window.SubstrateAPI.addLink(ticketId, { to_ticket: to, type })
-      .then(() => {
-        // The server emits a ticket-updated delta that refreshes ticket.links.
-        setToTicket(''); setAdding(false); setBusy(false);
-      })
-      .catch((e) => { setErr(e?.payload?.error || e?.message || 'Failed to add link'); setBusy(false); });
-  };
-
-  const onRemove = (l) => {
-    window.SubstrateAPI.removeLink(ticketId, { to_ticket: l.to_ticket, type: l.type })
-      .catch((e) => console.error('removeLink failed', e));
-  };
-
-  // Only links that hang off this ticket (from_ticket === id) are removable
-  // here; inbound links are shown for context.
-  return (
-    <div className={`td-links ${expanded ? 'open' : 'closed'}`}>
-      <div className="td-links-head">
-        <button
-          className="td-links-toggle"
-          onClick={() => setExpanded((v) => !v)}
-          aria-expanded={expanded}
-        >
-          <span className="td-chevron"><Icon.ChevronRight/></span>
-          <span>Links</span>
-          <span className="td-count tnum">{links.length}</span>
-        </button>
-        {expanded && (
-          <button
-            className="orch-btn small ghost td-link-add-btn"
-            onClick={() => setAdding((a) => !a)}
-          >
-            {adding ? 'Cancel' : '+ Link'}
-          </button>
-        )}
-      </div>
-      {expanded && (
-        <>
-          {links.length > 0 && (
-            <ul className="td-link-list">
-              {links.map((l, i) => {
-                const outbound = l.from_ticket === ticketId;
-                const other = outbound ? l.to_ticket : l.from_ticket;
-                return (
-                  <li key={`${l.from_ticket}-${l.to_ticket}-${l.type}-${i}`} className="td-link-row">
-                    <span className="td-link-type">{outbound ? l.type : `${l.type} (in)`}</span>
-                    <span className="td-link-target mono">{other}</span>
-                    {outbound && (
-                      <button className="td-link-remove" title="remove link" onClick={() => onRemove(l)}>×</button>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          {adding && (
-            <div className="td-link-add">
-              <input className="td-select td-link-input" type="text" placeholder="target ticket id"
-                value={toTicket} onChange={(e) => setToTicket(e.target.value)}/>
-              <select className="td-select" value={type} onChange={(e) => setType(e.target.value)}>
-                {TD_LINK_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
-              <button className="orch-btn small" onClick={onAdd} disabled={busy || !toTicket.trim()}>Add</button>
-            </div>
-          )}
-          {err && <div className="td-link-err">{err}</div>}
-        </>
-      )}
     </div>
   );
 }
