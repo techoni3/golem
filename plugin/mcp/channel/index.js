@@ -13,7 +13,7 @@
 //   - Every broadcast payload carries `session_id` so the dashboard can route
 //     the message into the right CEO's chat lane.
 //
-// See substrate/channels/golem/README.md for setup. Authoritative protocol
+// See plugin/README.md for setup. Authoritative protocol
 // docs: https://code.claude.com/docs/en/channels-reference.md
 import http from 'node:http';
 import path from 'node:path';
@@ -530,6 +530,20 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'ticket_dispatch',
+      description:
+        'Golem tracker — dispatch a ticket to a live session: assigns the ticket and pushes a brief to it over the channel. Use sessions_dispatchable to find live session ids. The target session must be a channel consumer (golemc) to receive the push.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Ticket id to dispatch.' },
+          session_id: { type: 'string', description: 'Live session id to dispatch to (from sessions_dispatchable).' },
+          note: { type: 'string', description: 'Optional note to include with the dispatch.' },
+        },
+        required: ['id', 'session_id'],
+      },
+    },
+    {
+      name: 'stream_create',
       description:
         'Golem tracker — create a stream (a named group of tickets) in your current project. mode "sequential" = one in-progress at a time; "parallel" = independent sub-work. Defaults to your current project.',
       inputSchema: {

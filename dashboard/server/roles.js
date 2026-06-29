@@ -1,7 +1,7 @@
 // subagent_type → role glyph + display label + accent color.
-// Mirrors the design's ROLES map but expanded to cover every persona shipped
-// in golem/substrate/agents/. Sub-agent types not in this map fall back to a
-// neutral glyph so unknown agents still render.
+// Maps known sub-agent types to a role for dashboard rendering. Sub-agent types
+// not in this map fall back to a neutral glyph so unknown agents still render.
+// (The v3 persona roster this originally mirrored has been removed.)
 
 export const ROLES = {
   TL: { label: 'TL', color: '#f59e0b', glyph: 'TL' },

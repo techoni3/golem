@@ -15,7 +15,7 @@
 #
 # Safety: set -u, bash-3.2 compatible (macOS default), every failure exits 0
 # and never blocks the session. Uses the same atomic mkdir-lock pattern as
-# substrate/channels/golem/index.js.
+# plugin/mcp/channel/index.js.
 
 set -u
 
@@ -82,7 +82,7 @@ PROJECT_ID="${SLUG}-${HASH}"
 NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 # --- atomic mkdir-lock helper ---------------------------------------------
-# Mirrors substrate/channels/golem/index.js withChannelLock(): mkdir a lock
+# Mirrors plugin/mcp/channel/index.js withChannelLock(): mkdir a lock
 # dir, run the critical section, rmdir. Stale locks (>5s) are reclaimed.
 with_lock() {
   local lock="$1"; shift

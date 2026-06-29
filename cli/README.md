@@ -1,6 +1,6 @@
 # golem CLI
 
-Minimal Node CLI for the golem v4 harness. Replaces the retired v3 bash CLI at `substrate/bin/golem`.
+Minimal Node CLI for the golem v4 harness. (The v3 bash CLI was retired in v4.)
 
 ## Install
 
