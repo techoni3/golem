@@ -292,10 +292,11 @@ button {
   gap: 6px;
 }
 
-/* Page container — fills the main area and scrolls internally. */
+/* Page container — fills the main area and scrolls internally. No max-width
+   cap so content uses the full available width (no blank right gap on wide
+   monitors). TKT-0155. */
 .page {
   padding: 28px 32px 80px;
-  max-width: 1600px;
   width: 100%;
   flex: 1 1 auto;
   min-height: 0;

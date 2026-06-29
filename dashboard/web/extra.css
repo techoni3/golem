@@ -1871,20 +1871,27 @@ select.ct-input { appearance: none; cursor: pointer; padding-right: 26px;
 .ct-header .drawer-title { font-size: 15px; }
 
 /* ===== Standalone ticket page (/tickets/<id>, TKT-0154) ===== */
-/* Reuses the drawer's .drawer-header + .td-scroll content but in a normal page
-   layout (no fixed shell). position:relative so the annotation pill + rail
-   (portaled to .ticket-page by td-annotate.jsx) anchor against it. Fills the
-   main area and scrolls internally like other pages (TKT-0155). */
+/* Mirrors the drawer's structure: .ticket-page is a NON-scrolling flex column
+   (position:relative so the annotation pill + rail portaled to it stay anchored),
+   and .td-scroll is the scroll region. This keeps the annotation rail + FAB
+   sticky (not scrolling with the body) — same as the drawer. TKT-0155. */
 .ticket-page {
   position: relative;
-  padding: 24px 32px 80px;
-  max-width: 1600px;
+  padding: 24px 32px 0;
   width: 100%;
   flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
-.ticket-page .td-scroll { overflow: visible; padding-top: 14px; }
+.ticket-page .td-scroll {
+  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-top: 14px;
+  padding-bottom: 24px;
+}
 .td-back-link {
   color: var(--text-2);
   font-size: 13px;
@@ -2883,9 +2890,15 @@ mark.anno.anno-tail::after {
      page's overflow:auto scrolls the whole board instead of clipping. */
 }
 /* Per-project board (inside the project command center): bound the kanban so
-   columns scroll within the section instead of growing the whole page. */
+   columns scroll within the section instead of growing the whole page. Unlike
+   the consolidated board (which gets a definite height via flex:1), this kanban
+   sits in a scrolling page, so max-height alone doesn't give the grid a definite
+   row height — the row sizes to content and columns don't scroll. Pin the row to
+   1fr + clip overflow so columns fill the bounded height and each list scrolls. */
 .pv-tracker .kanban {
   max-height: 70vh;
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
 }
 /* Column needs a definite height for the list's flex:1 + overflow to take. */
 .kanban-col {
