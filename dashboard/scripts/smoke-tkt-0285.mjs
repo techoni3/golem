@@ -31,6 +31,24 @@ const poll = async (path, pred, ms = 4000) => {
   return get(path);
 };
 
+// TKT-0354: the dispatch block must not overflow the sidebar. Returns the
+// sidebar's horizontal overflow + whether the actions row (Now|When-idle toggle
+// + Dispatch/Queue button) sits fully inside the sidebar rect.
+const sideOverflow = () => page.evaluate(() => {
+  const side = document.querySelector('.td-side');
+  if (!side) return null;
+  const s = side.getBoundingClientRect();
+  const inside = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return r.right <= s.right + 0.5 && r.left >= s.left - 0.5; };
+  return {
+    scrollWidth: side.scrollWidth,
+    clientWidth: side.clientWidth,
+    overflow: side.scrollWidth > side.clientWidth + 1,
+    actionsInside: inside(document.querySelector('.td-dispatch-actions')),
+    toggleInside: inside(document.querySelector('.td-dispatch-mode')),
+    goInside: inside(document.querySelector('.td-dispatch-go')),
+  };
+});
+
 // A body tall enough that .td-scroll can scroll ~800px (sticky needs travel).
 const LONG_BODY = Array.from({ length: 24 }, (_, i) =>
   `## Section ${i + 1}\n\nThis is paragraph ${i + 1} of a long scratch body used to exercise the sticky sidebar. The quick brown fox jumps over the lazy dog; the drawer must scroll well past 800px so the sticky .td-side has scroll travel to engage.`,
@@ -64,6 +82,12 @@ try {
   const leftGutter = lay.mdLeft - lay.mainLeft;
   const rightGutter = lay.mainRight - lay.mdRight;
   assert.ok(Math.abs(leftGutter - rightGutter) < 2, `body centered within main (left gutter ${leftGutter.toFixed(1)} ≈ right gutter ${rightGutter.toFixed(1)})`);
+
+  // ── 1b. (TKT-0354) sidebar dispatch block doesn't overflow the page-view sidebar ──
+  let ov1 = await sideOverflow();
+  assert.ok(ov1, '.td-side present (page view)');
+  assert.ok(!ov1.overflow, `page-view sidebar no horizontal overflow (scrollWidth ${ov1.scrollWidth} <= clientWidth ${ov1.clientWidth}+1)`);
+  assert.ok(ov1.actionsInside && ov1.toggleInside && ov1.goInside, `page-view dispatch actions inside the sidebar (actions=${ov1.actionsInside} toggle=${ov1.toggleInside} go=${ov1.goInside})`);
 
   // ── 2. Sticky (TKT-0285 consult cns-995f1f F1): at a typical laptop viewport
   // (1440×800) with a long body, the sidebar must stay pinned at the scroll
@@ -119,6 +143,10 @@ try {
   }));
   assert.equal(w50.stored, '50', `stored '30' coerced to '50' (got ${w50.stored})`);
   assert.ok(Math.abs(w50.width - 0.5 * 1440) < 20, `drawer width ≈ 50vw after coercion (got ${w50.width})`);
+  // (TKT-0354) drawer 50% — dispatch block doesn't overflow the sidebar
+  let ov50 = await sideOverflow();
+  assert.ok(ov50 && !ov50.overflow, `drawer 50% sidebar no horizontal overflow (scrollWidth ${ov50?.scrollWidth} <= clientWidth ${ov50?.clientWidth}+1)`);
+  assert.ok(ov50.actionsInside && ov50.toggleInside && ov50.goInside, `drawer 50% dispatch actions inside the sidebar (actions=${ov50.actionsInside} toggle=${ov50.toggleInside} go=${ov50.goInside})`);
   // click → 90vw + persisted
   await page.evaluate(() => document.querySelector('.td-width-btn').click());
   await wait(300);
@@ -128,6 +156,10 @@ try {
   }));
   assert.equal(w90.stored, '90', `click → '90' persisted (got ${w90.stored})`);
   assert.ok(Math.abs(w90.width - 0.9 * 1440) < 30, `drawer width ≈ 90vw (got ${w90.width})`);
+  // (TKT-0354) drawer 90% — dispatch block doesn't overflow the sidebar
+  let ov90 = await sideOverflow();
+  assert.ok(ov90 && !ov90.overflow, `drawer 90% sidebar no horizontal overflow (scrollWidth ${ov90?.scrollWidth} <= clientWidth ${ov90?.clientWidth}+1)`);
+  assert.ok(ov90.actionsInside && ov90.toggleInside && ov90.goInside, `drawer 90% dispatch actions inside the sidebar (actions=${ov90.actionsInside} toggle=${ov90.toggleInside} go=${ov90.goInside})`);
   // click again → 50vw
   await page.evaluate(() => document.querySelector('.td-width-btn').click());
   await wait(300);
@@ -160,6 +192,9 @@ try {
     widthAfterCoerce: w50.width,
     widthAfterClick: w90.width,
     stackedPos: stacked.pos,
+    overflowPage: ov1?.overflow,
+    overflow50: ov50?.overflow,
+    overflow90: ov90?.overflow,
   }, null, 2));
 } finally {
   if (ticketId) { try { await patch(`/tickets/${encodeURIComponent(ticketId)}`, { state: 'archived' }); } catch {} }

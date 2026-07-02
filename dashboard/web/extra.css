@@ -2949,7 +2949,6 @@ mark.anno.anno-tail::after {
 .td-side .td-prop-full { grid-column: auto; }
 .td-side .td-prop-label { display: block; flex: none; margin-bottom: 4px; }
 .td-side .td-prop .ps-trigger { width: 100%; }
-.td-side .td-prop-dispatch { grid-column: auto; margin-top: 14px; }
 
 /* Narrow fallback (container query on .td-scroll): under ~700px of content
    width (e.g. the 50% drawer on a small window) the sidebar stacks back on
@@ -2966,10 +2965,11 @@ mark.anno.anno-tail::after {
 }
 
 /* ===== TKT-0233: properties panel + PopSelect (custom listbox) ===== */
-/* The panel sits between the title and the body, inside .td-read-col, aligned
-   to the same 1200px column (one left edge for title / props / prose). Fields
-   are PopSelect controls (custom listbox) — native <select> menus are
-   OS-rendered + unstylable; PopSelect portals a themed menu to body. */
+/* The props live in the .td-side sidebar (since TKT-0285 — was between title
+   and body in .td-read-col). Fields are PopSelect controls (custom listbox) —
+   native <select> menus are OS-rendered + unstylable; PopSelect portals a
+   themed menu to body. The dispatch block (TKT-0354) stacks: label → full-width
+   picker → actions row (Now|When-idle toggle + Dispatch/Queue button). */
 .td-props {
   max-width: 1200px; width: 100%; margin: 0 auto; box-sizing: border-box;
   padding: 2px 40px 14px;
@@ -2983,25 +2983,33 @@ mark.anno.anno-tail::after {
 }
 .td-prop .ps-trigger { flex: 1 1 auto; min-width: 0; }
 .td-prop-dispatch {
-  grid-column: 1 / -1; display: flex; align-items: center; gap: 10px;
+  grid-column: 1 / -1;
+  display: flex; flex-direction: column; align-items: stretch; gap: 6px;
   margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--border-1);
 }
+.td-prop-dispatch .td-prop-label { flex: none; }
 .td-prop-dispatch .ps-trigger { flex: 1 1 auto; min-width: 0; }
+/* TKT-0354: actions row — the Now|When-idle toggle flexes, the Dispatch/Queue
+   button sits beside it; flex-wrap is the safety net, not the mechanism. */
+.td-dispatch-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .td-dispatch-go { flex: 0 0 auto; }
+/* Pending variant: the ⏳ line + Cancel wrap instead of overflowing the sidebar. */
+.td-prop-dispatch.td-dispatch-pending { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .td-dispatch-note { grid-column: 1 / -1; font-size: 11.5px; line-height: 1.5; color: var(--status-review); background: color-mix(in oklab, var(--status-review) 12%, var(--bg-2)); border: 1px solid color-mix(in oklab, var(--status-review) 30%, transparent); border-radius: var(--radius-1); padding: 7px 10px; margin-top: 6px; }
 
 /* TKT-0245: Now / When-idle segmented mode toggle + pending-queue row.
    The toggle sits between the PopSelect and the Dispatch/Queue button. The
    pending row replaces the dispatch row entirely while a dispatch is queued. */
 .td-dispatch-mode {
-  display: inline-flex; flex: 0 0 auto; border: 1px solid var(--border-2);
-  border-radius: var(--radius-1); overflow: hidden; align-self: stretch;
+  display: inline-flex; flex: 1 1 auto; border: 1px solid var(--border-2);
+  border-radius: var(--radius-1); overflow: hidden;
 }
 .td-dispatch-mode-btn {
   background: var(--bg-1); border: none; color: var(--text-3);
   font-family: "JetBrains Mono", monospace; font-size: 10px;
   letter-spacing: .5px; text-transform: uppercase; cursor: pointer;
-  padding: 0 8px; border-right: 1px solid var(--border-2); white-space: nowrap;
+  flex: 1; text-align: center; padding: 5px 6px;
+  border-right: 1px solid var(--border-2); white-space: nowrap;
 }
 .td-dispatch-mode-btn:last-child { border-right: none; }
 .td-dispatch-mode-btn:hover { color: var(--text-1); background: var(--bg-2); }

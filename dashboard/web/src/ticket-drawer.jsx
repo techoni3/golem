@@ -608,18 +608,20 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                         setDispatchMode(st === 'idle' ? 'now' : 'when_idle');
                       }}
                     />
-                    <div className="td-dispatch-mode" role="group" aria-label="Dispatch mode">
-                      <button type="button" className={`td-dispatch-mode-btn${dispatchMode === 'now' ? ' active' : ''}`}
-                        onClick={() => setDispatchMode('now')} aria-pressed={dispatchMode === 'now'} title="Push the brief immediately">Now</button>
-                      <button type="button" className={`td-dispatch-mode-btn${dispatchMode === 'when_idle' ? ' active' : ''}`}
-                        onClick={() => setDispatchMode('when_idle')} aria-pressed={dispatchMode === 'when_idle'} title="Queue the brief until the target session is idle">When idle</button>
+                    <div className="td-dispatch-actions">
+                      <div className="td-dispatch-mode" role="group" aria-label="Dispatch mode">
+                        <button type="button" className={`td-dispatch-mode-btn${dispatchMode === 'now' ? ' active' : ''}`}
+                          onClick={() => setDispatchMode('now')} aria-pressed={dispatchMode === 'now'} title="Push the brief immediately">Now</button>
+                        <button type="button" className={`td-dispatch-mode-btn${dispatchMode === 'when_idle' ? ' active' : ''}`}
+                          onClick={() => setDispatchMode('when_idle')} aria-pressed={dispatchMode === 'when_idle'} title="Queue the brief until the target session is idle">When idle</button>
+                      </div>
+                      <button className="orch-btn small td-dispatch-go"
+                        onClick={onDispatch}
+                        disabled={dispatching || !dispatchSession || dispatchable.length === 0}
+                        title={dispatchable.length === 0 ? 'No live session in this project — start one with `cd <project> && claude`' : (dispatchMode === 'when_idle' ? 'Queue the dispatch until the target session is idle' : 'Dispatch to the selected session')}>
+                        {dispatching ? '…' : (dispatchMode === 'when_idle' ? 'Queue' : 'Dispatch')}
+                      </button>
                     </div>
-                    <button className="orch-btn small td-dispatch-go"
-                      onClick={onDispatch}
-                      disabled={dispatching || !dispatchSession || dispatchable.length === 0}
-                      title={dispatchable.length === 0 ? 'No live session in this project — start one with `cd <project> && claude`' : (dispatchMode === 'when_idle' ? 'Queue the dispatch until the target session is idle' : 'Dispatch to the selected session')}>
-                      {dispatching ? '…' : (dispatchMode === 'when_idle' ? 'Queue' : 'Dispatch')}
-                    </button>
                   </div>
                 )}
 
