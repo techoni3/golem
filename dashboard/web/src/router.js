@@ -26,7 +26,7 @@
 // spammed — preserves the original "don't spam history" intent.
 
 (function () {
-  const TOP_LEVEL = ['dashboard', 'tracker', 'specs', 'projects', 'agents', 'logs'];
+  const TOP_LEVEL = ['dashboard', 'tracker', 'projects', 'agents', 'logs'];
 
   const parseQuery = (search) => {
     const out = {};
@@ -58,8 +58,10 @@
   const parseRoute = (path, query) => {
     const p = normalizePath(path);
     if (p === '/' || p === '/dashboard') return { kind: 'dashboard' };
-    if (p === '/tracker') return { kind: 'tracker' };
-    if (p === '/specs') return { kind: 'specs' };
+    if (p === '/tracker') return { kind: 'tracker', view: query.view || null };
+    // TKT-0339: the /specs page is gone — redirect old links/muscle memory to
+    // the tracker's specs view (not a 404).
+    if (p === '/specs') return { kind: 'tracker', view: 'specs' };
     if (p === '/projects') return { kind: 'projects' };
     if (p === '/agents') return { kind: 'agents' };
     if (p === '/logs') return { kind: 'logs' };
@@ -84,8 +86,11 @@
     if (!route || !route.kind) return '/';
     switch (route.kind) {
       case 'dashboard': return '/';
-      case 'tracker': return '/tracker';
-      case 'specs': return '/specs';
+      case 'tracker': {
+        const q = {};
+        if (route.view) q.view = route.view;
+        return `/tracker${stringifyQuery(q)}`;
+      }
       case 'projects': return '/projects';
       case 'agents': return '/agents';
       case 'logs': return '/logs';
@@ -104,6 +109,12 @@
   // Read the current location into a route descriptor + overlay map.
   const parseLocation = () => {
     const path = window.location.pathname;
+    // TKT-0339: /specs is gone — redirect to the tracker specs view.
+    // replaceState updates the URL without an extra history entry, then re-parse.
+    if (path === '/specs') {
+      window.history.replaceState({}, '', '/tracker?view=specs');
+      return parseLocation();
+    }
     const query = parseQuery(window.location.search);
     const route = parseRoute(path, query);
     route.overlays = {

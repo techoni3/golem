@@ -73,6 +73,9 @@ function ProjectView({ projectId, tab, setRoute }) {
       {/* ── 2. TICKETS ── */}
       <ProjectTrackerBoard contractId={project.project_id || project.id}/>
 
+      {/* ── 2b. SPECS (TKT-0339) — spec-kind tickets as a project sub-board ── */}
+      <ProjectSpecsBoard contractId={project.project_id || project.id}/>
+
       {/* ── 3. MILESTONE TIMELINE ── */}
       <ProjectMilestoneTimeline milestones={milestones}/>
 
@@ -195,6 +198,22 @@ function ProjectTrackerBoard({ contractId }) {
         />
       ) : null}
     </div>
+  );
+}
+
+// ── 2b. SPECS (TKT-0339) — a collapsible sub-board mounting SpecsBoardView
+// pinned to the project (one component, two mounts — the same view the Tracker
+// uses). Closed by default (specs are fewer than work items).
+function ProjectSpecsBoard({ contractId }) {
+  useStore();
+  const specs = window.Store.getTrackerTickets({ project_id: contractId, kind: 'spec' });
+  const count = specs.filter((s) => s.state !== 'archived').length;
+  return (
+    <CollapsibleSection title="Specs" count={count} defaultOpen={false}>
+      {/* specs-board.jsx loads after project-view.jsx → reference via window at
+          render time (defined by then). */}
+      {window.SpecsBoardView ? React.createElement(window.SpecsBoardView, { projectId: contractId }) : null}
+    </CollapsibleSection>
   );
 }
 

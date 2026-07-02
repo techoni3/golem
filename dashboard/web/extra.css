@@ -3663,3 +3663,33 @@ mark.anno.anno-tail::after {
   opacity: 0.85;
   flex: 0 0 auto;
 }
+
+/* ===== TKT-0339: tracker Work items|Specs toggle, specs sub-board, Project field ===== */
+
+/* Work items | Specs segmented toggle (tracker header). Mirrors the dispatch
+   mode toggle's segmented look. */
+.tracker-view-toggle {
+  display: inline-flex; border: 1px solid var(--border-2);
+  border-radius: var(--radius-1); overflow: hidden; flex: 0 0 auto;
+}
+.tracker-view-btn {
+  background: var(--bg-1); border: none; color: var(--text-3);
+  font-family: "JetBrains Mono", monospace; font-size: 10px;
+  letter-spacing: .5px; text-transform: uppercase; cursor: pointer;
+  padding: 5px 10px; border-right: 1px solid var(--border-2); white-space: nowrap;
+}
+.tracker-view-btn:last-child { border-right: none; }
+.tracker-view-btn:hover { color: var(--text-1); background: var(--bg-2); }
+.tracker-view-btn.active { color: var(--text-0); background: var(--accent-soft); }
+
+/* Specs board (reusable view — toolbar + board, no page title; mounted in the
+   tracker specs mode + the project-view Specs section). */
+.specs-board { margin-top: 4px; }
+.specs-toolbar { margin-bottom: 8px; }
+.specs-count { font-size: 11px; color: var(--text-3); margin-left: auto; margin-right: 4px; }
+
+/* Project field row in the ticket props sidebar (read-only, links to project). */
+.td-prop-project { margin-bottom: 12px; }
+.td-project-chip-link { text-decoration: none; cursor: pointer; }
+.td-project-chip-link:hover .cc-chip-text { color: var(--accent); }
+.td-prop-value-muted { color: var(--text-3); font-size: 12.5px; }

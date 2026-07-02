@@ -43,8 +43,7 @@ function App() {
       </div>
     );
   } else if (route.kind === 'dashboard') page = <Dashboard setRoute={navigate}/>;
-  else if (route.kind === 'tracker') page = <TrackerBoard setRoute={navigate}/>;
-  else if (route.kind === 'specs') page = <SpecsBoard/>;
+  else if (route.kind === 'tracker') page = <TrackerBoard setRoute={navigate} view={route.view}/>;
   else if (route.kind === 'projects') page = <ProjectsPage setRoute={navigate}/>;
   else if (route.kind === 'agents') page = <AgentsPage setRoute={navigate}/>;
   else if (route.kind === 'logs') page = <LogsPage/>;

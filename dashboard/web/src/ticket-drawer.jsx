@@ -523,6 +523,24 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
               {/* ── Properties panel (TKT-0233 → TKT-0285 moved into the sidebar) —
                    PopSelect controls; 0245's dispatch block + 0266's meta move with it. ── */}
               <div className="td-props">
+                {/* TKT-0339: Project — a read-only top-level field (color dot +
+                    name, links to the project view). Set at creation; not PATCHable
+                    (project_id isn't in updateTicket's whitelist + cross-project
+                    moves have unhandled ripple effects). Renders for ALL tickets. */}
+                <div className="td-prop td-prop-project" title="Set at creation">
+                  <span className="td-prop-label">Project</span>
+                  {project ? (
+                    <a className="cc-chip td-project-chip td-project-chip-link"
+                      href={window.Router.buildHref({ kind: 'project', id: project.id, tab: 'agents' })}
+                      onClick={(e) => { e.preventDefault(); window.Router.go({ kind: 'project', id: project.id, tab: 'agents' }); }}
+                      title={project.name}>
+                      <span className="cc-chip-dot" style={{ background: project.color }}/>
+                      <span className="cc-chip-text">{project.glyph ? `${project.glyph} ` : ''}{project.name}</span>
+                    </a>
+                  ) : (
+                    <span className="td-prop-value-muted">—</span>
+                  )}
+                </div>
                 <div className="td-prop">
                   <span className="td-prop-label">State</span>
                   <PopSelect
