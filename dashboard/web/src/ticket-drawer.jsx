@@ -475,7 +475,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                     onClick={() => setWidth(widthPct === '90' ? '50' : '90')}
                     title="Toggle drawer width (90% ⇄ 50%)"
                     aria-pressed={widthPct === '90'}
-                  >{widthPct === '90' ? <Icon.DrawerHalf/> : <Icon.DrawerWide/>}</button>
+                  >{widthPct === '90' ? <Icon.DrawerWide/> : <Icon.DrawerHalf/>}</button>
                 )}
                 {isPage ? null : (
                   <a className="td-open-page" href={window.Router.buildHref({ kind: 'ticket', id: ticket.id })}

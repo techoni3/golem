@@ -65,7 +65,14 @@ try {
   const rightGutter = lay.mainRight - lay.mdRight;
   assert.ok(Math.abs(leftGutter - rightGutter) < 2, `body centered within main (left gutter ${leftGutter.toFixed(1)} ≈ right gutter ${rightGutter.toFixed(1)})`);
 
-  // ── 2. Sticky: scroll .td-scroll ~800px → .td-side stays at scroll top ─────
+  // ── 2. Sticky (TKT-0285 consult cns-995f1f F1): at a typical laptop viewport
+  // (1440×800) with a long body, the sidebar must stay pinned at the scroll
+  // top after 800px of scroll. The buggy code (flex-shrink capped .td-layout to
+  // the scroll viewport) let the sidebar scroll away here — the smoke originally
+  // tested at 2560×1330, the one viewport where it barely survived. ──────────
+  await page.setViewportSize({ width: 1440, height: 800 });
+  await page.reload({ waitUntil: 'networkidle' });
+  await wait(700);
   await page.evaluate(() => { document.querySelector('.td-scroll').scrollTop = 800; });
   await wait(200);
   let sticky = await page.evaluate(() => {
@@ -74,7 +81,7 @@ try {
     return { sideTop: side.getBoundingClientRect().top, scrollTop: scroll.getBoundingClientRect().top, scrollTopVal: scroll.scrollTop };
   });
   assert.ok(sticky.scrollTopVal >= 700, `scrolled down ~800px (scrollTop ${sticky.scrollTopVal})`);
-  assert.ok(Math.abs(sticky.sideTop - sticky.scrollTop) < 30, `sticky sidebar stays at the scroll top after 800px (sideTop ${sticky.sideTop.toFixed(1)} ≈ scrollTop ${sticky.scrollTop.toFixed(1)})`);
+  assert.ok(Math.abs(sticky.sideTop - sticky.scrollTop) < 30, `sticky sidebar stays at the scroll top after 800px at 1440×800 (sideTop ${sticky.sideTop.toFixed(1)} ≈ scrollTop ${sticky.scrollTop.toFixed(1)})`);
 
   // ── 3. Sidebar control PATCH still lands (State → in_progress) ────────────
   await page.evaluate(() => {

@@ -2923,7 +2923,12 @@ mark.anno.anno-tail::after {
 .td-scroll { container-type: inline-size; }
 /* align-items: flex-start is REQUIRED — a stretched flex item has no scroll
    travel, so the sticky sidebar would never engage without it. */
-.td-layout { display: flex; align-items: flex-start; min-height: 100%; }
+/* `flex: 0 0 auto` is REQUIRED — as a flex item in .td-scroll's flex column,
+   .td-layout would otherwise shrink to the scroll viewport (flex-shrink: 1),
+   capping the sticky sidebar's range to viewport − sidebar height and letting
+   it scroll away on long bodies (consult cns-995f1f F1). No shrink → the layout
+   grows to its content height → the sticky sidebar gets the full scroll range. */
+.td-layout { display: flex; align-items: flex-start; flex: 0 0 auto; min-height: 100%; }
 .td-side {
   flex: 0 0 250px; width: 250px;
   position: sticky; top: 0;
@@ -2944,7 +2949,7 @@ mark.anno.anno-tail::after {
 .td-side .td-prop-full { grid-column: auto; }
 .td-side .td-prop-label { display: block; flex: none; margin-bottom: 4px; }
 .td-side .td-prop .ps-trigger { width: 100%; }
-.td-side .td-prop-dispatch { grid-column: auto; }
+.td-side .td-prop-dispatch { grid-column: auto; margin-top: 14px; }
 
 /* Narrow fallback (container query on .td-scroll): under ~700px of content
    width (e.g. the 50% drawer on a small window) the sidebar stacks back on
