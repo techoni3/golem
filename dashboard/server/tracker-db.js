@@ -695,18 +695,23 @@ WHERE state_changed_at IS NULL`).run();
       // the board snapshot carries durable labels in one query. Derived fields
       // — never stored on tickets; a rename retroactively improves old rows.
       const sql =
-        'SELECT t.*, sa.label AS assignee_label, sd.label AS dispatched_to_label ' +
+        'SELECT t.*, sa.label AS assignee_label, sd.label AS dispatched_to_label, ' +
+        // TKT-0286: 0/1 flag — does this ticket have a pending dispatch-queue
+        // row? Powers the board card ⏳ glyph (detail payloads already carry
+        // the full pending_dispatch; this is for list/snapshot contexts).
+        "EXISTS(SELECT 1 FROM dispatch_queue dq WHERE dq.ticket_id = t.id AND dq.status = 'pending') AS has_pending_dispatch " +
         'FROM tickets t ' +
         'LEFT JOIN session_labels sa ON sa.session_id = t.assignee ' +
         'LEFT JOIN session_labels sd ON sd.session_id = t.dispatched_to ' +
         (where.length ? ` WHERE ${where.join(' AND ')}` : '') +
         ' ORDER BY t.seq ASC';
       return db.prepare(sql).all(params).map((row) => {
-        const { assignee_label, dispatched_to_label, ...ticketFields } = row;
+        const { assignee_label, dispatched_to_label, has_pending_dispatch, ...ticketFields } = row;
         return {
           ...hydrateTicket(ticketFields),
           assignee_label: assignee_label ?? null,
           dispatched_to_label: dispatched_to_label ?? null,
+          has_pending_dispatch: !!has_pending_dispatch,
         };
       });
     },
@@ -1099,8 +1104,35 @@ WHERE state_changed_at IS NULL`).run();
     },
 
     listPendingDispatchesForSession(sessionId) {
-      if (!sessionId) return stmts.listPendingDispatches.all();
-      return stmts.listPendingForSession.all(sessionId);
+      // TKT-0286: thin wrapper over the enriched listDispatchQueue so 0245's
+      // REST (?session_id=) keeps working — rows now also carry ticket_title
+      // + session_label (0245's consumer only reads .id, so enrichment is a
+      // backward-compatible addition). No-arg still returns all pending.
+      return api.listDispatchQueue({ session_id: sessionId ?? null });
+    },
+
+    // TKT-0286: generalized, enriched dispatch-queue list. Powers the Agents
+    // page (all pending across projects), the session peek drawer (one
+    // session), and the offline-orphans section. Rows carry ticket_title
+    // (LEFT JOIN tickets, null-safe) + session_label (LEFT JOIN session_labels
+    // from 0266, null-safe) so consumers render friendly names without a
+    // second round-trip. Default status='pending'; pass status=null for all
+    // statuses (history). FIFO by created_at (matches the drainer's delivery
+    // order within a session).
+    listDispatchQueue({ session_id, project_id, status = 'pending' } = {}) {
+      const where = [];
+      const params = {};
+      if (status != null) { where.push('dq.status = @status'); params.status = status; }
+      if (session_id != null) { where.push('dq.session_id = @session_id'); params.session_id = session_id; }
+      if (project_id != null) { where.push('dq.project_id = @project_id'); params.project_id = project_id; }
+      const sql =
+        'SELECT dq.*, t.title AS ticket_title, sl.label AS session_label ' +
+        'FROM dispatch_queue dq ' +
+        'LEFT JOIN tickets t ON t.id = dq.ticket_id ' +
+        'LEFT JOIN session_labels sl ON sl.session_id = dq.session_id ' +
+        (where.length ? ` WHERE ${where.join(' AND ')}` : '') +
+        ' ORDER BY dq.created_at ASC, dq.id ASC';
+      return db.prepare(sql).all(params);
     },
 
     getPendingDispatchForTicket(ticketId) {

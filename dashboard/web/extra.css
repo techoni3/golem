@@ -3530,3 +3530,88 @@ mark.anno.anno-tail::after {
   border: 1px dashed var(--border-2);
   border-radius: var(--radius-1);
 }
+
+/* ===== TKT-0286: dispatch queue visibility — agents chip, offline orphans, session-drawer queue, board glyph ===== */
+
+/* Session card "⏳ N queued" chip (amber-tinted, glanceable). Sits in the
+   .native-session-top row between the name and the status. */
+.native-session-queue-chip {
+  font-size: 10.5px;
+  font-family: "JetBrains Mono", monospace;
+  color: var(--status-review);
+  background: color-mix(in oklab, var(--status-review) 14%, var(--bg-1));
+  border: 1px solid color-mix(in oklab, var(--status-review) 32%, transparent);
+  border-radius: var(--radius-1);
+  padding: 1px 7px;
+  white-space: nowrap;
+  margin-left: 2px;
+}
+
+/* Offline-orphans section rows (pending dispatches whose target session is
+   dead). Mirrors the agents-section styling family. */
+.agents-section-orphans .agents-section-title { color: var(--status-review); }
+.orphan-row {
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-1);
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.orphan-row-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.orphan-session-label {
+  font-size: 11.5px; color: var(--text-1); font-weight: 600;
+  max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.orphan-ticket-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  text-decoration: none; color: var(--text-1);
+  min-width: 0; flex: 1 1 auto;
+}
+.orphan-ticket-link .mono { font-size: 11px; color: var(--text-3); flex: 0 0 auto; }
+.orphan-ticket-title {
+  font-size: 12.5px; color: var(--text-0);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+.orphan-ticket-link:hover .orphan-ticket-title { color: var(--accent); }
+.orphan-ago { font-size: 10.5px; color: var(--text-3); flex: 0 0 auto; }
+.orphan-cancel { flex: 0 0 auto; }
+.orphan-row-hint { font-size: 10.5px; color: var(--text-3); font-family: "JetBrains Mono", monospace; }
+.orphan-row-err { font-size: 11px; color: var(--status-blocked); }
+
+/* Session peek drawer "Dispatch queue" list. Rows: position · ticket · note ·
+   queued-ago · Cancel, matching the drawer's existing section styling. */
+.nsd-queue { display: flex; flex-direction: column; gap: 6px; }
+.nsd-queue-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  background: var(--bg-1); border: 1px solid var(--border-1);
+  border-radius: var(--radius-1); padding: 6px 10px;
+}
+.nsd-queue-pos { font-size: 11px; color: var(--text-3); flex: 0 0 18px; text-align: right; }
+.nsd-queue-ticket {
+  display: inline-flex; align-items: center; gap: 6px; text-decoration: none;
+  color: var(--text-1); min-width: 0; flex: 1 1 auto;
+}
+.nsd-queue-ticket .mono { font-size: 11px; color: var(--text-3); flex: 0 0 auto; }
+.nsd-queue-title {
+  font-size: 12.5px; color: var(--text-0);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+.nsd-queue-ticket:hover .nsd-queue-title { color: var(--accent); }
+.nsd-queue-note {
+  font-size: 11px; color: var(--text-3); font-style: italic;
+  max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.nsd-queue-ago { font-size: 10.5px; color: var(--text-3); flex: 0 0 auto; margin-left: auto; }
+.nsd-queue-cancel { flex: 0 0 auto; }
+.nsd-queue-rowerr { flex-basis: 100%; font-size: 11px; color: var(--status-blocked); }
+
+/* Board card ⏳ glyph (next to the assignee label). Glyph-only — cards are
+   dense; muted amber, no count. */
+.ticket-queue-glyph {
+  font-size: 11px;
+  color: var(--status-review);
+  opacity: 0.85;
+  flex: 0 0 auto;
+}

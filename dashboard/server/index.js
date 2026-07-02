@@ -681,6 +681,9 @@ async function main() {
           `queued ${queueRow.id.slice(0, 8)} for ${sessionId} — will deliver when idle`);
         const ticket = tracker.getTicket(id);
         broadcastWS({ type: 'ticket-updated', ticket });
+        // TKT-0286: signal every queue-aware surface (Agents page chips, the
+        // session peek drawer list, offline orphans) to refetch.
+        broadcastWS({ type: 'dispatch-queue-updated' });
         return { ok: true, queued: true, queue_id: queueRow.id, ticket };
       }
       // target idle → fall through to immediate delivery below.
@@ -725,9 +728,17 @@ async function main() {
   // TKT-0245: GET /api/dispatch-queue — list pending queued dispatches,
   // optionally filtered by ?session_id=. Used by the UI (and the smoke) to
   // discover + cancel pending rows for a session.
+  // TKT-0286: queue-wide view. Optional session / project / status filters
+  // (default status=pending; status=all → every status for history). Accepts
+  // `session` (new) AND `session_id` (0245 backcompat). Rows are enriched with
+  // ticket_title + session_label by listDispatchQueue.
   fastify.get('/api/dispatch-queue', async (req) => {
-    const sessionId = req.query?.session_id;
-    return tracker.listPendingDispatchesForSession(sessionId);
+    const q = req.query ?? {};
+    const sessionId = q.session || q.session_id || null;
+    const projectId = q.project != null ? resolveProjectId(q.project) : null;
+    let status = q.status || 'pending';
+    if (status === 'all') status = null;
+    return tracker.listDispatchQueue({ session_id: sessionId, project_id: projectId, status });
   });
 
   // TKT-0245: DELETE /api/dispatch-queue/:qid — cancel a pending queued
@@ -739,6 +750,8 @@ async function main() {
       const row = tracker.cancelQueuedDispatch(qid, { actor: 'human' });
       const ticket = tracker.getTicket(row.ticket_id);
       if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
+      // TKT-0286: signal queue-aware surfaces to refetch (the row is gone).
+      broadcastWS({ type: 'dispatch-queue-updated' });
       return { ok: true };
     } catch (err) {
       const msg = String(err?.message ?? err);

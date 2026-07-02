@@ -9,6 +9,31 @@ function AgentsPage({ setRoute }) {
   // render on the Agents page.
   const alive = all.filter((s) => s.alive);
 
+  // TKT-0286: all pending dispatch-queue rows (enriched with ticket_title +
+  // session_label by listDispatchQueue). Refetch on the dispatch-queue-updated
+  // WS signal (rev) — no polling. Grouped by session for the card chip; rows
+  // whose target session is no longer alive surface as offline orphans.
+  const dispatchQueueRev = window.Store.getState().dispatchQueueRev || 0;
+  const [queue, setQueue] = React.useState([]);
+  React.useEffect(() => {
+    let cancelled = false;
+    window.SubstrateAPI.getJSON('/api/dispatch-queue')
+      .then((rows) => { if (!cancelled) setQueue(Array.isArray(rows) ? rows : []); })
+      .catch(() => { if (!cancelled) setQueue([]); });
+    return () => { cancelled = true; };
+  }, [dispatchQueueRev]);
+  const queueBySession = React.useMemo(() => {
+    const m = new Map();
+    for (const r of queue) {
+      const arr = m.get(r.session_id) ?? [];
+      arr.push(r);
+      m.set(r.session_id, arr);
+    }
+    return m;
+  }, [queue]);
+  const aliveIds = new Set(alive.map((s) => s.session_id));
+  const orphans = queue.filter((r) => !aliveIds.has(r.session_id));
+
   // Disambiguate duplicate session names by appending project name + short sid.
   const nameCounts = {};
   for (const s of alive) {
@@ -37,7 +62,7 @@ function AgentsPage({ setRoute }) {
         </div>
       </div>
 
-      {alive.length === 0 ? (
+      {alive.length === 0 && orphans.length === 0 ? (
         <EmptyCard
           label="no native sessions online"
           hint={<>Start a <span className="mono">claude</span> session to bring agents online.</>}
@@ -53,7 +78,7 @@ function AgentsPage({ setRoute }) {
               </div>
               <div className="native-sessions">
                 {working.map((s) => (
-                  <SessionCard key={s.session_id || s.pid} session={s} name={formatName(s)}/>
+                  <SessionCard key={s.session_id || s.pid} session={s} name={formatName(s)} queueCount={queueBySession.get(s.session_id)?.length || 0}/>
                 ))}
               </div>
             </div>
@@ -68,10 +93,14 @@ function AgentsPage({ setRoute }) {
               </div>
               <div className="native-sessions">
                 {idle.map((s) => (
-                  <SessionCard key={s.session_id || s.pid} session={s} name={formatName(s)}/>
+                  <SessionCard key={s.session_id || s.pid} session={s} name={formatName(s)} queueCount={queueBySession.get(s.session_id)?.length || 0}/>
                 ))}
               </div>
             </div>
+          )}
+
+          {orphans.length > 0 && (
+            <OfflineOrphansSection rows={orphans}/>
           )}
         </>
       )}
@@ -79,7 +108,7 @@ function AgentsPage({ setRoute }) {
   );
 }
 
-function SessionCard({ session, name }) {
+function SessionCard({ session, name, queueCount = 0 }) {
   const working = session.status === 'busy' || session.status === 'waiting';
   const registered = session.registered || !!window.Store.getProjectByContractId(session.project_id);
   const openPeek = () => {
@@ -97,6 +126,9 @@ function SessionCard({ session, name }) {
       <div className="native-session-top">
         <Icon.Gear size={16} className={`gear gear-${working ? 'working' : 'idle'}`}/>
         <span className="native-session-name">{name}</span>
+        {queueCount > 0 && (
+          <span className="native-session-queue-chip" title={`${queueCount} dispatch${queueCount === 1 ? '' : 'es'} queued — delivers when this session is idle`}>⏳ {queueCount} queued</span>
+        )}
         <span className={`native-session-status status-${working ? 'busy' : 'idle'}`}>
           {session.status || 'idle'}
           {session.waiting_for ? ` · ${session.waiting_for}` : ''}
@@ -261,6 +293,50 @@ function LogsPage() {
           })}
         </ul>
       )}
+    </div>
+  );
+}
+
+// TKT-0286: pending dispatches whose target session is no longer alive. Named
+// via the persisted session_labels join (the live-session list can't resolve
+// them). Rendered below Working/Idle on the Agents page; Cancel relies on the
+// dispatch-queue-updated WS signal for refresh (no manual refetch, no polling).
+function OfflineOrphansSection({ rows }) {
+  const [errors, setErrors] = React.useState({});
+  const cancel = (qid) => {
+    window.SubstrateAPI.delJSON(`/api/dispatch-queue/${encodeURIComponent(qid)}`)
+      .catch((err) => setErrors((e) => ({ ...e, [qid]: String(err?.message || err) })));
+  };
+  const sessionLabel = (r) => r.session_label || `session ${String(r.session_id || '').slice(0, 8)}`;
+  const ago = (iso) => { const t = Date.parse(iso); return Number.isFinite(t) ? (window.SubstrateFmt?.fmtTimeAgo?.(t) || '') : ''; };
+  return (
+    <div className="agents-section agents-section-orphans">
+      <div className="agents-section-head">
+        <Icon.Archive size={16}/>
+        <span className="agents-section-title">Queued for offline sessions</span>
+        <span className="agents-section-count">{rows.length}</span>
+      </div>
+      <div className="native-sessions">
+        {rows.map((r) => (
+          <div key={r.id} className="orphan-row">
+            <div className="orphan-row-top">
+              <span className="orphan-session-label" title={r.session_id}>{sessionLabel(r)}</span>
+              <a className="orphan-ticket-link"
+                href={window.Router.buildHref({ kind: 'ticket', id: r.ticket_id })}
+                onClick={(e) => { e.preventDefault(); window.Router.openTicket(r.ticket_id); }}
+                title={r.ticket_title || r.ticket_id}
+              >
+                <span className="mono">{r.ticket_id}</span>
+                {r.ticket_title ? <span className="orphan-ticket-title">{r.ticket_title}</span> : null}
+              </a>
+              <span className="orphan-ago" title={r.created_at}>{ago(r.created_at)}</span>
+              <button className="orch-btn small ghost orphan-cancel" onClick={() => cancel(r.id)} title="Cancel this queued dispatch">Cancel</button>
+            </div>
+            <div className="orphan-row-hint">expires after 60m offline</div>
+            {errors[r.id] && <div className="orphan-row-err">{errors[r.id]}</div>}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

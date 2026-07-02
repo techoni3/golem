@@ -38,6 +38,9 @@
     streams: [],
     // WS5b: per-ticket comment threads, keyed by ticket id.
     ticketComments: new Map(),
+    // TKT-0286: bumped on every dispatch-queue-updated WS signal so queue-aware
+    // surfaces (Agents page, session peek drawer) refetch the queue.
+    dispatchQueueRev: 0,
   };
 
   const listeners = new Set();
@@ -345,6 +348,12 @@
             break;
           case 'stream-updated':
             applyStreamUpdated(msg);
+            break;
+          case 'dispatch-queue-updated':
+            // TKT-0286: payload-free signal — bump a rev counter so queue-aware
+            // surfaces refetch /api/dispatch-queue. No polling.
+            state.dispatchQueueRev = (state.dispatchQueueRev || 0) + 1;
+            notify();
             break;
           case 'pong':
             state.serverTime = msg.ts;

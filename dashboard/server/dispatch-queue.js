@@ -65,6 +65,7 @@ export function initDispatchDrainer({
     }
 
     const now = Date.now();
+    let queueChanged = false; // TKT-0286: broadcast dispatch-queue-updated once if any row transitioned this tick.
     for (const [sessionId, rows] of bySession) {
       const s = byId.get(sessionId);
 
@@ -82,6 +83,7 @@ export function initDispatchDrainer({
             );
             const ticket = tracker.getTicket(oldest.ticket_id);
             if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
+            queueChanged = true;
           } catch (err) {
             console.error('[dispatch-drainer] expire failed:', err);
           }
@@ -107,6 +109,7 @@ export function initDispatchDrainer({
         if (!ticket) {
           // Ticket vanished (deleted). Cancel the orphaned queue row.
           tracker.cancelQueuedDispatch(row.id, { actor: 'golem-drainer' });
+          queueChanged = true;
           const refreshed = tracker.getTicket(row.ticket_id);
           if (refreshed) broadcastWS({ type: 'ticket-updated', ticket: refreshed });
           continue;
@@ -122,6 +125,7 @@ export function initDispatchDrainer({
             dispatchedMs > createdMs
           ) {
             tracker.cancelQueuedDispatch(row.id, { actor: 'golem-drainer' });
+            queueChanged = true;
             const refreshed = tracker.getTicket(row.ticket_id);
             if (refreshed) broadcastWS({ type: 'ticket-updated', ticket: refreshed });
             continue;
@@ -157,11 +161,15 @@ export function initDispatchDrainer({
 
         const delivered = tracker.getTicket(ticket.id);
         if (delivered) broadcastWS({ type: 'ticket-updated', ticket: delivered });
+        queueChanged = true;
         lastDeliveredAt.set(sessionId, Date.now());
       } catch (err) {
         console.error(`[dispatch-drainer] delivery for ${row.id} failed:`, err);
       }
     }
+    // TKT-0286: one signal per tick if any queue row transitioned (deliver,
+    // expire, or a drainer-internal cancel) — queue-aware surfaces refetch.
+    if (queueChanged) broadcastWS({ type: 'dispatch-queue-updated' });
   }
 
   timer = setInterval(() => {

@@ -33,6 +33,20 @@ function NativeSessionDrawer({ open, sessionId, onClose }) {
     return () => clearInterval(id);
   }, [open, sessionId]);
 
+  // TKT-0286: this session's pending dispatch queue (FIFO). Refetch on open +
+  // on the dispatch-queue-updated WS signal (rev). Cancel relies on the same
+  // signal for refresh — no polling.
+  const dispatchQueueRev = window.Store.getState().dispatchQueueRev || 0;
+  const [queue, setQueue] = React.useState([]);
+  React.useEffect(() => {
+    if (!open || !sessionId) { setQueue([]); return; }
+    let cancelled = false;
+    window.SubstrateAPI.getJSON(`/api/dispatch-queue?session=${encodeURIComponent(sessionId)}`)
+      .then((rows) => { if (!cancelled) setQueue(Array.isArray(rows) ? rows : []); })
+      .catch(() => { if (!cancelled) setQueue([]); });
+    return () => { cancelled = true; };
+  }, [open, sessionId, dispatchQueueRev]);
+
   const session = sessionId ? window.Store.getNativeSessionById(sessionId) : null;
   const peek = sessionId ? window.Store.getNativeSessionPeek(sessionId) : null;
   const s = session || peek?.session || null;
@@ -153,9 +167,56 @@ function NativeSessionDrawer({ open, sessionId, onClose }) {
               </ul>
             </>
           )}
+
+          {queue.length > 0 && (
+            <>
+              <div className="nsd-section-head">
+                Dispatch queue
+                <span className="nsd-section-count tnum">{queue.length}</span>
+              </div>
+              <div className="nsd-queue">
+                {queue.map((r, i) => (
+                  <NsdQueueRow key={r.id} row={r} position={i + 1}/>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </aside>
     </>
+  );
+}
+
+// TKT-0286: one row of the session's dispatch queue inside the peek drawer.
+// Position (FIFO), ticket id + title (link), note (one-line truncated),
+// queued-ago, Cancel. Cancel relies on the dispatch-queue-updated WS signal
+// for refresh.
+function NsdQueueRow({ row, position }) {
+  const [err, setErr] = React.useState(null);
+  const cancel = () => {
+    setErr(null);
+    window.SubstrateAPI.delJSON(`/api/dispatch-queue/${encodeURIComponent(row.id)}`)
+      .catch((e) => setErr(String(e?.message || e)));
+  };
+  const t = Date.parse(row.created_at);
+  const ago = Number.isFinite(t) ? (window.SubstrateFmt?.fmtTimeAgo?.(t) || '') : '';
+  const note = row.note ? (row.note.length > 60 ? row.note.slice(0, 60) + '…' : row.note) : null;
+  return (
+    <div className="nsd-queue-row">
+      <span className="nsd-queue-pos tnum">{position}</span>
+      <a className="nsd-queue-ticket"
+        href={window.Router.buildHref({ kind: 'ticket', id: row.ticket_id })}
+        onClick={(e) => { e.preventDefault(); window.Router.openTicket(row.ticket_id); }}
+        title={row.ticket_title || row.ticket_id}
+      >
+        <span className="mono">{row.ticket_id}</span>
+        {row.ticket_title ? <span className="nsd-queue-title">{row.ticket_title}</span> : null}
+      </a>
+      {note && <span className="nsd-queue-note" title={row.note}>{note}</span>}
+      <span className="nsd-queue-ago" title={row.created_at}>{ago}</span>
+      <button className="orch-btn small ghost nsd-queue-cancel" onClick={cancel} title="Cancel this queued dispatch">Cancel</button>
+      {err && <div className="nsd-queue-rowerr">{err}</div>}
+    </div>
   );
 }
 

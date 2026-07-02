@@ -407,6 +407,11 @@ function TrackerCard({ ticket: t, project, assigneeLabel }) {
   const stale = (t.state === 'in_progress' || t.state === 'review')
     ? stalenessInfo(t.updated_at)
     : null;
+  // TKT-0286: small ⏳ glyph when the ticket has a pending dispatch-queue row
+  // (the snapshot's has_pending_dispatch flag, or the live pending_dispatch
+  // from a ticket-updated broadcast — the || covers both). Complements the
+  // drawer's pending row + the Agents-page queue view.
+  const queued = !!(t.has_pending_dispatch || t.pending_dispatch);
   // TKT-0103: drag handle. Activation distance (6px, set in TicketColumns's
   // PointerSensor activationConstraint) prevents accidental drags on click.
   // The drag listeners are bound to the card root; a click without a drag
@@ -449,6 +454,7 @@ function TrackerCard({ ticket: t, project, assigneeLabel }) {
       <div className="ticket-footer">
         <div className="ticket-assignee">
           {working && <Icon.Gear size={12} className="gear gear-working"/>}
+          {queued && <span className="ticket-queue-glyph" title="dispatch queued — delivers when the session is idle">⏳</span>}
           <span>{displayLabel}</span>
           {stale && <span className={`ticket-staleness${stale.aged ? ' stale-old' : ''}`} title={`stale — not updated in ${stale.text}`}>◷ {stale.text}</span>}
         </div>
