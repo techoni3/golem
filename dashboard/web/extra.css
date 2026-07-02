@@ -2492,14 +2492,16 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
   font-family: var(--font-sans);
   font-size: 15px;
   line-height: 1.65;
-  /* TKT-0208: cap prose width for readable line-length. 800px border-box
-     minus 2×40px gutters = 720px content ≈ 48em @ 15px (~90ch) — upper end
-     of the comfortable range (Butterick 45–90ch; Notion ~44em, GitHub
-     1012px), deliberately not narrower because ticket bodies are
-     code/table-heavy, not novels. Centering leaves breathing room on the
-     sides instead of stretching prose to 2300+ px on wide drawers. Grounded
-     in SpecForge (16/1.7, centered 1280px layout) + Notion/GitHub prose caps. */
-  max-width: 800px;
+  /* TKT-0208: cap + center the prose so it isn't full-bleed to the (very wide)
+     drawer. 1200px border-box minus 2×40px gutters = 1120px content — wider
+     than the classic 45–90ch readability range (≈720px @ 15px), intentionally,
+     per the user's wide monitors + code/table/mermaid-heavy bodies; tuned up
+     from the initial 800px. width:100% + margin:0 auto FILLS the cap (so the
+     body is actually 1200px, not shrunk to its content's max-content) and
+     keeps the body's left edge aligned with .td-titlebody (same width:100% +
+     max-width). Grounded in SpecForge / Notion / GitHub prose caps. */
+  width: 100%;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 24px 40px 72px;
   min-height: 100%;
@@ -2627,11 +2629,52 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
 
 /* Mermaid — centered, bordered container. */
 .td-md .mermaid {
-  display: flex; justify-content: center; margin: 12px 0;
+  display: flex; justify-content: center; margin: 12px 0; position: relative;
   border: 1px solid var(--border-2); border-radius: var(--radius-2);
   background: var(--bg-1); padding: 14px; overflow-x: auto;
 }
 .td-md .mermaid svg { max-width: 100%; height: auto; border: none; background: transparent; }
+
+/* TKT-0234: fullscreen mermaid. An expand button on each rendered .mermaid
+   block opens the diagram in a viewport-wide overlay (no max-width), so wide
+   diagrams stay readable instead of being squeezed into the prose column.
+   The button + overlay are vanilla DOM (mermaid blocks are raw marked output,
+   not React-managed) — wired up in td-annotate.jsx after window.runMermaid. */
+.mermaid-fs-btn {
+  position: absolute; top: 6px; right: 6px; z-index: 5;
+  width: 26px; height: 26px; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--bg-0) 82%, transparent);
+  border: 1px solid var(--border-2); border-radius: var(--radius-1);
+  color: var(--text-2); cursor: pointer; opacity: 0.55;
+  transition: opacity .15s ease, color .15s ease, border-color .15s ease;
+}
+.td-md .mermaid:hover .mermaid-fs-btn { opacity: 1; }
+.mermaid-fs-btn:hover { color: var(--text-0); border-color: var(--accent-border); background: var(--bg-2); }
+.mermaid-fs-btn svg { width: 14px; height: 14px; pointer-events: none; }
+@media (hover: none) { .mermaid-fs-btn { opacity: 1; } } /* touch: always visible */
+
+.mermaid-fs-overlay {
+  position: fixed; inset: 0; z-index: 10000;
+  background: rgba(8, 10, 16, 0.92);
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity .2s ease;
+}
+.mermaid-fs-overlay.open { opacity: 1; }
+.mermaid-fs-stage {
+  max-width: 96vw; max-height: 92vh; overflow: auto;
+  padding: 32px; display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-2);
+}
+/* Unconstrained: the cloned SVG renders at its natural size (no max-width:100%
+   squeeze), scrollable inside the stage if bigger than the viewport. */
+.mermaid-fs-stage svg { max-width: none; width: auto; height: auto; }
+.mermaid-fs-close {
+  position: fixed; top: 16px; right: 16px; z-index: 10001;
+  width: 36px; height: 36px; display: grid; place-items: center;
+  background: var(--bg-2); border: 1px solid var(--border-2); border-radius: var(--radius-1);
+  color: var(--text-1); font-size: 18px; line-height: 1; cursor: pointer;
+}
+.mermaid-fs-close:hover { color: var(--text-0); border-color: var(--accent-border); }
 
 /* Diagrams + figures (backfilled raw-HTML svg/figure blocks). */
 .td-md figure { margin: 12px 0 4px; }
@@ -2827,7 +2870,7 @@ mark.anno.anno-tail::after {
 /* Adjust drawer layout: body area hosts the annotation wrap. */
 .td-scroll { padding: 0; gap: 0; }
 .td-titlebody {
-  max-width: 800px;
+  max-width: 1200px;
   width: 100%;
   margin: 0 auto;
   box-sizing: border-box;

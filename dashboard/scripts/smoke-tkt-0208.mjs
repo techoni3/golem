@@ -3,11 +3,11 @@
 // The .td-md body in the read view (drawer + page) was full-bleed to the
 // drawer/page edges, making long lines hard to follow on wide screens. This
 // smoke locks in the readability sweep:
-//   1. .td-md is capped at 800px max-width (720px content ≈ 48em @ 15px).
+//   1. .td-md is capped at 1200px max-width (1120px content; tuned up from 800 for wide screens).
 //   2. .td-md has 40px horizontal padding (gutter), 24px top, 72px bottom.
 //   3. .td-md font-size is 15px, line-height 1.65 → 24.75px.
 //   4. .td-md paragraph margin is 10px; heading top margin is 24px.
-//   5. .td-titlebody shares the 800px cap + 40px gutter, so the title's left
+//   5. .td-titlebody shares the 1200px cap + 40px gutter, so the title's left
 //      edge aligns with the prose column's left edge (within ~10px — a few px
 //      of slack because .td-annotate-wrap's scrollbar shifts .td-md on long bodies).
 //   6. When the annotation rail is open, .td-read-col (the wrapper around the
@@ -70,14 +70,14 @@ try {
     };
   });
   assert.ok(md, '.td-md is mounted');
-  assert.equal(md.maxWidth, '800px', '.td-md max-width is 800px');
+  assert.equal(md.maxWidth, '1200px', '.td-md max-width is 1200px');
   assert.equal(md.fontSize, '15px', '.td-md font-size is 15px');
   assert.equal(md.paddingTop, '24px', '.td-md has 24px top padding');
   assert.equal(md.paddingBottom, '72px', '.td-md has 72px bottom padding');
   assert.equal(md.paddingLeft, '40px', '.td-md has 40px left padding');
   assert.equal(md.paddingRight, '40px', '.td-md has 40px right padding');
   assert.equal(md.lineHeight, '24.75px', '.td-md line-height is 1.65 × 15px = 24.75px');
-  assert.equal(md.width, 800, '.td-md rendered width is capped at 800px');
+  assert.equal(md.width, 1200, '.td-md rendered width is capped at 1200px');
 
   // ── 5. Title column aligns with the prose column (rail closed) ──────────
   const aligned = await page.evaluate(() => {
@@ -137,8 +137,8 @@ try {
     };
   });
   assert.ok(railOpen, '.td-md, .td-titlebody and .td-read-col are mounted with rail open');
-  assert.equal(railOpen.maxWidth, '800px', '.td-md keeps its 800px max-width when rail is open');
-  assert.equal(railOpen.width, 800, '.td-md rendered width is still 800px when rail is open');
+  assert.equal(railOpen.maxWidth, '1200px', '.td-md keeps its 1200px max-width when rail is open');
+  assert.ok(railOpen.width < 1200, `rail-open body shrinks below the 1200px cap (available-bound; got ${railOpen.width})`);
   assert.equal(railOpen.readColPaddingRight, '390px', '.td-read-col reserves 390px right padding for the rail (360 rail + 30 gutter)');
   assert.ok(
     Math.abs(railOpen.titleLeft - railOpen.bodyLeft) < 10,

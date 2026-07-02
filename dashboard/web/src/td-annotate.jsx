@@ -38,6 +38,89 @@ const BLOCK_PLUS_STYLE = {
 const CTX = 42;
 
 function authorMeta(a) { return TA_AUTHORS[a] || { label: a, color: '#9aa4bb' }; }
+
+// TKT-0234: fullscreen mermaid. After window.runMermaid renders SVGs into
+// .mermaid blocks, attach an expand button to each; clicking opens a viewport-
+// wide overlay (portaled to document.body, outside .td-md's max-width) with the
+// SVG cloned at natural size + scrollable. Vanilla DOM (mermaid blocks are raw
+// marked output, not React-managed). Idempotent via data-fs-attached + an
+// SVG-present check, so re-renders (new body) don't double-attach or attach to
+// not-yet-rendered blocks.
+const MERMAID_FS_ICON =
+  '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" ' +
+  'stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M3 6V3.5A.5.5 0 0 1 3.5 3H6M13 6V3.5a.5.5 0 0 0-.5-.5H10M3 10v2.5a.5.5 0 0 0 .5.5H6M13 10v2.5a.5.5 0 0 1-.5.5H10"/></svg>';
+
+function attachMermaidFullscreen(root) {
+  if (!root) return;
+  root.querySelectorAll('.mermaid').forEach((block) => {
+    if (block.dataset.fsAttached) return;
+    if (!block.querySelector('svg')) return; // mermaid hasn't rendered this one yet
+    block.dataset.fsAttached = '1';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'mermaid-fs-btn';
+    btn.title = 'View diagram fullscreen';
+    btn.setAttribute('aria-label', 'View diagram fullscreen');
+    btn.innerHTML = MERMAID_FS_ICON;
+    btn.addEventListener('click', (e) => { e.stopPropagation(); openMermaidFullscreen(block); });
+    block.appendChild(btn);
+  });
+}
+
+function openMermaidFullscreen(block) {
+  const svg = block.querySelector('svg');
+  if (!svg) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'mermaid-fs-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.innerHTML =
+    '<button class="mermaid-fs-close" type="button" aria-label="Close">&#215;</button>' +
+    '<div class="mermaid-fs-stage"></div>';
+  const stage = overlay.querySelector('.mermaid-fs-stage');
+  // Clone the SVG and render it at its NATURAL pixel width (no squeeze):
+  // mermaid emits width="100%" + style="max-width:<natural>px"; strip those so
+  // the clone uses the diagram's real dimensions. height:auto keeps the aspect
+  // ratio from the viewBox; the stage scrolls if the diagram overflows the
+  // viewport. Remove the id so the page doesn't end up with two same-id SVGs.
+  const clone = svg.cloneNode(true);
+  clone.removeAttribute('id');
+  clone.removeAttribute('width');
+  clone.removeAttribute('height');
+  clone.style.maxWidth = 'none';
+  const vb = svg.viewBox && svg.viewBox.baseVal;
+  clone.style.width = svg.style.maxWidth || (vb && vb.width ? (vb.width + 'px') : 'auto');
+  clone.style.height = 'auto';
+  stage.appendChild(clone);
+  document.body.appendChild(overlay);
+  requestAnimationFrame(() => overlay.classList.add('open'));
+  const close = () => {
+    overlay.classList.remove('open');
+    window.setTimeout(() => overlay.remove(), 220);
+    document.removeEventListener('keydown', onKey, true);
+  };
+  // Esc closes ONLY the overlay — not the ticket drawer. The drawer registers
+  // its own Esc handler on window (bubble) that would otherwise unmount the
+  // whole ticket subtree (and the mermaid block with it). Listening on
+  // document in the CAPTURE phase fires before any window-bubble handler, and
+  // stopImmediatePropagation kills the event so the drawer's (and the
+  // annotation-rail's) Esc listeners never see it. (Registering on window
+  // instead would lose the ordering — the drawer's listener is added first.)
+  const onKey = (e) => { if (e.key === 'Escape') { e.stopImmediatePropagation(); close(); } };
+  overlay.querySelector('.mermaid-fs-close').addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', onKey, true);
+}
+
+// Test hooks for smoke-tkt-0234.mjs (fullscreen-mermaid Esc regression). The
+// smoke injects a .mermaid block with a fake SVG and drives the real
+// attach/open/Esc path without needing the mermaid network or a fixture ticket.
+// Harmless DOM helpers, not user-facing.
+if (typeof window !== 'undefined') {
+  window.__tdAttachMermaidFullscreen = attachMermaidFullscreen;
+  window.__tdOpenMermaidFullscreen = openMermaidFullscreen;
+}
 function tagMeta(t) { return TA_TAGS[t] || TA_TAGS.note; }
 
 function bodyHtml(text) {
@@ -337,7 +420,11 @@ function TdAnnotate({ body, comments, currentAuthor = 'you', onCreate, onUpdate,
     if (!root || !window.runMermaid) return;
     const nodes = root.querySelectorAll('.mermaid');
     if (!nodes.length) return;
-    window.runMermaid(nodes);
+    let cancelled = false;
+    window.runMermaid(nodes).then(() => {
+      if (!cancelled) attachMermaidFullscreen(root);
+    });
+    return () => { cancelled = true; };
   }, [html]);
 
   // TKT-0172: keep blockCountsRef (open comments per block_id) fresh so the
