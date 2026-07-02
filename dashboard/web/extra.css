@@ -3451,10 +3451,12 @@ mark.anno.anno-tail::after {
   max-height: 4.5em;
   overflow: hidden;
 }
-/* Scoped so the annotation rail's mark.anno styles are untouched. */
+/* Scoped so the annotation rail's mark.anno styles are untouched. TKT-0284
+   follow-up (consult cns-d918ab): bumped 28%→42% — 28% was barely visible on
+   the dark canvas; 42% is a clear scan-aid without a loud block. */
 .spec-result-title mark,
 .spec-result-snippet mark {
-  background: color-mix(in oklab, var(--accent) 28%, transparent);
+  background: color-mix(in oklab, var(--accent) 42%, transparent);
   color: var(--text-0);
   border-radius: 2px;
   padding: 0 1px;
