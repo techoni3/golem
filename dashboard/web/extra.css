@@ -1899,6 +1899,55 @@
   letter-spacing: 0.02em;
 }
 
+/* TKT-0266: color-coded kind pills — one palette for the board card
+   (.tracker-kind-pill) and the drawer/page header (.td-kind-pill). Each
+   variant sets color = the hue, background ≈ 12% mix, border ≈ 40% mix,
+   matching the recipe the status pills / chips use. Pill size/typography is
+   unchanged — color only. */
+.tracker-kind-pill[data-kind="work-item"],
+.td-kind-pill[data-kind="work-item"] {
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+  border-color: color-mix(in oklab, var(--accent) 40%, transparent);
+}
+.tracker-kind-pill[data-kind="fix"],
+.td-kind-pill[data-kind="fix"] {
+  color: #fb6f92;
+  background: color-mix(in oklab, #fb6f92 12%, transparent);
+  border-color: color-mix(in oklab, #fb6f92 40%, transparent);
+}
+.tracker-kind-pill[data-kind="question"],
+.td-kind-pill[data-kind="question"] {
+  color: #b394ff;
+  background: color-mix(in oklab, #b394ff 12%, transparent);
+  border-color: color-mix(in oklab, #b394ff 40%, transparent);
+}
+.tracker-kind-pill[data-kind="decision"],
+.td-kind-pill[data-kind="decision"] {
+  color: #f5a623;
+  background: color-mix(in oklab, #f5a623 12%, transparent);
+  border-color: color-mix(in oklab, #f5a623 40%, transparent);
+}
+.tracker-kind-pill[data-kind="spec"],
+.td-kind-pill[data-kind="spec"] {
+  color: #34d3b8;
+  background: color-mix(in oklab, #34d3b8 12%, transparent);
+  border-color: color-mix(in oklab, #34d3b8 40%, transparent);
+}
+
+/* TKT-0266: staleness glyph on stale in_progress/review tickets (>24h since
+   updated). Muted by default; amber (>72h) via .stale-old. Sits at the right
+   edge of the assignee row (margin-left:auto pushes it past the label). */
+.ticket-staleness {
+  margin-left: auto;
+  font-size: 9.5px;
+  font-family: var(--font-mono);
+  color: var(--text-3);
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+.ticket-staleness.stale-old { color: var(--status-review); }
+
 /* ===== WS5: Create-ticket modal ===== */
 .ct-row { display: flex; gap: 10px; }
 .ct-row .ct-field { flex: 1; min-width: 0; }

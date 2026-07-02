@@ -48,6 +48,33 @@ function isQuestionForHuman(t) {
     && t.state !== 'archived';
 }
 
+// TKT-0266: a ticket is "actively worked" when it is in_progress AND its
+// assignee resolves to a live native session that is busy. A busy session with
+// several in_progress tickets gears them all — acceptable approximation (we
+// don't know which one it's touching this second). Idle-but-alive assignees get
+// NOTHING: "active" means busy, per the ask. Reads the live store so the gear
+// appears/disappears within the 3s session-refresh tick (component re-renders on
+// store updates).
+function isActivelyWorked(t) {
+  if (!t || t.state !== 'in_progress' || !t.assignee || t.assignee === 'human') return false;
+  const ns = window.Store.getNativeSessionById ? window.Store.getNativeSessionById(t.assignee) : null;
+  return !!(ns && ns.alive && ns.status === 'busy');
+}
+
+// TKT-0266: staleness glyph for in_progress/review tickets older than 24h.
+// Returns { text, aged } where aged = older than 72h (amber), else null. The
+// board card renders "◷ 3d" at the right edge of the assignee row.
+function stalenessInfo(updated_at) {
+  if (!updated_at) return null;
+  const t = Date.parse(updated_at);
+  if (!Number.isFinite(t)) return null;
+  const ageMs = Date.now() - t;
+  if (ageMs < 24 * 3600 * 1000) return null; // <24h: no glyph
+  const days = Math.floor(ageMs / 86400000);
+  const aged = ageMs > 72 * 3600 * 1000; // >72h: amber
+  return { text: `${days}d`, aged };
+}
+
 function TrackerBoard() {
   useStore();
   const projects = window.Store.getProjects();
@@ -122,6 +149,9 @@ function TrackerBoard() {
   // TKT-0104: client-side search. When the debounced searchQuery is non-empty
   // we further filter the server-filtered tickets on id/title/kind/priority/
   // assignee-label/project-name. Empty query = no client filter.
+  // TKT-0266: match against the enriched (durable) assignee label too so a
+  // search for a persisted session name hits even after that session goes
+  // offline.
   const visibleTickets = React.useMemo(() => {
     if (!searchQuery) return tickets;
     const q = searchQuery;
@@ -130,7 +160,7 @@ function TrackerBoard() {
       if ((t.title || '').toLowerCase().includes(q)) return true;
       if ((t.kind || '').toLowerCase() === q) return true;
       if ((t.priority || '').toLowerCase() === q) return true;
-      const aLabel = resolveAssignee(t.assignee).toLowerCase();
+      const aLabel = (t.assignee_label || resolveAssignee(t.assignee)).toLowerCase();
       if (aLabel.includes(q)) return true;
       const p = projectByContract.get(t.project_id);
       if (p && p.name && p.name.toLowerCase().includes(q)) return true;
@@ -283,7 +313,20 @@ function TicketColumns({ cols, tickets, projectByContract, resolveAssignee }) {
       onDragStart={onDragStart} onDragEnd={onDragEnd}>
       <div className="kanban tracker-kanban" style={{ gridTemplateColumns: `repeat(${cols.length}, minmax(220px, 1fr))` }}>
         {cols.map((c) => {
-          const colTickets = visibleTickets.filter((t) => t.state === c.id);
+          let colTickets = visibleTickets.filter((t) => t.state === c.id);
+          // TKT-0266: Done/Archived columns render in reverse-chronological
+          // order (most recently completed first). Other columns keep their
+          // rank/fetch order so drag-reordering semantics stay untouched.
+          // Sort key: done_at desc → state_changed_at desc → updated_at desc.
+          if (c.id === 'done' || c.id === 'archived') {
+            colTickets = colTickets.slice().sort((a, b) => {
+              const ta = Date.parse(a.done_at || a.state_changed_at || a.updated_at);
+              const tb = Date.parse(b.done_at || b.state_changed_at || b.updated_at);
+              if (!Number.isFinite(ta)) return 1;
+              if (!Number.isFinite(tb)) return -1;
+              return tb - ta; // desc
+            });
+          }
           return (
             <ColumnDrop key={c.id} id={c.id} label={c.label} color={c.color} count={colTickets.length}>
               {colTickets.length === 0 && <div className="empty">empty</div>}
@@ -303,7 +346,7 @@ function TicketColumns({ cols, tickets, projectByContract, resolveAssignee }) {
         {activeTicket ? (
           <div className="ticket ticket-drag-overlay">
             <div className="tracker-card-tags">
-              <span className="pill tracker-kind-pill">{activeTicket.kind}</span>
+              <span className="pill tracker-kind-pill" data-kind={activeTicket.kind}>{activeTicket.kind}</span>
             </div>
             <div className="ticket-id">{activeTicket.id}</div>
             <div className="ticket-title">{activeTicket.title}</div>
@@ -349,6 +392,18 @@ function TrackerCard({ ticket: t, project, assigneeLabel }) {
   };
   const prio = t.priority ? String(t.priority).toLowerCase() : null;
   const needsAnswer = isQuestionForHuman(t);
+  // TKT-0266: durable label preferred; live resolver is the fallback for
+  // never-persisted sessions. The enriched field comes from the server-side
+  // session_labels JOIN (board snapshot) or getTicket lookup.
+  const displayLabel = t.assignee_label || assigneeLabel;
+  // TKT-0266: rotating gear on actively-worked tickets (in_progress + busy
+  // live assignee). Re-renders on store updates so it tracks the 3s session
+  // refresh live.
+  const working = isActivelyWorked(t);
+  // TKT-0266: staleness glyph on in_progress/review tickets older than 24h.
+  const stale = (t.state === 'in_progress' || t.state === 'review')
+    ? stalenessInfo(t.updated_at)
+    : null;
   // TKT-0103: drag handle. Activation distance (6px, set in TicketColumns's
   // PointerSensor activationConstraint) prevents accidental drags on click.
   // The drag listeners are bound to the card root; a click without a drag
@@ -383,14 +438,16 @@ function TrackerCard({ ticket: t, project, assigneeLabel }) {
             <span className="cc-chip-text">{project.glyph ? `${project.glyph} ` : ''}{project.name}</span>
           </span>
         )}
-        <span className="pill tracker-kind-pill">{t.kind}</span>
+        <span className="pill tracker-kind-pill" data-kind={t.kind}>{t.kind}</span>
         {needsAnswer && <span className="pill tracker-answer-badge">❓ needs answer</span>}
       </div>
       <div className="ticket-id">{t.id}</div>
       <div className="ticket-title">{t.title}</div>
       <div className="ticket-footer">
         <div className="ticket-assignee">
-          <span>{assigneeLabel}</span>
+          {working && <Icon.Gear size={12} className="gear gear-working"/>}
+          <span>{displayLabel}</span>
+          {stale && <span className={`ticket-staleness${stale.aged ? ' stale-old' : ''}`} title={`stale — not updated in ${stale.text}`}>◷ {stale.text}</span>}
         </div>
         {prio && <span className={`ticket-priority ${prio}`}>{t.priority}</span>}
       </div>
@@ -404,6 +461,10 @@ window.TicketColumns = TicketColumns;
 // WS6: shared question-for-human predicate, reused by the ticket drawer to
 // decide when to surface the "Answer & return" affordance + header badge.
 window.isQuestionForHuman = isQuestionForHuman;
+// TKT-0266: shared active-work + staleness predicates, reused by the ticket
+// drawer for the header gear.
+window.isActivelyWorked = isActivelyWorked;
+window.stalenessInfo = stalenessInfo;
 // Exported so the per-project board (project-view.jsx) shares the exact column
 // set + ordering, avoiding drift between the two boards.
 window.TRACKER_COLUMNS = TRACKER_COLUMNS;

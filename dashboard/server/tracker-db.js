@@ -243,6 +243,18 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_dispatch_queue_pending
         ON dispatch_queue (ticket_id) WHERE status = 'pending';
+
+      -- TKT-0266: durable session-name labels. One row per session_id with a
+      -- known name. Survives the session going offline so old tickets still
+      -- render the friendly assignee name instead of a uuid stub. Derived
+      -- (labels are JOINed onto tickets at read time, never stored on tickets).
+      CREATE TABLE IF NOT EXISTS session_labels (
+        session_id   TEXT PRIMARY KEY,
+        label        TEXT NOT NULL,
+        project_id   TEXT,
+        last_seen_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_session_labels_project ON session_labels(project_id);
     `);
     // Seed meta defaults idempotently.
     const seed = db.prepare('INSERT OR IGNORE INTO meta(key, value) VALUES (?, ?)');
@@ -423,6 +435,16 @@ WHERE state_changed_at IS NULL`).run();
       setTicketAssignee: db.prepare(
         'UPDATE tickets SET assignee = @assignee, updated_at = @updated_at WHERE id = @id'
       ),
+      // TKT-0266: durable session-name labels.
+      getSessionLabel: db.prepare('SELECT * FROM session_labels WHERE session_id = ?'),
+      setSessionLabel: db.prepare(`
+        INSERT INTO session_labels (session_id, label, project_id, last_seen_at)
+        VALUES (@session_id, @label, @project_id, @last_seen_at)
+        ON CONFLICT(session_id) DO UPDATE SET
+          label = excluded.label,
+          project_id = excluded.project_id,
+          last_seen_at = excluded.last_seen_at
+      `),
     };
   }
 
@@ -449,6 +471,21 @@ WHERE state_changed_at IS NULL`).run();
       return JSON.parse(s);
     } catch {
       return {};
+    }
+  }
+
+  // TKT-0266: resolve an assignee/dispatched_to value to its persisted durable
+  // label from session_labels. Returns null for 'human' (the UI renders "You")
+  // and for sessions with no persisted label (caller falls back to the live
+  // resolver). stmts is populated after prepare(), which runs before any
+  // getTicket/listTickets call, so this is safe at request time.
+  function resolveAssigneeLabel(assignee) {
+    if (!assignee || assignee === 'human') return null;
+    try {
+      const row = stmts.getSessionLabel.get(assignee);
+      return row ? row.label : null;
+    } catch {
+      return null;
     }
   }
 
@@ -487,6 +524,35 @@ WHERE state_changed_at IS NULL`).run();
     allocateTicketId,
 
     recordEvent,
+
+    // TKT-0266: persist a durable session-name label. Change-gated + 5-min
+    // staleness gate so the 3s native-sessions refresh tick does NOT write a
+    // row every tick for every session. Writes only when the label actually
+    // changed OR last_seen_at is >5 min stale (keeps last_seen_at fresh for
+    // sessions that stay alive a long time without a name change). Skips
+    // silently when session_id or label is empty (unnamed sessions are not
+    // worth persisting — `session 1234abcd` is the live resolver's job).
+    upsertSessionLabel(session_id, label, project_id = null) {
+      if (!session_id || !label) return;
+      const ts = now();
+      const existing = stmts.getSessionLabel.get(session_id);
+      if (existing && existing.label === label) {
+        // Label unchanged — only refresh last_seen_at if it's >5 min stale.
+        const ageMs = Date.parse(ts) - Date.parse(existing.last_seen_at);
+        if (Number.isFinite(ageMs) && ageMs < 5 * 60 * 1000) return;
+      }
+      stmts.setSessionLabel.run({
+        session_id,
+        label,
+        project_id: project_id ?? null,
+        last_seen_at: ts,
+      });
+    },
+
+    getSessionLabel(session_id) {
+      if (!session_id) return null;
+      return stmts.getSessionLabel.get(session_id) ?? null;
+    },
 
     createTicket(input = {}) {
       const {
@@ -553,7 +619,11 @@ WHERE state_changed_at IS NULL`).run();
       const links = stmts.listLinks.all(id, id);
       // TKT-0245: embed any pending dispatch so the drawer needs no extra fetch.
       const pending_dispatch = stmts.getPendingForTicket.get(id) ?? null;
-      return { ...hydrateTicket(row), comments, links, pending_dispatch };
+      // TKT-0266: derived durable assignee labels (never stored on the ticket).
+      const hydrated = hydrateTicket(row);
+      hydrated.assignee_label = resolveAssigneeLabel(row.assignee);
+      hydrated.dispatched_to_label = resolveAssigneeLabel(row.dispatched_to);
+      return { ...hydrated, comments, links, pending_dispatch };
     },
 
     // TKT-0107: maximum updated_at across all tickets for a project. Powers
@@ -575,34 +645,47 @@ WHERE state_changed_at IS NULL`).run();
       const where = [];
       const params = {};
       if (project_id != null) {
-        where.push('project_id = @project_id');
+        where.push('t.project_id = @project_id');
         params.project_id = project_id;
       }
       if (state != null) {
-        where.push('state = @state');
+        where.push('t.state = @state');
         params.state = state;
       }
       if (assignee != null) {
-        where.push('assignee = @assignee');
+        where.push('t.assignee = @assignee');
         params.assignee = assignee;
       }
       if (kind != null) {
-        where.push('kind = @kind');
+        where.push('t.kind = @kind');
         params.kind = kind;
       }
       if (stream_id != null) {
-        where.push('stream_id = @stream_id');
+        where.push('t.stream_id = @stream_id');
         params.stream_id = stream_id;
       }
       // Exclude archived by default unless explicitly asking for it.
       if (state !== 'archived' && !includeArchived) {
-        where.push("state != 'archived'");
+        where.push("t.state != 'archived'");
       }
+      // TKT-0266: LEFT JOIN session_labels twice (assignee + dispatched_to) so
+      // the board snapshot carries durable labels in one query. Derived fields
+      // — never stored on tickets; a rename retroactively improves old rows.
       const sql =
-        'SELECT * FROM tickets' +
+        'SELECT t.*, sa.label AS assignee_label, sd.label AS dispatched_to_label ' +
+        'FROM tickets t ' +
+        'LEFT JOIN session_labels sa ON sa.session_id = t.assignee ' +
+        'LEFT JOIN session_labels sd ON sd.session_id = t.dispatched_to ' +
         (where.length ? ` WHERE ${where.join(' AND ')}` : '') +
-        ' ORDER BY seq ASC';
-      return db.prepare(sql).all(params).map(hydrateTicket);
+        ' ORDER BY t.seq ASC';
+      return db.prepare(sql).all(params).map((row) => {
+        const { assignee_label, dispatched_to_label, ...ticketFields } = row;
+        return {
+          ...hydrateTicket(ticketFields),
+          assignee_label: assignee_label ?? null,
+          dispatched_to_label: dispatched_to_label ?? null,
+        };
+      });
     },
 
     updateTicket(id, patch = {}) {
@@ -631,6 +714,17 @@ WHERE state_changed_at IS NULL`).run();
       }
 
       const ts = now();
+      // TKT-0266: lifecycle stamps on state transitions (mirrors moveTicket).
+      // The board PATCHes state directly (not via /move), so without these the
+      // Done column's done_at-based reverse-chron sort has nothing to key off
+      // and state_changed_at never advances past the v4 backfill. Only set on
+      // an actual state change (not a no-op re-PATCH of the same state).
+      if ('state' in updates && updates.state !== existing.state) {
+        updates.state_changed_at = ts;
+        if (updates.state === 'done') updates.done_at = ts;
+        if (updates.state === 'archived') updates.archived_at = ts;
+      }
+
       const txn = db.transaction(() => {
         if (Object.keys(updates).length) {
           const setClause = Object.keys(updates)

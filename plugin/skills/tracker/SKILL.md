@@ -139,3 +139,15 @@ comments leave all anchor fields empty.
 - Verify before `done` — cross-ref `golem:verify-done`.
 - Comment milestones (cross-ref `golem:journaling` for the central journal; the
   ticket thread is the work record, the journal is the mechanical trail).
+
+## State hygiene
+
+- Never end a turn with a ticket you own in a wrong state: finished work →
+  `review` (or `done` after verify-done), abandoned/parked → comment WHY +
+  `blocked` or unassign. A dispatched ticket leaves `todo` the moment you
+  start it.
+- Before going idle after a brief, sweep `ticket_list({mine:true})`: anything
+  `in_progress` you are not actively working must be advanced, commented, or
+  released.
+- Stale tickets are a defect: if your own ticket is untouched >1 day, fix its
+  state before starting new work.

@@ -233,10 +233,13 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
     }
   }, [isQuestion, ticket?.created_by, labelBySession]);
 
-  const resolveActor = React.useCallback((a) => {
+  const resolveActor = React.useCallback((a, persistedLabel) => {
     if (a === 'human') return 'You';
     if (!a) return 'Unassigned';
-    return labelBySession.get(a) || `session ${String(a).slice(0, 8)}`;
+    // TKT-0266: prefer the durable persisted label (from session_labels) so
+    // the meta strip still shows the friendly name after the session goes
+    // offline. Falls back to the live resolver, then the uuid stub.
+    return persistedLabel || labelBySession.get(a) || `session ${String(a).slice(0, 8)}`;
   }, [labelBySession]);
 
   // Commit a single field immediately (actor: human).
@@ -386,6 +389,10 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
   const close = () => onClose && onClose();
 
   const statePill = ticket ? (TD_STATE_PILL[ticket.state] || 'idle') : 'idle';
+  // TKT-0266: rotating gear next to the state pill when the ticket is being
+  // actively worked (in_progress + busy live assignee). Same rule as the board
+  // card; re-renders on store updates so it tracks the 3s session refresh.
+  const activelyWorked = ticket ? (window.isActivelyWorked ? window.isActivelyWorked(ticket) : false) : false;
 
   // variant='page' renders the same ticket content in a standalone page layout
   // (no fixed drawer shell / backdrop / width presets) so /tickets/<id> can be
@@ -440,7 +447,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                   </a>
                 )}
                 <span className="td-id mono">{ticket.id}</span>
-                <span className="pill td-kind-pill">{ticket.kind}</span>
+                <span className="pill td-kind-pill" data-kind={ticket.kind}>{ticket.kind}</span>
                 {project && (
                   <span className="cc-chip td-project-chip" title={project.name}>
                     <span className="cc-chip-dot" style={{ background: project.color }}/>
@@ -448,6 +455,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                   </span>
                 )}
                 <span className={`pill ${statePill}`}>{ticket.state}</span>
+                {activelyWorked && <Icon.Gear size={12} className="gear gear-working" title="assignee is actively working"/>}
                 {isQuestion && (
                   <span
                     className="pill td-answer-badge"
@@ -545,7 +553,10 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                       { value: 'human', label: 'You' },
                       ...dispatchable.map((s) => ({ value: s.session_id, label: s.label })),
                       ...(ticket.assignee && ticket.assignee !== 'human' && !labelBySession.has(ticket.assignee)
-                        ? [{ value: ticket.assignee, label: `session ${String(ticket.assignee).slice(0, 8)}`, hint: 'offline' }]
+                        // TKT-0266: prefer the persisted durable label so the
+                        // offline option shows the friendly name (e.g.
+                        // "golem:builder (offline)") instead of a uuid stub.
+                        ? [{ value: ticket.assignee, label: ticket.assignee_label || `session ${String(ticket.assignee).slice(0, 8)}`, hint: 'offline' }]
                         : []),
                     ]}
                     onChange={(v) => commitField({ assignee: v || null })}
@@ -647,7 +658,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                     <div className="td-meta-list">
                       <div className="td-meta-row">
                         <span className="td-meta-key">Dispatched to</span>
-                        <span className="mono">{resolveActor(ticket.dispatched_to) || '—'}</span>
+                        <span className="mono">{resolveActor(ticket.dispatched_to, ticket.dispatched_to_label) || '—'}</span>
                         {ticket.dispatched_at && <span className="td-meta-value">· {tdAgo(ticket.dispatched_at)}</span>}
                       </div>
                       <div className="td-meta-row">

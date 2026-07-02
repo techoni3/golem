@@ -169,6 +169,21 @@ export function createState() {
       ]);
       nativeSessions = sessions;
       channels = Array.isArray(chans) ? chans : [];
+      // TKT-0266: persist durable session-name labels. Keyed off nativeSessions
+      // (NOT dispatchable) — a named session without a channel still deserves a
+      // persisted name. Only alive sessions with a name are upserted; the upsert
+      // is change-gated + 5-min staleness-gated internally so this 3s tick does
+      // NOT write a row every tick for every session.
+      if (trackerRef && typeof trackerRef.upsertSessionLabel === 'function') {
+        for (const s of nativeSessions) {
+          if (!s.alive || !s.name || !s.session_id) continue;
+          try {
+            trackerRef.upsertSessionLabel(s.session_id, s.name, s.project_id ?? null);
+          } catch (err) {
+            console.error('[native-sessions] upsertSessionLabel failed:', err);
+          }
+        }
+      }
       ee.emit('event', {
         type: 'native-sessions-update',
         native_sessions: nativeSessions,
