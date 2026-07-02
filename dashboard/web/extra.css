@@ -2908,6 +2908,33 @@ mark.anno.anno-tail::after {
 .td-dispatch-go { flex: 0 0 auto; }
 .td-dispatch-note { grid-column: 1 / -1; font-size: 11.5px; line-height: 1.5; color: var(--status-review); background: color-mix(in oklab, var(--status-review) 12%, var(--bg-2)); border: 1px solid color-mix(in oklab, var(--status-review) 30%, transparent); border-radius: var(--radius-1); padding: 7px 10px; margin-top: 6px; }
 
+/* TKT-0245: Now / When-idle segmented mode toggle + pending-queue row.
+   The toggle sits between the PopSelect and the Dispatch/Queue button. The
+   pending row replaces the dispatch row entirely while a dispatch is queued. */
+.td-dispatch-mode {
+  display: inline-flex; flex: 0 0 auto; border: 1px solid var(--border-2);
+  border-radius: var(--radius-1); overflow: hidden; align-self: stretch;
+}
+.td-dispatch-mode-btn {
+  background: var(--bg-1); border: none; color: var(--text-3);
+  font-family: "JetBrains Mono", monospace; font-size: 10px;
+  letter-spacing: .5px; text-transform: uppercase; cursor: pointer;
+  padding: 0 8px; border-right: 1px solid var(--border-2); white-space: nowrap;
+}
+.td-dispatch-mode-btn:last-child { border-right: none; }
+.td-dispatch-mode-btn:hover { color: var(--text-1); background: var(--bg-2); }
+.td-dispatch-mode-btn.active {
+  color: var(--text-0); background: var(--accent-soft);
+}
+.td-dispatch-cancel { flex: 0 0 auto; }
+.td-dispatch-pending-line {
+  flex: 1 1 auto; min-width: 0; font-size: 11.5px; line-height: 1.5;
+  color: var(--text-2); display: inline-flex; align-items: center;
+  gap: 5px; flex-wrap: wrap;
+}
+.td-dispatch-pending-icon { color: var(--status-review); }
+.td-dispatch-pending-offline { color: var(--status-blocked); font-weight: 600; }
+
 /* Meta strip (Dispatched to / Created by / Updated) — collapsed by default */
 .td-meta-strip { grid-column: 1 / -1; margin-top: 4px; }
 .td-meta-toggle {

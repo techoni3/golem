@@ -241,11 +241,11 @@ export function replyComment(id, commentId, body) {
   return request('POST', `/api/tickets/${encodeURIComponent(id)}/comments/${encodeURIComponent(commentId)}/reply`, { body });
 }
 
-/** POST /api/tickets/:id/dispatch {session_id,note?} */
-export function dispatchTicket(id, { session_id, note } = {}) {
+/** POST /api/tickets/:id/dispatch {session_id,note?,mode?} — when_idle:true maps to mode 'when_idle'. */
+export function dispatchTicket(id, { session_id, note, when_idle } = {}) {
   if (!id) throw new Error('dispatchTicket: id is required');
   return request('POST', `/api/tickets/${encodeURIComponent(id)}/dispatch`, {
-    body: { session_id, note },
+    body: { session_id, note, mode: when_idle ? 'when_idle' : 'now' },
   });
 }
 

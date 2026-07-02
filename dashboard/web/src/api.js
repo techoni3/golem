@@ -203,10 +203,13 @@
       patchJSON(`/api/tickets/${encodeURIComponent(id)}/comments/${encodeURIComponent(commentId)}`, patch),
     replyComment: (id, commentId, body) =>
       postJSON(`/api/tickets/${encodeURIComponent(id)}/comments/${encodeURIComponent(commentId)}/reply`, body),
-    dispatchTicket: (id, { session_id, note }) =>
-      postJSON(`/api/tickets/${encodeURIComponent(id)}/dispatch`, { session_id, note }),
+    dispatchTicket: (id, { session_id, note, mode }) =>
+      postJSON(`/api/tickets/${encodeURIComponent(id)}/dispatch`, { session_id, note, mode }),
     listDispatchable: (projectId) =>
       getJSON(`/api/sessions/dispatchable${qs({ project: projectId })}`),
+    // TKT-0245: cancel a queued dispatch (DELETE /api/dispatch-queue/:qid).
+    cancelDispatchQueue: (qid) =>
+      delJSON(`/api/dispatch-queue/${encodeURIComponent(qid)}`),
     listStreams: (projectId) => getJSON(`/api/streams${qs({ project: projectId })}`),
     createStream: (body) => postJSON('/api/streams', body),
     updateStream: (id, patch) => patchJSON(`/api/streams/${encodeURIComponent(id)}`, patch),

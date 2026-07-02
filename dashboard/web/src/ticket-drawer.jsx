@@ -76,6 +76,11 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
   const [dispatchSession, setDispatchSession] = React.useState('');
   const [dispatchNote, setDispatchNote] = React.useState(null); // soft inline note text
   const [dispatching, setDispatching] = React.useState(false);
+  // TKT-0245: 'now' | 'when_idle' — default follows the selected target's live
+  // status (idle→Now, busy/waiting→When idle); the user can override via the
+  // segmented toggle. `cancelling` gates the Cancel button on a pending row.
+  const [dispatchMode, setDispatchMode] = React.useState('now');
+  const [cancelling, setCancelling] = React.useState(false);
 
   // WS6: question return state. `returnSession` is the live session the answered
   // question is handed back to (defaults to the asker `created_by` when live).
@@ -169,6 +174,46 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
     return m;
   }, [dispatchable]);
 
+  // TKT-0245: decorate dispatch picker options with live status dots + hints.
+  // Join the dispatchable list with the store's nativeSessions (updated every
+  // 3s via WS) by session_id so the dots re-render live; pending_count comes
+  // from the dispatchable REST response.
+  const nativeSessionsNow = window.Store.getState().nativeSessions;
+  const dispatchOptions = React.useMemo(() => {
+    const liveStatus = new Map();
+    for (const s of nativeSessionsNow) {
+      if (s.session_id) liveStatus.set(s.session_id, s.status ?? null);
+    }
+    return dispatchable.map((s) => {
+      const status = liveStatus.get(s.session_id) ?? s.status ?? null;
+      const dot = status === 'idle' ? 'var(--status-active)'
+        : status === 'busy' ? 'var(--status-running)'
+        : status === 'waiting' ? 'var(--status-review)'
+        : 'var(--text-3)';
+      let hint = status === 'idle' ? 'idle'
+        : status === 'busy' ? 'working'
+        : status === 'waiting' ? 'waiting'
+        : '—';
+      if (s.pending_count > 0) hint += ` · ${s.pending_count} queued`;
+      return { value: s.session_id, label: s.label, dot, hint };
+    });
+  }, [dispatchable, nativeSessionsNow]);
+
+  // TKT-0245: pending dispatch (embedded in ticket detail by the server). When
+  // set, the dispatch row is replaced by a status line + Cancel button. The
+  // store refreshes the ticket on every ticket-updated WS, so this is live.
+  const pendingDispatch = ticket?.pending_dispatch ?? null;
+  const pendingTargetOffline = (() => {
+    if (!pendingDispatch) return false;
+    const s = window.Store.getNativeSessionById?.(pendingDispatch.session_id);
+    return !s || !s.alive;
+  })();
+  const pendingLabel = pendingDispatch
+    ? (labelBySession.get(pendingDispatch.session_id)
+      || window.Store.getNativeSessionById?.(pendingDispatch.session_id)?.name
+      || `session ${String(pendingDispatch.session_id).slice(0, 8)}`)
+    : null;
+
   // WS6: this ticket is a question FOR the user (question-kind, assignee=human,
   // not done/archived) — drives the "Answer & return" affordance.
   const isQuestion = ticket
@@ -233,10 +278,18 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
     if (!ticketId || !dispatchSession || dispatching) return;
     setDispatching(true);
     setDispatchNote(null);
-    window.SubstrateAPI.dispatchTicket(ticketId, { session_id: dispatchSession })
+    window.SubstrateAPI.dispatchTicket(ticketId, { session_id: dispatchSession, mode: dispatchMode })
       .then((res) => {
         if (res?.ticket?.id) window.Store.upsertTrackerTicket(res.ticket);
-        if (res && res.channel && res.channel.ok === false) {
+        // Re-fetch dispatchable so pending_count hints refresh in the picker.
+        if (projectId) {
+          window.SubstrateAPI.listDispatchable(projectId)
+            .then((list) => setDispatchable(Array.isArray(list) ? list : []))
+            .catch(() => {});
+        }
+        if (res?.queued) {
+          setDispatchNote(null); // the pending row renders in place of the dispatch row
+        } else if (res && res.channel && res.channel.ok === false) {
           setDispatchNote("assigned — no live channel, it'll be picked up when that session is reachable");
         } else {
           setDispatchNote(null);
@@ -248,7 +301,29 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
         setDispatchNote(err?.payload?.error || err?.message || 'Dispatch failed');
         setDispatching(false);
       });
-  }, [ticketId, dispatchSession, dispatching]);
+  }, [ticketId, dispatchSession, dispatching, dispatchMode, projectId]);
+
+  // TKT-0245: cancel a queued dispatch. The server broadcasts a ticket-updated
+  // (pending_dispatch gone) so the store refreshes the ticket and the drawer
+  // re-renders back to the dispatch row.
+  const onCancelDispatch = React.useCallback(() => {
+    const pending = ticket?.pending_dispatch;
+    if (!pending || cancelling) return;
+    setCancelling(true);
+    window.SubstrateAPI.cancelDispatchQueue(pending.id)
+      .then(() => {
+        if (projectId) {
+          window.SubstrateAPI.listDispatchable(projectId)
+            .then((list) => setDispatchable(Array.isArray(list) ? list : []))
+            .catch(() => {});
+        }
+        setCancelling(false);
+      })
+      .catch((err) => {
+        console.error('cancel dispatch failed', err);
+        setCancelling(false);
+      });
+  }, [ticket, cancelling, projectId]);
 
   // Add a plain or inline-anchored comment. `input` can be a string (legacy)
   // or an object with { body, quote?, prefix?, suffix?, section?, section_id?, tag? }.
@@ -506,24 +581,61 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                   />
                 </div>
 
-                {/* Dispatch — an action, not a property; full-width, separated */}
-                <div className="td-prop-dispatch">
-                  <span className="td-prop-label">Dispatch to</span>
-                  <PopSelect
-                    value={dispatchSession}
-                    placeholder={dispatchable.length === 0 ? 'No session' : 'Session…'}
-                    compact
-                    disabled={dispatching || dispatchable.length === 0}
-                    options={dispatchable.map((s) => ({ value: s.session_id, label: s.label }))}
-                    onChange={(v) => setDispatchSession(v)}
-                  />
-                  <button className="orch-btn small td-dispatch-go"
-                    onClick={onDispatch}
-                    disabled={dispatching || !dispatchSession || dispatchable.length === 0}
-                    title={dispatchable.length === 0 ? 'No live session in this project — start one with `cd <project> && claude`' : 'Dispatch to the selected session'}>
-                    {dispatching ? '…' : 'Dispatch'}
-                  </button>
-                </div>
+                {/* Dispatch — an action, not a property; full-width, separated.
+                    TKT-0245: when a dispatch is queued (ticket.pending_dispatch
+                    set), the row becomes a status line + Cancel; otherwise the
+                    PopSelect (with live status dots) + Now/When-idle mode toggle
+                    + Dispatch/Queue button. Disabled/empty-picker behavior from
+                    TKT-0233 is preserved verbatim. */}
+                {pendingDispatch ? (
+                  <div className="td-prop-dispatch td-dispatch-pending">
+                    <span className="td-prop-label">Dispatch</span>
+                    <span className="td-dispatch-pending-line">
+                      <span className="td-dispatch-pending-icon">⏳</span>
+                      Queued for {pendingLabel} · {tdAgo(pendingDispatch.created_at)} · waiting for idle
+                      {pendingTargetOffline && <span className="td-dispatch-pending-offline"> · session offline</span>}
+                    </span>
+                    <button className="orch-btn small ghost td-dispatch-cancel"
+                      onClick={onCancelDispatch}
+                      disabled={cancelling}
+                      title="Cancel this queued dispatch">
+                      {cancelling ? '…' : 'Cancel'}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="td-prop-dispatch">
+                    <span className="td-prop-label">Dispatch to</span>
+                    <PopSelect
+                      value={dispatchSession}
+                      placeholder={dispatchable.length === 0 ? 'No session' : 'Session…'}
+                      compact
+                      disabled={dispatching || dispatchable.length === 0}
+                      options={dispatchOptions}
+                      onChange={(v) => {
+                        setDispatchSession(v);
+                        // Default the mode from the selected target's live
+                        // status: idle → Now, busy/waiting → When idle (the
+                        // user can override via the toggle below).
+                        const sel = dispatchable.find((s) => s.session_id === v);
+                        const liveSt = nativeSessionsNow.find((s) => s.session_id === v)?.status ?? null;
+                        const st = sel ? (liveSt ?? sel.status ?? null) : null;
+                        setDispatchMode(st === 'idle' ? 'now' : 'when_idle');
+                      }}
+                    />
+                    <div className="td-dispatch-mode" role="group" aria-label="Dispatch mode">
+                      <button type="button" className={`td-dispatch-mode-btn${dispatchMode === 'now' ? ' active' : ''}`}
+                        onClick={() => setDispatchMode('now')} aria-pressed={dispatchMode === 'now'} title="Push the brief immediately">Now</button>
+                      <button type="button" className={`td-dispatch-mode-btn${dispatchMode === 'when_idle' ? ' active' : ''}`}
+                        onClick={() => setDispatchMode('when_idle')} aria-pressed={dispatchMode === 'when_idle'} title="Queue the brief until the target session is idle">When idle</button>
+                    </div>
+                    <button className="orch-btn small td-dispatch-go"
+                      onClick={onDispatch}
+                      disabled={dispatching || !dispatchSession || dispatchable.length === 0}
+                      title={dispatchable.length === 0 ? 'No live session in this project — start one with `cd <project> && claude`' : (dispatchMode === 'when_idle' ? 'Queue the dispatch until the target session is idle' : 'Dispatch to the selected session')}>
+                      {dispatching ? '…' : (dispatchMode === 'when_idle' ? 'Queue' : 'Dispatch')}
+                    </button>
+                  </div>
+                )}
 
                 {/* Meta strip — collapsed by default */}
                 <div className="td-meta-strip">
@@ -551,7 +663,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                   )}
                 </div>
 
-                {dispatchNote && <div className="td-dispatch-note">{dispatchNote}</div>}
+                {dispatchNote && !pendingDispatch && <div className="td-dispatch-note">{dispatchNote}</div>}
               </div>
 
               {/* ── Body — read (TdAnnotate) or edit (TKT-0233: body-only) ── */}

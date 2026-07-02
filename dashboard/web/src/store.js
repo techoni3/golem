@@ -70,8 +70,21 @@
     if (Array.isArray(snap.recent_milestones)) state.recentMilestones = snap.recent_milestones.slice();
     // WS5: flat cross-project tracker slice.
     if (Array.isArray(snap.tickets)) {
+      // TKT-0245: MERGE with existing entries instead of replacing wholesale.
+      // A snapshot (REST or WS-on-connect) carries only basic ticket fields
+      // (from listTickets); a ticket already in the Map from getTicket() may
+      // carry extra detail (pending_dispatch, links, events) that the snapshot
+      // does NOT. A bare replace would drop those — so the pending-dispatch
+      // indicator would vanish on every page reload as the WS snapshot
+      // overwrote the getTicket fetch. Merging { ...prev, ...t } preserves the
+      // detail fields while still refreshing the basic fields from the
+      // snapshot and dropping tickets that no longer exist.
       const m = new Map();
-      for (const t of snap.tickets) if (t && t.id) m.set(t.id, t);
+      for (const t of snap.tickets) {
+        if (!t || !t.id) continue;
+        const prev = state.trackerTickets.get(t.id);
+        m.set(t.id, prev ? { ...prev, ...t } : t);
+      }
       state.trackerTickets = m;
     }
     if (Array.isArray(snap.streams)) state.streams = snap.streams.slice();

@@ -531,13 +531,14 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'ticket_dispatch',
       description:
-        'Golem tracker — dispatch a ticket to a live session: assigns the ticket and pushes a brief to it over the channel. Use sessions_dispatchable to find live session ids. The target session must be a channel consumer (golemc) to receive the push.',
+        'Golem tracker — dispatch a ticket to a live session: assigns the ticket and pushes a brief to it over the channel. Use sessions_dispatchable to find live session ids (each carries a status: idle|busy|waiting, and a pending_count of queued dispatches). The target session must be a channel consumer (golemc) to receive the push. By default the brief is pushed immediately (mode "now"); pass when_idle:true to queue it until the target is idle — use this when the session is busy/waiting so the brief is not buried mid-turn.',
       inputSchema: {
         type: 'object',
         properties: {
           id: { type: 'string', description: 'Ticket id to dispatch.' },
           session_id: { type: 'string', description: 'Live session id to dispatch to (from sessions_dispatchable).' },
           note: { type: 'string', description: 'Optional note to include with the dispatch.' },
+          when_idle: { type: 'boolean', description: 'Queue the dispatch until the target session is idle instead of pushing immediately. Use when the target is busy/waiting so the brief is delivered when it can be acted on.' },
         },
         required: ['id', 'session_id'],
       },
@@ -571,7 +572,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'sessions_dispatchable',
       description:
-        'Golem tracker — list live native Claude sessions that can receive a dispatched ticket, in your current project (or pass project for another). Returns session ids + labels for use with ticket_dispatch.',
+        'Golem tracker — list live native Claude sessions that can receive a dispatched ticket, in your current project (or pass project for another). Returns session ids + labels for use with ticket_dispatch. Each entry carries a status (idle|busy|waiting) and a pending_count of queued dispatches — pass when_idle:true on ticket_dispatch for a busy/waiting target so the brief lands when it next goes idle.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -814,7 +815,11 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       if (name === 'ticket_dispatch') {
         if (!args.id) throw new Error('ticket_dispatch: id is required');
         if (!args.session_id) throw new Error('ticket_dispatch: session_id is required');
-        return jsonResult(await tracker.dispatchTicket(args.id, { session_id: args.session_id, note: args.note }));
+        return jsonResult(await tracker.dispatchTicket(args.id, {
+          session_id: args.session_id,
+          note: args.note,
+          when_idle: args.when_idle === true,
+        }));
       }
 
       if (name === 'stream_create') {

@@ -223,6 +223,26 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
         key   TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
+
+      -- TKT-0245: asynchronous dispatch queue. A pending row represents a
+      -- ticket queued for a session that is not currently idle; the drainer
+      -- (dispatch-queue.js) delivers it when the target's status flips to
+      -- idle. The partial unique index guarantees at most one pending row per
+      -- ticket (re-queue replaces; cancel/expire/deliver resolve it).
+      CREATE TABLE IF NOT EXISTS dispatch_queue (
+        id           TEXT PRIMARY KEY,
+        ticket_id    TEXT NOT NULL,
+        project_id   TEXT NOT NULL,
+        session_id   TEXT NOT NULL,
+        note         TEXT,
+        status       TEXT NOT NULL DEFAULT 'pending',  -- pending|delivered|cancelled|expired
+        created_at   TEXT NOT NULL,
+        delivered_at TEXT,
+        resolved_at  TEXT,
+        last_error   TEXT
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_dispatch_queue_pending
+        ON dispatch_queue (ticket_id) WHERE status = 'pending';
     `);
     // Seed meta defaults idempotently.
     const seed = db.prepare('INSERT OR IGNORE INTO meta(key, value) VALUES (?, ?)');
@@ -370,6 +390,39 @@ WHERE state_changed_at IS NULL`).run();
       `),
       getMeta: db.prepare('SELECT value FROM meta WHERE key = ?'),
       setMeta: db.prepare('INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'),
+      // TKT-0245: dispatch_queue prepared statements.
+      insertDispatchQueue: db.prepare(`
+        INSERT INTO dispatch_queue (id, ticket_id, project_id, session_id, note, status, created_at)
+        VALUES (@id, @ticket_id, @project_id, @session_id, @note, 'pending', @created_at)
+      `),
+      cancelPendingForTicket: db.prepare(
+        "UPDATE dispatch_queue SET status = 'cancelled', resolved_at = @resolved_at WHERE ticket_id = @ticket_id AND status = 'pending'"
+      ),
+      getPendingForTicket: db.prepare(
+        "SELECT * FROM dispatch_queue WHERE ticket_id = ? AND status = 'pending'"
+      ),
+      getQueueRow: db.prepare('SELECT * FROM dispatch_queue WHERE id = ?'),
+      cancelQueueRow: db.prepare(
+        "UPDATE dispatch_queue SET status = 'cancelled', resolved_at = @resolved_at WHERE id = @id AND status = 'pending'"
+      ),
+      expireQueueRow: db.prepare(
+        "UPDATE dispatch_queue SET status = 'expired', last_error = @last_error, resolved_at = @resolved_at WHERE id = @id AND status = 'pending'"
+      ),
+      markQueueDeliveredRow: db.prepare(
+        "UPDATE dispatch_queue SET status = 'delivered', delivered_at = @delivered_at, last_error = @last_error, resolved_at = @resolved_at WHERE id = @id AND status = 'pending'"
+      ),
+      listPendingDispatches: db.prepare(
+        "SELECT * FROM dispatch_queue WHERE status = 'pending' ORDER BY created_at ASC"
+      ),
+      listPendingForSession: db.prepare(
+        "SELECT * FROM dispatch_queue WHERE session_id = ? AND status = 'pending' ORDER BY created_at ASC"
+      ),
+      countPendingForSession: db.prepare(
+        "SELECT COUNT(*) AS n FROM dispatch_queue WHERE session_id = ? AND status = 'pending'"
+      ),
+      setTicketAssignee: db.prepare(
+        'UPDATE tickets SET assignee = @assignee, updated_at = @updated_at WHERE id = @id'
+      ),
     };
   }
 
@@ -498,7 +551,9 @@ WHERE state_changed_at IS NULL`).run();
       if (!row) return null;
       const comments = stmts.getComments.all(id);
       const links = stmts.listLinks.all(id, id);
-      return { ...hydrateTicket(row), comments, links };
+      // TKT-0245: embed any pending dispatch so the drawer needs no extra fetch.
+      const pending_dispatch = stmts.getPendingForTicket.get(id) ?? null;
+      return { ...hydrateTicket(row), comments, links, pending_dispatch };
     },
 
     // TKT-0107: maximum updated_at across all tickets for a project. Powers
@@ -742,6 +797,121 @@ WHERE state_changed_at IS NULL`).run();
         return stmts.getTicket.get(id);
       });
       return hydrateTicket(txn());
+    },
+
+    // TKT-0245: asynchronous dispatch queue. The queue lives in SQLite so it
+    // survives dashboard restarts (routine). A pending row asserts ownership
+    // intent (assignee flips immediately) but does NOT set dispatched_to /
+    // dispatched_at — those land when the drainer actually delivers the brief
+    // on idle. Re-queue = replace (the unique partial index enforces one
+    // pending row per ticket).
+    queueDispatch(ticketId, { session_id, note = null, actor = 'human' } = {}) {
+      const existing = stmts.getTicket.get(ticketId);
+      if (!existing) throw new Error(`queueDispatch: ticket '${ticketId}' not found`);
+      if (!session_id) throw new Error('queueDispatch: session_id is required');
+      const ts = now();
+      const queueId = crypto.randomUUID();
+      const txn = db.transaction(() => {
+        // Re-queue = replace: cancel any existing pending row for this ticket
+        // (no separate event — the dispatch_queued event captures the action).
+        stmts.cancelPendingForTicket.run({ resolved_at: ts, ticket_id: ticketId });
+        // Ownership intent immediate; dispatched_to/dispatched_at stay null
+        // until the drainer delivers on idle.
+        stmts.setTicketAssignee.run({ assignee: session_id, updated_at: ts, id: ticketId });
+        stmts.insertDispatchQueue.run({
+          id: queueId,
+          ticket_id: ticketId,
+          project_id: existing.project_id,
+          session_id,
+          note: note ?? null,
+          created_at: ts,
+        });
+        recordEvent({
+          ticket_id: ticketId,
+          project_id: existing.project_id,
+          type: 'dispatch_queued',
+          actor,
+          data: { session_id, queue_id: queueId },
+        });
+        return stmts.getQueueRow.get(queueId);
+      });
+      return txn();
+    },
+
+    cancelQueuedDispatch(queueId, { actor = 'human' } = {}) {
+      const row = stmts.getQueueRow.get(queueId);
+      if (!row) throw new Error(`cancelQueuedDispatch: queue row '${queueId}' not found`);
+      if (row.status !== 'pending') {
+        throw new Error(`cancelQueuedDispatch: queue row '${queueId}' is not pending (status=${row.status})`);
+      }
+      const ts = now();
+      const txn = db.transaction(() => {
+        stmts.cancelQueueRow.run({ resolved_at: ts, id: queueId });
+        recordEvent({
+          ticket_id: row.ticket_id,
+          project_id: row.project_id,
+          type: 'dispatch_cancelled',
+          actor,
+          data: { queue_id: queueId, session_id: row.session_id },
+        });
+        return stmts.getQueueRow.get(queueId);
+      });
+      return txn();
+    },
+
+    // Used by the drainer when a session stays offline too long. Idempotent on
+    // a non-pending row (returns the row unchanged) so a concurrent cancel /
+    // deliver doesn't throw.
+    expireQueuedDispatch(queueId, reason) {
+      const row = stmts.getQueueRow.get(queueId);
+      if (!row) throw new Error(`expireQueuedDispatch: queue row '${queueId}' not found`);
+      if (row.status !== 'pending') return row;
+      const ts = now();
+      const txn = db.transaction(() => {
+        stmts.expireQueueRow.run({ last_error: reason ?? null, resolved_at: ts, id: queueId });
+        recordEvent({
+          ticket_id: row.ticket_id,
+          project_id: row.project_id,
+          type: 'dispatch_expired',
+          actor: 'system',
+          data: { queue_id: queueId, session_id: row.session_id, reason },
+        });
+        return stmts.getQueueRow.get(queueId);
+      });
+      return txn();
+    },
+
+    // Used by the drainer after a delivery attempt. Idempotent on a non-pending
+    // row (a concurrent cancel must not throw here).
+    markQueueDelivered(queueId, { error = null } = {}) {
+      const row = stmts.getQueueRow.get(queueId);
+      if (!row) throw new Error(`markQueueDelivered: queue row '${queueId}' not found`);
+      if (row.status !== 'pending') return row;
+      const ts = now();
+      const txn = db.transaction(() => {
+        stmts.markQueueDeliveredRow.run({
+          delivered_at: ts, last_error: error ?? null, resolved_at: ts, id: queueId,
+        });
+        return stmts.getQueueRow.get(queueId);
+      });
+      return txn();
+    },
+
+    listPendingDispatches() {
+      return stmts.listPendingDispatches.all();
+    },
+
+    listPendingDispatchesForSession(sessionId) {
+      if (!sessionId) return stmts.listPendingDispatches.all();
+      return stmts.listPendingForSession.all(sessionId);
+    },
+
+    getPendingDispatchForTicket(ticketId) {
+      return stmts.getPendingForTicket.get(ticketId) ?? null;
+    },
+
+    countPendingDispatchesForSession(sessionId) {
+      return Number(stmts.countPendingForSession.get(sessionId)?.n ?? 0);
     },
 
     addComment(ticket_id, input = {}) {

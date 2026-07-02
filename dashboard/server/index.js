@@ -17,6 +17,7 @@ import { openTrackerDb } from './tracker-db.js';
 import { readChannels } from './channels.js';
 import { applyGateVerdict } from './projects.js';
 import { listIdeas, createIdea, popIdea } from './ideas.js';
+import { initDispatchDrainer } from './dispatch-queue.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const WEB_ROOT = path.resolve(__dirname, '..', 'web');
@@ -97,6 +98,21 @@ function sleep(ms) {
 function getProcessComm(pid) {
   const result = spawnSync('ps', ['-p', String(pid), '-o', 'comm='], { encoding: 'utf8' });
   return (result.stdout || '').trim() || 'unknown';
+}
+
+// TKT-0245: build a self-contained brief so the receiving session knows exactly
+// what it's been handed and how to pick it up. Extracted from the inline
+// construction in the dispatch handler so the drainer (dispatch-queue.js)
+// produces byte-identical briefs — no format drift between the two delivery
+// paths. `note` is an already-trimmed string or null.
+function buildDispatchBrief(ticket, note) {
+  const id = ticket.id;
+  return (
+    `You've been assigned tracker ticket ${id}: "${ticket.title}" (project ${ticket.project_id}, kind ${ticket.kind}).\n\n` +
+    `${note ? note + '\n\n' : ''}` +
+    `Load it with the golem tracker tools (ticket_get ${id}) to read the full body, acceptance criteria, and comment thread, then pick it up: move it to in_progress, do the work, comment progress, and move it to review/done when complete. ` +
+    `If you have blocking questions, create a question-kind ticket in this project assigned to 'human'.`
+  );
 }
 
 async function main() {
@@ -612,15 +628,41 @@ async function main() {
   // touch the channel. The channel push is best-effort — an unreachable session
   // never fails the request, since the assignment is already on disk and the
   // session (or the user) can pick it up on resume.
+  //
+  // TKT-0245: `mode` ('now' | 'when_idle', default 'now'). 'when_idle' queues
+  // the dispatch until the target session is idle (the drainer delivers it
+  // then); if the target is already idle it falls through to the immediate
+  // 'now' path. A bare POST (no mode) behaves exactly as before — the default
+  // never changes, so existing MCP calls and older UIs are untouched.
   fastify.post('/api/tickets/:id/dispatch', async (req, reply) => {
     const id = req.params.id;
     const b = req.body ?? {};
     const sessionId = typeof b.session_id === 'string' && b.session_id.trim() ? b.session_id.trim() : null;
     const note = typeof b.note === 'string' && b.note.trim() ? b.note.trim() : null;
+    const mode = typeof b.mode === 'string' ? b.mode : 'now';
+    if (mode !== 'now' && mode !== 'when_idle') {
+      return reply.code(400).send({ error: `mode must be 'now' or 'when_idle' (got '${mode}')` });
+    }
 
     const existing = tracker.getTicket(id);
     if (!existing) return reply.code(404).send({ error: 'not_found' });
     if (!sessionId) return reply.code(400).send({ error: 'session_id is required' });
+
+    // 'when_idle': queue for delivery on idle unless the target is already idle
+    // (in which case fall through to the immediate 'now' path — no queue row).
+    if (mode === 'when_idle') {
+      const target = state.nativeSessions().find((s) => s.session_id === sessionId);
+      const isIdle = !!target && target.alive && target.status === 'idle';
+      if (!isIdle) {
+        const queueRow = tracker.queueDispatch(id, { session_id: sessionId, note, actor: 'human' });
+        chat.record('system', 'info',
+          `queued ${queueRow.id.slice(0, 8)} for ${sessionId} — will deliver when idle`);
+        const ticket = tracker.getTicket(id);
+        broadcastWS({ type: 'ticket-updated', ticket });
+        return { ok: true, queued: true, queue_id: queueRow.id, ticket };
+      }
+      // target idle → fall through to immediate delivery below.
+    }
 
     // 1) Durable write — assign + record the dispatched event. Source of truth.
     tracker.setDispatched(id, { session_id: sessionId, actor: 'human' });
@@ -628,11 +670,9 @@ async function main() {
     // 2) Build a clear, self-contained brief so the receiving session knows
     //    exactly what it's been handed and how to pick it up. The tracker MCP
     //    tools (ticket_get, etc.) land in WS3 — naming them now is intentional.
-    const briefString =
-      `You've been assigned tracker ticket ${id}: "${existing.title}" (project ${existing.project_id}, kind ${existing.kind}).\n\n` +
-      `${note ? note + '\n\n' : ''}` +
-      `Load it with the golem tracker tools (ticket_get ${id}) to read the full body, acceptance criteria, and comment thread, then pick it up: move it to in_progress, do the work, comment progress, and move it to review/done when complete. ` +
-      `If you have blocking questions, create a question-kind ticket in this project assigned to 'human'.`;
+    //    (TKT-0245: extracted to buildDispatchBrief so the drainer produces
+    //    byte-identical briefs.)
+    const briefString = buildDispatchBrief(existing, note);
 
     // 3) Best-effort channel push — never fail the request on a push miss.
     let channelResult = null;
@@ -650,7 +690,39 @@ async function main() {
 
     const ticket = tracker.getTicket(id);
     broadcastWS({ type: 'ticket-updated', ticket });
+    // Bare 'now' POSTs (the default) keep the exact original response shape so
+    // existing callers (MCP ticket_dispatch, older UI) are untouched. The
+    // when_idle path that fell through (target was already idle) adds the
+    // queued:false / delivered:true hints the plan specifies.
+    if (mode === 'when_idle') {
+      return { ok: true, queued: false, delivered: true, ticket, channel: channelResult };
+    }
     return { ok: true, ticket, channel: channelResult };
+  });
+
+  // TKT-0245: GET /api/dispatch-queue — list pending queued dispatches,
+  // optionally filtered by ?session_id=. Used by the UI (and the smoke) to
+  // discover + cancel pending rows for a session.
+  fastify.get('/api/dispatch-queue', async (req) => {
+    const sessionId = req.query?.session_id;
+    return tracker.listPendingDispatchesForSession(sessionId);
+  });
+
+  // TKT-0245: DELETE /api/dispatch-queue/:qid — cancel a pending queued
+  // dispatch. Broadcasts a ticket-updated for the affected ticket so the drawer
+  // re-renders back to the dispatch row. 404 if no such pending row.
+  fastify.delete('/api/dispatch-queue/:qid', async (req, reply) => {
+    const qid = req.params.qid;
+    try {
+      const row = tracker.cancelQueuedDispatch(qid, { actor: 'human' });
+      const ticket = tracker.getTicket(row.ticket_id);
+      if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
+      return { ok: true };
+    } catch (err) {
+      const msg = String(err?.message ?? err);
+      if (/not found|not pending/i.test(msg)) return reply.code(404).send({ error: msg });
+      return reply.code(400).send({ error: msg });
+    }
   });
 
   // GET /api/streams — streams for one project, or all if `project` omitted.
@@ -725,6 +797,9 @@ async function main() {
         channel_url: ch.url ?? (ch.host && ch.port ? `http://${ch.host}:${ch.port}` : null),
         started_at: s.started_at ?? null,
         updated_at: s.updated_at ?? null,
+        // TKT-0245: count of pending queued dispatches for this session, so the
+        // picker can show "working · 1 queued".
+        pending_count: tracker.countPendingDispatchesForSession(s.session_id),
       });
     }
     return out;
@@ -906,6 +981,18 @@ async function main() {
   const sweepTimer = setInterval(runAutoArchiveSweep, SIX_HOURS_MS);
   sweepTimer.unref();
 
+  // TKT-0245: dispatch drainer — delivers queued dispatches when their target
+  // session goes idle. Own 5s tick (reads state.nativeSessions(), which state.js
+  // already refreshes every 3s — no new session poll). Closed in shutdown().
+  const dispatchDrainer = initDispatchDrainer({
+    tracker,
+    state,
+    chat,
+    pushBrief,
+    buildDispatchBrief,
+    broadcastWS,
+  });
+
   // Pin to the canonical dashboard URL http://dashboard.golem.localhost:7420.
   // If 7420 is busy, check whether the occupying process is the previous
   // dashboard recorded in ~/.config/golem/dashboard.json. If so, terminate it
@@ -1004,6 +1091,7 @@ async function main() {
   const shutdown = async () => {
     fastify.log.info('shutting down…');
     try {
+      dispatchDrainer.close();
       chat.stop();
       await state.close();
       tracker.close();
