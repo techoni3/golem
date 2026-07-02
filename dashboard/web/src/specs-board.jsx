@@ -196,7 +196,7 @@ function SpecSearchResults({ results, qLower, searching }) {
           onClick={(e) => { e.preventDefault(); window.Router.openTicket(r.id); }}
         >
           <div className="spec-result-head">
-            <span className="spec-result-id mono">{r.id}</span>
+            <span className="spec-result-id mono">{r.display_id || r.id}</span>
             <span className={`pill ${SPEC_STATE_PILL[r.state] || 'idle'}`}>{r.state}</span>
             <span className="spec-result-ago">{specAgo(r.updated_at)}</span>
           </div>

@@ -69,9 +69,10 @@ let specId = null, childA = null, childB = null, plain = null;
 const created = [];
 try {
   // ── Scratch tickets ───────────────────────────────────────────────────────
-  specId = (await post('/tickets', { project_id: PROJECT, kind: 'spec', created_by: 'smoke', title: 'SMOKE-0284 scratch spec', body: SPEC_BODY })).id;
+  const specRes = await post('/tickets', { project_id: PROJECT, kind: 'spec', created_by: 'smoke', title: 'SMOKE-0284 scratch spec', body: SPEC_BODY });
+  specId = specRes.id;
   created.push(specId);
-  childA = (await post('/tickets', { project_id: PROJECT, kind: 'work-item', created_by: 'smoke', title: 'SMOKE-0284 child A', parent_id: specId, body: 'First work item under the scratch spec.' })).id;
+  const childARes = await post('/tickets', { project_id: PROJECT, kind: 'work-item', created_by: 'smoke', title: 'SMOKE-0284 child A', parent_id: specId, body: 'First work item under the scratch spec.' }); childA = childARes.id;
   created.push(childA);
   childB = (await post('/tickets', { project_id: PROJECT, kind: 'work-item', created_by: 'smoke', title: 'SMOKE-0284 child B', parent_id: specId, body: 'Second work item under the scratch spec.' })).id;
   created.push(childB);
@@ -136,7 +137,7 @@ try {
     id: document.querySelector('.drawer-ticket .td-id')?.textContent || '',
   }));
   assert.ok(drawerOpen.open, 'ticket drawer opened on row click');
-  assert.equal(drawerOpen.id, specId, `drawer shows the spec (got ${drawerOpen.id})`);
+  assert.equal(drawerOpen.id, specRes.display_id || specId, `drawer shows the spec (got ${drawerOpen.id})`);
   await page.evaluate(() => document.querySelector('.drawer-ticket .drawer-close')?.click());
   await wait(400);
 
@@ -194,7 +195,7 @@ try {
     id: document.querySelector('.drawer-ticket .td-id')?.textContent || '',
   }));
   assert.ok(childDrawer.open, 'clicking a child opens the child ticket drawer');
-  assert.equal(childDrawer.id, childA, `child drawer shows child A (got ${childDrawer.id})`);
+  assert.equal(childDrawer.id, childARes.display_id || childA, `child drawer shows child A (got ${childDrawer.id})`);
 
   // ── 5. + New spec → composer with Kind=spec ──────────────────────────────
   await page.goto(`${ORIGIN}/tracker?view=specs`, { waitUntil: 'networkidle' });

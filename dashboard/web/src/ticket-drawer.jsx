@@ -481,7 +481,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                     ← {project?.name}
                   </a>
                 )}
-                <span className="td-id mono">{ticket.id}</span>
+                <span className="td-id mono">{ticket.display_id || ticket.id}</span>
                 <span className="pill td-kind-pill" data-kind={ticket.kind}>{ticket.kind}</span>
                 {project && (
                   <span className="cc-chip td-project-chip" title={project.name}>
@@ -684,6 +684,10 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                   </button>
                   {fieldsExpanded && (
                     <div className="td-meta-list">
+                      <div className="td-meta-row">
+                        <span className="td-meta-key">Canonical id</span>
+                        <span className="mono">{ticket.id}</span>
+                      </div>
                       <div className="td-meta-row">
                         <span className="td-meta-key">Dispatched to</span>
                         <span className="mono">{resolveActor(ticket.dispatched_to, ticket.dispatched_to_label) || '—'}</span>

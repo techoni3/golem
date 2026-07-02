@@ -164,6 +164,7 @@ function TrackerBoard({ view }) {
     const q = searchQuery;
     return tickets.filter((t) => {
       if ((t.id || '').toLowerCase().includes(q)) return true;
+      if ((t.display_id || '').toLowerCase().includes(q)) return true;
       if ((t.title || '').toLowerCase().includes(q)) return true;
       if ((t.kind || '').toLowerCase() === q) return true;
       if ((t.priority || '').toLowerCase() === q) return true;
@@ -374,7 +375,7 @@ function TicketColumns({ cols, tickets, projectByContract, resolveAssignee }) {
             <div className="tracker-card-tags">
               <span className="pill tracker-kind-pill" data-kind={activeTicket.kind}>{activeTicket.kind}</span>
             </div>
-            <div className="ticket-id">{activeTicket.id}</div>
+            <div className="ticket-id">{activeTicket.display_id || activeTicket.id}</div>
             <div className="ticket-title">{activeTicket.title}</div>
           </div>
         ) : null}
@@ -472,7 +473,7 @@ function TrackerCard({ ticket: t, project, assigneeLabel }) {
         <span className="pill tracker-kind-pill" data-kind={t.kind}>{t.kind}</span>
         {needsAnswer && <span className="pill tracker-answer-badge">❓ needs answer</span>}
       </div>
-      <div className="ticket-id">{t.id}</div>
+      <div className="ticket-id">{t.display_id || t.id}</div>
       <div className="ticket-title">{t.title}</div>
       <div className="ticket-footer">
         <div className="ticket-assignee">

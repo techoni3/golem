@@ -436,9 +436,13 @@ async function main() {
   // GET /api/tickets/:id — ticket (+ comments/links from getTicket) plus its
   // event history. 404 if unknown.
   fastify.get('/api/tickets/:id', async (req, reply) => {
-    const ticket = tracker.getTicket(req.params.id);
+    const id = req.params.id;
+    let ticket = tracker.getTicket(id);
+    // TKT-0519: lookup convenience — if the exact canonical id misses, try the
+    // display id (e.g. pasting GOL-42 in the URL) before 404ing.
+    if (!ticket) ticket = tracker.getTicketByDisplayId(id);
     if (!ticket) return reply.code(404).send({ error: 'not_found' });
-    return { ...ticket, events: tracker.listEvents({ ticket_id: req.params.id }) };
+    return { ...ticket, events: tracker.listEvents({ ticket_id: ticket.id }) };
   });
 
   // PATCH /api/tickets/:id — partial update. 404 if missing, 400 on invalid.

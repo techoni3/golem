@@ -19,7 +19,7 @@ import { marked } from 'marked';
 import TurndownService from 'turndown';
 import { gfm as turndownGfm } from 'turndown-plugin-gfm';
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 const KINDS = new Set(['work-item', 'decision', 'spec', 'question', 'fix']);
 const STATES = new Set(['todo', 'in_progress', 'blocked', 'review', 'done', 'archived']);
@@ -353,6 +353,39 @@ WHERE state_changed_at IS NULL`).run();
       }
     }
 
+    // Schema migration v5 -> v6 (TKT-0519): per-project display ids (pseq +
+    // display_id) + a project_prefixes table. Historical smoke debris is
+    // quarantined to smoketests-000000 BEFORE backfill so real projects number
+    // 1..N with no smoke gaps. Gated on schema_version < 6 (runs once).
+    if (schemaVersion && Number(schemaVersion) < 6) {
+      const ticketCols6 = db.prepare("PRAGMA table_info(tickets)").all().map((c) => c.name);
+      if (!ticketCols6.includes('pseq')) db.exec('ALTER TABLE tickets ADD COLUMN pseq INTEGER');
+      if (!ticketCols6.includes('display_id')) db.exec('ALTER TABLE tickets ADD COLUMN display_id TEXT');
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_display ON tickets(display_id) WHERE display_id IS NOT NULL');
+      db.exec(`CREATE TABLE IF NOT EXISTS project_prefixes (
+        project_id TEXT PRIMARY KEY,
+        prefix TEXT NOT NULL UNIQUE
+      )`);
+      // Quarantine historical smoke debris BEFORE numbering. Rule is exactly
+      // created_by='smoke' OR title LIKE 'SMOKE-%' — do NOT match %smoke%
+      // broadly (real tickets mention smoke in titles).
+      db.prepare("UPDATE tickets SET project_id='smoketests-000000' WHERE created_by='smoke' OR title LIKE 'SMOKE-%'").run();
+      db.prepare("UPDATE events SET project_id='smoketests-000000' WHERE ticket_id IN (SELECT id FROM tickets WHERE project_id='smoketests-000000')").run();
+      // Backfill: number each project's tickets 1..N by (created_at, seq) and
+      // seed the per-project pseq counter so future creates continue from N+1.
+      const setPseq = db.prepare('UPDATE tickets SET pseq = ?, display_id = ? WHERE id = ?');
+      const setMetaV6 = db.prepare('INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+      for (const { project_id } of db.prepare('SELECT DISTINCT project_id FROM tickets').all()) {
+        const prefix = ensurePrefix(project_id);
+        let n = 0;
+        for (const r of db.prepare('SELECT id FROM tickets WHERE project_id = ? ORDER BY created_at ASC, seq ASC').all(project_id)) {
+          n += 1;
+          setPseq.run(n, `${prefix}-${n}`, r.id);
+        }
+        setMetaV6.run(`pseq:${project_id}`, String(n));
+      }
+    }
+
     // Indexes that depend on lifecycle columns. Idempotent: no-op on fresh
     // DBs (CREATE TABLE above already created them), first-time-create on
     // existing DBs (where the ALTER TABLE above just added the columns).
@@ -370,11 +403,11 @@ WHERE state_changed_at IS NULL`).run();
         INSERT INTO tickets
           (id, seq, project_id, kind, title, body, state, priority, labels,
            stream_id, parent_id, assignee, created_by, dispatched_to,
-           dispatched_at, source_ref, created_at, updated_at)
+           dispatched_at, source_ref, created_at, updated_at, pseq, display_id)
         VALUES
           (@id, @seq, @project_id, @kind, @title, @body, @state, @priority, @labels,
            @stream_id, @parent_id, @assignee, @created_by, @dispatched_to,
-           @dispatched_at, @source_ref, @created_at, @updated_at)
+           @dispatched_at, @source_ref, @created_at, @updated_at, @pseq, @display_id)
       `),
       getTicket: db.prepare('SELECT * FROM tickets WHERE id = ?'),
       getComments: db.prepare('SELECT * FROM comments WHERE ticket_id = ? ORDER BY created_at ASC, id ASC'),
@@ -489,19 +522,59 @@ WHERE state_changed_at IS NULL`).run();
     }
   }
 
-  // allocateTicketId — bump the meta ticket_seq counter inside a transaction
-  // and format the new id. Monotonic and collision-free under concurrent opens
-  // because better-sqlite3 transactions serialize and busy_timeout retries.
-  const allocateTxn = db.transaction(() => {
+  // TKT-0519: derive + persist a project's display-id prefix. Candidates in
+  // order: first 3 chars → first 4 → dash-split initials → base+2/3/… Take the
+  // first not already in project_prefixes (UNIQUE enforces it). Once persisted,
+  // never recomputed — stable even if the algorithm changes. Hoisted (function
+  // declaration) so the v6 migration's backfill can call it before prepare().
+  function ensurePrefix(projectId) {
+    const existing = db.prepare('SELECT prefix FROM project_prefixes WHERE project_id = ?').get(projectId);
+    if (existing) return existing.prefix;
+    const slug = String(projectId).replace(/-[0-9a-f]{6}$/, '');
+    const candidates = [slug.slice(0, 3).toUpperCase(), slug.slice(0, 4).toUpperCase()];
+    const initials = slug.split('-').map((p) => p[0] || '').join('').toUpperCase();
+    if (initials.length >= 2) candidates.push(initials);
+    const base = slug.slice(0, 3).toUpperCase();
+    for (let i = 2; i <= 99; i++) candidates.push(base + i);
+    const taken = new Set(db.prepare('SELECT prefix FROM project_prefixes').all().map((r) => r.prefix));
+    for (const c of candidates) {
+      if (c && !taken.has(c)) {
+        db.prepare('INSERT INTO project_prefixes (project_id, prefix) VALUES (?, ?)').run(projectId, c);
+        return c;
+      }
+    }
+    const fb = slug.toUpperCase().slice(0, 8);
+    db.prepare('INSERT INTO project_prefixes (project_id, prefix) VALUES (?, ?)').run(projectId, fb);
+    return fb;
+  }
+
+  // allocateTicketId — bump the global ticket_seq (canonical TKT id, unchanged)
+  // AND the per-project pseq counter, inside one transaction. Monotonic +
+  // collision-free under concurrent opens (better-sqlite3 transactions
+  // serialize + busy_timeout retries — same guarantee the global counter relies
+  // on today). pseq is initialized from MAX(pseq) if the meta counter is
+  // missing (a project that predates the v6 backfill's counter seeding).
+  const allocateTxn = db.transaction((projectId) => {
     const cur = Number(stmts.getMeta.get('ticket_seq')?.value ?? '0');
     const seq = cur + 1;
     stmts.setMeta.run('ticket_seq', String(seq));
     const id = `TKT-${String(seq).padStart(4, '0')}`;
-    return { id, seq };
+    const pseqKey = `pseq:${projectId}`;
+    const pseqRow = stmts.getMeta.get(pseqKey);
+    let pseq;
+    if (pseqRow) {
+      pseq = Number(pseqRow.value) + 1;
+    } else {
+      const maxRow = db.prepare('SELECT MAX(pseq) AS m FROM tickets WHERE project_id = ?').get(projectId);
+      pseq = (maxRow?.m ?? 0) + 1;
+    }
+    stmts.setMeta.run(pseqKey, String(pseq));
+    const prefix = ensurePrefix(projectId);
+    return { id, seq, pseq, display_id: `${prefix}-${pseq}` };
   });
 
-  function allocateTicketId() {
-    return allocateTxn();
+  function allocateTicketId(projectId) {
+    return allocateTxn(projectId);
   }
 
   // ---- public API -------------------------------------------------------
@@ -578,7 +651,7 @@ WHERE state_changed_at IS NULL`).run();
       const ts = now();
       const bodyMd = toMarkdownBody(body);
       const txn = db.transaction(() => {
-        const { id, seq } = allocateTicketId();
+        const { id, seq, pseq, display_id } = allocateTicketId(project_id);
         const row = {
           id,
           seq,
@@ -598,6 +671,8 @@ WHERE state_changed_at IS NULL`).run();
           source_ref,
           created_at: ts,
           updated_at: ts,
+          pseq,
+          display_id,
         };
         stmts.insertTicket.run(row);
         recordEvent({
@@ -634,6 +709,14 @@ WHERE state_changed_at IS NULL`).run();
         assignee_label: resolveAssigneeLabel(c.assignee),
       }));
       return { ...hydrated, comments, links, pending_dispatch, children };
+    },
+
+    // TKT-0519: lookup by display id (e.g. GOL-42) — resolves to the canonical
+    // id then returns the full ticket (with comments/links/etc.).
+    getTicketByDisplayId(displayId) {
+      if (!displayId) return null;
+      const row = db.prepare('SELECT id FROM tickets WHERE display_id = ?').get(displayId);
+      return row ? api.getTicket(row.id) : null;
     },
 
     // TKT-0107: maximum updated_at across all tickets for a project. Powers
@@ -757,9 +840,9 @@ WHERE state_changed_at IS NULL`).run();
         where.push('kind = @kind');
         params.kind = kind;
       }
-      where.push("(title LIKE @q ESCAPE '\\' OR body LIKE @q ESCAPE '\\')");
+      where.push("(title LIKE @q ESCAPE '\\' OR body LIKE @q ESCAPE '\\' OR display_id LIKE @q ESCAPE '\\')");
       const sql =
-        'SELECT id, title, kind, state, body, updated_at FROM tickets ' +
+        'SELECT id, title, kind, state, body, updated_at, display_id FROM tickets ' +
         'WHERE ' + where.join(' AND ') + ' ' +
         'ORDER BY updated_at DESC LIMIT @limit';
       const rows = db.prepare(sql).all(params);
@@ -784,6 +867,7 @@ WHERE state_changed_at IS NULL`).run();
         }
         return {
           id: r.id,
+          display_id: r.display_id,
           title,
           kind: r.kind,
           state: r.state,
