@@ -77,7 +77,11 @@ try {
   assert.equal(md.paddingLeft, '40px', '.td-md has 40px left padding');
   assert.equal(md.paddingRight, '40px', '.td-md has 40px right padding');
   assert.equal(md.lineHeight, '24.75px', '.td-md line-height is 1.65 × 15px = 24.75px');
-  assert.equal(md.width, 1200, '.td-md rendered width is capped at 1200px');
+  // TKT-0285: the body lives in .td-main (viewport − 250px sidebar), so at this
+  // viewport .td-md fills the narrower main column instead of hitting the 1200
+  // cap. The cap (max-width: 1200px) is what 0208 protects — assert it holds
+  // (body never exceeds 1200), not that it's reached.
+  assert.ok(md.width <= 1200, `.td-md width within the 1200px cap (got ${md.width}; TKT-0285 sidebar narrows the main column)`);
 
   // ── 5. Title column aligns with the prose column (rail closed) ──────────
   const aligned = await page.evaluate(() => {
@@ -124,7 +128,7 @@ try {
   const railOpen = await page.evaluate(() => {
     const body = document.querySelector('.td-md');
     const title = document.querySelector('.td-titlebody');
-    const col = document.querySelector('.td-read-col');
+    const col = document.querySelector('.td-main'); // TKT-0285: was .td-read-col
     if (!body || !title || !col) return null;
     const bcs = window.getComputedStyle(body);
     const ccs = window.getComputedStyle(col);
@@ -133,13 +137,13 @@ try {
       width: body.getBoundingClientRect().width,
       titleLeft: title.getBoundingClientRect().left,
       bodyLeft: body.getBoundingClientRect().left,
-      readColPaddingRight: ccs.paddingRight,
+      mainPaddingRight: ccs.paddingRight,
     };
   });
-  assert.ok(railOpen, '.td-md, .td-titlebody and .td-read-col are mounted with rail open');
+  assert.ok(railOpen, '.td-md, .td-titlebody and .td-main are mounted with rail open');
   assert.equal(railOpen.maxWidth, '1200px', '.td-md keeps its 1200px max-width when rail is open');
   assert.ok(railOpen.width < 1200, `rail-open body shrinks below the 1200px cap (available-bound; got ${railOpen.width})`);
-  assert.equal(railOpen.readColPaddingRight, '390px', '.td-read-col reserves 390px right padding for the rail (360 rail + 30 gutter)');
+  assert.equal(railOpen.mainPaddingRight, '390px', '.td-main reserves 390px right padding for the rail (360 rail + 30 gutter)');
   assert.ok(
     Math.abs(railOpen.titleLeft - railOpen.bodyLeft) < 10,
     `with rail open, .td-titlebody left (${railOpen.titleLeft}) aligns with .td-md left (${railOpen.bodyLeft}) within 10px (title slides left WITH the body)`

@@ -2914,23 +2914,51 @@ mark.anno.anno-tail::after {
 .td-comments { padding: 14px 22px; }
 .td-composer { padding: 12px 22px; border-top: 1px solid var(--border-1); }
 
-/* When the annotation rail (360px + 30px gutter) is open, reserve its
-   footprint on .td-read-col — the wrapper around the title + body — so BOTH
-   the title and the prose slide left of the rail together and stay aligned
-   (rail-open used to leave the title centered in the full width while the
-   body slid left, a ~200px gap). The rail is portaled into the drawer/page
-   shell (see the #anno-pill comment above), so it overlays the shell's right
-   edge regardless of the wrap's own position. Padding the read-col shrinks
-   the content box that .td-titlebody and .td-md center within, keeping their
-   800px measure and sliding them left of the rail. Chrome (action tray /
-   fields / composer) lives outside the col and stays full-width. .td-read-col
-   mirrors .td-body-area's flex column + min-height:0 so the body keeps its
-   bounded height + internal scroll. Note: a ~5px residual title-vs-body gap
-   can remain on long-bodied tickets because .td-annotate-wrap's own vertical
-   scrollbar reduces its content width by ~10px (.td-md centers slightly left
-   of where the title centers); cosmetic, accepted. */
-.td-read-col { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-.td-read-col:has(.td-annotate-wrap.rail-open) { padding-right: 390px; }
+/* ===== TKT-0285: fields sidebar — .td-props moves into a sticky left .td-side;
+   the title + body + (0284) Work-items panel live in .td-main, which re-centers
+   within the remaining horizontal space (gutters both sides). The annotation rail
+   (comments on the right) is untouched. ===== */
+/* .td-scroll is the scrolling ancestor; container-type lets the narrow fallback
+   below query its inline size. */
+.td-scroll { container-type: inline-size; }
+/* align-items: flex-start is REQUIRED — a stretched flex item has no scroll
+   travel, so the sticky sidebar would never engage without it. */
+.td-layout { display: flex; align-items: flex-start; min-height: 100%; }
+.td-side {
+  flex: 0 0 250px; width: 250px;
+  position: sticky; top: 0;
+  max-height: calc(100vh - var(--td-header-h, 96px)); overflow-y: auto;
+  padding: 18px 16px 24px 20px;
+  border-right: 1px solid var(--border-1);
+}
+.td-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+/* The annotation rail (360px + 30px gutter) overlays the drawer/page shell's
+   right edge; reserve its footprint on .td-main so the title + prose slide
+   left of the rail together (unchanged behaviour, new home — was .td-read-col). */
+.td-main:has(.td-annotate-wrap.rail-open) { padding-right: 390px; }
+
+/* Sidebar field shape: single column, label above a full-width control (kills
+   the 1200px centering + 2-col grid of the top-panel era in sidebar context). */
+.td-side .td-props { display: block; max-width: none; width: auto; margin: 0; padding: 0; gap: 0; }
+.td-side .td-prop { display: block; margin-bottom: 10px; }
+.td-side .td-prop-full { grid-column: auto; }
+.td-side .td-prop-label { display: block; flex: none; margin-bottom: 4px; }
+.td-side .td-prop .ps-trigger { width: 100%; }
+.td-side .td-prop-dispatch { grid-column: auto; }
+
+/* Narrow fallback (container query on .td-scroll): under ~700px of content
+   width (e.g. the 50% drawer on a small window) the sidebar stacks back on
+   top with the old 2-col grid so 6+ fields don't tower. Replaces the old
+   @media (max-width: 720px) td-props rule. */
+@container (max-width: 700px) {
+  .td-layout { display: block; }
+  .td-side { position: static; width: auto; max-height: none; border-right: none; border-bottom: 1px solid var(--border-1); }
+  .td-side .td-props { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 18px; }
+  .td-side .td-prop { display: flex; align-items: center; gap: 10px; margin-bottom: 0; }
+  .td-side .td-prop-label { display: flex; flex: 0 0 64px; margin-bottom: 0; }
+  .td-side .td-prop-full { grid-column: 1 / -1; }
+  .td-side .td-prop-dispatch { grid-column: 1 / -1; }
+}
 
 /* ===== TKT-0233: properties panel + PopSelect (custom listbox) ===== */
 /* The panel sits between the title and the body, inside .td-read-col, aligned
@@ -3057,7 +3085,8 @@ mark.anno.anno-tail::after {
 .ps-option .ps-hint { font-size: 10px; color: var(--text-3); flex: 0 0 auto; }
 .ps-empty { padding: 8px 10px; font-size: 11px; color: var(--text-3); text-align: center; }
 
-@media (max-width: 720px) { .td-props { grid-template-columns: 1fr; } }
+/* TKT-0285: the @media (max-width: 720px) td-props single-col rule moved into
+   the container-query fallback above (sidebar-aware, scoped to .td-side). */
 
 /* ===== Drawer width presets + collapsible compact field controls ===== */
 /* Width button group sits left of the close button in the ticket header. */
@@ -3075,6 +3104,10 @@ mark.anno.anno-tail::after {
   background: color-mix(in oklab, var(--accent) 12%, transparent);
   border-color: color-mix(in oklab, var(--accent) 35%, transparent);
 }
+/* TKT-0285: the 3-button group is now a single toggle button directly in the
+   title row — push it right (where the group used to sit) without affecting the
+   create drawer's grouped buttons (which are not direct children of the row). */
+.drawer-title-row > .td-width-btn { margin-left: auto; }
 
 /* TKT-0233: the old .td-fields-section + .td-action-tray + .td-tray-* CSS was
    removed — fields now live in the .td-props panel above the body as PopSelect
@@ -3469,7 +3502,7 @@ mark.anno.anno-tail::after {
 }
 
 /* Spec drawer → Work items panel (TKT-0284). Aligned to the 1200px document
-   column like .td-props; sits inside .td-read-col after the body. Lists the
+   column like .td-props; sits inside .td-main after the body. Lists the
    spec's children (work items with parent_id = this spec) with a + Work item
    button that opens the composer preset to Kind=work-item + Parent=this spec. */
 .td-children {

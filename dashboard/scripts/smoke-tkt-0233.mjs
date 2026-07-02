@@ -46,21 +46,27 @@ try {
   await page.waitForSelector('.td-props', { timeout: 5000 });
   await wait(300);
 
-  // ── 1. Panel placement + alignment (one left edge for title/props/prose) ─
+  // ── 1. Sidebar placement (TKT-0285: .td-props moved into a left .td-side) ──
   const geom = await page.evaluate(() => {
-    const props = document.querySelector('.td-props');
+    const side = document.querySelector('.td-side');
+    const main = document.querySelector('.td-main');
     const md = document.querySelector('.td-md');
+    const stateProp = Array.from(document.querySelectorAll('.td-side .td-prop-label'))
+      .find((l) => /State/i.test(l.textContent))?.parentElement;
     return {
-      propsTop: props?.getBoundingClientRect().top,
-      mdTop: md?.getBoundingClientRect().top,
-      propsLeft: props?.getBoundingClientRect().left,
-      mdLeft: md?.getBoundingClientRect().left,
+      hasSide: !!side,
+      hasMain: !!main,
+      mdMounted: !!md,
+      sideRight: side?.getBoundingClientRect().right,
+      mainLeft: main?.getBoundingClientRect().left,
+      sideHasState: !!stateProp?.querySelector('.ps-trigger'),
       actionTray: !!document.querySelector('.td-action-tray'),
     };
   });
-  assert.ok(geom.propsTop != null && geom.mdTop != null, '.td-props + .td-md mounted');
-  assert.ok(geom.propsTop < geom.mdTop, `panel above the body (propsTop ${geom.propsTop} < mdTop ${geom.mdTop})`);
-  assert.ok(Math.abs(geom.propsLeft - geom.mdLeft) < 1, `panel aligns with prose (propsLeft ${geom.propsLeft} ≈ mdLeft ${geom.mdLeft})`);
+  assert.ok(geom.hasSide && geom.hasMain, '.td-side + .td-main mounted');
+  assert.ok(geom.mdMounted, '.td-md (body) mounted in main');
+  assert.ok(geom.sideRight <= geom.mainLeft + 1, `sidebar is left of main (sideRight ${geom.sideRight} <= mainLeft ${geom.mainLeft})`);
+  assert.ok(geom.sideHasState, '.td-side contains the State control');
   assert.ok(!geom.actionTray, 'no .td-action-tray in the DOM');
 
   // ── 2. PopSelect journey: State trigger → listbox → in_progress → PATCH ──

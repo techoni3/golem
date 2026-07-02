@@ -20,15 +20,20 @@ const TD_PRIORITIES = [
 // Drawer width presets (percentage of viewport width). Persisted in
 // localStorage so a refresh keeps the user's choice. Order is wide→narrow,
 // matching the icon button group left-to-right.
+// TKT-0285: the 30% (Narrow) preset is gone — a sidebar is impossible at that
+// width. Two presets now: 90 (Wide) + 50 (Half). tdLoadWidth coerces a stored
+// '30' to '50' one-time so nobody lands on a broken width.
 const TD_WIDTHS = [
   { v: '90', icon: () => <Icon.DrawerWide/>, label: 'Wide (90%)' },
   { v: '50', icon: () => <Icon.DrawerHalf/>, label: 'Half (50%)' },
-  { v: '30', icon: () => <Icon.DrawerNarrow/>, label: 'Narrow (30%)' },
 ];
 const TD_WIDTH_KEY = 'td:width';
 function tdLoadWidth() {
   try {
-    const s = localStorage.getItem(TD_WIDTH_KEY);
+    let s = localStorage.getItem(TD_WIDTH_KEY);
+    // TKT-0285: the 30% preset is gone — coerce a stored '30' to '50' and
+    // persist it back so the migration is one-time (not a broken blank width).
+    if (s === '30') { s = '50'; try { localStorage.setItem(TD_WIDTH_KEY, s); } catch {} }
     return TD_WIDTHS.some((w) => w.v === s) ? s : '90';
   } catch { return '90'; }
 }
@@ -465,17 +470,12 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                   </span>
                 )}
                 {isPage ? null : (
-                  <div className="td-width-group" role="group" aria-label="Drawer width">
-                    {TD_WIDTHS.map((w) => (
-                      <button
-                        key={w.v}
-                        className={`td-width-btn ${widthPct === w.v ? 'active' : ''}`}
-                        onClick={() => setWidth(w.v)}
-                        title={w.label}
-                        aria-pressed={widthPct === w.v}
-                      >{w.icon()}</button>
-                    ))}
-                  </div>
+                  <button
+                    className={`td-width-btn ${widthPct === '90' ? 'active' : ''}`}
+                    onClick={() => setWidth(widthPct === '90' ? '50' : '90')}
+                    title="Toggle drawer width (90% ⇄ 50%)"
+                    aria-pressed={widthPct === '90'}
+                  >{widthPct === '90' ? <Icon.DrawerHalf/> : <Icon.DrawerWide/>}</button>
                 )}
                 {isPage ? null : (
                   <a className="td-open-page" href={window.Router.buildHref({ kind: 'ticket', id: ticket.id })}
@@ -496,41 +496,16 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
             </div>
 
             <div className="td-scroll">
-              {/* ── Title + body (with Edit toggle), wrapped in .td-read-col so the
-                   title aligns with the prose column AND both slide left of the
-                   annotation rail together (TKT-0208). Chrome (action tray / fields /
-                   composer) stays full-width below, outside the col. */}
-              <div className="td-read-col">
-              {/* ── Title — document heading, click to inline-edit (TKT-0233) ── */}
-              <div className="td-titlebody">
-                <div className="td-title-row">
-                  {editingTitle ? (
-                    <input
-                      ref={titleInputRef}
-                      className="td-title-input"
-                      value={titleDraft}
-                      onChange={(e) => setTitleDraft(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') { e.preventDefault(); commitTitle(); }
-                        else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setEditingTitle(false); }
-                      }}
-                      onBlur={commitTitle}
-                      placeholder="Title"
-                    />
-                  ) : (
-                    <h2 className="td-title" onClick={startTitleEdit} title="Click to edit">{ticket.title}</h2>
-                  )}
-                  <button
-                    className="orch-btn small ghost td-edit-btn"
-                    onClick={() => setEditBuf({ body: ticket.body || '' })}
-                    title="Edit body"
-                  >
-                    Edit
-                  </button>
-                </div>
-              </div>
-
-              {/* ── Properties panel (TKT-0233) — PopSelect controls, aligned to the column ── */}
+              {/* TKT-0285: fields sidebar — the .td-props panel (TKT-0233) moves
+                  into a sticky left .td-side; the title + body + (0284) Work-items
+                  panel live in .td-main, which re-centers within the remaining
+                  horizontal space (gutters both sides). The annotation rail
+                  (comments on the right) is untouched. align-items: flex-start is
+                  REQUIRED on .td-layout or the sticky sidebar never engages. */}
+              <div className="td-layout">
+              <aside className="td-side">
+              {/* ── Properties panel (TKT-0233 → TKT-0285 moved into the sidebar) —
+                   PopSelect controls; 0245's dispatch block + 0266's meta move with it. ── */}
               <div className="td-props">
                 <div className="td-prop">
                   <span className="td-prop-label">State</span>
@@ -676,6 +651,40 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
 
                 {dispatchNote && !pendingDispatch && <div className="td-dispatch-note">{dispatchNote}</div>}
               </div>
+              </aside>
+
+              {/* TKT-0285: main column — title + body + (0284) Work-items panel.
+                  The title + .td-md re-center within .td-main (gutters both sides);
+                  the annotation-rail reserve now lives on .td-main. */}
+              <div className="td-main">
+              {/* ── Title — document heading, click to inline-edit (TKT-0233) ── */}
+              <div className="td-titlebody">
+                <div className="td-title-row">
+                  {editingTitle ? (
+                    <input
+                      ref={titleInputRef}
+                      className="td-title-input"
+                      value={titleDraft}
+                      onChange={(e) => setTitleDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') { e.preventDefault(); commitTitle(); }
+                        else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setEditingTitle(false); }
+                      }}
+                      onBlur={commitTitle}
+                      placeholder="Title"
+                    />
+                  ) : (
+                    <h2 className="td-title" onClick={startTitleEdit} title="Click to edit">{ticket.title}</h2>
+                  )}
+                  <button
+                    className="orch-btn small ghost td-edit-btn"
+                    onClick={() => setEditBuf({ body: ticket.body || '' })}
+                    title="Edit body"
+                  >
+                    Edit
+                  </button>
+                </div>
+              </div>
 
               {/* ── Body — read (TdAnnotate) or edit (TKT-0233: body-only) ── */}
               <div className="td-body-area">
@@ -724,11 +733,8 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                   resolveAssignee={resolveActor}
                 />
               )}
-              </div>{/* /.td-read-col */}
-
-              {/* TKT-0233: the old bottom action-tray of native <select> chips was
-                  removed — fields now live in the .td-props panel above, inside
-                  the read-col, as PopSelect controls. */}
+              </div>{/* /.td-main */}
+              </div>{/* /.td-layout */}
             </div>
 
             {isQuestion ? (
