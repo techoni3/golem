@@ -196,7 +196,10 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
       if (s.reachable === false) {
         let hint = 'unreachable · will queue';
         if (s.pending_count > 0) hint += ` · ${s.pending_count} queued`;
-        return { value: s.session_id, label: s.label, dot: 'var(--text-3)', hint };
+        // TKT-0369 consult cns-9082c5 V1: --text-2 (not --text-3) so the dot
+        // doesn't blend with the hint text (also --text-3) — the dot is the only
+        // color carrier for status, so it needs to pop while staying "neutral".
+        return { value: s.session_id, label: s.label, dot: 'var(--text-2)', hint };
       }
       const status = liveStatus.get(s.session_id) ?? s.status ?? null;
       const dot = status === 'idle' ? 'var(--status-active)'
