@@ -410,6 +410,17 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
       });
   }, [ticketId, returnSession, doReturn]);
 
+  // TKT-0519: resolve a question WITHOUT returning it anywhere — for stale
+  // questions whose asker is gone (dead session, smoke fixture, obsolete ask).
+  // Posts the typed answer first when there is one, then marks the ticket done,
+  // which clears the needs-answer block and the board badge (both key off
+  // isQuestionForHuman → state done fails the check).
+  const onResolve = React.useCallback(async (body) => {
+    if (!ticketId) return;
+    if (body && body.trim()) await onAddComment(body.trim());
+    commitField({ state: 'done' });
+  }, [ticketId, onAddComment, commitField]);
+
   const close = () => onClose && onClose();
 
   const statePill = ticket ? (TD_STATE_PILL[ticket.state] || 'idle') : 'idle';
@@ -784,6 +795,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                 onComment={onAddComment}
                 onReturn={onReturn}
                 onAnswerAndReturn={onAnswerAndReturn}
+                onResolve={onResolve}
                 returnSession={returnSession}
                 setReturnSession={setReturnSession}
                 dispatchable={dispatchable}
@@ -869,7 +881,7 @@ function SpecChildrenPanel({ specId, projectContractId, resolveAssignee }) {
 // the comment THEN dispatch in one go). The answer always posts even with no
 // live session — only the return ping is gated on a reachable session.
 function QuestionReturn({
-  onComment, onReturn, onAnswerAndReturn, returnSession, setReturnSession,
+  onComment, onReturn, onAnswerAndReturn, onResolve, returnSession, setReturnSession,
   dispatchable, returning, note, ticket, labelBySession,
 }) {
   const [text, setText] = React.useState('');
@@ -919,6 +931,22 @@ function QuestionReturn({
     }
   }, [busy, trimmed, returnSession, onAnswerAndReturn]);
 
+  // TKT-0519: resolve without returning — posts the typed answer (if any), then
+  // marks the question done. No returnSession requirement. For stale questions
+  // whose asker is gone.
+  const resolveNoReturn = React.useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await onResolve(trimmed);
+      setText('');
+    } catch (err) {
+      console.error('resolve failed', err);
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, trimmed, onResolve]);
+
   const onKey = (e) => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); postComment(); }
   };
@@ -966,6 +994,7 @@ function QuestionReturn({
         <div className="td-qr-hint">
           The asking session <span className="mono">{String(asker).slice(0, 8)}</span> is offline — your answer still
           posts; pick another live session to ping, or it'll be re-read on resume.
+          If the asker is gone for good, use Resolve to close this question.
         </div>
       )}
       {!hasSessions && (
@@ -998,6 +1027,14 @@ function QuestionReturn({
           title={!returnSession ? 'Pick a live session to return to' : 'Post the answer then return to the selected session'}
         >
           Answer &amp; return
+        </button>
+        <button
+          className="orch-btn ghost"
+          onClick={resolveNoReturn}
+          disabled={disabled}
+          title="Mark this question done without pinging any session — use when the asker is gone or the question is stale. Posts your typed answer first if present."
+        >
+          Resolve
         </button>
       </div>
     </div>
