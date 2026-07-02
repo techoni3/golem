@@ -57,6 +57,10 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
   // Edit buffer for title/body. null when not editing.
   const [editBuf, setEditBuf] = React.useState(null);
   const [saving, setSaving] = React.useState(false);
+  // TKT-0233: inline title edit (click the h2 to edit; Enter/blur commits, Esc reverts).
+  const [editingTitle, setEditingTitle] = React.useState(false);
+  const [titleDraft, setTitleDraft] = React.useState('');
+  const titleInputRef = React.useRef(null);
 
   // Drawer width preset (persisted) + field-controls collapse (collapsed by
   // default; the body/state/assignee/priority fields are rarely changed and
@@ -200,14 +204,11 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
       .catch((err) => console.error('updateTicket failed', err));
   }, [ticketId]);
 
+  // TKT-0233: body-only edit. editBuf is now { body } (title is edited inline).
   const onSaveEdit = React.useCallback(() => {
     if (!ticketId || !editBuf) return;
     setSaving(true);
-    window.SubstrateAPI.updateTicket(ticketId, {
-      title: editBuf.title.trim(),
-      body: editBuf.body,
-      actor: 'human',
-    })
+    window.SubstrateAPI.updateTicket(ticketId, { body: editBuf.body, actor: 'human' })
       .then((updated) => {
         if (updated && updated.id) window.Store.upsertTrackerTicket(updated);
         setEditBuf(null);
@@ -215,6 +216,18 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
       })
       .catch((err) => { console.error('save ticket failed', err); setSaving(false); });
   }, [ticketId, editBuf]);
+
+  // TKT-0233: inline title edit — click the h2 to edit, Enter/blur commits, Esc reverts.
+  const startTitleEdit = React.useCallback(() => {
+    setTitleDraft(ticket?.title || '');
+    setEditingTitle(true);
+    setTimeout(() => titleInputRef.current?.focus(), 0);
+  }, [ticket]);
+  const commitTitle = React.useCallback(() => {
+    const t = (titleDraft || '').trim();
+    setEditingTitle(false);
+    if (t && ticket && t !== ticket.title) commitField({ title: t });
+  }, [titleDraft, ticket, commitField]);
 
   const onDispatch = React.useCallback(() => {
     if (!ticketId || !dispatchSession || dispatching) return;
@@ -405,46 +418,162 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                    annotation rail together (TKT-0208). Chrome (action tray / fields /
                    composer) stays full-width below, outside the col. */}
               <div className="td-read-col">
-              {editBuf ? (
-                <div className="td-edit">
-                  <input
-                    className="td-edit-title"
-                    type="text"
-                    value={editBuf.title}
-                    onChange={(e) => setEditBuf({ ...editBuf, title: e.target.value })}
-                    placeholder="Title"
-                  />
-                  <textarea
-                    className="td-edit-body orch-modal-textarea"
-                    rows={8}
-                    value={editBuf.body}
-                    onChange={(e) => setEditBuf({ ...editBuf, body: e.target.value })}
-                    placeholder="Body (Markdown) — plain text auto-wraps into paragraphs"
-                  />
-                  <div className="td-edit-actions">
-                    <button className="orch-btn ghost" onClick={() => setEditBuf(null)} disabled={saving}>Cancel</button>
-                    <button className="orch-btn primary" onClick={onSaveEdit} disabled={saving || !editBuf.title.trim()}>
-                      {saving ? 'Saving…' : 'Save'}
-                    </button>
-                  </div>
+              {/* ── Title — document heading, click to inline-edit (TKT-0233) ── */}
+              <div className="td-titlebody">
+                <div className="td-title-row">
+                  {editingTitle ? (
+                    <input
+                      ref={titleInputRef}
+                      className="td-title-input"
+                      value={titleDraft}
+                      onChange={(e) => setTitleDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') { e.preventDefault(); commitTitle(); }
+                        else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setEditingTitle(false); }
+                      }}
+                      onBlur={commitTitle}
+                      placeholder="Title"
+                    />
+                  ) : (
+                    <h2 className="td-title" onClick={startTitleEdit} title="Click to edit">{ticket.title}</h2>
+                  )}
+                  <button
+                    className="orch-btn small ghost td-edit-btn"
+                    onClick={() => setEditBuf({ body: ticket.body || '' })}
+                    title="Edit body"
+                  >
+                    Edit
+                  </button>
                 </div>
-              ) : (
-                <div className="td-titlebody">
-                  <div className="td-title-row">
-                    <h2 className="td-title">{ticket.title}</h2>
-                    <button
-                      className="orch-btn small ghost td-edit-btn"
-                      onClick={() => setEditBuf({ title: ticket.title || '', body: ticket.body || '' })}
-                    >
-                      Edit
-                    </button>
-                  </div>
-                </div>
-              )}
+              </div>
 
-              {/* ── Markdown body + inline annotations ── */}
+              {/* ── Properties panel (TKT-0233) — PopSelect controls, aligned to the column ── */}
+              <div className="td-props">
+                <div className="td-prop">
+                  <span className="td-prop-label">State</span>
+                  <PopSelect
+                    value={ticket.state}
+                    compact
+                    options={TD_STATES.map((s) => ({ value: s, label: s, dot: PS_STATE_DOT[s] }))}
+                    onChange={(v) => commitField({ state: v })}
+                  />
+                </div>
+                <div className="td-prop">
+                  <span className="td-prop-label">Assignee</span>
+                  <PopSelect
+                    value={ticket.assignee || ''}
+                    placeholder="Unassigned"
+                    searchable
+                    compact
+                    options={[
+                      { value: '', label: 'Unassigned' },
+                      { value: 'human', label: 'You' },
+                      ...dispatchable.map((s) => ({ value: s.session_id, label: s.label })),
+                      ...(ticket.assignee && ticket.assignee !== 'human' && !labelBySession.has(ticket.assignee)
+                        ? [{ value: ticket.assignee, label: `session ${String(ticket.assignee).slice(0, 8)}`, hint: 'offline' }]
+                        : []),
+                    ]}
+                    onChange={(v) => commitField({ assignee: v || null })}
+                  />
+                </div>
+                <div className="td-prop">
+                  <span className="td-prop-label">Priority</span>
+                  <PopSelect
+                    value={ticket.priority || ''}
+                    placeholder="None"
+                    compact
+                    options={TD_PRIORITIES.map((p) => ({ value: p.value, label: p.label || 'None', badge: p.value || undefined }))}
+                    onChange={(v) => commitField({ priority: v || null })}
+                  />
+                </div>
+                <div className="td-prop">
+                  <span className="td-prop-label">Type</span>
+                  <PopSelect
+                    value={ticket.kind}
+                    compact
+                    options={TD_KINDS.map((k) => ({ value: k, label: k }))}
+                    onChange={(v) => commitField({ kind: v })}
+                  />
+                </div>
+                <div className="td-prop td-prop-full">
+                  <span className="td-prop-label">Stream</span>
+                  <PopSelect
+                    value={ticket.stream_id || ''}
+                    placeholder="None"
+                    compact
+                    options={[{ value: '', label: 'None' }, ...streams.map((s) => ({ value: s.id, label: s.name }))]}
+                    onChange={(v) => commitField({ stream_id: v || null })}
+                  />
+                </div>
+
+                {/* Dispatch — an action, not a property; full-width, separated */}
+                <div className="td-prop-dispatch">
+                  <span className="td-prop-label">Dispatch to</span>
+                  <PopSelect
+                    value={dispatchSession}
+                    placeholder={dispatchable.length === 0 ? 'No session' : 'Session…'}
+                    compact
+                    disabled={dispatching || dispatchable.length === 0}
+                    options={dispatchable.map((s) => ({ value: s.session_id, label: s.label }))}
+                    onChange={(v) => setDispatchSession(v)}
+                  />
+                  <button className="orch-btn small td-dispatch-go"
+                    onClick={onDispatch}
+                    disabled={dispatching || !dispatchSession || dispatchable.length === 0}
+                    title={dispatchable.length === 0 ? 'No live session in this project — start one with `cd <project> && claude`' : 'Dispatch to the selected session'}>
+                    {dispatching ? '…' : 'Dispatch'}
+                  </button>
+                </div>
+
+                {/* Meta strip — collapsed by default */}
+                <div className="td-meta-strip">
+                  <button className="td-meta-toggle" onClick={() => setFieldsExpanded((e) => !e)} aria-expanded={fieldsExpanded} title={fieldsExpanded ? 'Hide metadata' : 'Show metadata'}>
+                    <Icon.ChevronRight/>
+                    <span>{fieldsExpanded ? 'Less' : 'More'}</span>
+                  </button>
+                  {fieldsExpanded && (
+                    <div className="td-meta-list">
+                      <div className="td-meta-row">
+                        <span className="td-meta-key">Dispatched to</span>
+                        <span className="mono">{resolveActor(ticket.dispatched_to) || '—'}</span>
+                        {ticket.dispatched_at && <span className="td-meta-value">· {tdAgo(ticket.dispatched_at)}</span>}
+                      </div>
+                      <div className="td-meta-row">
+                        <span className="td-meta-key">Created by</span>
+                        <span>{ticket.created_by && ticket.created_by !== 'human' ? ticket.created_by.slice(0, 8) : 'You'}</span>
+                        <span className="td-meta-value">· {tdAgo(ticket.created_at)}</span>
+                      </div>
+                      <div className="td-meta-row">
+                        <span className="td-meta-key">Updated</span>
+                        <span className="td-meta-value">{tdAgo(ticket.updated_at)}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {dispatchNote && <div className="td-dispatch-note">{dispatchNote}</div>}
+              </div>
+
+              {/* ── Body — read (TdAnnotate) or edit (TKT-0233: body-only) ── */}
               <div className="td-body-area">
-                {ticket.body ? (
+                {editBuf ? (
+                  <div className="td-edit">
+                    <textarea
+                      className="td-edit-body orch-modal-textarea"
+                      rows={8}
+                      value={editBuf.body}
+                      onChange={(e) => setEditBuf({ ...editBuf, body: e.target.value })}
+                      onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setEditBuf(null); } }}
+                      placeholder="Body (Markdown) — plain text auto-wraps into paragraphs"
+                    />
+                    <div className="td-edit-actions">
+                      <button className="orch-btn ghost" onClick={() => setEditBuf(null)} disabled={saving}>Cancel</button>
+                      <button className="orch-btn primary" onClick={onSaveEdit} disabled={saving}>
+                        {saving ? 'Saving…' : 'Save'}
+                      </button>
+                    </div>
+                  </div>
+                ) : ticket.body ? (
                   <TdAnnotate
                     body={ticket.body}
                     comments={comments}
@@ -460,125 +589,9 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
               </div>
               </div>{/* /.td-read-col */}
 
-              {/* ── Compact action tray (TKT-0101) ── */}
-              {/* One row of pills + slim dispatch + collapsed links by default.
-                  Pills are styled selects (TD-CHIP), commit on change via
-                  commitField. Inline label prefixes use the actual field name
-                  ("State", "Assignee", …) so the row is readable at 30% width
-                  without tooltips; labels shrink to just the colored chip on
-                  wider drawers via a media query in extra.css. */}
-              <div className={`td-action-tray ${fieldsExpanded ? 'open' : ''}`}>
-                <div className="td-tray-row">
-                  <label className="td-tray-chip" data-key="state">
-                    <span className="td-tray-key">State</span>
-                    <select className="td-chip" value={ticket.state}
-                      onChange={(e) => commitField({ state: e.target.value })}
-                      aria-label="State">
-                      {TD_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </label>
-
-                  <label className="td-tray-chip" data-key="assignee">
-                    <span className="td-tray-key">Assignee</span>
-                    <select className="td-chip" value={ticket.assignee || ''}
-                      onChange={(e) => commitField({ assignee: e.target.value || null })}
-                      aria-label="Assignee">
-                      <option value="">Unassigned</option>
-                      <option value="human">Human (You)</option>
-                      {dispatchable.map((s) => (
-                        <option key={s.session_id} value={s.session_id}>{s.label}</option>
-                      ))}
-                      {/* Keep an offline assignee selectable if it isn't in the live list. */}
-                      {ticket.assignee && ticket.assignee !== 'human'
-                        && !labelBySession.has(ticket.assignee) && (
-                        <option value={ticket.assignee}>
-                          session {String(ticket.assignee).slice(0, 8)} (offline)
-                        </option>
-                      )}
-                    </select>
-                  </label>
-
-                  <label className="td-tray-chip" data-key="priority">
-                    <span className="td-tray-key">Priority</span>
-                    <select className="td-chip" value={ticket.priority || ''}
-                      onChange={(e) => commitField({ priority: e.target.value || null })}
-                      aria-label="Priority">
-                      {TD_PRIORITIES.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-                    </select>
-                  </label>
-
-                  <label className="td-tray-chip" data-key="kind">
-                    <span className="td-tray-key">Kind</span>
-                    <select className="td-chip" value={ticket.kind}
-                      onChange={(e) => commitField({ kind: e.target.value })}
-                      aria-label="Kind">
-                      {TD_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
-                    </select>
-                  </label>
-
-                  <label className="td-tray-chip" data-key="stream">
-                    <span className="td-tray-key">Stream</span>
-                    <select className="td-chip" value={ticket.stream_id || ''}
-                      onChange={(e) => commitField({ stream_id: e.target.value || null })}
-                      aria-label="Stream">
-                      <option value="">None</option>
-                      {streams.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                  </label>
-
-                  {/* Dispatch — folded into the same row as the field chips
-                      (wraps to the next line on narrow widths), separated by a
-                      left rule so it stands out without claiming its own row. */}
-                  <div className="td-tray-dispatch">
-                    <label className="td-tray-chip">
-                      <span className="td-tray-key">Dispatch</span>
-                      <select className="td-chip" value={dispatchSession}
-                        onChange={(e) => setDispatchSession(e.target.value)}
-                        disabled={dispatching || dispatchable.length === 0}
-                        aria-label="Dispatch to session">
-                        <option value="">
-                          {dispatchable.length === 0 ? 'No session' : 'Session…'}
-                        </option>
-                        {dispatchable.map((s) => (
-                          <option key={s.session_id} value={s.session_id}>{s.label}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <button className="orch-btn small td-dispatch-go"
-                      onClick={onDispatch}
-                      disabled={dispatching || !dispatchSession || dispatchable.length === 0}
-                      title={dispatchable.length === 0 ? 'No live session in this project — start one with `cd <project> && claude`' : 'Dispatch to the selected session'}>
-                      {dispatching ? '…' : 'Dispatch'}
-                    </button>
-                  </div>
-
-                  <button
-                    className="td-tray-more"
-                    onClick={() => setFieldsExpanded((e) => !e)}
-                    aria-expanded={fieldsExpanded}
-                    title={fieldsExpanded ? 'Hide fields detail' : 'More field controls'}
-                  >
-                    <Icon.ChevronRight/>
-                  </button>
-                </div>
-
-                {fieldsExpanded && (
-                  <div className="td-tray-extra">
-                    <div className="td-tray-extra-row">
-                      <span className="td-tray-extra-key">Dispatched to</span>
-                      <span className="mono">{resolveActor(ticket.dispatched_to) || '—'}</span>
-                      {ticket.dispatched_at && <span className="td-tray-extra-meta">· {tdAgo(ticket.dispatched_at)}</span>}
-                    </div>
-                    <div className="td-tray-extra-row">
-                      <span className="td-tray-extra-key">Created by</span>
-                      <span>{ticket.created_by && ticket.created_by !== 'human' ? ticket.created_by.slice(0, 8) : 'You'}</span>
-                      <span className="td-tray-extra-meta">· {tdAgo(ticket.created_at)}</span>
-                    </div>
-                  </div>
-                )}
-
-                {dispatchNote && <div className="td-dispatch-note">{dispatchNote}</div>}
-              </div>
+              {/* TKT-0233: the old bottom action-tray of native <select> chips was
+                  removed — fields now live in the .td-props panel above, inside
+                  the read-col, as PopSelect controls. */}
             </div>
 
             {isQuestion ? (
@@ -609,14 +622,7 @@ function tdAgo(iso) {
   return window.SubstrateFmt?.fmtTimeAgo?.(t) || '';
 }
 
-function TdField({ label, children }) {
-  return (
-    <label className="td-field">
-      <span className="td-field-label">{label}</span>
-      {children}
-    </label>
-  );
-}
+// TKT-0233: the unused TdField component was removed (fields now use .td-prop).
 
 // WS6: the "Answer & return" affordance for a question-kind ticket. Combines the
 // comment composer (the answer) with a "Return to ▾" live-session select and two

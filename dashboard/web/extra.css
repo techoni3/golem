@@ -2146,35 +2146,12 @@ select.ct-input { appearance: none; cursor: pointer; padding-right: 26px;
 .td-body-empty { margin-top: 8px; color: var(--text-3); font-size: 12.5px; font-style: italic; }
 
 .td-edit { display: flex; flex-direction: column; gap: 8px; }
-.td-edit-title {
-  width: 100%;
-  background: var(--bg-0);
-  color: var(--text-0);
-  border: 1px solid var(--border-2);
-  border-radius: var(--radius-1);
-  padding: 9px 11px;
-  font-size: 15px;
-  font-weight: 600;
-}
-.td-edit-title:focus, .td-edit-body:focus { outline: none; border-color: var(--accent-border); }
+.td-edit-body:focus { outline: none; border-color: var(--accent-border); }
 .td-edit-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
 /* Markdown body scaffold folded into the .td-md container below (TKT-0173). */
 
-/* Inline field grid */
-.td-fields {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px 14px;
-  padding: 14px 0;
-  border-top: 1px solid var(--border-1);
-  border-bottom: 1px solid var(--border-1);
-}
-.td-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-.td-field-label {
-  font-size: 10.5px; color: var(--text-2);
-  text-transform: uppercase; letter-spacing: 0.06em;
-}
+/* (TKT-0233: the old .td-fields/.td-field grid CSS was removed — fields now use .td-props/.td-prop.) */
 .td-select {
   width: 100%;
   background: var(--bg-0);
@@ -2193,25 +2170,8 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
 .td-select:focus { outline: none; border-color: var(--accent-border); }
 .td-select:disabled { opacity: 0.55; cursor: not-allowed; }
 
-.td-section-title {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 11px; color: var(--text-2);
-  text-transform: uppercase; letter-spacing: 0.06em;
-  margin-bottom: 8px;
-}
-.td-count { color: var(--text-3); font-size: 11px; }
-
-/* Dispatch */
-/* Dispatch note (rendered inside the action tray when a soft note is set). */
-.td-dispatch-note {
-  font-size: 11.5px; line-height: 1.5;
-  color: var(--status-review);
-  background: color-mix(in oklab, var(--status-review) 12%, var(--bg-2));
-  border: 1px solid color-mix(in oklab, var(--status-review) 30%, transparent);
-  border-radius: var(--radius-1);
-  padding: 7px 10px;
-  margin-top: 6px;
-}
+/* (TKT-0233: .td-section-title/.td-count + old .td-dispatch-note removed —
+   .td-dispatch-note is redefined in the TKT-0233 panel section below.) */
 
 /* Comment thread — reuses .ceo-chat/.ceo-msg, scoped tweaks here */
 .td-comments { display: flex; flex-direction: column; }
@@ -2902,7 +2862,7 @@ mark.anno.anno-tail::after {
   border-top: 1px solid var(--border-1);
   border-bottom: 1px solid var(--border-1);
 }
-.td-fields, .td-comments { padding: 14px 22px; }
+.td-comments { padding: 14px 22px; }
 .td-composer { padding: 12px 22px; border-top: 1px solid var(--border-1); }
 
 /* When the annotation rail (360px + 30px gutter) is open, reserve its
@@ -2923,6 +2883,106 @@ mark.anno.anno-tail::after {
 .td-read-col { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .td-read-col:has(.td-annotate-wrap.rail-open) { padding-right: 390px; }
 
+/* ===== TKT-0233: properties panel + PopSelect (custom listbox) ===== */
+/* The panel sits between the title and the body, inside .td-read-col, aligned
+   to the same 1200px column (one left edge for title / props / prose). Fields
+   are PopSelect controls (custom listbox) — native <select> menus are
+   OS-rendered + unstylable; PopSelect portals a themed menu to body. */
+.td-props {
+  max-width: 1200px; width: 100%; margin: 0 auto; box-sizing: border-box;
+  padding: 2px 40px 14px;
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 18px;
+}
+.td-prop { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.td-prop-full { grid-column: 1 / -1; }
+.td-prop-label {
+  flex: 0 0 64px; font-family: "JetBrains Mono", monospace; font-size: 10px;
+  letter-spacing: .5px; text-transform: uppercase; color: var(--text-3);
+}
+.td-prop .ps-trigger { flex: 1 1 auto; min-width: 0; }
+.td-prop-dispatch {
+  grid-column: 1 / -1; display: flex; align-items: center; gap: 10px;
+  margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--border-1);
+}
+.td-prop-dispatch .ps-trigger { flex: 1 1 auto; min-width: 0; }
+.td-dispatch-go { flex: 0 0 auto; }
+.td-dispatch-note { grid-column: 1 / -1; font-size: 11.5px; line-height: 1.5; color: var(--status-review); background: color-mix(in oklab, var(--status-review) 12%, var(--bg-2)); border: 1px solid color-mix(in oklab, var(--status-review) 30%, transparent); border-radius: var(--radius-1); padding: 7px 10px; margin-top: 6px; }
+
+/* Meta strip (Dispatched to / Created by / Updated) — collapsed by default */
+.td-meta-strip { grid-column: 1 / -1; margin-top: 4px; }
+.td-meta-toggle {
+  display: inline-flex; align-items: center; gap: 4px; background: none; border: none;
+  color: var(--text-3); font-family: "JetBrains Mono", monospace; font-size: 10px;
+  letter-spacing: .5px; text-transform: uppercase; cursor: pointer; padding: 2px 0;
+}
+.td-meta-toggle:hover { color: var(--text-1); }
+.td-meta-toggle svg { width: 10px; height: 10px; transition: transform .15s; }
+.td-meta-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+.td-meta-list { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
+.td-meta-row { display: flex; align-items: baseline; gap: 6px; font-size: 11px; color: var(--text-2); }
+.td-meta-key { font-family: "JetBrains Mono", monospace; font-size: 10px; color: var(--text-3); text-transform: uppercase; letter-spacing: .5px; }
+.td-meta-value { color: var(--text-3); }
+.td-meta-row .mono { font-family: "JetBrains Mono", monospace; }
+
+/* Inline title edit (click the h2) — input styled identically to the h2 so
+   nothing jumps (23px/600, same metrics as .td-title after TKT-0208/0234). */
+.td-title-input {
+  flex: 1 1 auto; min-width: 0; font-size: 23px; font-weight: 600; line-height: 1.25;
+  letter-spacing: -0.01em; color: var(--text-0); background: var(--bg-1);
+  border: 1px solid var(--accent-border); border-radius: var(--radius-1);
+  padding: 0 6px; margin: 0; font-family: inherit;
+}
+.td-title-input:focus { outline: none; }
+.td-title { cursor: text; }
+
+/* PopSelect (custom listbox) */
+.ps-trigger {
+  display: inline-flex; align-items: center; gap: 6px; text-align: left;
+  background: var(--bg-2); border: 1px solid var(--border-2); border-radius: var(--radius-1);
+  color: var(--text-0); font-size: 12px; font-family: inherit; cursor: pointer;
+  padding: 5px 9px; min-height: 28px; transition: border-color .15s, background .15s;
+}
+.ps-trigger.compact { padding: 3px 8px; min-height: 24px; font-size: 11px; }
+.ps-trigger:hover { border-color: var(--border-3); }
+.ps-trigger:focus-visible { outline: none; border-color: var(--accent-border); }
+.ps-trigger.disabled, .ps-trigger:disabled { opacity: .5; cursor: not-allowed; }
+.ps-trigger .ps-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ps-trigger .ps-chev { width: 12px; height: 12px; color: var(--text-3); transform: rotate(90deg); flex: 0 0 auto; }
+.ps-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.ps-badge {
+  font-family: "JetBrains Mono", monospace; font-size: 10px; font-weight: 600;
+  padding: 1px 5px; border-radius: 4px; flex: 0 0 auto;
+  background: var(--bg-3); color: var(--text-1); border: 1px solid var(--border-2);
+}
+
+.ps-menu {
+  background: var(--bg-1); border: 1px solid var(--border-2); border-radius: var(--radius-2);
+  box-shadow: 0 8px 26px rgba(0,0,0,.45); max-height: 320px; overflow-y: auto;
+  padding: 4px; display: flex; flex-direction: column; gap: 1px;
+  animation: ps-appear .12s ease-out;
+}
+@keyframes ps-appear { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+.ps-filter {
+  margin: 0 0 4px; padding: 5px 8px; font-size: 12px; font-family: inherit;
+  background: var(--bg-0); border: 1px solid var(--border-2); border-radius: var(--radius-1); color: var(--text-0);
+}
+.ps-filter:focus { outline: none; border-color: var(--accent-border); }
+.ps-options { display: flex; flex-direction: column; gap: 1px; }
+.ps-option {
+  display: flex; align-items: center; gap: 7px; text-align: left; width: 100%;
+  padding: 6px 10px; background: none; border: none; border-radius: var(--radius-1);
+  color: var(--text-1); font-size: 12px; font-family: inherit; cursor: pointer;
+}
+.ps-option:hover, .ps-option.active { background: var(--bg-2); color: var(--text-0); }
+.ps-option.selected { color: var(--text-0); }
+.ps-option.disabled { opacity: .45; cursor: not-allowed; }
+.ps-option .ps-check { width: 14px; flex: 0 0 auto; display: inline-flex; color: var(--accent); }
+.ps-option .ps-option-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ps-option .ps-hint { font-size: 10px; color: var(--text-3); flex: 0 0 auto; }
+.ps-empty { padding: 8px 10px; font-size: 11px; color: var(--text-3); text-align: center; }
+
+@media (max-width: 720px) { .td-props { grid-template-columns: 1fr; } }
+
 /* ===== Drawer width presets + collapsible compact field controls ===== */
 /* Width button group sits left of the close button in the ticket header. */
 .td-width-group { margin-left: auto; display: flex; gap: 2px; }
@@ -2940,130 +3000,9 @@ mark.anno.anno-tail::after {
   border-color: color-mix(in oklab, var(--accent) 35%, transparent);
 }
 
-/* Collapsible fields section: borders + toggle live on the wrapper; the grid
-   inside is rendered only when expanded. Compact inline label+select rows. */
-.td-fields-section { border-top: 1px solid var(--border-1); border-bottom: 1px solid var(--border-1); }
-.td-fields-section .td-fields {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px 14px;
-  padding: 10px 22px 12px;
-  border: none;            /* section wrapper owns the borders now */
-}
-.td-fields-section .td-field { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.td-fields-section .td-field-label { flex: 0 0 58px; }
-.td-fields-section select.td-select { padding: 4px 26px 4px 8px; font-size: 12px; }
-
-.td-fields-toggle {
-  width: 100%; display: flex; align-items: center; gap: 6px;
-  padding: 8px 22px; background: transparent; border: none;
-  color: var(--text-2); font-size: 11px; font-family: var(--font-sans);
-  text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer;
-}
-.td-fields-toggle:hover { color: var(--text-0); background: var(--bg-2); }
-.td-chevron { display: inline-flex; color: var(--text-3); transition: transform 150ms ease; }
-.td-fields-section.open .td-chevron { transform: rotate(90deg); }
-.td-fields-summary {
-  margin-left: 6px; color: var(--text-3);
-  text-transform: none; letter-spacing: 0; font-size: 11px;
-}
-
-/* ===== TKT-0101: Compact action tray + slim dispatch + collapsible links ===== */
-.td-action-tray {
-  border-top: 1px solid var(--border-1);
-  border-bottom: 1px solid var(--border-1);
-  padding: 6px 22px;
-  background: color-mix(in oklab, var(--bg-2) 60%, transparent);
-}
-.td-tray-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px 6px;
-  align-items: center;
-}
-.td-tray-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: var(--bg-1);
-  border: 1px solid var(--border-2);
-  border-radius: 14px;
-  padding: 0 4px 0 8px;
-  height: 22px;
-  font-size: 10px;
-  color: var(--text-3);
-  white-space: nowrap;
-}
-.td-tray-chip:hover { border-color: var(--border-3); }
-.td-tray-chip:focus-within { border-color: var(--accent-border); }
-.td-tray-key {
-  font-size: 9px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--text-3);
-  font-family: var(--font-mono);
-}
-.td-tray-chip select.td-chip {
-  appearance: none;
-  background: transparent;
-  border: none;
-  color: var(--text-0);
-  padding: 0 14px 0 0;
-  height: 22px;
-  font-size: 11px;
-  font-family: var(--font-mono);
-  cursor: pointer;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 16 16' fill='none' stroke='%238a909c' stroke-width='1.5'><path d='M4 6l4 4 4-4'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 0 center;
-}
-.td-tray-chip select.td-chip:focus { outline: none; }
-.td-tray-chip select.td-chip option { background: var(--bg-0); color: var(--text-0); }
-
-.td-tray-more {
-  margin-left: auto;
-  width: 22px; height: 22px;
-  border-radius: 50%;
-  background: transparent;
-  border: 1px solid var(--border-2);
-  color: var(--text-3);
-  display: grid; place-items: center;
-  cursor: pointer;
-  transition: transform .15s;
-}
-.td-tray-more[aria-expanded="true"] { transform: rotate(90deg); border-color: var(--accent-border); color: var(--accent); }
-.td-tray-more:hover { border-color: var(--border-3); color: var(--text-1); }
-.td-tray-more svg { width: 11px; height: 11px; }
-
-.td-tray-extra {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--border-1);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 11px;
-}
-.td-tray-extra-row { display: flex; align-items: center; gap: 6px; color: var(--text-1); }
-.td-tray-extra-key { font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-3); font-family: var(--font-mono); min-width: 92px; }
-.td-tray-extra-meta { color: var(--text-3); }
-
-/* Dispatch group folded into the action-tray row (TKT-0146 follow-up): wraps
-   with the field chips, separated by a left rule so it stands out without its
-   own row. */
-.td-tray-dispatch {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: 6px;
-  padding-left: 10px;
-  border-left: 1px solid var(--border-2);
-}
-.td-tray-dispatch .td-dispatch-go {
-  height: 22px;
-  padding: 0 10px;
-  font-size: 11px;
-}
+/* TKT-0233: the old .td-fields-section + .td-action-tray + .td-tray-* CSS was
+   removed — fields now live in the .td-props panel above the body as PopSelect
+   controls. (.td-select stays — the create drawer still uses it.) */
 
 /* ===== TKT-0103: Board drag-and-drop ===== */
 .ticket.is-dragging {
