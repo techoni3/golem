@@ -1451,6 +1451,27 @@
   color: var(--status-review);
   border-color: color-mix(in oklab, var(--status-review) 38%, transparent);
 }
+/* TKT-0518: collapsible + re-orderable sections. The head is a flex row:
+   a full-width toggle button (caret/title/count) + right-aligned tools + ↑/↓. */
+.pv-sec-head { margin-bottom: 12px; }
+.pv-sec.closed .pv-sec-head { margin-bottom: 0; }
+.pv-sec-toggle {
+  display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;
+  background: none; border: 0; padding: 0; cursor: pointer;
+  color: inherit; font: inherit; text-align: left;
+}
+.pv-sec-toggle:hover .pv-section-title { color: var(--accent); }
+.pv-sec-caret { color: var(--text-3); font-size: 10px; width: 12px; flex-shrink: 0; }
+.pv-sec-tools { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.pv-sec-move { display: flex; gap: 2px; }
+.pv-sec-move-btn {
+  background: none; border: 0; padding: 2px 4px; cursor: pointer;
+  color: var(--text-3); font-size: 11px; line-height: 1; border-radius: 4px;
+}
+.pv-sec-move-btn:hover:not(:disabled) { color: var(--text-1); background: var(--bg-2); }
+.pv-sec-move-btn:disabled { opacity: 0.3; cursor: default; }
+/* Ported from the deleted .pv-collapse-body rule — the kanban gets breathing room. */
+.pv-sec-body .kanban { margin-top: 12px; }
 .pv-quiet-line {
   font-size: 12px;
   color: var(--text-3);
@@ -1459,8 +1480,7 @@
 }
 
 /* ── PLAN ── */
-.pv-plan .pv-section-head { justify-content: space-between; }
-.pv-plan-stat { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-1); }
+.pv-plan-stat { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-1); margin-left: auto; }
 .pv-plan-pct { font-weight: 600; }
 .pv-plan-bar {
   height: 8px;
@@ -1694,42 +1714,8 @@
   color: var(--text-4);
   margin-bottom: 12px;
 }
-.pv-collapse {
-  border: 1px solid var(--border-2);
-  border-radius: var(--radius-2);
-  background: var(--bg-1);
-  margin-bottom: 10px;
-  overflow: hidden;
-}
-.pv-collapse.open { background: var(--bg-0); }
-.pv-collapse-head {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 11px 14px;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  color: var(--text-1);
-  font-family: var(--font-sans);
-  text-align: left;
-  transition: background 100ms ease;
-}
-.pv-collapse-head:hover { background: var(--bg-2); }
-.pv-collapse-caret { color: var(--text-3); font-size: 10px; width: 12px; flex-shrink: 0; }
-.pv-collapse-title { font-size: 12.5px; font-weight: 600; flex: 1; }
-.pv-collapse-count {
-  font-size: 11px;
-  color: var(--text-3);
-  background: var(--bg-2);
-  border: 1px solid var(--border-2);
-  border-radius: 999px;
-  padding: 1px 8px;
-}
-.pv-collapse-body { padding: 4px 14px 16px; border-top: 1px solid var(--border-2); }
-.pv-collapse-body .timeline-wrap,
-.pv-collapse-body .kanban { margin-top: 12px; }
+/* TKT-0518: the .pv-collapse* card chrome is gone — all sections now use the
+   light .pv-section look via the PVSection shell (.pv-sec* rules above). */
 
 /* ── Legacy hook-activity rollup ── */
 .pv-hook-stream { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
@@ -2231,7 +2217,7 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
 .td-composer { padding: 10px 22px 14px; }
 
 /* Per-project tracker board section */
-.pv-tracker-tools { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.pv-tracker-tools { display: flex; align-items: center; gap: 12px; }
 .pv-tracker .tracker-kanban { margin-top: 4px; }
 
 /* ===== WS6: Work-streams panel ===== */

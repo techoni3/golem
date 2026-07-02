@@ -1,22 +1,93 @@
 // Project view (v4) — the per-project command center.
 //
-// Top-to-bottom the page leads with v4 progress objects only:
-//
-//   1. HERO            — name / glyph / counts.
-//   2. PLAN            — live checklist from PLAN.md (N/M + bar), or one quiet
-//                        line when the project has no plan.
-//   3. TICKETS         — per-project tracker.db kanban.
-//   4. MILESTONES      — this project's milestone timeline, newest first.
-//   5. SESSIONS        — native Claude Code sessions in this project.
-//
-// The v3 journal-synthesized agents panel, markdown tracker kanban, hook-event
-// stream, and gate panels were removed in TKT-0009.
+// The hero leads, then six sections (Plan, Pending gates, Tickets, Specs,
+// Milestones, Sessions) — each a collapsible, re-orderable PVSection (TKT-0518).
+// Layout (order + collapsed) is PAGE-scoped (one layout for every project's
+// detail page), persisted to localStorage. The v3 journal-synthesized agents
+// panel, markdown tracker kanban, hook-event stream, and gate panels were
+// removed in TKT-0009.
 
 const { useState: usePVState } = React;
+
+// ── TKT-0518: page-layout persistence ───────────────────────────────────────
+// PAGE-scoped, not project-scoped: one layout for the project-detail page no
+// matter which project is open (explicit product decision on the ticket).
+const PV_LAYOUT_KEY = 'golem.pv.layout.v1';
+const PV_SECTION_IDS = ['plan', 'gates', 'tickets', 'specs', 'milestones', 'sessions'];
+const PV_DEFAULT_COLLAPSED = { specs: true }; // today's defaults: specs closed, rest open
+
+function pvLoadLayout() {
+  try {
+    const j = JSON.parse(localStorage.getItem(PV_LAYOUT_KEY) || '{}');
+    return {
+      order: Array.isArray(j.order) ? j.order : [],
+      collapsed: (j.collapsed && typeof j.collapsed === 'object') ? j.collapsed : {},
+    };
+  } catch { return { order: [], collapsed: {} }; }
+}
+
+function usePvLayout() {
+  const [layout, setLayout] = usePVState(pvLoadLayout);
+  // Forward-compat merge: stored order first (unknown ids dropped), then any
+  // known-but-unstored ids appended — a section shipped after the user saved
+  // a layout still appears instead of silently vanishing.
+  const order = React.useMemo(() => {
+    const stored = layout.order.filter((id) => PV_SECTION_IDS.includes(id));
+    return [...stored, ...PV_SECTION_IDS.filter((id) => !stored.includes(id))];
+  }, [layout.order]);
+  const persist = (next) => {
+    setLayout(next);
+    try { localStorage.setItem(PV_LAYOUT_KEY, JSON.stringify(next)); } catch { /* storage full/blocked — layout stays for this session */ }
+  };
+  const isOpen = (id) => !(id in layout.collapsed ? layout.collapsed[id] : PV_DEFAULT_COLLAPSED[id]);
+  const toggle = (id) => persist({ ...layout, collapsed: { ...layout.collapsed, [id]: isOpen(id) } });
+  const move = (id, dir) => {
+    const i = order.indexOf(id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= order.length) return;
+    const next = [...order];
+    [next[i], next[j]] = [next[j], next[i]];
+    persist({ ...layout, order: next });
+  };
+  return { order, isOpen, toggle, move };
+}
+
+// ── TKT-0518: shared section shell — collapse + reorder controls ────────────
+// The toggle <button> spans the whole left/middle of the head (flex:1) so the
+// row is an easy click target; tools and move buttons are SIBLINGS of it, not
+// children — nested interactive elements inside a <button> are invalid HTML
+// and would break click handling. counts/badges stay in the head (visible when
+// collapsed) so e.g. a collapsed Gates section still shows its "N awaiting" pulse.
+function PVSection({ title, count, badge, extra, tools, open, onToggle, onMoveUp, onMoveDown, canUp, canDown, className, children }) {
+  return (
+    <section className={`pv-section pv-sec ${open ? 'open' : 'closed'}${className ? ' ' + className : ''}`}>
+      <div className="pv-section-head pv-sec-head">
+        <button className="pv-sec-toggle" onClick={onToggle} aria-expanded={open} title={open ? 'Collapse section' : 'Expand section'}>
+          <span className="pv-sec-caret">{open ? '▾' : '▸'}</span>
+          <span className="pv-section-title">{title}</span>
+          {badge}
+          {count != null && <span className="pv-section-count tnum">{count}</span>}
+          {extra}
+        </button>
+        <div className="pv-sec-tools">
+          {tools}
+          <span className="pv-sec-move">
+            <button className="pv-sec-move-btn" disabled={!canUp} onClick={onMoveUp} aria-label={`Move ${title} up`} title="Move section up">↑</button>
+            <button className="pv-sec-move-btn" disabled={!canDown} onClick={onMoveDown} aria-label={`Move ${title} down`} title="Move section down">↓</button>
+          </span>
+        </div>
+      </div>
+      {open && <div className="pv-sec-body">{children}</div>}
+    </section>
+  );
+}
 
 function ProjectView({ projectId, tab, setRoute }) {
   useStore();
   const project = window.Store.getProject(projectId);
+  // Hooks rule: usePvLayout calls useState/useMemo, so it MUST run before the
+  // early return for an unknown project (hooks can't be conditional).
+  const { order, isOpen, toggle, move } = usePvLayout();
 
   if (!project) {
     return (
@@ -32,6 +103,28 @@ function ProjectView({ projectId, tab, setRoute }) {
   const sessions = window.Store.getProjectSessions(project);
   const aliveSessions = window.Store.getProjectAliveSessions(project);
   const plan = project.plan;
+  const cid = project.project_id || project.id;
+
+  // TKT-0518: render sections from the persisted layout. key={id} is
+  // load-bearing — React reconciles by key, so a reorder preserves each
+  // section's internal state (e.g. Tickets' showArchived + fetched dispatchable)
+  // instead of remounting it.
+  const renderSection = (id, shell) => {
+    switch (id) {
+      case 'plan':       return <ProjectPlanSection key={id} plan={plan} color={project.color} {...shell}/>;
+      // TKT-0194: human-in-the-loop approval / input gates. The anchor agent (or
+      // any v4 agent) writes a gate file to ~/.config/golem/gates/<project_id>/
+      // <gate_id>.md when a phase needs a human verdict; the dashboard exposes
+      // the awaiting ones here with Approve / Deny / Cancel buttons.
+      case 'gates':      return <ProjectGatesSection key={id} project={project} {...shell}/>;
+      case 'tickets':    return <ProjectTrackerBoard key={id} contractId={cid} {...shell}/>;
+      // TKT-0339: spec-kind tickets as a project sub-board (SpecsBoardView pinned).
+      case 'specs':      return <ProjectSpecsBoard key={id} contractId={cid} {...shell}/>;
+      case 'milestones': return <ProjectMilestoneTimeline key={id} milestones={milestones} {...shell}/>;
+      case 'sessions':   return <ProjectSessions key={id} sessions={sessions} setRoute={setRoute} projectId={cid} {...shell}/>;
+      default: return null;
+    }
+  };
 
   return (
     <div className="page project-command-center">
@@ -59,68 +152,37 @@ function ProjectView({ projectId, tab, setRoute }) {
         </div>
       </div>
 
-      {/* ── 1. PLAN ── */}
-      <ProjectPlanSection plan={plan} color={project.color}/>
-
-      {/* ── 1b. PENDING GATES (TKT-0194) — human-in-the-loop approval / input
-          gates. The anchor agent (or any v4 agent) writes a gate file to
-          ~/.config/golem/gates/<project_id>/<gate_id>.md when a phase
-          needs a human verdict; the dashboard exposes the awaiting ones
-          here with Approve / Deny / Cancel buttons. The human can also edit
-          the file's `status:` line directly — both paths converge. */}
-      <ProjectGatesSection project={project}/>
-
-      {/* ── 2. TICKETS ── */}
-      <ProjectTrackerBoard contractId={project.project_id || project.id}/>
-
-      {/* ── 2b. SPECS (TKT-0339) — spec-kind tickets as a project sub-board ── */}
-      <ProjectSpecsBoard contractId={project.project_id || project.id}/>
-
-      {/* ── 3. MILESTONE TIMELINE ── */}
-      <ProjectMilestoneTimeline milestones={milestones}/>
-
-      {/* ── 4. SESSIONS IN THIS PROJECT ── */}
-      <ProjectSessions sessions={sessions} setRoute={setRoute} projectId={project.project_id || project.id}/>
+      {order.map((id, i) => renderSection(id, {
+        open: isOpen(id),
+        onToggle: () => toggle(id),
+        onMoveUp: () => move(id, -1),
+        onMoveDown: () => move(id, +1),
+        canUp: i > 0,
+        canDown: i < order.length - 1,
+      }))}
     </div>
   );
 }
 
-// ── Reusable collapsible section ──────────────────────────────────────────
-function CollapsibleSection({ title, count, defaultOpen = false, children }) {
-  const [open, setOpen] = usePVState(defaultOpen);
-  return (
-    <section className={`pv-collapse ${open ? 'open' : ''}`}>
-      <button className="pv-collapse-head" onClick={() => setOpen((o) => !o)}>
-        <span className="pv-collapse-caret">{open ? '▾' : '▸'}</span>
-        <span className="pv-collapse-title">{title}</span>
-        {count != null && <span className="pv-collapse-count tnum">{count}</span>}
-      </button>
-      {open && <div className="pv-collapse-body">{children}</div>}
-    </section>
-  );
-}
-
 // ── 1. PLAN ──
-function ProjectPlanSection({ plan, color }) {
+function ProjectPlanSection({ plan, color, ...shell }) {
   if (!plan || !plan.total) {
     return (
-      <div className="pv-section">
-        <div className="pv-section-head"><span className="pv-section-title">Plan</span></div>
+      <PVSection title="Plan" {...shell}>
         <div className="pv-quiet-line">no <span className="mono">PLAN.md</span> — add one at the project root to track progress here.</div>
-      </div>
+      </PVSection>
     );
   }
   const pct = Math.round((plan.done / plan.total) * 100);
   const barColor = color || 'var(--accent)';
   return (
-    <div className="pv-section pv-plan">
-      <div className="pv-section-head">
-        <span className="pv-section-title">{plan.title || 'Plan'}</span>
+    <PVSection {...shell} title={plan.title || 'Plan'} className="pv-plan"
+      extra={
         <span className="pv-plan-stat">
           <span className="tnum">{plan.done}/{plan.total}</span>
           <span className="pv-plan-pct tnum" style={{ color: barColor }}>{pct}%</span>
         </span>
-      </div>
+      }>
       <div className="pv-plan-bar">
         <div className="pv-plan-fill" style={{ width: `${pct}%`, background: barColor }}/>
       </div>
@@ -132,12 +194,12 @@ function ProjectPlanSection({ plan, color }) {
           </li>
         ))}
       </ul>
-    </div>
+    </PVSection>
   );
 }
 
 // ── 2. TICKETS ──
-function ProjectTrackerBoard({ contractId }) {
+function ProjectTrackerBoard({ contractId, ...shell }) {
   useStore();
   const [showArchived, setShowArchived] = usePVState(false);
 
@@ -171,20 +233,20 @@ function ProjectTrackerBoard({ contractId }) {
   };
 
   const Columns = window.TicketColumns;
+  // Tools live OUTSIDE the toggle button (siblings) so clicking them doesn't
+  // collapse the section.
+  const tools = (
+    <div className="pv-tracker-tools">
+      <label className="tracker-toggle">
+        <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)}/>
+        Show archived
+      </label>
+      <button className="orch-btn primary" onClick={onNew}>+ New ticket</button>
+    </div>
+  );
 
   return (
-    <div className="pv-section pv-tracker">
-      <div className="pv-section-head">
-        <span className="pv-section-title">Tickets</span>
-        <span className="pv-section-count tnum">{tickets.length}</span>
-        <div className="pv-tracker-tools">
-          <label className="tracker-toggle">
-            <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)}/>
-            Show archived
-          </label>
-          <button className="orch-btn primary" onClick={onNew}>+ New ticket</button>
-        </div>
-      </div>
+    <PVSection {...shell} title="Tickets" count={tickets.length} className="pv-tracker" tools={tools}>
       {tickets.length === 0 && !showArchived ? (
         <div className="pv-quiet-line">
           no tracker tickets yet — click <span className="mono">+ New ticket</span> to create one in this project.
@@ -197,43 +259,39 @@ function ProjectTrackerBoard({ contractId }) {
           resolveAssignee={resolveAssignee}
         />
       ) : null}
-    </div>
+    </PVSection>
   );
 }
 
 // ── 2b. SPECS (TKT-0339) — a collapsible sub-board mounting SpecsBoardView
 // pinned to the project (one component, two mounts — the same view the Tracker
-// uses). Closed by default (specs are fewer than work items).
-function ProjectSpecsBoard({ contractId }) {
+// uses). Closed by default via PV_DEFAULT_COLLAPSED (TKT-0518).
+function ProjectSpecsBoard({ contractId, ...shell }) {
   useStore();
   const specs = window.Store.getTrackerTickets({ project_id: contractId, kind: 'spec' });
   const count = specs.filter((s) => s.state !== 'archived').length;
   return (
-    <CollapsibleSection title="Specs" count={count} defaultOpen={false}>
+    <PVSection {...shell} title="Specs" count={count}>
       {/* specs-board.jsx loads after project-view.jsx → reference via window at
           render time (defined by then). */}
       {window.SpecsBoardView ? React.createElement(window.SpecsBoardView, { projectId: contractId }) : null}
-    </CollapsibleSection>
+    </PVSection>
   );
 }
 
 // ── 3. MILESTONE TIMELINE ──
-function ProjectMilestoneTimeline({ milestones }) {
-  if (!milestones || milestones.length === 0) {
+function ProjectMilestoneTimeline({ milestones, ...shell }) {
+  const count = (milestones && milestones.length) || 0;
+  if (count === 0) {
     return (
-      <div className="pv-section">
-        <div className="pv-section-head"><span className="pv-section-title">Milestones</span></div>
+      <PVSection {...shell} title="Milestones" count={0}>
         <div className="pv-quiet-line">no milestones yet — sessions append them as work lands.</div>
-      </div>
+      </PVSection>
     );
   }
   const ordered = [...milestones].sort((a, b) => (b.t ?? 0) - (a.t ?? 0));
   return (
-    <div className="pv-section pv-milestones">
-      <div className="pv-section-head">
-        <span className="pv-section-title">Milestones</span>
-        <span className="pv-section-count tnum">{milestones.length}</span>
-      </div>
+    <PVSection {...shell} title="Milestones" count={count} className="pv-milestones">
       <ul className="pv-timeline">
         {ordered.map((m, i) => (
           <li key={`${m.t}-${i}`} className="pv-timeline-item">
@@ -247,18 +305,14 @@ function ProjectMilestoneTimeline({ milestones }) {
           </li>
         ))}
       </ul>
-    </div>
+    </PVSection>
   );
 }
 
 // ── 4. SESSIONS ──
-function ProjectSessions({ sessions, setRoute, projectId }) {
+function ProjectSessions({ sessions, setRoute, projectId, ...shell }) {
   return (
-    <div className="pv-section">
-      <div className="pv-section-head">
-        <span className="pv-section-title">Sessions in this project</span>
-        <span className="pv-section-count tnum">{sessions.length}</span>
-      </div>
+    <PVSection {...shell} title="Sessions in this project" count={sessions.length}>
       {sessions.length === 0 ? (
         <div className="pv-quiet-line">
           no live <span className="mono">claude</span> session in this project. Run <span className="mono">cd</span> into it and start one — it appears here automatically.
@@ -268,7 +322,7 @@ function ProjectSessions({ sessions, setRoute, projectId }) {
           {sessions.map((s) => <SessionCard key={s.session_id || s.pid} session={s} setRoute={setRoute}/>)}
         </div>
       )}
-    </div>
+    </PVSection>
   );
 }
 
@@ -279,24 +333,23 @@ function ProjectSessions({ sessions, setRoute, projectId }) {
 // /api/projects/:id/gates/:gateId/:decision. After a verdict we refresh
 // the projects list so the gate moves to the resolved list (or disappears
 // if cancelled). For input gates, the body describes the missing secret.
-function ProjectGatesSection({ project }) {
+function ProjectGatesSection({ project, ...shell }) {
   const allGates = (project && Array.isArray(project.gates)) ? project.gates : [];
   const awaiting = allGates.filter((g) => g.status === 'awaiting');
   const resolved = allGates.filter((g) => g.status !== 'awaiting');
   const [busyGateId, setBusyGateId] = usePVState(null);
   const [error, setError] = usePVState(null);
+  // The "N awaiting" pulse badge stays visible when the section is collapsed
+  // (it's in the head) — a collapsed Gates section must still scream.
+  const badge = awaiting.length > 0 ? <span className="pv-section-title-badge pulse">{awaiting.length} awaiting</span> : null;
 
   if (allGates.length === 0) {
     return (
-      <div className="pv-section">
-        <div className="pv-section-head">
-          <span className="pv-section-title">Pending gates</span>
-          <span className="pv-section-count tnum">0</span>
-        </div>
+      <PVSection {...shell} title="Pending gates" count={0} badge={badge}>
         <div className="pv-quiet-line">
           no <span className="mono">~/.config/golem/gates/</span> files for this project. Agents write a gate here when a phase needs a human verdict (see <span className="mono">plugin/skills/gates/SKILL.md</span>).
         </div>
-      </div>
+      </PVSection>
     );
   }
 
@@ -315,16 +368,7 @@ function ProjectGatesSection({ project }) {
   };
 
   return (
-    <div className="pv-section">
-      <div className="pv-section-head">
-        <span className="pv-section-title">
-          Pending gates
-          {awaiting.length > 0 && (
-            <span className="pv-section-title-badge pulse">{awaiting.length} awaiting</span>
-          )}
-        </span>
-        <span className="pv-section-count tnum">{allGates.length}</span>
-      </div>
+    <PVSection {...shell} title="Pending gates" count={allGates.length} badge={badge}>
       {error && <div className="pv-section-error">verdict failed: {error}</div>}
       {awaiting.length > 0 && (
         <div className="pv-gates-awaiting">
@@ -392,7 +436,7 @@ function ProjectGatesSection({ project }) {
           </ul>
         </details>
       )}
-    </div>
+    </PVSection>
   );
 }
 
@@ -467,5 +511,5 @@ function MilestoneStrip({ milestones }) {
 }
 
 window.ProjectView = ProjectView;
-window.CollapsibleSection = CollapsibleSection;
+window.PVSection = PVSection;
 window.MilestoneStrip = MilestoneStrip;

@@ -120,19 +120,20 @@ try {
   // ── 6. Project view: Specs collapsible section ────────────────────────────
   await page.goto(`${ORIGIN}/project/${encodeURIComponent(registryId)}`, { waitUntil: 'networkidle' });
   await wait(700);
-  // Find the Specs collapsible section (by title).
+  // Find the Specs collapsible section (by title). TKT-0518: sections are now
+  // PVSection (.pv-sec-toggle / .pv-section-title / .pv-section-count).
   let specsSection = await page.evaluate(() => {
-    const heads = Array.from(document.querySelectorAll('.pv-collapse-head'));
-    const h = heads.find((x) => /Specs/.test(x.querySelector('.pv-collapse-title')?.textContent || ''));
-    return { found: !!h, count: h ? (h.querySelector('.pv-collapse-count')?.textContent || '') : '' };
+    const toggles = Array.from(document.querySelectorAll('.pv-sec-toggle'));
+    const t = toggles.find((x) => /Specs/.test(x.querySelector('.pv-section-title')?.textContent || ''));
+    return { found: !!t, count: t ? (t.querySelector('.pv-section-count')?.textContent || '') : '' };
   });
   assert.ok(specsSection.found, 'project view has a Specs collapsible section');
   assert.ok(Number(specsSection.count) >= 1, `Specs section count ≥ 1 (got ${specsSection.count})`);
-  // Expand it (click the head) → the spec card appears.
+  // Expand it (click the toggle) → the spec card appears.
   await page.evaluate(() => {
-    const heads = Array.from(document.querySelectorAll('.pv-collapse-head'));
-    const h = heads.find((x) => /Specs/.test(x.querySelector('.pv-collapse-title')?.textContent || ''));
-    if (h) h.click();
+    const toggles = Array.from(document.querySelectorAll('.pv-sec-toggle'));
+    const t = toggles.find((x) => /Specs/.test(x.querySelector('.pv-section-title')?.textContent || ''));
+    if (t) t.click();
   });
   await poll(() => page.evaluate((s) => !!document.querySelector(`.ticket[data-ticket-id="${s}"]`), specId), (v) => !!v, 8000);
   assert.ok(await page.evaluate((s) => !!document.querySelector(`.ticket[data-ticket-id="${s}"]`), specId), 'expanding the Specs section shows the spec card');
