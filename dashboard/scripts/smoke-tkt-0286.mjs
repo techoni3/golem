@@ -222,15 +222,20 @@ try {
     orphan = await page.evaluate(() => {
       const section = document.querySelector('.agents-section-orphans');
       if (!section) return null;
-      const row = section.querySelector('.orphan-ticket-link .mono');
-      const label = section.querySelector('.orphan-session-label')?.textContent || '';
-      return { hasSection: true, ticketId: row?.textContent || null, label };
+      // TKT-0369: the orphans section may list OTHER stale rows (e.g. a user's
+      // test dispatch to a non-existent session) — find B among ALL the rows,
+      // don't assume it's the first.
+      const rows = Array.from(section.querySelectorAll('.orphan-row'));
+      const ticketIds = Array.from(section.querySelectorAll('.orphan-ticket-link .mono')).map((e) => e.textContent || '');
+      const labels = Array.from(section.querySelectorAll('.orphan-session-label')).map((e) => e.textContent || '');
+      return { hasSection: true, rowCount: rows.length, ticketIds, labels };
     });
-    if (orphan && orphan.ticketId === ticketB) break;
+    if (orphan && orphan.ticketIds.includes(ticketB)) break;
     await wait(200);
   }
-  assert.ok(orphan && orphan.ticketId === ticketB, 'offline-orphans section shows the still-queued ticket B');
-  assert.equal(orphan.label, FAKE_NAME, `orphan row labeled via persisted session_labels (got "${orphan.label}")`);
+  assert.ok(orphan && orphan.ticketIds.includes(ticketB), `offline-orphans section shows the still-queued ticket B (rows: ${orphan ? orphan.ticketIds.join(',') : 'none'})`);
+  const bIdx = orphan ? orphan.ticketIds.indexOf(ticketB) : -1;
+  assert.ok(bIdx >= 0 && orphan.labels[bIdx] === FAKE_NAME, `orphan row for B labeled via persisted session_labels (got "${bIdx >= 0 ? orphan.labels[bIdx] : '—'}")`);
 
   // ── 10. Zero pageerrors ──────────────────────────────────────────────────
   assert.equal(pageerrors.length, 0, `no pageerror events (got ${pageerrors.length}: ${pageerrors.join(' | ')})`);
@@ -240,7 +245,7 @@ try {
     ticketA, ticketB, ticketC,
     queueRows: mine.length,
     drawerRows: drawerRows.length,
-    orphanLabel: orphan.label,
+    orphanLabel: bIdx >= 0 ? orphan.labels[bIdx] : null,
   }, null, 2));
 } finally {
   // Cancel any remaining pending queue rows for the fake session (B if step 9 ran).

@@ -18,6 +18,10 @@
 //     the ticket assigned, not lost).
 //   • A session that is offline is NOT immediately expired — it may come back.
 //     Only after 60m offline does the oldest pending row expire.
+//   • Alive but no registered channel = unreachable (TKT-0369): treated like
+//     offline — rows held pending, same 60m expiry. Never attempt a push that
+//     would burn the row (setDispatched already run); the row auto-delivers
+//     when the channel re-registers (e.g. after /reload-plugins).
 //
 // This module does NOT add another session poll. It reads state.nativeSessions()
 // (already refreshed every 3s by state.js) on its own 5s tick.
@@ -33,6 +37,7 @@ export function initDispatchDrainer({
   pushBrief,
   buildDispatchBrief,
   broadcastWS,
+  listChannels,
 }) {
   // session_id → ts(ms) of the most recent successful delivery. Used by the
   // cooldown check so we never deliver twice to a session within 60s.
@@ -52,6 +57,13 @@ export function initDispatchDrainer({
     if (!pending || pending.length === 0) return;
 
     const sessions = state.nativeSessions();
+    // TKT-0369: sessions whose channel MCP is down are UNREACHABLE — treat
+    // them like offline sessions (hold rows pending, 60m expiry), never attempt
+    // a push that would burn the row with setDispatched already run. Built once
+    // per tick so a transient readChannels failure makes everyone wait one tick
+    // (safe), not burn.
+    let channelIds = new Set();
+    try { channelIds = new Set((await listChannels()).map((c) => c.session_id)); } catch { /* transient → everyone waits a tick */ }
     const byId = new Map();
     for (const s of sessions) if (s.session_id) byId.set(s.session_id, s);
 
@@ -69,17 +81,18 @@ export function initDispatchDrainer({
     for (const [sessionId, rows] of bySession) {
       const s = byId.get(sessionId);
 
-      // Session unknown or dead.
-      if (!s || !s.alive) {
+      // Session unknown, dead, OR unreachable (channel MCP down — TKT-0369):
+      // hold rows pending (60m expiry), never burn one on a push that can't land.
+      if (!s || !s.alive || !channelIds.has(sessionId)) {
         const oldest = rows[0]; // FIFO: rows[0] is the oldest by created_at
         const createdMs = Date.parse(oldest.created_at);
         if (Number.isFinite(createdMs) && now - createdMs > OFFLINE_EXPIRY_MS) {
           try {
-            tracker.expireQueuedDispatch(oldest.id, 'session offline > 60m');
+            tracker.expireQueuedDispatch(oldest.id, 'target offline or channel unreachable > 60m');
             chat.record(
               'system',
               'error',
-              `queued dispatch ${oldest.id.slice(0, 8)} for ${sessionId} expired — session offline > 60m`,
+              `queued dispatch ${oldest.id.slice(0, 8)} for ${sessionId} expired — target offline or channel unreachable > 60m`,
             );
             const ticket = tracker.getTicket(oldest.ticket_id);
             if (ticket) broadcastWS({ type: 'ticket-updated', ticket });

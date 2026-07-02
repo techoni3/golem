@@ -190,6 +190,14 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
       if (s.session_id) liveStatus.set(s.session_id, s.status ?? null);
     }
     return dispatchable.map((s) => {
+      // TKT-0369: an alive session whose channel MCP died stays in the picker
+      // (reachable:false) — force a grey dot + an explanatory hint so the user
+      // knows an immediate push can't reach it (queue instead).
+      if (s.reachable === false) {
+        let hint = 'unreachable · will queue';
+        if (s.pending_count > 0) hint += ` · ${s.pending_count} queued`;
+        return { value: s.session_id, label: s.label, dot: 'var(--text-3)', hint };
+      }
       const status = liveStatus.get(s.session_id) ?? s.status ?? null;
       const dot = status === 'idle' ? 'var(--status-active)'
         : status === 'busy' ? 'var(--status-running)'
@@ -212,6 +220,14 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
     if (!pendingDispatch) return false;
     const s = window.Store.getNativeSessionById?.(pendingDispatch.session_id);
     return !s || !s.alive;
+  })();
+  // TKT-0369: target alive but its channel MCP is down — the row is held pending
+  // (delivers when the channel re-registers). Surfaced on the ⏳ line so the user
+  // knows WHY delivery waits (and that /reload-plugins in that session fixes it).
+  const pendingTargetUnreachable = (() => {
+    if (!pendingDispatch || pendingTargetOffline) return false;
+    const d = dispatchable.find((s) => s.session_id === pendingDispatch.session_id);
+    return !!d && d.reachable === false;
   })();
   const pendingLabel = pendingDispatch
     ? (labelBySession.get(pendingDispatch.session_id)
@@ -580,6 +596,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                       <span className="td-dispatch-pending-icon">⏳</span>
                       Queued for {pendingLabel} · {tdAgo(pendingDispatch.created_at)} · waiting for idle
                       {pendingTargetOffline && <span className="td-dispatch-pending-offline"> · session offline</span>}
+                      {pendingTargetUnreachable && <span className="td-dispatch-pending-offline"> · channel down (mcp disconnected — /reload-plugins in that session restores it)</span>}
                     </span>
                     <button className="orch-btn small ghost td-dispatch-cancel"
                       onClick={onCancelDispatch}
@@ -601,11 +618,13 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                         setDispatchSession(v);
                         // Default the mode from the selected target's live
                         // status: idle → Now, busy/waiting → When idle (the
-                        // user can override via the toggle below).
+                        // user can override via the toggle below). TKT-0369: an
+                        // unreachable target defaults to When-idle even when
+                        // its live status is idle — an immediate push can't land.
                         const sel = dispatchable.find((s) => s.session_id === v);
                         const liveSt = nativeSessionsNow.find((s) => s.session_id === v)?.status ?? null;
                         const st = sel ? (liveSt ?? sel.status ?? null) : null;
-                        setDispatchMode(st === 'idle' ? 'now' : 'when_idle');
+                        setDispatchMode(sel && sel.reachable === false ? 'when_idle' : (st === 'idle' ? 'now' : 'when_idle'));
                       }}
                     />
                     <div className="td-dispatch-actions">
@@ -917,7 +936,7 @@ function QuestionReturn({
           </option>
           {dispatchable.map((s) => (
             <option key={s.session_id} value={s.session_id}>
-              {s.label}{s.session_id === asker ? ' (asker)' : ''}
+              {s.label}{s.session_id === asker ? ' (asker)' : ''}{s.reachable === false ? ' (unreachable)' : ''}
             </option>
           ))}
         </select>

@@ -677,7 +677,13 @@ async function main() {
     // (in which case fall through to the immediate 'now' path — no queue row).
     if (mode === 'when_idle') {
       const target = state.nativeSessions().find((s) => s.session_id === sessionId);
-      const isIdle = !!target && target.alive && target.status === 'idle';
+      // TKT-0369: only fall through to the immediate path when the target is
+      // idle AND actually reachable — an idle session with a dead channel MCP
+      // must queue (the row delivers when the channel re-registers), not burn
+      // on an immediate push that cannot succeed.
+      let hasChannel = false;
+      try { hasChannel = (await listChannels()).some((c) => c.session_id === sessionId); } catch { /* treat as unreachable */ }
+      const isIdle = !!target && target.alive && target.status === 'idle' && hasChannel;
       if (!isIdle) {
         const queueRow = tracker.queueDispatch(id, { session_id: sessionId, note, actor: 'human' });
         chat.record('system', 'info',
@@ -689,7 +695,7 @@ async function main() {
         broadcastWS({ type: 'dispatch-queue-updated' });
         return { ok: true, queued: true, queue_id: queueRow.id, ticket };
       }
-      // target idle → fall through to immediate delivery below.
+      // target idle + reachable → fall through to immediate delivery below.
     }
 
     // 1) Durable write — assign + record the dispatched event. Source of truth.
@@ -800,11 +806,12 @@ async function main() {
     }
   });
 
-  // GET /api/sessions/dispatchable — live native sessions in a project that can
-  // actually receive a brief: alive === true AND mapping to the requested
-  // project (canonical contract id), INTERSECTed with channels.json by
-  // session_id (only registered channels are reachable). `project` omitted →
-  // all dispatchable sessions (each annotated with its project_id).
+  // GET /api/sessions/dispatchable — live native sessions in a project (alive,
+  // matching the requested contract project_id). Channel presence is an
+  // ANNOTATION, not a filter (TKT-0369): an alive session whose channel MCP
+  // died stays listed with reachable:false so the UI can offer durable
+  // when-idle queueing (delivered when the channel re-registers). `project`
+  // omitted → all dispatchable sessions (each annotated with its project_id).
   fastify.get('/api/sessions/dispatchable', async (req) => {
     const wanted = req.query?.project != null ? resolveProjectId(req.query.project) : null;
     let channels = [];
@@ -825,14 +832,19 @@ async function main() {
       if (!s.alive) continue;
       if (wanted != null && s.project_id !== wanted) continue;
       const ch = channelBySession.get(s.session_id);
-      if (!ch) continue; // no channel → not reachable for dispatch
+      // TKT-0369: an alive session whose channel MCP died must NOT silently
+      // vanish from the picker — it stays listed with reachable:false so the UI
+      // can offer durable when-idle queueing (delivered when the channel
+      // re-registers, e.g. after /reload-plugins). Channel presence is now an
+      // annotation, not a filter.
       out.push({
         session_id: s.session_id,
         name: s.name ?? null,
         label: s.name || `session ${String(s.session_id ?? '').slice(0, 8)}`,
         status: s.status ?? null,
         project_id: s.project_id ?? null,
-        channel_url: ch.url ?? (ch.host && ch.port ? `http://${ch.host}:${ch.port}` : null),
+        reachable: !!ch,
+        channel_url: ch ? (ch.url ?? (ch.host && ch.port ? `http://${ch.host}:${ch.port}` : null)) : null,
         started_at: s.started_at ?? null,
         updated_at: s.updated_at ?? null,
         // TKT-0245: count of pending queued dispatches for this session, so the
@@ -1029,6 +1041,7 @@ async function main() {
     pushBrief,
     buildDispatchBrief,
     broadcastWS,
+    listChannels,
   });
 
   // Pin to the canonical dashboard URL http://dashboard.golem.localhost:7420.

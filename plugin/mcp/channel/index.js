@@ -1087,14 +1087,38 @@ server.listen(PORT, HOST, () => {
 // Cleanup hooks — the channel registry should not grow ghosts when the CEO
 // dies or restarts. The stale-PID GC in the dashboard is a backstop, not a
 // primary cleanup path.
-function shutdown(code = 0) {
+function shutdown(code = 0, why = 'signal') {
+  try { process.stderr.write(`[golem-channel] shutdown (${why})\n`); } catch { /* stderr gone */ }
   unregisterChannel();
   try { server.close(); } catch { /* ignore */ }
   process.exit(code);
 }
-process.on('SIGINT',  () => shutdown(0));
-process.on('SIGTERM', () => shutdown(0));
-process.on('SIGHUP',  () => shutdown(0));
+process.on('SIGINT',  () => shutdown(0, 'SIGINT'));
+process.on('SIGTERM', () => shutdown(0, 'SIGTERM'));
+process.on('SIGHUP',  () => shutdown(0, 'SIGHUP'));
 process.on('beforeExit', () => unregisterChannel());
+// TKT-0369: the channel died mid-session with zero trace (no stderr, no crash
+// report) — every abnormal exit must say why, or the next death is
+// undiagnosable. Claude Code persists this stderr into its MCP log.
+process.on('uncaughtException', (err) => {
+  try { process.stderr.write(`[golem-channel] uncaughtException: ${err?.stack || err}\n`); } catch { /* stderr gone */ }
+  shutdown(1, 'uncaughtException');
+});
+process.on('unhandledRejection', (reason) => {
+  const msg = reason instanceof Error ? (reason.stack || reason.message) : String(reason);
+  try { process.stderr.write(`[golem-channel] unhandledRejection: ${msg}\n`); } catch { /* stderr gone */ }
+  shutdown(1, 'unhandledRejection');
+});
+process.on('exit', (code) => {
+  // Sync-safe on 'exit'; catches any path the handlers above missed.
+  try { process.stderr.write(`[golem-channel] exit code=${code}\n`); } catch { /* stderr gone */ }
+});
 
 await mcp.connect(new StdioServerTransport());
+// TKT-0369: if the host closes the MCP stdio transport without killing us, the
+// HTTP server would keep this process alive as a ZOMBIE channel — registered in
+// channels.json, accepting briefs, but unable to deliver the notifications push
+// (the transport is gone). Shut down cleanly instead so the registry reflects
+// reality. (onclose is supported: @modelcontextprotocol/sdk 1.29.0
+// Protocol._onclose invokes this.onclose.)
+mcp.onclose = () => shutdown(0, 'mcp transport closed by host');
