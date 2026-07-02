@@ -219,13 +219,17 @@
 
   // WS5: cross-project tracker tickets, filtered.
   function getTrackerTickets(filter = {}) {
-    const { project_id, state: st, kind, assignee, includeArchived } = filter;
+    const { project_id, state: st, kind, exclude_kind, assignee, includeArchived } = filter;
     const out = [];
     for (const t of state.trackerTickets.values()) {
       if (!includeArchived && t.state === 'archived') continue;
       if (project_id != null && t.project_id !== project_id) continue;
       if (st != null && t.state !== st) continue;
       if (kind != null && t.kind !== kind) continue;
+      // TKT-0284: negative-kind filter — the Tracker excludes specs (specs
+      // live on their own /specs page). Cheap client-side skip mirroring the
+      // server's exclude_kind WHERE clause.
+      if (exclude_kind != null && t.kind === exclude_kind) continue;
       if (assignee !== undefined && assignee !== null) {
         if (assignee === '__unassigned__') {
           if (t.assignee != null) continue;

@@ -3401,3 +3401,132 @@ mark.anno.anno-tail::after {
   color: var(--text-3);
 }
 .idea-ts { font-size: 10.5px; }
+
+/* ===== TKT-0284: Specs page — search results + spec drawer Work-items panel ===== */
+
+/* Specs content-search result list (replaces the board while a query is
+   active). Flat rows; each shows id · state · updated-ago · marked title ·
+   marked body snippet. */
+.specs-search-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0 24px;
+}
+.spec-result-row {
+  display: block;
+  text-decoration: none;
+  color: var(--text-1);
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-1);
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+.spec-result-row:hover { border-color: var(--border-2); background: var(--bg-2); }
+.spec-result-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.spec-result-id { font-size: 11px; color: var(--text-3); }
+.spec-result-ago { margin-left: auto; font-size: 10.5px; }
+.spec-result-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-0);
+  line-height: 1.35;
+  margin-bottom: 4px;
+}
+.spec-result-snippet {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  max-height: 4.5em;
+  overflow: hidden;
+}
+/* Scoped so the annotation rail's mark.anno styles are untouched. */
+.spec-result-title mark,
+.spec-result-snippet mark {
+  background: color-mix(in oklab, var(--accent) 28%, transparent);
+  color: var(--text-0);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.specs-search-empty {
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+/* Spec drawer → Work items panel (TKT-0284). Aligned to the 1200px document
+   column like .td-props; sits inside .td-read-col after the body. Lists the
+   spec's children (work items with parent_id = this spec) with a + Work item
+   button that opens the composer preset to Kind=work-item + Parent=this spec. */
+.td-children {
+  max-width: 1200px; width: 100%; margin: 0 auto; box-sizing: border-box;
+  padding: 16px 40px 28px;
+}
+.td-children-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.td-children-title {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  letter-spacing: .6px;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.td-children-count { font-size: 11px; color: var(--text-3); }
+.td-children-add { margin-left: auto; }
+.td-children-list { display: flex; flex-direction: column; gap: 6px; }
+.td-child-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--text-1);
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-1);
+  padding: 8px 12px;
+  font-size: 12.5px;
+  transition: border-color .12s, background .12s;
+}
+.td-child-row:hover { border-color: var(--border-2); background: var(--bg-2); }
+.td-child-id { font-size: 11px; color: var(--text-3); flex: 0 0 auto; }
+.td-child-title {
+  flex: 1 1 auto; min-width: 0;
+  color: var(--text-0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.td-child-row .pill { flex: 0 0 auto; }
+.td-child-assignee {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-3);
+  max-width: 160px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.td-children-empty {
+  padding: 14px 12px;
+  font-size: 12.5px;
+  color: var(--text-3);
+  background: var(--bg-1);
+  border: 1px dashed var(--border-2);
+  border-radius: var(--radius-1);
+}

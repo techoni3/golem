@@ -710,6 +710,20 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                   <div className="td-body-empty">No description.</div>
                 )}
               </div>
+
+              {/* TKT-0284: spec → work-items panel. Specs surface their children
+                  (work items with parent_id = this spec) as a clickable list
+                  under the body, aligned to the 1200px column. Children are
+                  read LIVE from the store so a newly-created work item appears
+                  instantly (its creation broadcasts ticket-created, not a
+                  parent refresh). Non-spec tickets skip the panel v1. */}
+              {ticket.kind === 'spec' && (
+                <SpecChildrenPanel
+                  specId={ticket.id}
+                  projectContractId={ticket.project_id}
+                  resolveAssignee={resolveActor}
+                />
+              )}
               </div>{/* /.td-read-col */}
 
               {/* TKT-0233: the old bottom action-tray of native <select> chips was
@@ -743,6 +757,60 @@ function tdAgo(iso) {
   const t = typeof iso === 'number' ? iso : Date.parse(iso);
   if (Number.isNaN(t)) return '';
   return window.SubstrateFmt?.fmtTimeAgo?.(t) || '';
+}
+
+// TKT-0284: spec → work-items panel. Renders the spec's children (work items
+// with parent_id = this spec) as a clickable list, aligned to the 1200px
+// document column like .td-props. Children are read LIVE from the store on
+// every render (useStore re-renders on store changes, so a newly-created work
+// item appears instantly — its creation broadcasts ticket-created, not a
+// parent ticket-updated, so the server's ticket.children would go stale
+// without a re-fetch). "+ Work item" opens the composer with Kind=work-item
+// + Parent=this spec (Router.openComposer presets).
+function SpecChildrenPanel({ specId, projectContractId, resolveAssignee }) {
+  useStore();
+  // No memo: the store Map mutates in place on upsert (applyTicketCreated /
+  // applyTicketUpdated do .set on the same Map ref), so a useMemo keyed on the
+  // Map would not recompute. Recompute on every render instead — cheap at v1
+  // spec volume, and useStore guarantees a re-render on every store change.
+  const all = window.Store.getState().trackerTickets;
+  const children = [];
+  for (const t of all.values()) {
+    if (t.parent_id === specId) children.push(t);
+  }
+  children.sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
+  const onNewWorkItem = () => {
+    window.Router.openComposer(projectContractId, { kind: 'work-item', parent: specId });
+  };
+  return (
+    <div className="td-children">
+      <div className="td-children-header">
+        <span className="td-children-title">Work items</span>
+        <span className="td-children-count tnum">{children.length}</span>
+        <button className="orch-btn small ghost td-children-add" onClick={onNewWorkItem}
+          title="Create a work item under this spec">+ Work item</button>
+      </div>
+      {children.length === 0 ? (
+        <div className="td-children-empty">No work items yet — they'll emerge as sections lock in.</div>
+      ) : (
+        <div className="td-children-list">
+          {children.map((c) => (
+            <a key={c.id}
+              className="td-child-row"
+              href={window.Router.buildHref({ kind: 'ticket', id: c.id })}
+              onClick={(e) => { e.preventDefault(); window.Router.openTicket(c.id); }}
+              title={c.title}
+            >
+              <span className="td-child-id mono">{c.id}</span>
+              <span className="td-child-title">{c.title}</span>
+              <span className={`pill ${TD_STATE_PILL[c.state] || 'idle'}`}>{c.state}</span>
+              <span className="td-child-assignee">{resolveAssignee(c.assignee, c.assignee_label)}</span>
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // TKT-0233: the unused TdField component was removed (fields now use .td-prop).

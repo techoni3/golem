@@ -18,7 +18,9 @@ const TRACKER_COLUMNS = [
 ];
 const TRACKER_ARCHIVED_COL = { id: 'archived', label: 'Archived', color: 'var(--status-done)' };
 
-const TRACKER_KINDS = ['work-item', 'decision', 'spec', 'question', 'fix'];
+// TKT-0284: specs live on their own /specs page — excluded from the tracker
+// (filter.exclude_kind below) and dropped from this kind dropdown.
+const TRACKER_KINDS = ['work-item', 'decision', 'question', 'fix'];
 
 // TKT-0103: drag-and-drop. The dashboard loads @dnd-kit/core via an ES module
 // in index.html that registers window.__dndkit (and signals __dndkitReady).
@@ -126,6 +128,7 @@ function TrackerBoard() {
     : {
       project_id: projectFilter || undefined,
       kind: kindFilter || undefined,
+      exclude_kind: 'spec',
       assignee:
         assigneeFilter === 'human' ? 'human'
           : assigneeFilter === '__unassigned__' ? '__unassigned__'

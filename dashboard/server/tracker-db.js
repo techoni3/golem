@@ -623,7 +623,17 @@ WHERE state_changed_at IS NULL`).run();
       const hydrated = hydrateTicket(row);
       hydrated.assignee_label = resolveAssigneeLabel(row.assignee);
       hydrated.dispatched_to_label = resolveAssigneeLabel(row.dispatched_to);
-      return { ...hydrated, comments, links, pending_dispatch };
+      // TKT-0284: child tickets (any kind with parent_id = this id). The drawer
+      // only renders the panel for specs (separation by view, not by entity),
+      // but populating children is cheap and any ticket can have them. Ordered
+      // by created_at so the spec's work items appear in creation order.
+      const children = db.prepare(
+        "SELECT id, title, kind, state, assignee FROM tickets WHERE parent_id = ? ORDER BY created_at ASC, id ASC"
+      ).all(id).map((c) => ({
+        ...c,
+        assignee_label: resolveAssigneeLabel(c.assignee),
+      }));
+      return { ...hydrated, comments, links, pending_dispatch, children };
     },
 
     // TKT-0107: maximum updated_at across all tickets for a project. Powers
@@ -641,7 +651,7 @@ WHERE state_changed_at IS NULL`).run();
     },
 
     listTickets(filter = {}) {
-      const { project_id, state, assignee, kind, stream_id, includeArchived } = filter;
+      const { project_id, state, assignee, kind, exclude_kind, stream_id, parent_id, includeArchived } = filter;
       const where = [];
       const params = {};
       if (project_id != null) {
@@ -660,9 +670,22 @@ WHERE state_changed_at IS NULL`).run();
         where.push('t.kind = @kind');
         params.kind = kind;
       }
+      // TKT-0284: cheap negative-kind filter — the Specs page is the Tracker
+      // minus specs, and the Specs page is the Tracker's spec slice. Avoids a
+      // separate entity / table; follows the existing WHERE pattern exactly.
+      if (exclude_kind != null) {
+        where.push('t.kind != @exclude_kind');
+        params.exclude_kind = exclude_kind;
+      }
       if (stream_id != null) {
         where.push('t.stream_id = @stream_id');
         params.stream_id = stream_id;
+      }
+      // TKT-0284: parent_id filter — used by the drawer's children panel and
+      // any future "show children of X" view.
+      if (parent_id != null) {
+        where.push('t.parent_id = @parent_id');
+        params.parent_id = parent_id;
       }
       // Exclude archived by default unless explicitly asking for it.
       if (state !== 'archived' && !includeArchived) {
@@ -684,6 +707,86 @@ WHERE state_changed_at IS NULL`).run();
           ...hydrateTicket(ticketFields),
           assignee_label: assignee_label ?? null,
           dispatched_to_label: dispatched_to_label ?? null,
+        };
+      });
+    },
+
+    // TKT-0284: content search across ticket title + body. LIKE-based v1;
+    // contract stable for an FTS5 swap if spec volume ever warrants it.
+    //
+    // Params:
+    //   project_id — required (cross-project search is a later iteration).
+    //   kind       — optional filter (specs page passes 'spec'; the later PM
+    //                iteration wants work-item search too).
+    //   q          — required, ≥1 char (REST layer enforces ≥2).
+    //   limit      — default 50, capped here for safety.
+    //
+    // Returns: { id, title, kind, state, updated_at, snippet, title_match,
+    //           match_start, match_len }
+    //   snippet     — first case-insensitive body match ±80 chars with leading
+    //                 / trailing '…' when truncated, so the client can render
+    //                 it inline. Empty when no body match.
+    //   title_match — true when q appears case-insensitively in the title.
+    //   match_start — offset of the match within snippet (the client uses this
+    //                 to slice + wrap a <mark>). -1 when no body match.
+    //   match_len   — length of the match within snippet (length of q). 0 when
+    //                 no body match.
+    // The snippet is computed in JS after the row fetch — fighting SQL for ±80
+    // chars + offsets is more brittle than a substring slice.
+    //
+    // LIKE-wildcard escaping: a literal '%' or '_' in user input must NOT match
+    // everything (or any-single-char). We escape '\', '%', '_' and use
+    // ESCAPE '\' in the LIKE clause so the wildcard chars are literal.
+    searchTickets({ project_id, kind, q, limit = 50 } = {}) {
+      if (q == null || q === '') return [];
+      const safeLimit = Math.max(1, Math.min(200, Number(limit) || 50));
+      const escaped = String(q).replace(/[\\%_]/g, (c) => '\\' + c);
+      const like = `%${escaped}%`;
+      const where = [];
+      const params = { q: like, limit: safeLimit };
+      if (project_id != null) {
+        where.push('project_id = @project_id');
+        params.project_id = project_id;
+      }
+      if (kind != null) {
+        where.push('kind = @kind');
+        params.kind = kind;
+      }
+      where.push("(title LIKE @q ESCAPE '\\' OR body LIKE @q ESCAPE '\\')");
+      const sql =
+        'SELECT id, title, kind, state, body, updated_at FROM tickets ' +
+        'WHERE ' + where.join(' AND ') + ' ' +
+        'ORDER BY updated_at DESC LIMIT @limit';
+      const rows = db.prepare(sql).all(params);
+      const qLower = String(q).toLowerCase();
+      const pad = 80;
+      return rows.map((r) => {
+        const title = r.title || '';
+        const body = r.body || '';
+        const titleMatch = title.toLowerCase().includes(qLower);
+        const bodyIdx = body.toLowerCase().indexOf(qLower);
+        let snippet = '';
+        let matchStart = -1;
+        let matchLen = 0;
+        if (bodyIdx >= 0) {
+          const start = Math.max(0, bodyIdx - pad);
+          const end = Math.min(body.length, bodyIdx + qLower.length + pad);
+          const prefix = start > 0 ? '…' : '';
+          const suffix = end < body.length ? '…' : '';
+          snippet = prefix + body.slice(start, end) + suffix;
+          matchStart = (start > 0 ? 1 : 0) + (bodyIdx - start);
+          matchLen = qLower.length;
+        }
+        return {
+          id: r.id,
+          title,
+          kind: r.kind,
+          state: r.state,
+          updated_at: r.updated_at,
+          snippet,
+          title_match: titleMatch,
+          match_start: matchStart,
+          match_len: matchLen,
         };
       });
     },

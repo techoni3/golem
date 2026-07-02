@@ -381,11 +381,33 @@ async function main() {
     if (q.state != null) filter.state = q.state;
     if (q.assignee != null) filter.assignee = q.assignee;
     if (q.kind != null) filter.kind = q.kind;
+    // TKT-0284: negative-kind filter (Tracker excludes specs) + parent_id
+    // filter (drawer's children panel). Both mirror the existing pattern —
+    // cheap WHERE additions, no new entity.
+    if (q.excludeKind != null) filter.exclude_kind = q.excludeKind;
+    if (q.parent != null) filter.parent_id = q.parent;
     if (q.stream != null) filter.stream_id = q.stream;
     if (q.includeArchived != null) {
       filter.includeArchived = q.includeArchived === 'true' || q.includeArchived === true || q.includeArchived === '1';
     }
     return tracker.listTickets(filter);
+  });
+
+  // TKT-0284: GET /api/tickets/search — content search across title + body.
+  // Params: project (required contract project_id), kind (optional), q (≥2 chars).
+  // Returns an array of { id, title, kind, state, updated_at, snippet,
+  // title_match, match_start, match_len }. 400 on missing/short q.
+  // LIKE-based v1; contract stable for an FTS5 swap if spec volume warrants it.
+  fastify.get('/api/tickets/search', async (req, reply) => {
+    const q = req.query ?? {};
+    const projectId = q.project != null ? resolveProjectId(q.project) : null;
+    const qq = q.q != null ? String(q.q) : '';
+    if (qq.length < 2) {
+      return reply.code(400).send({ error: 'q must be at least 2 characters' });
+    }
+    const filter = { project_id: projectId, q: qq };
+    if (q.kind != null) filter.kind = q.kind;
+    return tracker.searchTickets(filter);
   });
 
   // POST /api/tickets — create. 400 on validation error.

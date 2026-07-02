@@ -28,6 +28,17 @@ const Icon = {
       <rect x="11" y="2.5" width="3.5" height="9" rx="1"/>
     </svg>
   ),
+  // TKT-0284: Specs page icon — a document-with-lines glyph (spec = written
+  // spec doc). Stroke style matches Tracker / Logs (currentColor, 1.5 stroke).
+  Spec: ({ size = 14 }) => (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3.5 1.5H10L12.5 4V14a.5.5 0 0 1-.5.5H3.5a.5.5 0 0 1-.5-.5V2a.5.5 0 0 1 .5-.5z"/>
+      <path d="M10 1.5V4h2.5"/>
+      <path d="M5 7h5"/>
+      <path d="M5 9.5h5"/>
+      <path d="M5 12h3"/>
+    </svg>
+  ),
   Logs: ({ size = 14 }) => (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
       <path d="M3 4H13"/>

@@ -8,6 +8,7 @@
 //   /                 → dashboard
 //   /dashboard        → dashboard (alias)
 //   /tracker          → tracker
+//   /specs            → specs (TKT-0284 — spec-kind tickets, separated by view)
 //   /projects         → projects
 //   /agents           → agents
 //   /logs             → logs
@@ -15,7 +16,7 @@
 //   /tickets/<id>     → { kind:'ticket', id }
 //
 // Drawers are URL overlays carried as query params on the current page's path:
-//   ?ticket=<id>  ?compose=1 (&project=<pid>)  ?chat=<sid>  ?ns=<sid>
+//   ?ticket=<id>  ?compose=1 (&project=<pid> &kind=<k> &parent=<id>)  ?chat=<sid>  ?ns=<sid>
 // Opening a drawer PUSHES a history entry (so Back closes it); closing either
 // pops that entry (history.back) or, for deep-linked overlays with nothing to
 // pop, replaceState-strips the param.
@@ -25,7 +26,7 @@
 // spammed — preserves the original "don't spam history" intent.
 
 (function () {
-  const TOP_LEVEL = ['dashboard', 'tracker', 'projects', 'agents', 'logs'];
+  const TOP_LEVEL = ['dashboard', 'tracker', 'specs', 'projects', 'agents', 'logs'];
 
   const parseQuery = (search) => {
     const out = {};
@@ -58,6 +59,7 @@
     const p = normalizePath(path);
     if (p === '/' || p === '/dashboard') return { kind: 'dashboard' };
     if (p === '/tracker') return { kind: 'tracker' };
+    if (p === '/specs') return { kind: 'specs' };
     if (p === '/projects') return { kind: 'projects' };
     if (p === '/agents') return { kind: 'agents' };
     if (p === '/logs') return { kind: 'logs' };
@@ -83,6 +85,7 @@
     switch (route.kind) {
       case 'dashboard': return '/';
       case 'tracker': return '/tracker';
+      case 'specs': return '/specs';
       case 'projects': return '/projects';
       case 'agents': return '/agents';
       case 'logs': return '/logs';
@@ -107,6 +110,11 @@
       ticket: query.ticket || null,
       compose: !!query.compose,
       composeProject: query.project || null,
+      // TKT-0284: compose presets — Kind PopSelect + parent_id (silent).
+      // `?compose=1&kind=spec` opens the composer with Kind=spec;
+      // `?compose=1&kind=work-item&parent=TKT-0284` opens it with a parent.
+      composeKind: query.kind || null,
+      composeParent: query.parent || null,
       chat: query.chat || null,
       ns: query.ns || null,
       ideas: !!query.ideas, // TKT-0206: global ideas stack overlay
@@ -156,8 +164,20 @@
   // Convenience: build a query with one overlay param added, preserving the
   // rest (used by openers that already know the current route).
   const openTicket = (id) => openOverlay('ticket', id);
-  const openComposer = (projectId) =>
-    openOverlay('compose', '1', projectId ? { project: projectId } : null);
+  // TKT-0284: openComposer accepts presets as an object OR (back-compat) a
+  // bare projectId string. The presets carry kind + parent_id so the Specs
+  // page can open the composer with Kind=spec, and the drawer's "+ Work item"
+  // can open it with Kind=work-item + Parent=<spec id>. `project` is kept
+  // as the primary arg for back-compat with the existing tracker + project
+  // openers (`Router.openComposer(projectId)`).
+  const openComposer = (projectId, presets) => {
+    const base = projectId ? { project: projectId } : null;
+    if (!presets) return openOverlay('compose', '1', base);
+    const extra = { ...(base || {}) };
+    if (presets.kind) extra.kind = presets.kind;
+    if (presets.parent) extra.parent = presets.parent;
+    return openOverlay('compose', '1', extra);
+  };
   const openChat = (sessionId) => openOverlay('chat', sessionId);
   const openNativeSession = (sessionId) => openOverlay('ns', sessionId);
   // TKT-0206: open / close the global ideas-stack drawer.

@@ -104,7 +104,7 @@ function applyDraft(d, setProjectId, setters, fallbackPid, bodyTemplateIdRef) {
   if (d && bodyTemplateIdRef) bodyTemplateIdRef.current = null;
 }
 
-function CreateTicketDrawer({ open, preselectProject, onClose }) {
+function CreateTicketDrawer({ open, preselectProject, preselectKind, preselectParent, onClose }) {
   useStore();
   const projects = window.Store.getProjects();
 
@@ -144,6 +144,10 @@ function CreateTicketDrawer({ open, preselectProject, onClose }) {
   // ref is set to a known template id — so user-typed content is preserved
   // through type-changes and template re-picks.
   const bodyTemplateIdRef = React.useRef(null);
+  // TKT-0284: silent parent_id preset (opener intent — "+ Work item" from a
+  // spec drawer). NOT a draft field (snapshot/applyDraft don't touch it); a
+  // ref because it never drives a render — only buildBody reads it on submit.
+  const parentIdRef = React.useRef(null);
   const bodyRef = React.useRef(null);
   // TKT-0198: tracks whether the user has manually dragged the resize handle.
   // While false, an effect recomputes the body's inline style.height to fill
@@ -274,11 +278,17 @@ function CreateTicketDrawer({ open, preselectProject, onClose }) {
   // draft (or blank, with the project preselected). The draft is the source of
   // truth — closing no longer wipes state, and reopening re-syncs from the
   // flushed localStorage draft.
-  const restore = React.useCallback((pid) => {
+  const restore = React.useCallback((pid, presets) => {
     let draft = null;
     if (pid) draft = window.CtDraft.migrateToProject(pid) || window.CtDraft.load(pid);
     else draft = window.CtDraft.load('');
     applyDraft(draft, setProjectId, setters, pid, bodyTemplateIdRef);
+    // TKT-0284: opener presets override the draft's kind — explicit intent
+    // ("+ New spec" / "+ Work item" from a spec drawer) beats a stale draft.
+    // parent_id is a silent field carried only from the opener (cleared on
+    // a plain restore / project swap — drafts don't carry parentage).
+    if (presets && presets.kind) setKind(presets.kind);
+    parentIdRef.current = (presets && presets.parent) || null;
     setRestored(!!(draft && ((draft.title && draft.title.trim()) || (draft.body && draft.body.trim()))));
   }, []);
 
@@ -287,11 +297,14 @@ function CreateTicketDrawer({ open, preselectProject, onClose }) {
   const openedFor = React.useRef(null);
   React.useEffect(() => {
     if (!open) { openedFor.current = null; return; }
-    const key = `${preselectProject}`;
+    // TKT-0284: the key includes the presets so opening with a different
+    // kind/parent (e.g. "+ New spec" then "+ Work item") re-restores and
+    // applies the new preset instead of skipping as a same-project dup.
+    const key = `${preselectProject}|${preselectKind || ''}|${preselectParent || ''}`;
     if (openedFor.current === key) return;
     openedFor.current = key;
-    restore(preselectProject);
-  }, [open, preselectProject, restore]);
+    restore(preselectProject, { kind: preselectKind, parent: preselectParent });
+  }, [open, preselectProject, preselectKind, preselectParent, restore]);
 
   // When the user changes project while the drawer is open, load that project's
   // own draft (after flushing the previous one). This is the per-project swap.
@@ -453,6 +466,7 @@ function CreateTicketDrawer({ open, preselectProject, onClose }) {
     priority: priority || undefined,
     stream_id: streamId || undefined,
     assignee: assignee || undefined,
+    parent_id: parentIdRef.current || undefined,
     created_by: 'human',
   });
 

@@ -44,6 +44,7 @@ function App() {
     );
   } else if (route.kind === 'dashboard') page = <Dashboard setRoute={navigate}/>;
   else if (route.kind === 'tracker') page = <TrackerBoard setRoute={navigate}/>;
+  else if (route.kind === 'specs') page = <SpecsBoard/>;
   else if (route.kind === 'projects') page = <ProjectsPage setRoute={navigate}/>;
   else if (route.kind === 'agents') page = <AgentsPage setRoute={navigate}/>;
   else if (route.kind === 'logs') page = <LogsPage/>;
@@ -81,6 +82,8 @@ function App() {
       <CreateTicketDrawer
         open={!!route.overlays.compose}
         preselectProject={route.overlays.composeProject || ''}
+        preselectKind={route.overlays.composeKind || ''}
+        preselectParent={route.overlays.composeParent || ''}
         onClose={() => window.Router.closeOverlay('compose')}/>
       <TicketDrawer
         open={!!route.overlays.ticket}

@@ -117,6 +117,9 @@
   <script type="text/babel" data-presets="env,react" src="/src/streams-panel.jsx"></script>
   <script type="text/babel" data-presets="env,react" src="/src/project-view.jsx"></script>
   <script type="text/babel" data-presets="env,react" src="/src/tracker-board.jsx"></script>
+  <!-- TKT-0284: Specs page — spec-kind tickets separated by view. Loaded after
+       tracker-board.jsx so it can reuse window.TicketColumns / window.TrackerCard. -->
+  <script type="text/babel" data-presets="env,react" src="/src/specs-board.jsx"></script>
   <script src="/src/ct-draft.js"></script>
   <script type="text/babel" data-presets="env,react" src="/src/field-controls.jsx"></script>
   <script type="text/babel" data-presets="env,react" src="/src/create-ticket-drawer.jsx"></script>
