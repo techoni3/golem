@@ -24,9 +24,13 @@
 
 set -u
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=./_golem-home.sh
+. "$SCRIPT_DIR/_golem-home.sh"
+
 EVENT_TYPE="${1:-unknown}"
 TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/golem"
+CONFIG_DIR="$GOLEM_HOME_DIR"
 
 PAYLOAD="$(cat 2>/dev/null || true)"
 

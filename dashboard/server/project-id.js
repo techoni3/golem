@@ -13,15 +13,13 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
+import { golemHome, journalsDir, gatesDir } from '../../lib/golem-home.js';
 
 const HOME = os.homedir();
 
-export const GOLEM_CONFIG_DIR = path.join(
-  process.env.XDG_CONFIG_HOME ?? path.join(HOME, '.config'),
-  'golem',
-);
-export const CENTRAL_JOURNALS_DIR = path.join(GOLEM_CONFIG_DIR, 'journals');
-export const CENTRAL_GATES_DIR = path.join(GOLEM_CONFIG_DIR, 'gates');
+export const GOLEM_CONFIG_DIR = golemHome();
+export const CENTRAL_JOURNALS_DIR = journalsDir();
+export const CENTRAL_GATES_DIR = gatesDir();
 
 /** Lowercase slug of a directory basename — non-alnum runs collapse to "-". */
 export function slugify(name) {

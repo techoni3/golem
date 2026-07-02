@@ -7,7 +7,6 @@
 // We exclude `archive/` and dotfile-prefixed dirs from both roots.
 
 import path from 'node:path';
-import os from 'node:os';
 import fs from 'node:fs/promises';
 import { CONFIG } from './config.js';
 import { colorFor, glyphFor } from './util.js';
@@ -17,12 +16,9 @@ import {
   centralGatesDir,
 } from './project-id.js';
 import { planPath } from './plan.js';
+import { projectsJsonPath } from '../../lib/golem-home.js';
 
-const REGISTRY_FILE = path.join(
-  process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'),
-  'golem',
-  'projects.json',
-);
+const REGISTRY_FILE = projectsJsonPath();
 
 const EXCLUDED = new Set(['archive', 'node_modules']);
 

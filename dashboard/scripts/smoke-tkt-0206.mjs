@@ -14,7 +14,7 @@ import { strict as assert } from 'node:assert';
 import { rm } from 'node:fs/promises';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { ideasDir } from '../../lib/golem-home.js';
 
 const { browser, cleanup } = await acquireChrome();
 const page = browser.contexts()[0]?.pages()[0] ?? await browser.newPage();
@@ -22,7 +22,7 @@ await page.setViewportSize({ width: 1440, height: 900 });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-const IDEAS_DIR = join(homedir(), '.config', 'golem', 'ideas');
+const IDEAS_DIR = ideasDir();
 
 // Clean any leftover smoke ideas from prior runs.
 for (const f of readdirSync(IDEAS_DIR).filter((f) => f.startsWith('tkt-0206-smoke-'))) {

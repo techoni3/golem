@@ -17,23 +17,17 @@
 //   2. fallback scan of GOLEM_PROJECTS_ROOT / golem-projects/* for dirs that
 //      have a tracker/ subdir but aren't in the registry.
 
-import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { openTrackerDb } from '../server/tracker-db.js';
+import { projectsJsonPath } from '../../lib/golem-home.js';
 
 const require = createRequire(import.meta.url);
 const matter = require('gray-matter');
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const HOME = os.homedir();
-
-// Same config-dir resolution as the rest of the codebase (orchestrator.js).
-function configDir() {
-  return path.join(process.env.XDG_CONFIG_HOME ?? path.join(HOME, '.config'), 'golem');
-}
 
 // Default golem-projects root, mirroring CONFIG.projectsRoot in config.js.
 function projectsRoot() {
@@ -88,7 +82,7 @@ function parseArgs(argv) {
 
 // Load the project registry. Returns [] if missing/unparseable.
 function loadRegistry() {
-  const file = path.join(configDir(), 'projects.json');
+  const file = projectsJsonPath();
   let raw;
   try {
     raw = fs.readFileSync(file, 'utf8');

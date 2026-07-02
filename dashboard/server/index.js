@@ -1,5 +1,4 @@
 import path from 'node:path';
-import os from 'node:os';
 import fs from 'node:fs';
 import url from 'node:url';
 import crypto from 'node:crypto';
@@ -18,6 +17,7 @@ import { readChannels } from './channels.js';
 import { applyGateVerdict } from './projects.js';
 import { listIdeas, createIdea, popIdea } from './ideas.js';
 import { initDispatchDrainer } from './dispatch-queue.js';
+import { golemHome, dashboardJsonPath } from '../../lib/golem-home.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const WEB_ROOT = path.resolve(__dirname, '..', 'web');
@@ -44,15 +44,9 @@ const TRACKER_COLUMNS = ['triage', 'open', 'in-progress', 'review', 'blocked', '
 // this contract id. We tolerate a registry-`id` being passed by resolving it to
 // the contract id via the projects list before querying (resolveProjectId).
 
-// The golem config dir — same resolution as tracker-db.js / channels.js
-// (XDG_CONFIG_HOME ?? ~/.config, then /golem). Used for dashboard.json.
-function golemConfigDir() {
-  return path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'), 'golem');
-}
-
 /** Read the pid previously recorded by a dashboard instance, if any. */
 function readPreviousDashboardPid() {
-  const target = path.join(golemConfigDir(), 'dashboard.json');
+  const target = dashboardJsonPath();
   try {
     const doc = JSON.parse(fs.readFileSync(target, 'utf8'));
     if (doc && typeof doc.pid === 'number') return doc.pid;
@@ -1121,9 +1115,9 @@ async function main() {
   // — a write failure logs a warning and must NOT crash the server. We LEAVE the
   // file on shutdown (a stale entry is harmless: consumers health-check the URL).
   try {
-    const dir = golemConfigDir();
+    const dir = golemHome();
     fs.mkdirSync(dir, { recursive: true });
-    const target = path.join(dir, 'dashboard.json');
+    const target = dashboardJsonPath();
     const tmp = path.join(dir, `.dashboard.json.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`);
     const doc = {
       url:

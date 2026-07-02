@@ -1,5 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
+import { ticketAssetsDir } from '../../lib/golem-home.js';
 
 const HOME = os.homedir();
 
@@ -35,9 +36,7 @@ export const CONFIG = {
   journalCapPerAgent: parseInt(process.env.GOLEM_JOURNAL_CAP ?? '200', 10),
   // TKT-0106: ticket asset directory. Content-addressed image storage used by
   // /api/ticket-assets (upload + serve).
-  assetsDir:
-    process.env.GOLEM_ASSETS_DIR ??
-    path.join(HOME, '.config', 'golem', 'ticket-assets'),
+  assetsDir: ticketAssetsDir(),
   // TKT-0106: max asset size in bytes. Defaults to 10 MB.
   assetMaxBytes: parseInt(process.env.GOLEM_ASSET_MAX_BYTES ?? `${10 * 1024 * 1024}`, 10),
   // TKT-0106: allowed MIME types for upload.

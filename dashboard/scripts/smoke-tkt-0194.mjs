@@ -16,12 +16,12 @@ import { acquireChrome } from './_chrome.mjs';
 import { strict as assert } from 'node:assert';
 import { writeFile, readFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
+import { gatesDirFor } from '../../lib/golem-home.js';
 
 const { browser, cleanup } = await acquireChrome();
 const page = browser.contexts()[0]?.pages()[0] ?? await browser.newPage();
 
-const GATE_DIR = path.join(os.homedir(), '.config', 'golem', 'gates', 'anchor-d5cc3e');
+const GATE_DIR = gatesDirFor('anchor-d5cc3e');
 const GATE_FILE = path.join(GATE_DIR, 'tkt-0194-smoke.md');
 const GATE_BODY = `# TKT-0194 smoke
 

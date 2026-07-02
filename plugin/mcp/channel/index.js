@@ -91,11 +91,10 @@ function deriveSessionName() {
 let SESSION_ID = deriveSessionId();
 let SESSION_NAME = deriveSessionName();
 
-const CHANNELS_REGISTRY = path.join(
-  process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'),
-  'golem',
-  'channels.json',
-);
+// golem-home resolution (TKT-0573, ADR-4) lives in tracker-client.js's
+// golemHome() — reused here so this file doesn't carry a second hand-rolled
+// mirror of lib/golem-home.js within the same package.
+const CHANNELS_REGISTRY = path.join(tracker.golemHome(), 'channels.json');
 const CHANNELS_LOCK = `${CHANNELS_REGISTRY}.lock`;
 
 // --- Outbound: SSE listeners on /events ------------------------------------

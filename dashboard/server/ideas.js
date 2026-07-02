@@ -10,15 +10,9 @@
 
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import os from 'node:os';
+import { ideasDir } from '../../lib/golem-home.js';
 
-const HOME = os.homedir();
-const GOLEM_CONFIG_DIR = path.join(
-  process.env.XDG_CONFIG_HOME ?? path.join(HOME, '.config'),
-  'golem',
-);
-
-export const IDEAS_DIR = path.join(GOLEM_CONFIG_DIR, 'ideas');
+export const IDEAS_DIR = ideasDir();
 
 async function ensureDir() {
   await fs.mkdir(IDEAS_DIR, { recursive: true });

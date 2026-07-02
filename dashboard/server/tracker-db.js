@@ -5,12 +5,10 @@
 // for back-compat). Everything here is synchronous (better-sqlite3); the
 // dashboard's request handlers are async but the DB calls inside them are not.
 //
-// DB path resolution mirrors how the rest of the codebase finds the golem
-// config dir (see orchestrator.js): XDG_CONFIG_HOME ?? ~/.config, then /golem.
-// The file is tracker.db inside that dir, overridable wholesale via
+// DB path resolution goes through lib/golem-home.js (TKT-0573, ADR-4) — the
+// tracker DB lives at <golem home>/tracker.db, overridable wholesale via
 // GOLEM_TRACKER_DB.
 
-import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -18,6 +16,7 @@ import Database from 'better-sqlite3';
 import { marked } from 'marked';
 import TurndownService from 'turndown';
 import { gfm as turndownGfm } from 'turndown-plugin-gfm';
+import { trackerDbPath } from '../../lib/golem-home.js';
 
 const SCHEMA_VERSION = 6;
 
@@ -27,15 +26,9 @@ const STREAM_MODES = new Set(['sequential', 'parallel']);
 const LINK_TYPES = new Set(['blocks', 'relates', 'duplicates']);
 const COMMENT_TAGS = new Set(['confirmed', 'partial', 'disputed', 'fix', 'risk', 'question', 'note']);
 
-const HOME = os.homedir();
-
-function configDir() {
-  return path.join(process.env.XDG_CONFIG_HOME ?? path.join(HOME, '.config'), 'golem');
-}
-
-/** Default DB path: <golem config dir>/tracker.db, overridable by GOLEM_TRACKER_DB. */
+/** Default DB path: <golem home>/tracker.db, overridable by GOLEM_TRACKER_DB. */
 export function defaultDbPath() {
-  return process.env.GOLEM_TRACKER_DB ?? path.join(configDir(), 'tracker.db');
+  return trackerDbPath();
 }
 
 function now() {

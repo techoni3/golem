@@ -15,16 +15,26 @@ import os from 'node:os';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 
-// --- config-dir resolution (matches index.js / tracker-db.js) --------------
-// XDG_CONFIG_HOME ?? ~/.config, then /golem. Single source of the golem config
-// dir for this module; identical to the resolution used by the channel server
-// and the dashboard, so all three agree on where dashboard.json / sessions.json
-// live.
-function golemConfigDir() {
-  return path.join(
-    process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'),
-    'golem',
-  );
+// --- golem-home resolution (TKT-0573, ADR-4) --------------------------------
+// This is a hand-maintained MIRROR of lib/golem-home.js's golemHome(). This
+// package runs from the INSTALLED plugin copy with its own node_modules — it
+// cannot import the repo module — so keep the resolution order in sync by
+// hand if either side changes:
+//   1. GOLEM_HOME env       — explicit override.
+//   2. XDG_CONFIG_HOME env  — legacy override (test isolation); outranks the
+//      ~/.golem auto-detect so isolated runs never leak into production state.
+//   3. ~/.golem             — once it exists as a real directory.
+//   4. ~/.config/golem      — pre-migration default.
+// Exported so index.js (same package) reuses this instead of duplicating it
+// a second time.
+export function golemHome() {
+  if (process.env.GOLEM_HOME) return process.env.GOLEM_HOME;
+  if (process.env.XDG_CONFIG_HOME) return path.join(process.env.XDG_CONFIG_HOME, 'golem');
+  const migrated = path.join(os.homedir(), '.golem');
+  try {
+    if (fs.statSync(migrated).isDirectory()) return migrated;
+  } catch { /* not migrated yet */ }
+  return path.join(os.homedir(), '.config', 'golem');
 }
 
 const DEFAULT_BASE_URL = 'http://dashboard.golem.localhost:7420';
@@ -39,7 +49,7 @@ const DEFAULT_BASE_URL = 'http://dashboard.golem.localhost:7420';
  * @returns {string}
  */
 export function dashboardBaseUrl() {
-  const file = path.join(golemConfigDir(), 'dashboard.json');
+  const file = path.join(golemHome(), 'dashboard.json');
   try {
     const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (doc && typeof doc.url === 'string' && doc.url.trim()) {
@@ -116,7 +126,7 @@ export function currentProjectId() {
   const sid = currentSessionId();
   if (sid) {
     try {
-      const file = path.join(golemConfigDir(), 'sessions.json');
+      const file = path.join(golemHome(), 'sessions.json');
       const reg = JSON.parse(fs.readFileSync(file, 'utf8'));
       const rows = Array.isArray(reg?.sessions) ? reg.sessions : [];
       const row = rows.find((s) => s && s.session_id === sid);

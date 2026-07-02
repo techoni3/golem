@@ -30,6 +30,7 @@ import fs from 'node:fs';
 import url from 'node:url';
 import { strict as assert } from 'node:assert';
 import { acquireChrome } from './_chrome.mjs';
+import { channelsJsonPath } from '../../lib/golem-home.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const REPO_ABS = path.resolve(__dirname, '..', '..');
@@ -38,7 +39,7 @@ const ORIGIN = 'http://dashboard.golem.localhost:7420';
 const PROJECT = 'golem-1eba80';
 const FAKE_SESSION = 'smoke-0245-fake';
 const SESSIONS_DIR = path.join(os.homedir(), '.claude', 'sessions');
-const CHANNELS_FILE = path.join(os.homedir(), '.config', 'golem', 'channels.json');
+const CHANNELS_FILE = channelsJsonPath();
 const REGISTRY_FILE = path.join(SESSIONS_DIR, `${process.pid}.json`);
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));

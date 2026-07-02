@@ -14,7 +14,11 @@
 
 set -u
 
-CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/golem"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=./_golem-home.sh
+. "$SCRIPT_DIR/_golem-home.sh"
+
+CONFIG_DIR="$GOLEM_HOME_DIR"
 
 # --- resolve topic ---------------------------------------------------------
 TOPIC="${GOLEM_NTFY_TOPIC:-}"
