@@ -2134,7 +2134,7 @@ select.ct-input { appearance: none; cursor: pointer; padding-right: 26px;
 .td-title {
   flex: 1;
   min-width: 0;
-  font-size: 20px;
+  font-size: 23px;
   font-weight: 600;
   line-height: 1.25;
   letter-spacing: -0.01em;
@@ -2490,18 +2490,18 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
 .td-md {
   color: var(--text-1);
   font-family: var(--font-sans);
-  font-size: 13.5px;
-  line-height: 1.6;
-  /* TKT-0208: cap prose width for readable line-length (~70-80ch on a 13.5px
-     font is ~620-720px — pick the upper end so code blocks and tables still
-     fit; the drawer is wide so this is mostly a *floor* — narrower viewports
-     just use the full width). Centering on wider screens (drawer / page)
-     leaves visual breathing room on the sides instead of stretching prose
-     to 1300+ px (which is what the user reported). 760px ≈ 70ch @ 13.5px
-     sans, matching GitHub / Notion / Linear prose widths. */
-  max-width: 760px;
+  font-size: 15px;
+  line-height: 1.65;
+  /* TKT-0208: cap prose width for readable line-length. 800px border-box
+     minus 2×40px gutters = 720px content ≈ 48em @ 15px (~90ch) — upper end
+     of the comfortable range (Butterick 45–90ch; Notion ~44em, GitHub
+     1012px), deliberately not narrower because ticket bodies are
+     code/table-heavy, not novels. Centering leaves breathing room on the
+     sides instead of stretching prose to 2300+ px on wide drawers. Grounded
+     in SpecForge (16/1.7, centered 1280px layout) + Notion/GitHub prose caps. */
+  max-width: 800px;
   margin: 0 auto;
-  padding: 22px 32px 64px;
+  padding: 24px 40px 72px;
   min-height: 100%;
   overflow-wrap: anywhere;
   box-sizing: border-box;
@@ -2524,21 +2524,21 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
   border-radius: 3px;
   transition: outline-color 100ms ease-out;
 }
-/* Headings — compact hierarchy, distinct sizes. TKT-0208: slightly more
-   breathing room above headings (20px) and below (8px) for cleaner cadence
-   now that the prose has 1.6 line-height and a 760px max-width. */
+/* Headings — compact hierarchy, distinct sizes. TKT-0208: 24px/8px heading
+   cadence matches the 1.65 line-height + 800px measure; sizes scaled up with
+   the 13.5→15px body bump so the hierarchy still reads (title 23 > h1 22 > h2 18.5). */
 .td-md h1, .td-md h2, .td-md h3, .td-md h4, .td-md h5, .td-md h6 {
   color: var(--text-0); font-weight: 600; line-height: 1.3; letter-spacing: -0.01em;
-  margin: 20px 0 8px;
+  margin: 24px 0 8px;
 }
-.td-md h1 { font-size: 19px; font-weight: 700; letter-spacing: -0.02em; padding-bottom: 4px; border-bottom: 1px solid var(--border-1); }
-.td-md h2 { font-size: 16px; }
-.td-md h3 { font-size: 14.5px; }
-.td-md h4 { font-size: 13.5px; color: var(--text-0); }
-.td-md h5, .td-md h6 { font-size: 12px; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.04em; }
-/* TKT-0208: paragraph margin bumped to 8px to match the new 1.6 line-height
-   and 760px max-width — 6px was tight, 8px breathes without being puffy. */
-.td-md p { margin: 8px 0; }
+.td-md h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; padding-bottom: 6px; border-bottom: 1px solid var(--border-1); }
+.td-md h2 { font-size: 18.5px; }
+.td-md h3 { font-size: 16.5px; }
+.td-md h4 { font-size: 15px; color: var(--text-0); }
+.td-md h5, .td-md h6 { font-size: 12.5px; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.04em; }
+/* TKT-0208: paragraph margin 10px matches SpecForge's `p { margin: 10px 0 }`
+   on the new 1.65 line-height / 800px measure. */
+.td-md p { margin: 10px 0; }
 .td-md strong { color: var(--text-0); font-weight: 600; }
 .td-md em { font-style: italic; }
 .td-md a {
@@ -2547,45 +2547,45 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
 }
 .td-md a:hover { text-decoration-color: var(--accent); }
 
-/* Lists — TKT-0208: a bit more indent (24px from 22px) and breathing room
-   between list items (4px from 2px) for hierarchy on the wider body. */
-.td-md ul, .td-md ol { margin: 8px 0; padding-left: 24px; }
-.td-md li { margin: 4px 0; }
-.td-md li > p { margin: 2px 0; }
+/* Lists — TKT-0208: 26px indent + 5px item gap, scaled with the 15px body
+   (SpecForge uses padding-left 24px + 5px item margin at 16px). */
+.td-md ul, .td-md ol { margin: 10px 0; padding-left: 26px; }
+.td-md li { margin: 5px 0; }
+.td-md li > p { margin: 4px 0; }
 .td-md ul { list-style: disc; }
 .td-md ol { list-style: decimal; }
 .td-md li::marker { color: var(--text-3); }
 
 /* Inline code + code blocks. */
 .td-md code {
-  font-family: var(--font-mono); font-size: 12px;
+  font-family: var(--font-mono); font-size: 13px;
   background: var(--bg-3); border: 1px solid var(--border-2);
   border-radius: var(--radius-1); padding: 1px 5px; color: var(--text-0);
   white-space: pre-wrap; word-break: break-word;
 }
 .td-md pre {
   background: var(--bg-0); border: 1px solid var(--border-2);
-  border-radius: var(--radius-2); padding: 10px 12px; margin: 8px 0;
-  overflow-x: auto; line-height: 1.5;
+  border-radius: var(--radius-2); padding: 14px 16px; margin: 12px 0;
+  overflow-x: auto; line-height: 1.55;
 }
 .td-md pre code {
   background: transparent; border: none; padding: 0;
-  font-size: 12px; color: var(--text-1); white-space: pre;
+  font-size: 13px; color: var(--text-1); white-space: pre;
 }
 
-/* Tables — TKT-0208: a bit more cell padding (6/11 from 5/9) for breathability
-   on a 760px body, otherwise tables feel cramped next to the prose. */
+/* Tables — TKT-0208: 13.5px body + 8/12 cell padding breathe with the prose;
+   wide tables still scroll inside the column (display: block; overflow-x: auto). */
 .td-md table {
   display: block; max-width: 100%; overflow-x: auto;
-  width: 100%; border-collapse: collapse; margin: 10px 0;
-  font-size: 12.5px; border: 1px solid var(--border-2); border-radius: var(--radius-2);
+  width: 100%; border-collapse: collapse; margin: 14px 0;
+  font-size: 13.5px; border: 1px solid var(--border-2); border-radius: var(--radius-2);
 }
 .td-md th, .td-md td {
-  text-align: left; padding: 6px 11px; vertical-align: top;
+  text-align: left; padding: 8px 12px; vertical-align: top;
   border-bottom: 1px solid var(--border-1);
 }
 .td-md th {
-  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em;
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.06em;
   text-transform: uppercase; color: var(--text-2); font-weight: 500;
   background: var(--bg-3); border-bottom: 1px solid var(--border-2);
 }
@@ -2593,30 +2593,30 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
 .td-md tr:last-child td { border-bottom: none; }
 .td-md tbody tr:hover td { background: var(--bg-2); }
 
-/* Blockquote — TKT-0208: a touch more padding (6/16 from 4/14) and slightly
-   looser left-border so callouts feel like distinct voices, not afterthoughts. */
+/* Blockquote — TKT-0208: 12px/18px padding for callouts that read as
+   distinct voices, scaled with the prose. */
 .td-md blockquote {
-  margin: 10px 0; padding: 6px 16px; border-left: 3px solid var(--border-3);
+  margin: 12px 0; padding: 6px 18px; border-left: 3px solid var(--border-3);
   color: var(--text-2); font-style: italic;
 }
-.td-md blockquote p { margin: 4px 0; }
-.td-md hr { border: none; border-top: 1px solid var(--border-2); margin: 12px 0; }
+.td-md blockquote p { margin: 6px 0; }
+.td-md hr { border: none; border-top: 1px solid var(--border-2); margin: 20px 0; }
 
 /* GitHub-style admonition callouts (renderer: > [!NOTE]/[!WARNING]/[!IMPORTANT]
    → <div class="admonition admonition-<type>">). Colored left border + tinted bg,
    title via ::before. */
 .td-md .admonition {
-  margin: 10px 0; padding: 8px 14px;
+  margin: 14px 0; padding: 10px 16px;
   border-radius: 0 var(--radius-2) var(--radius-2) 0;
   border-left: 3px solid var(--border-3); background: var(--bg-2);
 }
 .td-md .admonition > *:first-child { margin-top: 0; }
 .td-md .admonition > *:last-child { margin-bottom: 0; }
-.td-md .admonition p { margin: 4px 0; }
+.td-md .admonition p { margin: 6px 0; }
 .td-md .admonition::before {
-  display: block; font-family: var(--font-mono); font-size: 10px;
+  display: block; font-family: var(--font-mono); font-size: 10.5px;
   letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 .td-md .admonition-note { border-left-color: var(--status-running); background: color-mix(in oklab, var(--status-running) 9%, var(--bg-1)); }
 .td-md .admonition-note::before { content: "Note"; color: var(--status-running); }
@@ -2826,7 +2826,14 @@ mark.anno.anno-tail::after {
 
 /* Adjust drawer layout: body area hosts the annotation wrap. */
 .td-scroll { padding: 0; gap: 0; }
-.td-titlebody { padding: 10px 22px; flex: 0 0 auto; }
+.td-titlebody {
+  max-width: 800px;
+  width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
+  padding: 16px 40px 8px;
+  flex: 0 0 auto;
+}
 .td-body-area {
   flex: 1 1 auto;
   min-height: 0;
@@ -2838,16 +2845,23 @@ mark.anno.anno-tail::after {
 .td-fields, .td-comments { padding: 14px 22px; }
 .td-composer { padding: 12px 22px; border-top: 1px solid var(--border-1); }
 
-/* When the rail is open, drop the centering + max-width: the rail lives on
-   the right with a 360px width, so the body has to give it room. Reserve
-   the rail footprint as right padding so the prose is never hidden behind
-   the rail. The 30px gap leaves a small visual gutter between the body's
-   right edge and the rail. */
-.td-annotate-wrap.rail-open .td-md {
-  max-width: none;
-  margin: 0;
-  padding-right: 390px;
-}
+/* When the annotation rail (360px + 30px gutter) is open, reserve its
+   footprint on .td-read-col — the wrapper around the title + body — so BOTH
+   the title and the prose slide left of the rail together and stay aligned
+   (rail-open used to leave the title centered in the full width while the
+   body slid left, a ~200px gap). The rail is portaled into the drawer/page
+   shell (see the #anno-pill comment above), so it overlays the shell's right
+   edge regardless of the wrap's own position. Padding the read-col shrinks
+   the content box that .td-titlebody and .td-md center within, keeping their
+   800px measure and sliding them left of the rail. Chrome (action tray /
+   fields / composer) lives outside the col and stays full-width. .td-read-col
+   mirrors .td-body-area's flex column + min-height:0 so the body keeps its
+   bounded height + internal scroll. Note: a ~5px residual title-vs-body gap
+   can remain on long-bodied tickets because .td-annotate-wrap's own vertical
+   scrollbar reduces its content width by ~10px (.td-md centers slightly left
+   of where the title centers); cosmetic, accepted. */
+.td-read-col { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.td-read-col:has(.td-annotate-wrap.rail-open) { padding-right: 390px; }
 
 /* ===== Drawer width presets + collapsible compact field controls ===== */
 /* Width button group sits left of the close button in the ticket header. */

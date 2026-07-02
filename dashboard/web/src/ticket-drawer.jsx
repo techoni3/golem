@@ -400,7 +400,11 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
             </div>
 
             <div className="td-scroll">
-              {/* ── Title + body (with Edit toggle) ── */}
+              {/* ── Title + body (with Edit toggle), wrapped in .td-read-col so the
+                   title aligns with the prose column AND both slide left of the
+                   annotation rail together (TKT-0208). Chrome (action tray / fields /
+                   composer) stays full-width below, outside the col. */}
+              <div className="td-read-col">
               {editBuf ? (
                 <div className="td-edit">
                   <input
@@ -454,6 +458,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                   <div className="td-body-empty">No description.</div>
                 )}
               </div>
+              </div>{/* /.td-read-col */}
 
               {/* ── Compact action tray (TKT-0101) ── */}
               {/* One row of pills + slim dispatch + collapsed links by default.
