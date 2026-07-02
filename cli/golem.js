@@ -5,7 +5,7 @@
 //   install, cleanup, reinstall, session, project, dispatch, ack
 //
 // Surviving subcommands:
-//   dashboard    Start the admin dashboard (cd dashboard && npm start).
+//   dashboard    Start the admin dashboard (node dashboard/server/index.js).
 //   doctor       Sanity-check the environment.
 //   status       Dashboard health + canonical URL.
 //   help         Show this message.
@@ -115,18 +115,12 @@ async function cmdStatus(args) {
 }
 
 async function cmdDashboard(args) {
-  if (!existsSync(DASHBOARD_DIR)) {
-    fatal(1, `dashboard dir missing: ${DASHBOARD_DIR}`);
+  const serverEntry = resolve(DASHBOARD_DIR, 'server', 'index.js');
+  if (!existsSync(serverEntry)) {
+    fatal(1, `dashboard server entry missing: ${serverEntry}`);
   }
-  if (!existsSync(resolve(DASHBOARD_DIR, 'package.json'))) {
-    fatal(1, `dashboard has no package.json: ${DASHBOARD_DIR}`);
-  }
-  if (!existsSync(resolve(DASHBOARD_DIR, 'node_modules'))) {
-    fatal(1, 'dashboard deps missing — cd dashboard && npm install');
-  }
-  const npm = await hasCommand('npm');
-  if (!npm) {
-    fatal(1, 'npm not on PATH; install Node 20+');
+  if (!existsSync(resolve(GOLEM_ROOT, 'node_modules'))) {
+    fatal(1, 'root deps missing — npm install (from the repo root)');
   }
 
   const publicFlag = args.includes('--public');
@@ -138,8 +132,8 @@ async function cmdDashboard(args) {
   }
 
   const passthru = args.filter((a) => a !== '--public');
-  const proc = spawn('npm', ['start', ...passthru], {
-    cwd: DASHBOARD_DIR,
+  const proc = spawn(process.execPath, [serverEntry, ...passthru], {
+    cwd: GOLEM_ROOT,
     stdio: 'inherit',
     env,
   });
@@ -163,7 +157,13 @@ async function cmdDoctor() {
   log('');
   log('Dashboard');
   existsSync(DASHBOARD_DIR) ? ok(`dashboard dir exists (${DASHBOARD_DIR})`) : fail('dashboard dir exists');
-  existsSync(resolve(DASHBOARD_DIR, 'node_modules')) ? ok('dashboard/node_modules') : fail('dashboard/node_modules — cd dashboard && npm install');
+  existsSync(resolve(GOLEM_ROOT, 'node_modules')) ? ok('root node_modules') : fail('root node_modules — npm install (from the repo root)');
+  try {
+    await import('better-sqlite3');
+    ok('better-sqlite3 loads from root node_modules');
+  } catch (e) {
+    fail(`better-sqlite3 failed to load — ${e.message}`);
+  }
 
   log('');
   log('Dashboard server reachability');

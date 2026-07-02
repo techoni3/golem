@@ -8,7 +8,7 @@ WebSocket.
 ## Accessing the dashboard
 
 Once the dashboard is running (`golem dashboard` from the repo root, or
-`cd dashboard && npm start`), the canonical URL is:
+`npm run dashboard` from the repo root), the canonical URL is:
 
 **`http://dashboard.golem.localhost:7420`**
 
@@ -30,18 +30,18 @@ With the new Node CLI installed (`npm link` from the repo root):
 golem dashboard
 ```
 
-Or manually:
+Or manually, from the repo root (deps + lockfile live at the repo root, not
+in `dashboard/`):
 
 ```bash
-cd golem/dashboard
 npm install
-npm start
+npm run dashboard
 ```
 
 Open <http://dashboard.golem.localhost:7420> (fallback: <http://127.0.0.1:7420>).
 
-To smoke-check a running instance: `npm run check` (inside `dashboard/`) or
-`golem status` (from the repo root).
+To smoke-check a running instance: `npm run check:dashboard` (from the repo
+root) or `golem status`.
 
 ## Configuration
 
@@ -63,7 +63,7 @@ Environment variables (all optional):
 
 ```
 golem/dashboard/
-├── package.json                      # Fastify + ws + chokidar + gray-matter
+├── (deps live in the repo-root package.json — Fastify + ws + chokidar + gray-matter)
 ├── server/
 │   ├── config.js                     # env-driven config
 │   ├── index.js                      # Fastify server + REST + WS + static

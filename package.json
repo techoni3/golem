@@ -1,15 +1,43 @@
 {
   "name": "golem",
-  "version": "0.0.0",
-  "description": "Thin Node CLI for the golem v4 harness.",
+  "version": "0.1.0",
+  "description": "Golem — substrate compiler, dashboard/tracker, and CLI for the agentic harness.",
   "type": "module",
   "bin": {
     "golem": "./cli/golem.js"
   },
+  "exports": {
+    ".": "./cli/golem.js"
+  },
+  "files": [
+    "cli/",
+    "dashboard/server/",
+    "dashboard/web/",
+    "plugin/",
+    "README.md"
+  ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "check": "node --check cli/golem.js"
+    "check": "node --check cli/golem.js",
+    "dashboard": "node dashboard/server/index.js",
+    "dashboard:dev": "node --watch dashboard/server/index.js",
+    "check:dashboard": "dashboard/scripts/check.sh"
+  },
+  "dependencies": {
+    "@fastify/static": "^7.0.4",
+    "@fastify/websocket": "^10.0.1",
+    "better-sqlite3": "^11.10.0",
+    "chokidar": "^3.6.0",
+    "fastify": "^4.28.1",
+    "gray-matter": "^4.0.3",
+    "marked": "^14.1.4",
+    "turndown": "^7.2.4",
+    "turndown-plugin-gfm": "^1.0.2"
+  },
+  "devDependencies": {
+    "@babel/parser": "^7.29.7",
+    "playwright-core": "^1.61.0"
   }
 }
