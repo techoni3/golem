@@ -915,15 +915,21 @@ function CommentCard({ ann, active, currentAuthor, onFocus, onResolve, onDelete,
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState('');
   const [showTagPicker, setShowTagPicker] = React.useState(false);
+  // TKT-0237: collapsed-by-default comment cards (~7-line preview).
+  const [expanded, setExpanded] = React.useState(false);
+  const [overflows, setOverflows] = React.useState(false);
+  const contentRef = React.useRef(null);
   const c = authorMeta(ann.author);
   const tm = tagMeta(ann.tag);
   const editRef = React.useRef(null);
+  const replyCount = (ann.replies || []).length;
 
   const startEdit = (e) => {
     e.stopPropagation();
     setDraft(htmlToEditableText(ann.body));
     setEditing(true);
     setReplying(false);
+    setExpanded(true); // TKT-0237: auto-expand on Edit (never collapse)
     setTimeout(() => editRef.current?.focus(), 0);
   };
   const saveEdit = () => {
@@ -934,12 +940,40 @@ function CommentCard({ ann, active, currentAuthor, onFocus, onResolve, onDelete,
   };
   const cancelEdit = () => { setEditing(false); setDraft(''); };
 
+  // TKT-0237: auto-expand when the card becomes active (user clicked its mark).
+  React.useEffect(() => { if (active) setExpanded(true); }, [active]);
+
+  // TKT-0237: decide whether the content overflows the ~7-line clamp.
+  // scrollHeight is accurate even while .clamped applies (ignores overflow:
+  // hidden). 8px slack so a single hidden line doesn't trigger a clamp.
+  React.useLayoutEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    setOverflows(el.scrollHeight > 150 + 8);
+  }, [ann.body, ann.quote, replyCount, editing]);
+
+  const clamped = !expanded && !editing && !replying && overflows;
+
+  // TKT-0237: click anywhere toggles expand/collapse AND focuses — except on
+  // interactive elements, dead space in .acts, or the end of a text selection.
+  // The closest() guard is the belt to the buttons' existing stopPropagation()
+  // suspenders (the ticket fears the reply-click-collapses regression).
+  const onCardClick = (e) => {
+    onFocus();
+    if (e.target.closest('button, a, textarea, input, select, .acts, .anno-composer, .anno-tagrow, .anno-tag')) return;
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return;
+    if (overflows) setExpanded((v) => !v);
+  };
+
   return (
     <div
       className={`anno-card ${active ? 'is-active' : ''} ${ann.status === 'resolved' ? 'resolved' : ''} ${ann._orphan ? 'orphan' : ''}`}
       data-id={ann.id}
       style={{ '--_ac': c.color, '--_ac-soft': hexA(c.color, 0.1), '--_ac-bd': hexA(c.color, 0.5) }}
-      onClick={onFocus}
+      onClick={onCardClick}
+      aria-expanded={overflows ? expanded : undefined}
+      data-collapsible={overflows ? '1' : undefined}
     >
       <div className="ch">
         <span className="anno-tag clickable" onClick={(e) => { e.stopPropagation(); setShowTagPicker((v) => !v); }} style={{ '--_tc': tm.color, '--_tc-soft': hexA(tm.color, 0.14), '--_tc-bd': hexA(tm.color, 0.5) }}>
@@ -949,34 +983,39 @@ function CommentCard({ ann, active, currentAuthor, onFocus, onResolve, onDelete,
         <span className="when">{shortTime(ann.created_at)}</span>
       </div>
       {showTagPicker && <TagChipRow inline current={ann.tag} onPick={(tag) => { onTagChange(tag); setShowTagPicker(false); }}/>}
-      {ann.quote && <div className="quote">{esc(ann.quote)}</div>}
-      {editing ? (
-        <div className="anno-composer anno-edit">
-          <textarea ref={editRef} value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Edit comment…"
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); saveEdit(); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelEdit(); } }}/>
-          <div className="row">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
-              <button className="cancel" onClick={cancelEdit}>esc</button>
-              <button className="send" onClick={saveEdit} disabled={!draft.trim()}>Save</button>
+      <div ref={contentRef} className={`anno-card-content ${clamped ? 'clamped' : ''}`}>
+        {ann.quote && <div className="quote">{esc(ann.quote)}</div>}
+        {editing ? (
+          <div className="anno-composer anno-edit">
+            <textarea ref={editRef} value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Edit comment…"
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); saveEdit(); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelEdit(); } }}/>
+            <div className="row">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
+                <button className="cancel" onClick={cancelEdit}>esc</button>
+                <button className="send" onClick={saveEdit} disabled={!draft.trim()}>Save</button>
+              </div>
             </div>
+            <div className="hint">Enter to save · Shift+Enter newline · Esc cancel</div>
           </div>
-          <div className="hint">Enter to save · Shift+Enter newline · Esc cancel</div>
-        </div>
-      ) : (
-        <div className="body" dangerouslySetInnerHTML={{ __html: bodyHtml(ann.body) }}/>
+        ) : (
+          <div className="body" dangerouslySetInnerHTML={{ __html: bodyHtml(ann.body) }}/>
+        )}
+        {(ann.replies || []).map((rep, i) => (
+          <div className="reply" key={i}>
+            <div className="ch">
+              <span className="anno-chip" style={{ '--_ac': authorMeta(rep.author).color, '--_ac-soft': hexA(authorMeta(rep.author).color, 0.1), '--_ac-bd': hexA(authorMeta(rep.author).color, 0.5) }}>{esc(authorMeta(rep.author).label)}</span>
+              <span className="when">{shortTime(rep.ts)}</span>
+            </div>
+            <div className="body" dangerouslySetInnerHTML={{ __html: bodyHtml(rep.text) }}/>
+          </div>
+        ))}
+      </div>
+      {overflows && !editing && !replying && (
+        <div className="anno-expand-hint">{expanded ? '⌃ less' : `⌄ more${replyCount ? ` · ${replyCount} ${replyCount === 1 ? 'reply' : 'replies'}` : ''}`}</div>
       )}
-      {(ann.replies || []).map((rep, i) => (
-        <div className="reply" key={i}>
-          <div className="ch">
-            <span className="anno-chip" style={{ '--_ac': authorMeta(rep.author).color, '--_ac-soft': hexA(authorMeta(rep.author).color, 0.1), '--_ac-bd': hexA(authorMeta(rep.author).color, 0.5) }}>{esc(authorMeta(rep.author).label)}</span>
-            <span className="when">{shortTime(rep.ts)}</span>
-          </div>
-          <div className="body" dangerouslySetInnerHTML={{ __html: bodyHtml(rep.text) }}/>
-        </div>
-      ))}
       {replying && <AnnoComposer hideTag currentAuthor={currentAuthor} onSend={(text, author) => { onReply(text, author); setReplying(false); }} onCancel={() => setReplying(false)}/>}
       <div className="acts">
-        <button onClick={(e) => { e.stopPropagation(); setReplying(true); }}>Reply</button>
+        <button onClick={(e) => { e.stopPropagation(); setExpanded(true); setReplying(true); }}>Reply</button>
         <button onClick={(e) => { e.stopPropagation(); startEdit(e); }}>Edit</button>
         <button onClick={(e) => { e.stopPropagation(); onResolve(); }}>{ann.status === 'resolved' ? 'Reopen' : 'Resolve'}</button>
         <button className="danger" onClick={(e) => { e.stopPropagation(); onDelete(); }}>Delete</button>

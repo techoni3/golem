@@ -2801,14 +2801,31 @@ mark.anno.anno-tail::after {
 .anno-card .reply { margin-top: 7px; padding-top: 7px; border-top: 1px dashed #243049; }
 .anno-card .reply .ch { margin-bottom: 3px; }
 .anno-card .reply .body { font-size: 12.5px; color: #aab2c4; }
-.anno-card .acts { display: flex; gap: 12px; margin-top: 8px; }
+.anno-card .acts { display: flex; gap: 6px; margin-top: 6px; }
 .anno-card .acts button {
   font-family: "JetBrains Mono", monospace; font-size: 9.5px; letter-spacing: .4px; text-transform: uppercase;
-  background: none; border: none; color: #6f7890; cursor: pointer; padding: 0; transition: .15s;
+  background: none; border: none; color: #6f7890; cursor: pointer;
+  padding: 6px 9px; min-height: 26px; border-radius: 6px; transition: .15s;
 }
-.anno-card .acts button:hover { color: #fff; }
-.anno-card .acts button.danger:hover { color: #fb6f92; }
+.anno-card .acts button:hover { color: #fff; background: rgba(170,178,196,.08); }
+.anno-card .acts button.danger:hover { color: #fb6f92; background: rgba(251,111,146,.08); }
+.anno-card .acts button:first-child { margin-left: -9px; }
 .anno-card.orphan .quote::after { content: " · anchor lost"; color: #fb6f92; font-style: normal; }
+
+/* TKT-0237: collapsed-by-default comment cards. Clamp ≈7 body lines
+   (7 × 20.25px + quote sliver); fade tells the user there's more. The fade
+   ends in var(--panel) so it blends into the card background (no hard line). */
+.anno-card .anno-card-content.clamped { max-height: 150px; overflow: hidden; position: relative; }
+.anno-card .anno-card-content.clamped::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 34px;
+  background: linear-gradient(180deg, transparent, var(--panel, #121826)); pointer-events: none;
+}
+.anno-card[data-collapsible] { cursor: pointer; }
+.anno-expand-hint {
+  font-family: "JetBrains Mono", monospace; font-size: 9.5px; letter-spacing: .5px;
+  text-transform: uppercase; color: #6f7890; text-align: center; padding: 3px 0 0;
+}
+.anno-card:hover .anno-expand-hint { color: #aab2c4; }
 
 /* composer */
 .anno-composer { margin: 0 0 10px; }
