@@ -3008,7 +3008,7 @@ mark.anno.anno-tail::after {
   background: var(--bg-1); border: none; color: var(--text-3);
   font-family: "JetBrains Mono", monospace; font-size: 10px;
   letter-spacing: .5px; text-transform: uppercase; cursor: pointer;
-  flex: 1; text-align: center; padding: 5px 6px;
+  flex: 1; text-align: center; padding: 6px 8px;
   border-right: 1px solid var(--border-2); white-space: nowrap;
 }
 .td-dispatch-mode-btn:last-child { border-right: none; }
