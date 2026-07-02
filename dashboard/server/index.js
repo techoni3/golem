@@ -571,12 +571,15 @@ async function main() {
     const { id, cid } = req.params;
     const b = req.body ?? {};
     try {
-      const comment = tracker.updateComment(id, cid, {
-        body: b.body,
-        tag: b.tag,
-        status: b.status,
-        block_id: b.block_id,
-      });
+      // TKT-0244: only include keys actually present on the request body, so a
+      // PATCH {status:'resolved'} (Resolve/Reopen/tag-change/block_id-change)
+      // doesn't write body=undefined → toMarkdownBody(undefined)='' and wipe
+      // the comment's text + de-anchor its block_id. An explicit {body:''} still
+      // clears intentionally (it's present → included → toMarkdownBody('')='').
+      const patch = Object.fromEntries(
+        ['body', 'tag', 'status', 'block_id'].filter((k) => k in b).map((k) => [k, b[k]])
+      );
+      const comment = tracker.updateComment(id, cid, patch);
       broadcastWS({ type: 'ticket-comment-updated', ticket_id: id, comment });
       const ticket = tracker.getTicket(id);
       if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
