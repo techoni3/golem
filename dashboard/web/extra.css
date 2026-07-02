@@ -3676,7 +3676,7 @@ mark.anno.anno-tail::after {
   background: var(--bg-1); border: none; color: var(--text-3);
   font-family: "JetBrains Mono", monospace; font-size: 10px;
   letter-spacing: .5px; text-transform: uppercase; cursor: pointer;
-  padding: 5px 10px; border-right: 1px solid var(--border-2); white-space: nowrap;
+  padding: 6px 10px; border-right: 1px solid var(--border-2); white-space: nowrap;
 }
 .tracker-view-btn:last-child { border-right: none; }
 .tracker-view-btn:hover { color: var(--text-1); background: var(--bg-2); }
