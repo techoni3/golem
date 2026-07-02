@@ -256,6 +256,14 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
       );
       CREATE INDEX IF NOT EXISTS idx_session_labels_project ON session_labels(project_id);
     `);
+    // Read schema_version BEFORE seeding it. A brand-new DB has no row yet —
+    // that must read as "predates every migration" (0), not silently
+    // coalesce to the current version once the seed below inserts it, or
+    // every version-gated migration (incl. the v6 ALTER TABLE that adds
+    // pseq/display_id) would wrongly no-op on a fresh DB whose base
+    // CREATE TABLE above never had those columns (TKT-0572).
+    const schemaVersion = db.prepare('SELECT value FROM meta WHERE key = ?').get('schema_version')?.value ?? '0';
+
     // Seed meta defaults idempotently.
     const seed = db.prepare('INSERT OR IGNORE INTO meta(key, value) VALUES (?, ?)');
     seed.run('schema_version', String(SCHEMA_VERSION));
@@ -275,7 +283,6 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
     // Schema migration v2 -> v3: canonical HTML bodies. Convert any ticket or
     // comment body that is not already HTML into HTML (Markdown -> HTML via
     // marked, plain text -> wrapped paragraphs).
-    const schemaVersion = db.prepare('SELECT value FROM meta WHERE key = ?').get('schema_version')?.value;
     if (schemaVersion && Number(schemaVersion) < 3) {
       const updateTicketBody = db.prepare('UPDATE tickets SET body = ?, updated_at = ? WHERE id = ?');
       for (const { id, body } of db.prepare('SELECT id, body FROM tickets').all()) {
