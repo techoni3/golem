@@ -140,6 +140,15 @@ function statusString(status) {
   return t === "retry" ? "busy" : t;
 }
 
+function sessionUpdatedAt(info) {
+  const t = Number(info?.time?.updated ?? info?.time?.created ?? 0);
+  return Number.isFinite(t) ? t : 0;
+}
+
+function topLevelSession(info) {
+  return info && info.id && !info.parentID;
+}
+
 function updateBridge({ sessionID, cwd, status, port, name, insert = true }) {
   if (!sessionID || !port) return;
   const now = new Date().toISOString();
@@ -338,6 +347,7 @@ function loadTrackerContext() {
 export default async (input) => {
   const initCwd = input?.directory || process.cwd();
   const sessionDir = new Map(); // sessionID → directory (tool events carry no dir)
+  const knownSessionIDs = new Set();
   const trackerContext = loadTrackerContext();
 
   const dirFor = (sid) => sessionDir.get(sid) || initCwd;
@@ -354,9 +364,52 @@ export default async (input) => {
     updateBridge({ sessionID, cwd: dirFor(sessionID), status: st, port, name, insert });
     updateSessionRegistry({ sessionID, cwd: dirFor(sessionID), status: st, name, insert });
   };
+  const registerWhenBridgeReady = (fn, attempt = 0) => {
+    if (fn()) return;
+    if (attempt >= 20) return;
+    setTimeout(() => registerWhenBridgeReady(fn, attempt + 1), 100).unref?.();
+  };
+  const rememberSession = (info, status = null) => {
+    if (!topLevelSession(info)) return false;
+    if (info.directory) sessionDir.set(info.id, info.directory);
+    knownSessionIDs.add(info.id);
+    currentSessionID = info.id || currentSessionID;
+    publishBridge(info.id, status || info.status || "idle", info.title || info.name || null, { insert: true });
+    return true;
+  };
+  const seedResumedSessions = async () => {
+    try {
+      const callSession = (method, args) => {
+        const fn = input?.client?.session?.[method];
+        return typeof fn === "function" ? fn.call(input.client.session, args).catch(() => null) : Promise.resolve(null);
+      };
+      const [listed, statuses] = await Promise.all([
+        callSession("list", { query: { directory: initCwd } }),
+        callSession("status", { query: { directory: initCwd } }),
+      ]);
+      const sessions = Array.isArray(listed?.data) ? listed.data : [];
+      const statusById = statuses?.data && typeof statuses.data === "object" ? statuses.data : {};
+      const activeIds = new Set(Object.keys(statusById));
+      const candidates = sessions
+        .filter(topLevelSession)
+        .filter((s) => activeIds.size === 0 || activeIds.has(s.id))
+        .sort((a, b) => sessionUpdatedAt(b) - sessionUpdatedAt(a));
+      const seeded = candidates.length ? candidates : sessions.filter(topLevelSession).sort((a, b) => sessionUpdatedAt(b) - sessionUpdatedAt(a)).slice(0, 1);
+      const register = () => {
+        if (!bridge.port()) return false;
+        for (const info of seeded) rememberSession(info, statusById[info.id] || "idle");
+        return true;
+      };
+      registerWhenBridgeReady(register);
+    } catch (e) {
+      logErr("resume seed", e);
+    }
+  };
+  seedResumedSessions();
   const heartbeat = setInterval(() => {
     try {
-      if (currentSessionID) publishBridge(currentSessionID);
+      for (const sid of knownSessionIDs) publishBridge(sid);
+      if (knownSessionIDs.size === 0 && currentSessionID) publishBridge(currentSessionID);
     } catch (e) {
       logErr("session heartbeat", e);
     }
@@ -372,6 +425,7 @@ export default async (input) => {
           const info = p.info || {};
           if (info.parentID) return; // child/subagent session — journaled via the task tool, not as a top-level start
           if (info.directory) sessionDir.set(info.id, info.directory);
+          knownSessionIDs.add(info.id);
           currentSessionID = info.id || currentSessionID;
           const stdin = base(info.id, info.directory);
           runHook("session-register.sh", [], stdin);
@@ -385,7 +439,7 @@ export default async (input) => {
             updateSessionRegistry({ sessionID: info.id, cwd: info.directory || dirFor(info.id), status, name });
             return true;
           };
-          if (!register()) setTimeout(register, 100).unref?.();
+          registerWhenBridgeReady(register);
         } else if (t === "session.idle") {
           currentSessionID = p.sessionID || currentSessionID;
           publishBridge(p.sessionID, "idle");
@@ -403,6 +457,7 @@ export default async (input) => {
           const info = p.info || {};
           if (info.parentID) return; // child/subagent session
           if (info.directory) sessionDir.set(info.id, info.directory);
+          knownSessionIDs.add(info.id);
           currentSessionID = info.id || currentSessionID;
           publishBridge(info.id, null, info.title || null, { insert: true });
         } else if (t === "session.compacted") {
