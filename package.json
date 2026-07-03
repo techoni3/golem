@@ -1,6 +1,6 @@
 {
   "name": "golem",
-  "version": "5.0.1",
+  "version": "5.0.2",
   "description": "Golem — substrate compiler, dashboard/tracker, and CLI for the agentic harness.",
   "type": "module",
   "bin": {

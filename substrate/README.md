@@ -16,6 +16,11 @@ sub-agents, and the golem channel MCP.
   `project_path` so readers never re-derive. (Legacy guard: a v3-wired repo that
   still has `.claude/hooks/journal-event.sh` keeps owning its own journal — the
   plugin hook exits silently there.)
+- **Project-scoped substrate sync** → SessionStart also runs a fast
+  `golem sync --check --project <root> --harness <cc|opencode>`. Clean exits are
+  no-ops; drift launches a detached render into the project's harness-local dirs;
+  failures log to `~/.golem/logs/sync-on-register.log` and never block session
+  start.
 - **Notification** → pushes the message to your ntfy topic so you get a phone
   ping on needs-input / idle. No-op when no topic is configured.
 - **Agents** → `worker`, `reviewer`, `researcher` (all `model: opus`).
@@ -153,6 +158,7 @@ resolved by walking up from the session cwd to the nearest `.git` or `CLAUDE.md`
 | `GOLEM_CHANNEL_PORT` | channel HTTP port (`0` = random free port) | `7421` |
 | `GOLEM_CEO_SESSION_ID` | explicit override for the id the channel registers under | unset → derived **logical** id (see below) |
 | `GOLEM_CHANNEL_ALLOWED_SENDERS` | comma list of accepted `X-Sender` values | `dashboard,cli,curl,consult` |
+| `GOLEM_CLI` | hook override for the `golem` CLI path used by sync-on-register tests | `command -v golem` |
 
 `CLAUDE_PLUGIN_ROOT` is provided by Claude Code and resolves hook/MCP paths.
 
@@ -180,6 +186,25 @@ plugin/
 Central state lives under `~/.golem/` (`projects.json`, `sessions.json`,
 `channels.json`, `journals/<project_id>/hook.jsonl`, optional `ntfy_topic`) —
 zero repo footprint.
+
+## Project-scoped substrate artifacts
+
+Canonical markdown artifacts can declare `scope: project` in frontmatter;
+default is `scope: global`. Global renders ignore project-scoped files. Project
+sync renders only project-scoped files and records them under
+`substrate.lock.projects.<project_id>.targets`.
+
+Current P6 artifact-set decision: no real project-scoped golem content ships yet.
+The mechanism is verified with scratch-only fixture substrate roots via
+`GOLEM_SUBSTRATE_ROOT`; generated project files are not written into real user
+repos until a later explicit policy decision.
+
+Project mappings:
+
+| Harness | Agents | Skills |
+|---------|--------|--------|
+| Claude Code | `<project>/.claude/agents/<name>.md` | `<project>/.claude/skills/<name>/SKILL.md` |
+| opencode | `<project>/.opencode/agents/<name>.md` | `<project>/.opencode/skills/<name>/SKILL.md` |
 
 ## Notes & caveats
 

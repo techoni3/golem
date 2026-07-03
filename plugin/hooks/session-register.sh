@@ -11,7 +11,9 @@
 #      NEVER overwriting an existing entry's name/kind (manual entries win),
 #      only bumping last_seen.
 #   4. Atomically upsert ~/.config/golem/sessions.json with this session.
-#   5. Emit NO sessionTitle — naming is left entirely to the user's /rename
+#   5. Check project-scoped substrate drift for this (project, harness) and, if
+#      dirty, launch a detached render. This is fail-open and logs only.
+#   6. Emit NO sessionTitle — naming is left entirely to the user's /rename
 #      (auto-titling clobbered the chosen name on every resume).
 #
 # Safety: set -u, bash-3.2 compatible (macOS default), every failure exits 0
@@ -213,6 +215,46 @@ if command -v jq >/dev/null 2>&1; then
   with_lock "$PROJECTS_JSON.lock" upsert_projects || true
   with_lock "$SESSIONS_JSON.lock" upsert_sessions || true
 fi
+
+# --- project-scoped substrate sync-on-register -----------------------------
+# Fast path: one `golem sync --check --project ... --harness ...` runs inline.
+# Dirty path: full render runs detached so session start is not held hostage.
+# Any failure logs and exits 0; registration must never break a session.
+sync_on_register() {
+  local cli="${GOLEM_CLI:-}"
+  if [ -z "$cli" ]; then
+    cli="$(command -v golem 2>/dev/null || true)"
+  fi
+  local log_dir="$CONFIG_DIR/logs"
+  local log_file="$log_dir/sync-on-register.log"
+  mkdir -p "$log_dir" 2>/dev/null || return 0
+
+  if [ -z "$cli" ]; then
+    printf '%s sync-on-register: golem CLI not found; skipping project sync for %s (%s)\n' "$NOW" "$ROOT" "$HARNESS" >> "$log_file" 2>/dev/null || true
+    return 0
+  fi
+
+  local h="$HARNESS"
+  [ "$h" = "claudecode" ] && h="cc"
+
+  "$cli" sync --check --project "$ROOT" --harness "$h" >> "$log_file" 2>&1
+  local rc=$?
+  if [ "$rc" -eq 0 ]; then
+    return 0
+  fi
+  if [ "$rc" -eq 1 ]; then
+    (
+      printf '%s sync-on-register: drift detected; rendering %s for %s\n' "$NOW" "$h" "$ROOT"
+      "$cli" sync --project "$ROOT" --harness "$h"
+    ) >> "$log_file" 2>&1 &
+    return 0
+  fi
+
+  printf '%s sync-on-register: check failed rc=%s for %s (%s); fail-open\n' "$NOW" "$rc" "$ROOT" "$h" >> "$log_file" 2>/dev/null || true
+  return 0
+}
+
+sync_on_register || true
 
 # --- naming: intentionally NONE --------------------------------------------
 # We deliberately do NOT emit sessionTitle. SessionStart fires on resume/compact

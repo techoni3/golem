@@ -94,4 +94,25 @@ version, a different one installed) and reports opencode render drift.
 
 - `mcp.golem` references the repo checkout by absolute path; if you move the
   golem repo, re-run `golem sync --target opencode` to refresh the path.
-- opencode's agent dir is global; there is currently no project-scoped render.
+
+## Project-scoped renders
+
+P6 adds project-scoped substrate artifacts. A canonical substrate file can opt in
+with `scope: project` in frontmatter; default is `scope: global`. Global opencode
+sync ignores project-scoped files. Project sync renders only those files:
+
+| Piece  | Project render path |
+|--------|---------------------|
+| Agents | `<project>/.opencode/agents/<name>.md` |
+| Skills | `<project>/.opencode/skills/<name>/SKILL.md` |
+
+Session registration triggers the check for opencode sessions through the P5
+shim: `session.created` calls `session-register.sh` with `harness:"opencode"`,
+and the script runs `golem sync --check --project <root> --harness opencode`.
+Dirty renders run detached; failures log to `~/.golem/logs/sync-on-register.log`
+and never block session start.
+
+Current artifact-set decision for P6: no real project-scoped substrate content is
+shipped yet. The mechanism is verified with scratch-only fixtures so golem does
+not start writing generated files into real user repos before an explicit policy
+decision.

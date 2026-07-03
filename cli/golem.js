@@ -14,9 +14,10 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, readlinkSync, renameSync, symlinkSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, resolve, join } from 'node:path';
+import { dirname, resolve, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { golemHome, legacyConfigDir, migratedHomeDir, trackerDbPath, renderDirFor } from '../lib/golem-home.js';
+import { golemHome, legacyConfigDir, migratedHomeDir, trackerDbPath, renderDirFor, projectsJsonPath } from '../lib/golem-home.js';
+import { projectIdFor } from '../lib/project-id.js';
 import * as compiler from '../lib/compiler/engine.js';
 import * as ccAdapter from '../lib/compiler/adapters/cc.js';
 import * as ocAdapter from '../lib/compiler/adapters/opencode.js';
@@ -308,28 +309,107 @@ function readPackageVersion() {
   return JSON.parse(readFileSync(resolve(GOLEM_ROOT, 'package.json'), 'utf8')).version;
 }
 
+function substrateRoot() {
+  return process.env.GOLEM_SUBSTRATE_ROOT ? resolve(process.env.GOLEM_SUBSTRATE_ROOT) : resolve(GOLEM_ROOT, 'substrate');
+}
+
+function optionValue(args, name) {
+  const idx = args.indexOf(name);
+  return idx === -1 ? null : args[idx + 1];
+}
+
+function normalizeTarget(target) {
+  if (target === 'claudecode') return 'cc';
+  if (target === 'cc' || target === 'cc-marketplace' || target === 'opencode') return target;
+  fatal(2, `Unknown sync target/harness: ${target} (known: ${KNOWN_TARGETS.join(', ')}, claudecode)`);
+}
+
 function planForTarget(target) {
-  const substrateRoot = resolve(GOLEM_ROOT, 'substrate');
+  const root = substrateRoot();
   if (target === 'cc-marketplace') {
-    return ccAdapter.buildMarketplacePlan({ substrateRoot });
+    return ccAdapter.buildMarketplacePlan({ substrateRoot: root });
   }
   const adapter = ADAPTERS[target];
   if (!adapter) fatal(2, `Unknown sync target: ${target} (known: ${KNOWN_TARGETS.join(', ')})`);
-  return adapter.buildPlan({ substrateRoot, repoRoot: GOLEM_ROOT, packageVersion: readPackageVersion() });
+  return adapter.buildPlan({ substrateRoot: root, repoRoot: GOLEM_ROOT, packageVersion: readPackageVersion() });
+}
+
+function knownProjects() {
+  try {
+    const doc = JSON.parse(readFileSync(projectsJsonPath(), 'utf8'));
+    return (doc.projects ?? []).filter((p) => p?.path && existsSync(p.path));
+  } catch {
+    return [];
+  }
+}
+
+function printDrift({ clean, drifted, orphaned }) {
+  if (clean) {
+    log('  OK clean — no drift');
+    return;
+  }
+  if (drifted.length) {
+    log('');
+    log('  drifted:');
+    for (const d of drifted) log(`    ${d.reason.padEnd(9)} ${d.key}`);
+  }
+  if (orphaned.length) {
+    log('');
+    log('  orphaned (source removed, output would be pruned):');
+    for (const o of orphaned) log(`    orphan    ${o.key}`);
+  }
+}
+
+function gitQuiet(args, cwd) {
+  const res = spawnSync('git', args, { cwd, stdio: 'ignore' });
+  return res.status === 0;
+}
+
+function warnVisibleGeneratedFiles({ projectRoot, outDir, items, result }) {
+  if (!gitQuiet(['rev-parse', '--is-inside-work-tree'], projectRoot)) return;
+  const byKey = new Map(items.map((item) => [item.key, item.outputRelPath]));
+  const visible = [];
+  for (const key of result.written) {
+    const relOut = byKey.get(key);
+    if (!relOut) continue;
+    const relProject = pathRelative(projectRoot, join(outDir, relOut));
+    const ignored = gitQuiet(['check-ignore', '--quiet', '--', relProject], projectRoot);
+    const tracked = gitQuiet(['ls-files', '--error-unmatch', '--', relProject], projectRoot);
+    if (!ignored && !tracked) visible.push(relProject);
+  }
+  if (!visible.length) return;
+  err('');
+  err('  WARNING project render wrote generated files that are untracked and not gitignored:');
+  for (const rel of visible) err(`    ${rel}`);
+  err('  Add an ignore rule or intentionally track them before using project-scoped artifacts in this repo.');
+}
+
+function pathRelative(from, to) {
+  const rel = relative(from, to);
+  return rel || '.';
 }
 
 async function cmdSync(args) {
   const checkOnly = args.includes('--check');
   const force = args.includes('--force');
-  const targetIdx = args.indexOf('--target');
-  const target = targetIdx !== -1 ? args[targetIdx + 1] : 'cc';
+  const explicitTarget = optionValue(args, '--target') || optionValue(args, '--harness');
+  const target = normalizeTarget(explicitTarget || 'cc');
+  const projectArg = optionValue(args, '--project');
+
+  if (checkOnly && !explicitTarget && !projectArg && !optionValue(args, '--out') && args.filter((a) => a !== '--check').length === 0) {
+    return cmdSyncCheckAll();
+  }
+
+  if (projectArg) {
+    if (target === 'cc-marketplace') fatal(2, '--project is not valid with cc-marketplace');
+    return cmdSyncProject({ target, projectRoot: resolve(projectArg), checkOnly, force });
+  }
 
   if (target === 'opencode') {
     return cmdSyncOpencode({ checkOnly, force });
   }
 
-  const outIdx = args.indexOf('--out');
-  const outDir = outIdx !== -1 ? resolve(args[outIdx + 1]) : renderDirFor(target);
+  const outDir = optionValue(args, '--out') ? resolve(optionValue(args, '--out')) : renderDirFor(target);
 
   const items = planForTarget(target);
 
@@ -338,21 +418,9 @@ async function cmdSync(args) {
     log('');
     log(`golem sync --check --target ${target}`);
     log(`  out: ${outDir}`);
-    if (clean) {
-      log('  OK clean — no drift');
-      return;
-    }
-    if (drifted.length) {
-      log('');
-      log('  drifted:');
-      for (const d of drifted) log(`    ${d.reason.padEnd(9)} ${d.key}`);
-    }
-    if (orphaned.length) {
-      log('');
-      log('  orphaned (source removed, output would be pruned):');
-      for (const o of orphaned) log(`    orphan    ${o.key}`);
-    }
-    process.exit(1);
+    printDrift({ clean, drifted, orphaned });
+    if (!clean) process.exit(1);
+    return;
   }
 
   const { written, unchanged, tampered, pruned } = compiler.render({
@@ -386,6 +454,118 @@ async function cmdSync(args) {
   }
 }
 
+async function cmdSyncProject({ target, projectRoot, checkOnly, force }) {
+  const root = substrateRoot();
+  const packageVersion = readPackageVersion();
+  const projectId = projectIdFor(projectRoot);
+  log('');
+  log(`golem sync --target ${target}${checkOnly ? ' --check' : ''} --project ${projectRoot}`);
+  log(`  project_id: ${projectId}`);
+
+  if (target === 'opencode') {
+    if (!isHarnessEnabled('opencode')) {
+      log('  · opencode harness is disabled in ~/.golem/config.json — skipping (not drift).');
+      return;
+    }
+    const agentItems = ocAdapter.buildProjectAgentPlan({ substrateRoot: root });
+    const skillItems = ocAdapter.buildProjectSkillPlan({ substrateRoot: root });
+    const agentDir = ocAdapter.projectAgentOutDir(projectRoot);
+    const skillsDir = ocAdapter.projectSkillsOutDir(projectRoot);
+    if (checkOnly) {
+      const a = compiler.checkDrift({ target: 'opencode', outDir: agentDir, items: agentItems, projectId });
+      const s = compiler.checkDrift({ target: 'opencode', outDir: skillsDir, items: skillItems, projectId });
+      log(`  agents out: ${agentDir}`);
+      log(`  skills out: ${skillsDir}`);
+      const clean = a.clean && s.clean;
+      printDrift({ clean, drifted: [...a.drifted, ...s.drifted], orphaned: [...a.orphaned, ...s.orphaned] });
+      if (!clean) process.exit(1);
+      return;
+    }
+    const ra = compiler.render({ target: 'opencode', outDir: agentDir, items: agentItems, packageVersion, force, projectId });
+    const rs = compiler.render({ target: 'opencode', outDir: skillsDir, items: skillItems, packageVersion, force, projectId });
+    log(`  agents out: ${agentDir}`);
+    log(`    written: ${ra.written.length}, unchanged: ${ra.unchanged.length}, pruned: ${ra.pruned.length}, tampered: ${ra.tampered.length}`);
+    log(`  skills out: ${skillsDir}`);
+    log(`    written: ${rs.written.length}, unchanged: ${rs.unchanged.length}, pruned: ${rs.pruned.length}, tampered: ${rs.tampered.length}`);
+    warnVisibleGeneratedFiles({ projectRoot, outDir: agentDir, items: agentItems, result: ra });
+    warnVisibleGeneratedFiles({ projectRoot, outDir: skillsDir, items: skillItems, result: rs });
+    const tampered = [...ra.tampered, ...rs.tampered];
+    if (tampered.length) {
+      log('');
+      err('  TAMPER — refused to overwrite (hand-edited outside sync); re-run with --force:');
+      for (const t of tampered) err(`    ${t.outputRelPath}`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  const outDir = projectRoot;
+  const items = ccAdapter.buildProjectPlan({ substrateRoot: root, repoRoot: GOLEM_ROOT, packageVersion });
+  if (checkOnly) {
+    const res = compiler.checkDrift({ target: 'cc', outDir, items, projectId });
+    log(`  out: ${outDir}`);
+    printDrift(res);
+    if (!res.clean) process.exit(1);
+    return;
+  }
+  const res = compiler.render({ target: 'cc', outDir, items, packageVersion, force, projectId });
+  log(`  out: ${outDir}`);
+  log(`  written: ${res.written.length}, unchanged: ${res.unchanged.length}, pruned: ${res.pruned.length}, tampered: ${res.tampered.length}`);
+  warnVisibleGeneratedFiles({ projectRoot, outDir, items, result: res });
+  if (res.tampered.length) {
+    log('');
+    err('  TAMPER — refused to overwrite (hand-edited outside sync); re-run with --force:');
+    for (const t of res.tampered) err(`    ${t.outputRelPath}`);
+    process.exit(1);
+  }
+}
+
+async function cmdSyncCheckAll() {
+  let drift = false;
+  log('');
+  log('golem sync --check');
+
+  const ccOut = renderDirFor('cc');
+  const cc = compiler.checkDrift({ target: 'cc', outDir: ccOut, items: planForTarget('cc') });
+  log('');
+  log(`global cc: ${ccOut}`);
+  printDrift(cc);
+  drift = drift || !cc.clean;
+
+  if (isHarnessEnabled('opencode')) {
+    const root = substrateRoot();
+    const a = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.agentOutDir(), items: ocAdapter.buildAgentPlan({ substrateRoot: root }) });
+    const s = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.skillsOutDir(), items: ocAdapter.buildSkillPlan({ substrateRoot: root }) });
+    const clean = a.clean && s.clean;
+    log('');
+    log('global opencode:');
+    log(`  agents out: ${ocAdapter.agentOutDir()}`);
+    log(`  skills out: ${ocAdapter.skillsOutDir()}`);
+    printDrift({ clean, drifted: [...a.drifted, ...s.drifted], orphaned: [...a.orphaned, ...s.orphaned] });
+    drift = drift || !clean;
+  }
+
+  for (const p of knownProjects()) {
+    const projectId = p.id || projectIdFor(p.path);
+    const ccProj = compiler.checkDrift({ target: 'cc', outDir: p.path, items: ccAdapter.buildProjectPlan({ substrateRoot: substrateRoot() }), projectId });
+    log('');
+    log(`project cc ${projectId}: ${p.path}`);
+    printDrift(ccProj);
+    drift = drift || !ccProj.clean;
+    if (isHarnessEnabled('opencode')) {
+      const root = substrateRoot();
+      const a = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.projectAgentOutDir(p.path), items: ocAdapter.buildProjectAgentPlan({ substrateRoot: root }), projectId });
+      const s = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.projectSkillsOutDir(p.path), items: ocAdapter.buildProjectSkillPlan({ substrateRoot: root }), projectId });
+      const clean = a.clean && s.clean;
+      log(`project opencode ${projectId}: ${p.path}`);
+      printDrift({ clean, drifted: [...a.drifted, ...s.drifted], orphaned: [...a.orphaned, ...s.orphaned] });
+      drift = drift || !clean;
+    }
+  }
+
+  if (drift) process.exit(1);
+}
+
 /**
  * opencode sync (TKT-0576, P4). Unlike cc, opencode reads from TWO dirs — the
  * fixed global agent dir and a skills dir registered via skills.paths — plus a
@@ -403,10 +583,10 @@ async function cmdSyncOpencode({ checkOnly, force }) {
     return;
   }
 
-  const substrateRoot = resolve(GOLEM_ROOT, 'substrate');
+  const root = substrateRoot();
   const packageVersion = readPackageVersion();
-  const agentItems = ocAdapter.buildAgentPlan({ substrateRoot });
-  const skillItems = ocAdapter.buildSkillPlan({ substrateRoot });
+  const agentItems = ocAdapter.buildAgentPlan({ substrateRoot: root });
+  const skillItems = ocAdapter.buildSkillPlan({ substrateRoot: root });
   const agentDir = ocAdapter.agentOutDir();
   const skillsDir = ocAdapter.skillsOutDir();
 
@@ -542,6 +722,28 @@ async function cmdDoctor() {
     skip(`could not check substrate drift — ${e.message}`);
   }
 
+  try {
+    const projects = knownProjects();
+    const root = substrateRoot();
+    let driftedProjects = 0;
+    for (const p of projects) {
+      const projectId = p.id || projectIdFor(p.path);
+      const cc = compiler.checkDrift({ target: 'cc', outDir: p.path, items: ccAdapter.buildProjectPlan({ substrateRoot: root }), projectId });
+      let clean = cc.clean;
+      if (isHarnessEnabled('opencode')) {
+        const a = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.projectAgentOutDir(p.path), items: ocAdapter.buildProjectAgentPlan({ substrateRoot: root }), projectId });
+        const s = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.projectSkillsOutDir(p.path), items: ocAdapter.buildProjectSkillPlan({ substrateRoot: root }), projectId });
+        clean = clean && a.clean && s.clean;
+      }
+      if (!clean) driftedProjects += 1;
+    }
+    driftedProjects === 0
+      ? ok(`project renders clean (${projects.length} registered projects checked)`)
+      : skip(`project renders drifted in ${driftedProjects}/${projects.length} projects — run \`golem sync --check\` for details`);
+  } catch (e) {
+    skip(`could not check project render drift — ${e.message}`);
+  }
+
   log('');
   log('opencode harness');
   if (!isHarnessEnabled('opencode')) {
@@ -609,12 +811,18 @@ Run:
                        never runs automatically. Rollback is one command
                        (printed on completion).
   sync [--check] [--target cc|cc-marketplace|opencode] [--out <dir>] [--force]
-                       Render substrate/ sources into a harness bundle
-                       (default target: cc, default out: ~/.golem/renders/
-                       cc-plugin/). --check reports drift without writing
-                       (exit 0 clean, 1 drifted). --force overwrites a
-                       hand-edited (tampered) output; without it, sync warns
-                       and refuses that one file.
+       [--project <root>] [--harness cc|claudecode|opencode]
+                        Render substrate/ sources into a harness bundle
+                        (default target: cc, default out: ~/.golem/renders/
+                        cc-plugin/). --check reports drift without writing
+                        (exit 0 clean, 1 drifted). --force overwrites a
+                        hand-edited (tampered) output; without it, sync warns
+                        and refuses that one file.
+                        --project switches to project-scoped artifacts only,
+                        rendering into the project root's harness-local dirs and
+                        recording the lockfile under projects.<project_id>.
+                        With only --check and no target/project args, reports
+                        global renders plus all known project render sections.
                        target opencode renders agents into
                        ~/.config/opencode/agent/ + skills into
                        ~/.golem/renders/opencode/skills/ and merges managed

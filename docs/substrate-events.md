@@ -93,3 +93,21 @@ entry).
 Adapters MUST be non-blocking and fail-open: a slow or broken script can never
 stall or crash the harness session (the opencode shim shells out
 fire-and-forget and logs failures to `~/.golem/logs/opencode-shim.log`).
+
+## Project-scoped sync on session-start
+
+`session-register.sh` also owns P6 project-scoped substrate sync. After the
+registry upserts, it runs a fast check:
+
+```bash
+golem sync --check --project <project_root> --harness <cc|opencode>
+```
+
+Exit `0` is the no-op clean path. Exit `1` means drift; the hook launches the
+full `golem sync --project ... --harness ...` render detached and writes output
+to `~/.golem/logs/sync-on-register.log`. Any other error is logged and ignored
+so session start remains fail-open.
+
+The opencode shim does not duplicate this logic: its `session.created` handler
+passes `harness:"opencode"` to the same `session-register.sh`, so both harnesses
+share the registration and sync path.

@@ -9,6 +9,8 @@
 //
 // Event → CC event_kind (observed via a probe plugin, TKT-0577 research):
 //   session.created (parentID null)   → session-register.sh + journal session-start
+//                                      (session-register also performs P6
+//                                       project sync-on-register)
 //   chat.message (user)               → journal user-prompt
 //   tool.execute.before               → journal tool-pre   (tool "task" → agent-spawn)
 //   tool.execute.after                → journal tool-post  (tool "task" → agent-return)
