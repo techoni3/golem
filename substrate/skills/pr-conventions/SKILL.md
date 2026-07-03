@@ -37,6 +37,6 @@ Known limitations, deferred follow-ups, trade-offs. Empty if none.
 PR title = `<type>(<scope>): <subject>` matching the most representative commit.
 End the PR body with:
 ```
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
+🤖 Generated with {{#if claudecode}}[Claude Code](https://claude.com/claude-code){{/if}}{{#if opencode}}[opencode](https://opencode.ai){{/if}}
 ```
 One ticket per PR — never bundle multiple tracker tickets into one PR.

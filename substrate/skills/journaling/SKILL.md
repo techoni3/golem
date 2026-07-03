@@ -8,8 +8,11 @@ description: Central journal paths and milestone append format for golem project
 Journals live OUTSIDE the repo at `~/.golem/journals/<project_id>/`:
 `hook.jsonl` (mechanical) and `summary.jsonl` (semantic). Both append-only JSONL.
 
-**Mechanical journaling is automatic** via plugin hooks — never write `hook.jsonl`
-lines by hand. The model's ONLY write is appending milestone lines (see work-loop).
+{{#if claudecode}}**Mechanical journaling is automatic** via plugin hooks — never write `hook.jsonl`
+lines by hand. The model's ONLY write is appending milestone lines (see work-loop).{{/if}}{{#if opencode}}**Mechanical journaling needs Claude Code hooks** — under opencode there are no
+golem lifecycle hooks, so `hook.jsonl` is NOT auto-written and no project entry is
+auto-registered. Derive `project_id` with the fallback below and append milestone
+lines only (see work-loop); skip `hook.jsonl` entirely.{{/if}}
 
 `project_id`: look it up in the registry — the SessionStart hook already registered
 this project, and the registry is authoritative (legacy projects have non-derived ids):

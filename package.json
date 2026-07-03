@@ -32,6 +32,7 @@
     "chokidar": "^3.6.0",
     "fastify": "^4.28.1",
     "gray-matter": "^4.0.3",
+    "jsonc-parser": "^3.3.1",
     "marked": "^14.1.4",
     "turndown": "^7.2.4",
     "turndown-plugin-gfm": "^1.0.2"

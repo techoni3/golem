@@ -19,6 +19,8 @@ import { fileURLToPath } from 'node:url';
 import { golemHome, legacyConfigDir, migratedHomeDir, trackerDbPath, renderDirFor } from '../lib/golem-home.js';
 import * as compiler from '../lib/compiler/engine.js';
 import * as ccAdapter from '../lib/compiler/adapters/cc.js';
+import * as ocAdapter from '../lib/compiler/adapters/opencode.js';
+import { isHarnessEnabled, loadConfig, saveConfig } from '../lib/golem-config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -274,7 +276,33 @@ async function cmdMigrateHome(args) {
 }
 
 const ADAPTERS = { cc: ccAdapter };
-const KNOWN_TARGETS = ['cc', 'cc-marketplace'];
+const KNOWN_TARGETS = ['cc', 'cc-marketplace', 'opencode'];
+
+/** Resolve the opencode binary: PATH first, then the default install location. */
+function resolveOpencodeBin() {
+  const probe = spawnSync('sh', ['-c', 'command -v opencode'], { encoding: 'utf8' });
+  if (probe.status === 0 && probe.stdout.trim()) return probe.stdout.trim();
+  const fallback = join(homedir(), '.opencode', 'bin', 'opencode');
+  return existsSync(fallback) ? fallback : null;
+}
+
+/** `opencode --version` output, or null if the binary can't be found/run. */
+function opencodeVersion(bin) {
+  if (!bin) return null;
+  const res = spawnSync(bin, ['--version'], { encoding: 'utf8' });
+  return res.status === 0 ? res.stdout.trim() : null;
+}
+
+/** A validator that runs `opencode debug config` (the real tool, not the schema). */
+function makeOpencodeValidator(bin) {
+  if (!bin) return null;
+  return () => {
+    const res = spawnSync(bin, ['debug', 'config'], { encoding: 'utf8' });
+    if (res.status === 0) return { ok: true };
+    const msg = (res.stderr || res.stdout || `exit ${res.status}`).trim().split('\n').slice(0, 6).join('\n');
+    return { ok: false, error: msg };
+  };
+}
 
 function readPackageVersion() {
   return JSON.parse(readFileSync(resolve(GOLEM_ROOT, 'package.json'), 'utf8')).version;
@@ -295,6 +323,11 @@ async function cmdSync(args) {
   const force = args.includes('--force');
   const targetIdx = args.indexOf('--target');
   const target = targetIdx !== -1 ? args[targetIdx + 1] : 'cc';
+
+  if (target === 'opencode') {
+    return cmdSyncOpencode({ checkOnly, force });
+  }
+
   const outIdx = args.indexOf('--out');
   const outDir = outIdx !== -1 ? resolve(args[outIdx + 1]) : renderDirFor(target);
 
@@ -351,6 +384,106 @@ async function cmdSync(args) {
     log('  pruned (source removed):');
     for (const p of pruned) log(`    ${p.outputRelPath}`);
   }
+}
+
+/**
+ * opencode sync (TKT-0576, P4). Unlike cc, opencode reads from TWO dirs — the
+ * fixed global agent dir and a skills dir registered via skills.paths — plus a
+ * managed opencode.jsonc merge, so it can't ride the single-outDir cmdSync
+ * path. Honors the harness toggle: a disabled opencode harness is reported as
+ * "disabled" and skipped (exit 0), never as drift (ADR-8).
+ */
+async function cmdSyncOpencode({ checkOnly, force }) {
+  log('');
+  log(`golem sync --target opencode${checkOnly ? ' --check' : ''}`);
+
+  if (!isHarnessEnabled('opencode')) {
+    log('  · opencode harness is disabled in ~/.golem/config.json — skipping (not drift).');
+    log('    enable it there (harnesses.opencode.enabled = true) to render.');
+    return;
+  }
+
+  const substrateRoot = resolve(GOLEM_ROOT, 'substrate');
+  const packageVersion = readPackageVersion();
+  const agentItems = ocAdapter.buildAgentPlan({ substrateRoot });
+  const skillItems = ocAdapter.buildSkillPlan({ substrateRoot });
+  const agentDir = ocAdapter.agentOutDir();
+  const skillsDir = ocAdapter.skillsOutDir();
+
+  if (checkOnly) {
+    const a = compiler.checkDrift({ target: 'opencode', outDir: agentDir, items: agentItems });
+    const s = compiler.checkDrift({ target: 'opencode', outDir: skillsDir, items: skillItems });
+    log(`  agents out: ${agentDir}`);
+    log(`  skills out: ${skillsDir}`);
+    const drifted = [...a.drifted, ...s.drifted];
+    const orphaned = [...a.orphaned, ...s.orphaned];
+    if (a.clean && s.clean) {
+      log('  OK clean — no drift');
+      return;
+    }
+    if (drifted.length) {
+      log('');
+      log('  drifted:');
+      for (const d of drifted) log(`    ${d.reason.padEnd(9)} ${d.key}`);
+    }
+    if (orphaned.length) {
+      log('');
+      log('  orphaned (source removed, output would be pruned):');
+      for (const o of orphaned) log(`    orphan    ${o.key}`);
+    }
+    process.exit(1);
+  }
+
+  const ra = compiler.render({ target: 'opencode', outDir: agentDir, items: agentItems, packageVersion, force });
+  const rs = compiler.render({ target: 'opencode', outDir: skillsDir, items: skillItems, packageVersion, force });
+  log(`  agents out: ${agentDir}`);
+  log(`    written: ${ra.written.length}, unchanged: ${ra.unchanged.length}, pruned: ${ra.pruned.length}, tampered: ${ra.tampered.length}`);
+  log(`  skills out: ${skillsDir}`);
+  log(`    written: ${rs.written.length}, unchanged: ${rs.unchanged.length}, pruned: ${rs.pruned.length}, tampered: ${rs.tampered.length}`);
+
+  const tampered = [...ra.tampered, ...rs.tampered];
+  if (tampered.length) {
+    log('');
+    err('  TAMPER — refused to overwrite (hand-edited outside sync); re-run with --force:');
+    for (const t of tampered) err(`    ${t.outputRelPath}`);
+    process.exit(1);
+  }
+
+  // Managed opencode.jsonc merge (mcp.golem + skills.paths), guarded by a real
+  // `opencode debug config` validation with backup/restore on failure.
+  const bin = resolveOpencodeBin();
+  const validate = makeOpencodeValidator(bin);
+  const merge = ocAdapter.buildConfigMerge({ repoRoot: GOLEM_ROOT });
+  const configPath = ocAdapter.opencodeConfigPath();
+  const res = ocAdapter.applyConfigMerge({ configPath, merge, validate });
+  log('');
+  log(`  config: ${configPath}`);
+  if (!bin) {
+    log('    · opencode binary not found — merged config written but NOT validated (install opencode to validate).');
+  }
+  if (res.restored) {
+    err('    FAIL merged config failed `opencode debug config` — restored the previous file:');
+    err(indent(res.error, '      '));
+    process.exit(1);
+  }
+  log(res.changed ? '    OK merged mcp.golem + skills.paths (managed keys only)' : '    OK already up to date (no change)');
+
+  // Pin the opencode version this render was validated against (doctor warns on
+  // skew). Only after a clean validated sync.
+  if (bin && validate) {
+    const ver = opencodeVersion(bin);
+    if (ver) {
+      const cfg = loadConfig();
+      cfg.harnesses = cfg.harnesses ?? {};
+      cfg.harnesses.opencode = { ...cfg.harnesses.opencode, testedVersion: ver };
+      saveConfig(cfg);
+      log(`    pinned harnesses.opencode.testedVersion = ${ver}`);
+    }
+  }
+}
+
+function indent(text, pad) {
+  return String(text || '').split('\n').map((l) => pad + l).join('\n');
 }
 
 async function cmdDoctor() {
@@ -410,6 +543,33 @@ async function cmdDoctor() {
   }
 
   log('');
+  log('opencode harness');
+  if (!isHarnessEnabled('opencode')) {
+    skip('disabled in ~/.golem/config.json (harnesses.opencode.enabled = false) — not rendered');
+  } else {
+    try {
+      const substrateRoot = resolve(GOLEM_ROOT, 'substrate');
+      const a = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.agentOutDir(), items: ocAdapter.buildAgentPlan({ substrateRoot }) });
+      const s = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.skillsOutDir(), items: ocAdapter.buildSkillPlan({ substrateRoot }) });
+      (a.clean && s.clean)
+        ? ok('opencode render clean (agents + skills)')
+        : skip(`opencode render drifted (${a.drifted.length + s.drifted.length} changed, ${a.orphaned.length + s.orphaned.length} orphaned) — run \`golem sync --target opencode\``);
+    } catch (e) {
+      skip(`could not check opencode drift — ${e.message}`);
+    }
+    const bin = resolveOpencodeBin();
+    const actual = opencodeVersion(bin);
+    const pinned = loadConfig().harnesses?.opencode?.testedVersion ?? null;
+    if (!bin) {
+      skip('opencode binary not found on PATH or ~/.opencode/bin — cannot check version skew');
+    } else if (pinned && actual && pinned !== actual) {
+      skip(`opencode version skew: rendered against ${pinned}, installed is ${actual} — re-run \`golem sync --target opencode\``);
+    } else if (actual) {
+      ok(`opencode ${actual}${pinned ? ' (matches pinned render)' : ' (no pinned version yet)'}`);
+    }
+  }
+
+  log('');
   log('Dashboard server reachability');
   const probe = await probeDashboard();
   if (probe.ok) {
@@ -444,13 +604,18 @@ Run:
                        the old path to the new one, restarts. Explicit only —
                        never runs automatically. Rollback is one command
                        (printed on completion).
-  sync [--check] [--target cc] [--out <dir>] [--force]
+  sync [--check] [--target cc|cc-marketplace|opencode] [--out <dir>] [--force]
                        Render substrate/ sources into a harness bundle
                        (default target: cc, default out: ~/.golem/renders/
                        cc-plugin/). --check reports drift without writing
                        (exit 0 clean, 1 drifted). --force overwrites a
                        hand-edited (tampered) output; without it, sync warns
                        and refuses that one file.
+                       target opencode renders agents into
+                       ~/.config/opencode/agent/ + skills into
+                       ~/.golem/renders/opencode/skills/ and merges managed
+                       keys into opencode.jsonc — only when the opencode
+                       harness is enabled in ~/.golem/config.json.
 
 Inspect:
   doctor               Sanity-check the environment.
