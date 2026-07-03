@@ -274,15 +274,19 @@ async function cmdMigrateHome(args) {
 }
 
 const ADAPTERS = { cc: ccAdapter };
+const KNOWN_TARGETS = ['cc', 'cc-marketplace'];
 
 function readPackageVersion() {
   return JSON.parse(readFileSync(resolve(GOLEM_ROOT, 'package.json'), 'utf8')).version;
 }
 
 function planForTarget(target) {
-  const adapter = ADAPTERS[target];
-  if (!adapter) fatal(2, `Unknown sync target: ${target} (known: ${Object.keys(ADAPTERS).join(', ')})`);
   const substrateRoot = resolve(GOLEM_ROOT, 'substrate');
+  if (target === 'cc-marketplace') {
+    return ccAdapter.buildMarketplacePlan({ substrateRoot });
+  }
+  const adapter = ADAPTERS[target];
+  if (!adapter) fatal(2, `Unknown sync target: ${target} (known: ${KNOWN_TARGETS.join(', ')})`);
   return adapter.buildPlan({ substrateRoot, repoRoot: GOLEM_ROOT, packageVersion: readPackageVersion() });
 }
 
@@ -327,6 +331,9 @@ async function cmdSync(args) {
   });
   if (target === 'cc') {
     ccAdapter.syncMcpChannelDeps({ repoRoot: GOLEM_ROOT, outDir });
+  }
+  if (target === 'cc-marketplace') {
+    ccAdapter.ensureMarketplacePluginLink({ ccPluginDir: renderDirFor('cc'), marketplaceOutDir: outDir });
   }
 
   log('');

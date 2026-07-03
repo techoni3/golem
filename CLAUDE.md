@@ -43,9 +43,31 @@ been migrated to this helper.
 
 ## Installing the plugin
 
+As of TKT-0575 (P3, ADR-3), Claude Code loads golem from the **workspace
+render**, not the repo checkout directly:
+
+```bash
+golem sync --target cc && golem sync --target cc-marketplace
+claude plugin marketplace add ~/.golem/renders/cc-marketplace
+claude plugin install golem@golem-workspace --scope user
+```
+
+`plugin/` stays committed in the repo (it's the dev-checkout fallback and the
+rollback target — see below) but is no longer the install source; it's a
+generated, git-diff-checkable copy of `substrate/`, regenerated via `golem
+sync --target cc --out ./plugin --force` when you want to prove the render
+round-trips.
+
+**Updating**: edit `substrate/`, then `golem sync --target cc` re-renders
+`~/.golem/renders/cc-plugin/` and stamps the version from root
+`package.json`. Bump that version, re-sync, then `claude plugin update
+golem@golem-workspace` + `/reload-plugins`.
+
+**Rollback** (repo checkout, if the workspace render ever breaks):
+
 ```bash
 claude plugin marketplace add /Users/laveesingh/Documents/software/experiments/golem
 claude plugin install golem@golem-local --scope user
 ```
 
-Updates are version-gated: bump `version` in `plugin/.claude-plugin/plugin.json`, then `claude plugin update golem@golem-local` + `/reload-plugins`. See `plugin/README.md` for the channel-consumer launch (`golemc`) and the full setup.
+See `substrate/README.md` for the channel-consumer launch (`golemc`) and the full setup.
