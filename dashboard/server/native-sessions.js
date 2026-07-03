@@ -33,9 +33,23 @@ import {
   projectIdFor,
   resolveProjectRoot,
 } from './project-id.js';
+import { sessionsJsonPath } from '../../lib/golem-home.js';
 
 const HOME = os.homedir();
 const SESSIONS_DIR = path.join(HOME, '.claude', 'sessions');
+
+// Non-CC harness sessions (opencode, TKT-0577) self-register into
+// ~/.golem/sessions.json but have no `claude agents` row, no ~/.claude/sessions
+// file, and no reliable session pid (hook_ppid is the hook's shell). We surface
+// them by RECENCY instead of pid-liveness — a session whose last_seen_at is
+// within this window is shown as live.
+const GOLEM_SESSION_RECENT_MS = 15 * 60 * 1000;
+
+function msFromIso(iso) {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? t : null;
+}
 
 function pidAlive(pid) {
   if (!pid || pid === 0) return false;
@@ -128,6 +142,46 @@ function normalizeRegistry(row) {
   };
 }
 
+function normalizeGolemRegistry(row) {
+  if (!row || typeof row !== 'object') return null;
+  const sessionId = row.session_id ?? null;
+  if (!sessionId) return null;
+  return {
+    session_id: sessionId,
+    pid: Number(row.hook_ppid) || null,
+    cwd: row.project_path ?? null,
+    name: null,
+    status: null,
+    waiting_for: null,
+    started_at: msFromIso(row.boot_time),
+    updated_at: msFromIso(row.last_seen_at) ?? msFromIso(row.boot_time),
+    kind: null,
+    harness: row.harness ?? 'claudecode',
+    source: 'native',
+    _from: 'golem',
+  };
+}
+
+// Read ~/.golem/sessions.json (the golem session registry written by
+// session-register.sh for BOTH harnesses). CC entries here duplicate the
+// ~/.claude sources and merge by session_id; opencode entries are unique.
+async function readGolemRegistrySessions() {
+  let raw;
+  try {
+    raw = await fs.readFile(sessionsJsonPath(), 'utf8');
+  } catch {
+    return [];
+  }
+  let json;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  const rows = Array.isArray(json?.sessions) ? json.sessions : [];
+  return rows.map(normalizeGolemRegistry).filter(Boolean);
+}
+
 async function readRegistrySessions() {
   let entries;
   try {
@@ -159,25 +213,31 @@ async function readRegistrySessions() {
 // Merge CLI + registry rows keyed by session_id (falling back to pid). CLI
 // wins on conflict (it is the live, authoritative view); registry fills gaps
 // (e.g. updatedAt, sessions the CLI momentarily omits).
-function mergeSources(cliRows, registryRows) {
+function mergeSources(cliRows, registryRows, golemRows = []) {
   const byKey = new Map();
   const keyOf = (r) => r.session_id || `pid:${r.pid}`;
-  for (const r of registryRows) byKey.set(keyOf(r), r);
-  for (const r of cliRows) {
-    const k = keyOf(r);
-    const prev = byKey.get(k);
-    if (prev) {
-      byKey.set(k, {
-        ...prev,
-        ...r,
-        // Preserve a registry updated_at if the CLI didn't supply a fresher one.
-        updated_at: r.updated_at ?? prev.updated_at,
-        name: r.name ?? prev.name,
-      });
-    } else {
-      byKey.set(k, r);
+  // Priority (last write wins on shared fields): golem < registry < cli.
+  for (const r of golemRows) byKey.set(keyOf(r), r);
+  const overlay = (rows) => {
+    for (const r of rows) {
+      const k = keyOf(r);
+      const prev = byKey.get(k);
+      if (prev) {
+        byKey.set(k, {
+          ...prev,
+          ...r,
+          // Preserve fields the higher-priority source doesn't supply.
+          updated_at: r.updated_at ?? prev.updated_at,
+          name: r.name ?? prev.name,
+          harness: r.harness ?? prev.harness, // only the golem source sets harness
+        });
+      } else {
+        byKey.set(k, r);
+      }
     }
-  }
+  };
+  overlay(registryRows);
+  overlay(cliRows);
   return [...byKey.values()];
 }
 
@@ -210,22 +270,29 @@ async function deriveProjectId(cwd) {
  * @returns {Promise<Array<object>>}
  */
 export async function readNativeSessions(registeredIdLookup) {
-  const [cliRaw, registryRaw] = await Promise.all([
+  const [cliRaw, registryRaw, golemRaw] = await Promise.all([
     runClaudeAgentsJson(),
     readRegistrySessions(),
+    readGolemRegistrySessions(),
   ]);
 
   const cliRows = Array.isArray(cliRaw) ? cliRaw.map(normalizeCli).filter(Boolean) : [];
   const registryRows = registryRaw; // already normalized
-  const merged = mergeSources(cliRows, registryRows);
+  const merged = mergeSources(cliRows, registryRows, golemRaw);
 
   const out = [];
   for (const s of merged) {
-    const alive = pidAlive(s.pid);
-    // Drop dead sessions whose only evidence is a stale registry file. Keep a
-    // CLI-sourced row even if pid-check disagrees (CLI just listed it live),
-    // but mark alive honestly.
-    if (!alive && s._from === 'registry') continue;
+    const harness = s.harness ?? 'claudecode';
+    // Non-CC harness sessions (opencode) have no reliable pid — judge liveness
+    // by recency of last_seen_at instead. CC sessions keep pid-liveness.
+    const isNonCc = harness !== 'claudecode';
+    const alive = isNonCc
+      ? !!(s.updated_at && (Date.now() - s.updated_at) < GOLEM_SESSION_RECENT_MS)
+      : pidAlive(s.pid);
+    // Drop dead sessions whose only evidence is a stale registry/golem file.
+    // Keep a CLI-sourced row even if pid-check disagrees (CLI just listed it
+    // live), but mark alive honestly.
+    if (!alive && (s._from === 'registry' || s._from === 'golem')) continue;
 
     let project_id = null;
     let project_root = null;
@@ -263,6 +330,7 @@ export async function readNativeSessions(registeredIdLookup) {
       waiting_for: s.waiting_for ?? null,
       started_at: s.started_at,
       updated_at: s.updated_at,
+      harness,
       source: 'native',
     });
   }

@@ -466,7 +466,7 @@ async function cmdSyncOpencode({ checkOnly, force }) {
     err(indent(res.error, '      '));
     process.exit(1);
   }
-  log(res.changed ? '    OK merged mcp.golem + skills.paths (managed keys only)' : '    OK already up to date (no change)');
+  log(res.changed ? '    OK merged mcp.golem + skills.paths + plugin (managed keys only)' : '    OK already up to date (no change)');
 
   // Pin the opencode version this render was validated against (doctor warns on
   // skew). Only after a clean validated sync.
@@ -557,6 +557,10 @@ async function cmdDoctor() {
     } catch (e) {
       skip(`could not check opencode drift — ${e.message}`);
     }
+    // Runtime shim (P5): the file opencode's plugin[] entry points at must exist.
+    const shimPath = resolve(GOLEM_ROOT, 'shims', 'opencode', 'index.js');
+    existsSync(shimPath) ? ok(`opencode runtime shim present (${shimPath})`) : fail(`opencode runtime shim missing at ${shimPath} — plugin[] would fail to load`);
+
     const bin = resolveOpencodeBin();
     const actual = opencodeVersion(bin);
     const pinned = loadConfig().harnesses?.opencode?.testedVersion ?? null;

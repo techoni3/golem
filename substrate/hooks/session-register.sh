@@ -32,10 +32,17 @@ PAYLOAD="$(cat 2>/dev/null || true)"
 
 SESSION_ID=""
 CWD="$PWD"
+# harness: which agentic harness this session runs under. CC sends no such
+# field (defaults to claudecode); the opencode shim (TKT-0577) sets it to
+# "opencode" so the dashboard can distinguish the two. Additive — old readers
+# ignore it.
+HARNESS="claudecode"
 if command -v jq >/dev/null 2>&1 && [ -n "$PAYLOAD" ]; then
   SESSION_ID="$(printf '%s' "$PAYLOAD" | jq -r '.session_id // empty' 2>/dev/null || true)"
   _pcwd="$(printf '%s' "$PAYLOAD" | jq -r '.cwd // empty' 2>/dev/null || true)"
   [ -n "$_pcwd" ] && CWD="$_pcwd"
+  _ph="$(printf '%s' "$PAYLOAD" | jq -r '.harness // empty' 2>/dev/null || true)"
+  [ -n "$_ph" ] && HARNESS="$_ph"
 fi
 
 # --- resolve project root --------------------------------------------------
@@ -169,6 +176,7 @@ upsert_sessions() {
     --arg pid "${PPID:-}" \
     --arg pid_root "$ROOT" \
     --arg pid_proj "$PROJECT_ID" \
+    --arg harness "$HARNESS" \
     --arg now "$NOW" \
     '
     (.version // 1) as $v
@@ -180,7 +188,7 @@ upsert_sessions() {
           if $exists then
             [ $ss[]
               | if .session_id == $sid
-                then . + {last_seen_at: $now, project_id: $pid_proj, project_path: $pid_root}
+                then . + {last_seen_at: $now, project_id: $pid_proj, project_path: $pid_root, harness: $harness}
                 else . end
             ]
           else
@@ -189,6 +197,7 @@ upsert_sessions() {
               hook_ppid: ($pid | tonumber? // null),
               project_id: $pid_proj,
               project_path: $pid_root,
+              harness: $harness,
               boot_time: $now,
               last_seen_at: $now
             }]

@@ -7,13 +7,15 @@
     "golem": "./cli/golem.js"
   },
   "exports": {
-    ".": "./cli/golem.js"
+    ".": "./cli/golem.js",
+    "./opencode-shim": "./shims/opencode/index.js"
   },
   "files": [
     "cli/",
     "dashboard/server/",
     "dashboard/web/",
     "plugin/",
+    "shims/",
     "README.md"
   ],
   "engines": {
