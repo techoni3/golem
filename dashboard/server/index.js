@@ -154,6 +154,29 @@ async function main() {
     return tracker.raw().prepare('SELECT * FROM streams ORDER BY created_at ASC, id ASC').all();
   }
 
+  function enrichSessionRows(rows, channels = []) {
+    const channelIds = new Set((channels || []).map((c) => c.session_id).filter(Boolean));
+    const pendingBySession = tracker.countPendingDispatchesBySession();
+    const unackedBySession = new Set(
+      tracker.raw().prepare(`
+        SELECT DISTINCT json_extract(data, '$.session_id') AS session_id
+        FROM events
+        WHERE type = 'dispatch_unacked_warning'
+          AND json_extract(data, '$.session_id') IS NOT NULL
+      `).all().map((r) => r.session_id).filter(Boolean)
+    );
+    return (rows || []).map((s) => ({
+      ...s,
+      role: s.role ?? null,
+      harness: s.harness ?? 'claudecode',
+      reachable: channelIds.has(s.session_id),
+      pending_count: pendingBySession.get(s.session_id) ?? 0,
+      current_in_progress_ticket: tracker.currentInProgressTicketForSession(s.session_id),
+      has_unacked_dispatch: unackedBySession.has(s.session_id),
+      project_id: s.project_id ?? null,
+    }));
+  }
+
   await fastify.register(websocket);
   await fastify.register(fastifyStatic, {
     root: WEB_ROOT,
@@ -234,6 +257,7 @@ async function main() {
 
   fastify.get('/api/snapshot', async () => ({
     ...state.snapshot(),
+    native_sessions: enrichSessionRows(state.nativeSessions(), state.channels()),
     ...trackerSnapshot(),
     chat: chat.snapshot(),
   }));
@@ -354,7 +378,7 @@ async function main() {
   // v4: all native Claude Code sessions on this machine (merged CLI + registry,
   // pid-checked). Already inside /api/snapshot as native_sessions[]; this is a
   // convenience route + the polling target for any external scripting.
-  fastify.get('/api/native-sessions', async () => state.nativeSessions());
+  fastify.get('/api/native-sessions', async () => enrichSessionRows(state.nativeSessions(), state.channels()));
 
   // v4 (fix round 2, defect 1): per-session peek for the native-session drawer.
   // Returns { session, events, milestones, transcript_path, note } where events
@@ -721,6 +745,11 @@ async function main() {
       const detail = channelResult?.error || `status ${channelResult?.status ?? '?'}`;
       chat.record('system', 'error', `dispatch of ${id} to ${sessionId} — channel ${detail} (ticket assigned; session will pick it up on resume)`);
     }
+    tracker.markDispatchDeliveryAttempted(id, {
+      session_id: sessionId,
+      actor: 'human',
+      error: channelResult && channelResult.ok ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),
+    });
 
     const ticket = tracker.getTicket(id);
     broadcastWS({ type: 'ticket-updated', ticket });
@@ -826,6 +855,7 @@ async function main() {
     }
     const channelBySession = new Map();
     for (const c of channels) if (c.session_id) channelBySession.set(c.session_id, c);
+    const pendingBySession = tracker.countPendingDispatchesBySession();
 
     const out = [];
     for (const s of state.nativeSessions()) {
@@ -843,14 +873,16 @@ async function main() {
         label: s.name || `session ${String(s.session_id ?? '').slice(0, 8)}`,
         status: s.status ?? null,
         role: s.role ?? null,
+        harness: s.harness ?? 'claudecode',
         project_id: s.project_id ?? null,
         reachable: !!ch,
+        current_in_progress_ticket: tracker.currentInProgressTicketForSession(s.session_id),
         channel_url: ch ? (ch.url ?? (ch.host && ch.port ? `http://${ch.host}:${ch.port}` : null)) : null,
         started_at: s.started_at ?? null,
         updated_at: s.updated_at ?? null,
         // TKT-0245: count of pending queued dispatches for this session, so the
         // picker can show "working · 1 queued".
-        pending_count: tracker.countPendingDispatchesForSession(s.session_id),
+        pending_count: pendingBySession.get(s.session_id) ?? 0,
       });
     }
     return out;
@@ -868,7 +900,7 @@ async function main() {
       const text = `session role ${role ?? 'cleared'} for ${row.name || id}`;
       chat.record('system', 'session_role', text, { session_id: id });
       if (typeof state.refreshNativeSessions === 'function') await state.refreshNativeSessions();
-      broadcastWS({ type: 'native-sessions-update', native_sessions: state.nativeSessions(), channels: state.channels() });
+      broadcastWS({ type: 'native-sessions-update', native_sessions: enrichSessionRows(state.nativeSessions(), state.channels()), channels: state.channels() });
       return { ok: true, session: row };
     } catch (err) {
       const msg = String(err?.message ?? err);
@@ -951,11 +983,16 @@ async function main() {
       // Send full snapshot on connect.
       try {
         socket.send(
-          JSON.stringify({
-            type: 'snapshot',
-            payload: { ...state.snapshot(), ...trackerSnapshot(), chat: chat.snapshot() },
-            ts: Date.now(),
-          }),
+            JSON.stringify({
+              type: 'snapshot',
+              payload: {
+                ...state.snapshot(),
+                native_sessions: enrichSessionRows(state.nativeSessions(), state.channels()),
+                ...trackerSnapshot(),
+                chat: chat.snapshot(),
+              },
+              ts: Date.now(),
+            }),
         );
       } catch (err) {
         fastify.log.warn({ err }, 'ws snapshot send failed');
@@ -1012,6 +1049,12 @@ async function main() {
   // Forward state events → all connected sockets.
   state.on('event', (ev) => {
     if (sockets.size === 0) return;
+    if (ev?.type === 'native-sessions-update') {
+      ev = {
+        ...ev,
+        native_sessions: enrichSessionRows(ev.native_sessions || state.nativeSessions(), ev.channels || state.channels()),
+      };
+    }
     let payload;
     try {
       payload = JSON.stringify({ ...ev, ts: Date.now() });

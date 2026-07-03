@@ -111,6 +111,10 @@ function AgentsPage({ setRoute }) {
 function SessionCard({ session, name, queueCount = 0 }) {
   const working = session.status === 'busy' || session.status === 'waiting';
   const registered = session.registered || !!window.Store.getProjectByContractId(session.project_id);
+  const pendingCount = Number(session.pending_count || queueCount || 0);
+  const currentTicket = session.current_in_progress_ticket;
+  const hasUnacked = !!session.has_unacked_dispatch || window.Store.getTrackerTickets({ includeArchived: true })
+    .some((t) => t.has_unacked_dispatch && (t.assignee === session.session_id || t.dispatched_to === session.session_id));
   const openPeek = () => {
     if (session.session_id) window.openNativeSessionDrawer(session.session_id);
   };
@@ -127,9 +131,10 @@ function SessionCard({ session, name, queueCount = 0 }) {
         <Icon.Gear size={16} className={`gear gear-${working ? 'working' : 'idle'}`}/>
         <span className="native-session-name">{name}</span>
         {session.role && <span className="native-session-role-chip">{session.role}</span>}
-        {queueCount > 0 && (
-          <span className="native-session-queue-chip" title={`${queueCount} dispatch${queueCount === 1 ? '' : 'es'} queued — delivers when this session is idle`}>⏳ {queueCount} queued</span>
+        {pendingCount > 0 && (
+          <span className="native-session-queue-chip" title={`${pendingCount} dispatch${pendingCount === 1 ? '' : 'es'} queued — delivers when this session is idle`}>⏳ {pendingCount} queued</span>
         )}
+        {hasUnacked && <span className="native-session-queue-chip" title="one or more dispatches to this session appear unacknowledged">⚠ unacked</span>}
         <span className={`native-session-status status-${working ? 'busy' : 'idle'}`}>
           {session.status || 'idle'}
           {session.waiting_for ? ` · ${session.waiting_for}` : ''}
@@ -143,6 +148,11 @@ function SessionCard({ session, name, queueCount = 0 }) {
       <div className="native-session-cwd mono" title={session.cwd || ''}>
         {session.cwd || '—'}
       </div>
+      {currentTicket && (
+        <div className="native-session-cwd mono" title={currentTicket.title}>
+          current: {currentTicket.display_id || currentTicket.id} · {currentTicket.title}
+        </div>
+      )}
       <div className="native-session-meta">
         <span className="mono">pid {session.pid ?? '?'}</span>
         {session.session_id && <span className="mono" title={session.session_id}>{session.session_id.slice(0, 8)}</span>}

@@ -165,6 +165,10 @@ function SessionCard({ session: s, setRoute }) {
     : 'Dead';
 
   const title = s.name || (s.cwd ? s.cwd.split('/').filter(Boolean).pop() : null) || (s.session_id ? s.session_id.slice(0, 8) : `pid ${s.pid}`);
+  const currentTicket = s.current_in_progress_ticket;
+  const pendingCount = Number(s.pending_count || 0);
+  const hasUnacked = !!s.has_unacked_dispatch || window.Store.getTrackerTickets({ includeArchived: true })
+    .some((t) => t.has_unacked_dispatch && (t.assignee === s.session_id || t.dispatched_to === s.session_id));
 
   // Whole card opens the native-session peek drawer. Inner controls
   // (composer / Interrupt / Halt / project chip) stopPropagation so they never
@@ -186,6 +190,8 @@ function SessionCard({ session: s, setRoute }) {
         <span className={`orch-dot ${dotClass}`}/>
         <span className="cc-session-name" title={s.cwd || ''}>{title}</span>
         {s.role && <span className="cc-role-chip">{s.role}</span>}
+        {pendingCount > 0 && <span className="cc-role-chip" title={`${pendingCount} queued dispatch${pendingCount === 1 ? '' : 'es'}`}>⏳ {pendingCount}</span>}
+        {hasUnacked && <span className="cc-role-chip" title="one or more dispatches to this session appear unacknowledged">⚠ unacked</span>}
         <span className={`cc-status-badge badge-${statusKind}`}>
           {statusKind === 'busy' && <span className="cc-status-pulse"/>}
           {statusLabel}
@@ -222,6 +228,12 @@ function SessionCard({ session: s, setRoute }) {
       </div>
 
       {s.cwd && <div className="cc-session-cwd mono" title={s.cwd}>{s.cwd}</div>}
+
+      {currentTicket && (
+        <div className="cc-session-cwd mono" title={currentTicket.title}>
+          current: {currentTicket.display_id || currentTicket.id} · {currentTicket.title}
+        </div>
+      )}
 
       {hasChannel ? (
         <SessionControls session={s} channel={channel}/>
