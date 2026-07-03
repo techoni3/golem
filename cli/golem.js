@@ -6,6 +6,8 @@
 //
 // Surviving subcommands:
 //   dashboard    Start the admin dashboard (node dashboard/server/index.js).
+//   dashboard:restart
+//                Stop and restart the admin dashboard detached.
 //   doctor       Sanity-check the environment.
 //   status       Dashboard health + canonical URL.
 //   help         Show this message.
@@ -191,13 +193,17 @@ async function stopDashboard() {
 }
 
 /** Start the dashboard detached (survives this CLI process exiting) and wait for it to answer /api/health. */
-async function startDashboardDetached() {
+async function startDashboardDetached(args = []) {
   const serverEntry = resolve(DASHBOARD_DIR, 'server', 'index.js');
-  const child = spawn(process.execPath, [serverEntry], {
+  const publicFlag = args.includes('--public');
+  const passthru = args.filter((a) => a !== '--public');
+  const env = { ...process.env };
+  if (publicFlag) env.HOST = '0.0.0.0';
+  const child = spawn(process.execPath, [serverEntry, ...passthru], {
     cwd: GOLEM_ROOT,
     stdio: 'ignore',
     detached: true,
-    env: process.env,
+    env,
   });
   child.unref();
   const deadline = Date.now() + 8000;
@@ -207,6 +213,23 @@ async function startDashboardDetached() {
     await sleep(300);
   }
   return false;
+}
+
+async function cmdDashboardRestart(args) {
+  if (!existsSync(resolve(DASHBOARD_DIR, 'server', 'index.js'))) {
+    fatal(1, `dashboard server entry missing: ${resolve(DASHBOARD_DIR, 'server', 'index.js')}`);
+  }
+  if (!existsSync(resolve(GOLEM_ROOT, 'node_modules'))) {
+    fatal(1, 'root deps missing — npm install (from the repo root)');
+  }
+
+  log('Restarting dashboard...');
+  const stopped = await stopDashboard();
+  log(stopped ? '  OK dashboard stopped' : '  dashboard was not running');
+  log('  starting dashboard detached...');
+  const started = await startDashboardDetached(args);
+  if (!started) fatal(1, '  FAIL dashboard did not come back up within 8s — start it manually: golem dashboard');
+  log(`  OK dashboard responding on ${DASHBOARD_URL}`);
 }
 
 async function cmdMigrateHome(args) {
@@ -805,6 +828,8 @@ Run:
   dashboard [--public] [npm-start-args…]
                        Start the admin dashboard on ${DASHBOARD_URL}.
                        --public binds 0.0.0.0 (LAN-reachable, no auth).
+  dashboard:restart [--public] [npm-start-args…]
+                       Stop the running dashboard and restart it detached.
   migrate-home         One-time move of ~/.config/golem -> ~/.golem (ADR-4).
                        Backs up first, stops the dashboard, moves, symlinks
                        the old path to the new one, restarts. Explicit only —
@@ -871,6 +896,9 @@ async function main() {
       break;
     case 'dashboard':
       await cmdDashboard(rest);
+      break;
+    case 'dashboard:restart':
+      await cmdDashboardRestart(rest);
       break;
     case 'migrate-home':
       await cmdMigrateHome(rest);
