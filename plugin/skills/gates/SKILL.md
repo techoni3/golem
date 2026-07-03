@@ -5,7 +5,7 @@ description: Human-gate primitive — write an approval gate to pause at a miles
 
 # gates
 
-Gate files live OUTSIDE the repo at `~/.config/golem/gates/<project_id>/<gate_id>.md`
+Gate files live OUTSIDE the repo at `~/.golem/gates/<project_id>/<gate_id>.md`
 (`project_id` derivation: see journaling). Markdown with YAML frontmatter.
 
 Two kinds:

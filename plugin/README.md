@@ -7,12 +7,12 @@ sub-agents, and the golem channel MCP.
 
 ## What it does
 
-- **SessionStart** → registers the project in `~/.config/golem/projects.json`
+- **SessionStart** → registers the project in `~/.golem/projects.json`
   (auto entry; never overwrites a manual one) and records the session in
   `sessions.json`. It does **not** auto-name the session: `/rename` is the single
   source of the name (auto-titling clobbered it on every `/resume`).
 - **Lifecycle + tool events** → a single line per event in a central journal at
-  `~/.config/golem/journals/<project_id>/hook.jsonl`, carrying `project_id` and
+  `~/.golem/journals/<project_id>/hook.jsonl`, carrying `project_id` and
   `project_path` so readers never re-derive. (Legacy guard: a v3-wired repo that
   still has `.claude/hooks/journal-event.sh` keeps owning its own journal — the
   plugin hook exits silently there.)
@@ -70,7 +70,7 @@ claude plugin update golem@golem-local   # recopies the v4.1.0 plugin into the c
 
 then `/reload-plugins` inside the session. New sessions get them automatically.
 The tracker tools target the live dashboard, so make sure `golem dashboard` is
-running (they read its URL from `~/.config/golem/dashboard.json`).
+running (they read its URL from `~/.golem/dashboard.json`).
 
 ### Receiving dispatched tickets (channel consumer)
 
@@ -141,7 +141,7 @@ resolved by walking up from the session cwd to the nearest `.git` or `CLAUDE.md`
 
 | Var | Purpose | Default |
 |-----|---------|---------|
-| `GOLEM_NTFY_TOPIC` | ntfy.sh topic for push notifications | falls back to `~/.config/golem/ntfy_topic` file; unset → notifications are a silent no-op |
+| `GOLEM_NTFY_TOPIC` | ntfy.sh topic for push notifications | falls back to `~/.golem/ntfy_topic` file; unset → notifications are a silent no-op |
 | `XDG_CONFIG_HOME` | base for the `golem/` config/registry dir | `~/.config` |
 | `GOLEM_CHANNEL_PORT` | channel HTTP port (`0` = random free port) | `7421` |
 | `GOLEM_CEO_SESSION_ID` | explicit override for the id the channel registers under | unset → derived **logical** id (see below) |
@@ -170,7 +170,7 @@ plugin/
   .mcp.json                    # wires the channel MCP via ${CLAUDE_PLUGIN_ROOT}
 ```
 
-Central state lives under `~/.config/golem/` (`projects.json`, `sessions.json`,
+Central state lives under `~/.golem/` (`projects.json`, `sessions.json`,
 `channels.json`, `journals/<project_id>/hook.jsonl`, optional `ntfy_topic`) —
 zero repo footprint.
 

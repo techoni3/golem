@@ -5,7 +5,7 @@ description: Central journal paths and milestone append format for golem project
 
 # journaling
 
-Journals live OUTSIDE the repo at `~/.config/golem/journals/<project_id>/`:
+Journals live OUTSIDE the repo at `~/.golem/journals/<project_id>/`:
 `hook.jsonl` (mechanical) and `summary.jsonl` (semantic). Both append-only JSONL.
 
 **Mechanical journaling is automatic** via plugin hooks — never write `hook.jsonl`
@@ -16,7 +16,7 @@ this project, and the registry is authoritative (legacy projects have non-derive
 
 ```bash
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-PID=$(jq -r --arg p "$ROOT" '.projects[] | select(.path==$p) | .id' ~/.config/golem/projects.json)
+PID=$(jq -r --arg p "$ROOT" '.projects[] | select(.path==$p) | .id' ~/.golem/projects.json)
 ```
 
 Fallback only if the lookup is empty (must match the hook's derivation exactly):
@@ -37,5 +37,5 @@ Append a milestone (one line, no array wrapper, newline-terminated):
 printf '{"ts":"%s","event":"milestone","session_id":"%s","project_id":"%s","text":%s}\n' \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${CLAUDE_CODE_SESSION_ID:-}" "$PID" \
   "$(jq -Rn --arg t "ITEM TEXT" '$t')" \
-  >> ~/.config/golem/journals/"$PID"/hook.jsonl
+  >> ~/.golem/journals/"$PID"/hook.jsonl
 ```

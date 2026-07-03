@@ -8,14 +8,14 @@ This directory is the golem root: the source repo for the **golem v4 Claude Code
 |------|-------|
 | v4 plugin source | `plugin/` — agents (`worker`/`reviewer`/`researcher`), 9 `golem:*` skills, hooks, channel MCP |
 | Dashboard + tracker (SQLite, REST, web UI) | `dashboard/` — start with `golem dashboard` |
-| `golem` CLI | `cli/golem.js` (`npm link` surfaces it; verbs: `dashboard`, `doctor`, `status`, `help`) |
+| `golem` CLI | `cli/golem.js` (`npm link` surfaces it; verbs: `dashboard`, `migrate-home`, `doctor`, `status`, `help`) |
 | Project namespaces | `golem-projects/<name>/` (independent repos, gitignored) |
 | Local marketplace manifest | `.claude-plugin/marketplace.json` |
-| Runtime state (outside the repo) | `~/.config/golem/` — `projects.json`, `sessions.json`, `channels.json`, `journals/<project_id>/`, `tracker.db`, `gates/` |
+| Runtime state (outside the repo) | `~/.golem/` — `projects.json`, `sessions.json`, `channels.json`, `journals/<project_id>/`, `tracker.db`, `gates/` (ADR-4; `~/.config/golem` is a compat symlink to it post-migration — path resolution lives in `lib/golem-home.js`) |
 
 ## Journaling
 
-The plugin hooks journal every tool call + lifecycle event to **central** `~/.config/golem/journals/<project_id>/hook.jsonl` — zero repo footprint. Project root is resolved by walking up from `$PWD` to the nearest `AGENTS.md` or `.git`, so this file also acts as the root-workspace marker; sub-agents inherit routing via the same `$PWD`-walk.
+The plugin hooks journal every tool call + lifecycle event to **central** `~/.golem/journals/<project_id>/hook.jsonl` — zero repo footprint. Project root is resolved by walking up from `$PWD` to the nearest `AGENTS.md` or `.git`, so this file also acts as the root-workspace marker; sub-agents inherit routing via the same `$PWD`-walk.
 
 ## Installing the plugin
 

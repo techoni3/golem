@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "_comment": "Golem root workspace. No hooks are wired here — the golem plugin provides its own hooks (session-register, journal-route, notify, tracker-context) and writes all state to ~/.config/golem/. The permissions block keeps work in this tree from prompting mid-task; it must cover both root-workspace ops and the golem-projects/ subtree, since Claude Code resolves permissions from the session start directory.",
+  "_comment": "Golem root workspace. No hooks are wired here — the golem plugin provides its own hooks (session-register, journal-route, notify, tracker-context) and writes all state to ~/.golem/ (ADR-4; ~/.config/golem is a compat symlink to it). The permissions block keeps work in this tree from prompting mid-task; it must cover both root-workspace ops and the golem-projects/ subtree, since Claude Code resolves permissions from the session start directory.",
   "permissions": {
     "allow": [
       "Read(//Users/**)",

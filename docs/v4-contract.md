@@ -37,7 +37,7 @@ Builders MUST verify plugin.json / marketplace.json / in-plugin hooks.json
 schemas and install commands against current official docs
 (code.claude.com/docs/en/plugins*) before writing them. No guessing.
 
-## Identity & registries (all under `~/.config/golem/`)
+## Identity & registries (all under `~/.golem/`)
 
 - **project_id** = `<dirname-slug>-<6-char sha256 of absolute path>`
   (slug: lowercase, non-alnum → `-`). Stable, collision-safe, derivable by any
@@ -53,14 +53,14 @@ schemas and install commands against current official docs
 
 ## Central artifacts (zero repo footprint)
 
-- **Journals:** `~/.config/golem/journals/<project_id>/hook.jsonl` (+
+- **Journals:** `~/.golem/journals/<project_id>/hook.jsonl` (+
   `summary.jsonl`). Line schema unchanged from v3:
   `{ts, event, session_id, cwd, payload}` — plus `project_id` and `project_path`
   fields so readers never re-derive.
 - **Milestones** are journal lines: `{ts, event: "milestone", session_id,
   project_id, text}`. Appended by the model per `work-loop` skill (single
   `echo >> ` append). Dashboard renders them in the project chat/timeline.
-- **Gates:** `~/.config/golem/gates/<project_id>/<gate_id>.md` — same YAML
+- **Gates:** `~/.golem/gates/<project_id>/<gate_id>.md` — same YAML
   frontmatter format as v3 golem-gates, new location.
 - **Legacy coexistence rule:** if the resolved project root contains
   `.claude/hooks/journal-event.sh` (a v3-wired project, including this repo),
@@ -93,7 +93,7 @@ Target ≤ 40 lines each.
 ## Notifications
 
 `notify.sh` posts `{title, message}` to `https://ntfy.sh/$GOLEM_NTFY_TOPIC`
-(topic from env or `~/.config/golem/ntfy_topic` file). Silent no-op when unset.
+(topic from env or `~/.golem/ntfy_topic` file). Silent no-op when unset.
 Fired on Notification hook (needs-input / idle) and gate creation.
 
 ## Dashboard (v4 additions, keep all current features working)
