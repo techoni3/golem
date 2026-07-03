@@ -60,6 +60,7 @@ const BRIDGES_REGISTRY = join(golemHome(), "opencode-bridges.json");
 const BRIDGES_LOCK = `${BRIDGES_REGISTRY}.lock`;
 const SESSIONS_REGISTRY = join(golemHome(), "sessions.json");
 const SESSIONS_LOCK = `${SESSIONS_REGISTRY}.lock`;
+const SESSION_HEARTBEAT_MS = 30_000;
 let currentSessionID = "";
 
 function logErr(context, detail) {
@@ -353,6 +354,14 @@ export default async (input) => {
     updateBridge({ sessionID, cwd: dirFor(sessionID), status: st, port, name, insert });
     updateSessionRegistry({ sessionID, cwd: dirFor(sessionID), status: st, name, insert });
   };
+  const heartbeat = setInterval(() => {
+    try {
+      if (currentSessionID) publishBridge(currentSessionID);
+    } catch (e) {
+      logErr("session heartbeat", e);
+    }
+  }, SESSION_HEARTBEAT_MS);
+  heartbeat.unref?.();
 
   return {
     event: async ({ event }) => {
