@@ -11,6 +11,11 @@
 //   session.created (parentID null)   → session-register.sh + journal session-start
 //                                      (session-register also performs P6
 //                                       project sync-on-register)
+//   session.updated (parentID null)   → registry name/cwd refresh (info.title is
+//                                       the only real-time source of the title)
+//   session.status                    → registry status refresh; status is an
+//                                       OBJECT {type:"idle"|"retry"|"busy"} —
+//                                       collapsed to a string via statusString()
 //   chat.message (user)               → journal user-prompt
 //   tool.execute.before               → journal tool-pre   (tool "task" → agent-spawn)
 //   tool.execute.after                → journal tool-post  (tool "task" → agent-return)
@@ -125,7 +130,16 @@ function registerBridge({ sessionID, cwd, status, port, name }) {
   });
 }
 
-function updateBridge({ sessionID, cwd, status, port, name }) {
+// opencode's SessionStatus is an OBJECT ({type:"idle"|"retry"|"busy"}), but the
+// dashboard compares plain strings (status === 'busy' drives the working gear).
+// Collapse to the string; "retry" is still mid-work → busy.
+function statusString(status) {
+  const t = typeof status === "string" ? status : status?.type;
+  if (!t) return null;
+  return t === "retry" ? "busy" : t;
+}
+
+function updateBridge({ sessionID, cwd, status, port, name, insert = true }) {
   if (!sessionID || !port) return;
   const now = new Date().toISOString();
   withFileLock(BRIDGES_LOCK, () => {
@@ -137,6 +151,7 @@ function updateBridge({ sessionID, cwd, status, port, name }) {
       return { ...b, cwd: cwd || b.cwd || null, name: name || b.name || null, status: status || b.status || null, updated_at: now };
     });
     if (!found) {
+      if (!insert) return; // child/unknown session — never create a phantom endpoint
       reg.bridges.push({
         session_id: sessionID,
         opencode_pid: process.pid,
@@ -169,7 +184,7 @@ function unregisterBridges() {
   }
 }
 
-function updateSessionRegistry({ sessionID, cwd, status, name }) {
+function updateSessionRegistry({ sessionID, cwd, status, name, insert = true }) {
   if (!sessionID) return;
   try {
     const now = new Date().toISOString();
@@ -189,6 +204,7 @@ function updateSessionRegistry({ sessionID, cwd, status, name }) {
         };
       });
       if (!found) {
+        if (!insert) return; // child/unknown session — don't fabricate a registry row
         reg.sessions.push({
           session_id: sessionID,
           hook_ppid: process.pid,
@@ -326,11 +342,16 @@ export default async (input) => {
   const dirFor = (sid) => sessionDir.get(sid) || initCwd;
   const base = (sessionID, cwd) => ({ session_id: sessionID || "", cwd: cwd || initCwd, harness: "opencode" });
   const bridge = startBridge({ client: input?.client, dirFor, logErr });
-  const publishBridge = (sessionID, status = null, name = null) => {
+  // insert:false is the default so events from child/subagent sessions (whose
+  // ids also flow through chat.message/tool.* hooks) can only UPDATE existing
+  // rows, never create phantom sessions or dispatch endpoints. Only the
+  // parentID-guarded session.created/session.updated paths insert.
+  const publishBridge = (sessionID, status = null, name = null, { insert = false } = {}) => {
     const port = bridge.port();
     if (!sessionID || !port) return;
-    updateBridge({ sessionID, cwd: dirFor(sessionID), status, port, name });
-    updateSessionRegistry({ sessionID, cwd: dirFor(sessionID), status, name });
+    const st = statusString(status);
+    updateBridge({ sessionID, cwd: dirFor(sessionID), status: st, port, name, insert });
+    updateSessionRegistry({ sessionID, cwd: dirFor(sessionID), status: st, name, insert });
   };
 
   return {
@@ -361,9 +382,20 @@ export default async (input) => {
           publishBridge(p.sessionID, "idle");
           runHook("journal-route.sh", ["stop"], base(p.sessionID, dirFor(p.sessionID)));
         } else if (t === "session.status") {
-          const sid = p.sessionID || p.info?.id || currentSessionID;
+          // properties = { sessionID, status: {type:"idle"|"retry"|"busy"} } —
+          // no info object; statusString (in publishBridge) collapses the shape.
+          const sid = p.sessionID || currentSessionID;
           currentSessionID = sid || currentSessionID;
-          publishBridge(sid, p.status || p.info?.status || null, p.info?.title || p.info?.name || null);
+          publishBridge(sid, p.status);
+        } else if (t === "session.updated") {
+          // Carries the full Session — the ONLY place the real title shows up
+          // (auto-generated after the first message, and on any rename). Keep
+          // the registry name fresh so the dashboard shows names, not ses_* ids.
+          const info = p.info || {};
+          if (info.parentID) return; // child/subagent session
+          if (info.directory) sessionDir.set(info.id, info.directory);
+          currentSessionID = info.id || currentSessionID;
+          publishBridge(info.id, null, info.title || null, { insert: true });
         } else if (t === "session.compacted") {
           runHook("journal-route.sh", ["pre-compact"], base(p.sessionID, dirFor(p.sessionID)));
         } else if (t === "session.deleted") {

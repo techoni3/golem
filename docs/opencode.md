@@ -140,6 +140,14 @@ Runtime flow:
 - `session.idle`, `session.status`, `chat.message`, and tool events update the
   bridge and `sessions.json` status so `sessions_dispatchable` can show idle/busy
   and queue `when_idle` dispatches the same way it does for Claude Code sessions.
+  `session.status` carries `status` as an OBJECT (`{type:"idle"|"retry"|"busy"}`);
+  the shim collapses it to the plain string the dashboard compares against
+  (`retry` counts as `busy`).
+- `session.updated` (parentID-guarded) refreshes the registry `name` from
+  `info.title` — the only real-time source of the session title (auto-generated
+  after the first message, updated on rename). Events from child/subagent
+  sessions can only update existing rows, never insert, so they cannot create
+  phantom sessions or dispatch endpoints.
 
 The bridge is fail-open: HTTP or SDK errors are logged to
 `~/.golem/logs/opencode-shim.log` and must not crash or stall opencode.
