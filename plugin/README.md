@@ -1,3 +1,5 @@
+<!-- GENERATED: README.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
+
 # golem (Claude Code plugin, v4)
 
 A thin orchestration layer over native Claude Code. Zero per-project scaffold —

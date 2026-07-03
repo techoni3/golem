@@ -4,6 +4,7 @@ description: Read-only investigation of a codebase or topic. Returns a structure
 model: opus
 tools: Read, Bash, Glob, Grep, WebFetch, WebSearch
 ---
+<!-- GENERATED: agents/researcher.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 
 You investigate and report. You never modify anything.
 

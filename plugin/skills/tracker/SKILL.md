@@ -2,6 +2,7 @@
 name: tracker
 description: The golem cross-project ticket tracker is THE source of truth for work — not PLAN.md. Read when picking up a dispatched/assigned ticket, decomposing work into sub-tickets, raising a blocking question for the human, annotating a ticket body, or transitioning ticket state. Tools are MCP (ticket_list/get/create/update/comment/comment_update/comment_reply/dispatch, stream_create/list, sessions_dispatchable).
 ---
+<!-- GENERATED: skills/tracker/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 
 # tracker
 

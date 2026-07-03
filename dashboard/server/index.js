@@ -21,12 +21,13 @@ import { golemHome, dashboardJsonPath } from '../../lib/golem-home.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const WEB_ROOT = path.resolve(__dirname, '..', 'web');
-// The tracker genre templates live OUTSIDE dashboard/ (in the plugin source
-// tree at plugin/skills/tracker/templates/). Resolve the repo root two levels
-// up from this file (dashboard/server/index.js → dashboard/ → repo root) and
-// point at that dir. Used by GET /api/templates.
+// The tracker genre templates live OUTSIDE dashboard/, in the substrate
+// source tree at substrate/skills/tracker/templates/ (TKT-0574 — plugin/ is
+// now a generated render of substrate/, not the SoT). Resolve the repo root
+// two levels up from this file (dashboard/server/index.js → dashboard/ →
+// repo root) and point at that dir. Used by GET /api/templates.
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
-const TEMPLATES_DIR = path.join(REPO_ROOT, 'plugin', 'skills', 'tracker', 'templates');
+const TEMPLATES_DIR = path.join(REPO_ROOT, 'substrate', 'skills', 'tracker', 'templates');
 
 // Legacy markdown tracker columns (kept in /api/meta for API stability; the UI
 // no longer renders the markdown board).
@@ -892,7 +893,7 @@ async function main() {
 
   // TKT-0206: global ideas stack. A FIFO queue of raw thoughts the user
   // drops via the bottom-left anchor in the dashboard. Each idea is a
-  // .md file at ~/.config/golem/ideas/ with frontmatter (id, created_at,
+  // .md file at ~/.golem/ideas/ with frontmatter (id, created_at,
   // status) + body. "Popping" deletes the file (the user is taking it
   // forward — likely into a tracker ticket).
   fastify.get('/api/ideas', async () => listIdeas());
@@ -1044,7 +1045,7 @@ async function main() {
 
   // Pin to the canonical dashboard URL http://dashboard.golem.localhost:7420.
   // If 7420 is busy, check whether the occupying process is the previous
-  // dashboard recorded in ~/.config/golem/dashboard.json. If so, terminate it
+  // dashboard recorded in ~/.golem/dashboard.json. If so, terminate it
   // gracefully and retry once. If it is any other process, refuse to kill it
   // and exit with a clear error. We never walk to higher ports.
   const tryListen = async (port) => {
@@ -1111,7 +1112,7 @@ async function main() {
   const boundPort = await tryListen(CONFIG.port);
 
   // WS2: self-register so WS3's MCP discovery can find the live dashboard.
-  // Atomic write (tmp + rename) into ~/.config/golem/dashboard.json. Best-effort
+  // Atomic write (tmp + rename) into ~/.golem/dashboard.json. Best-effort
   // — a write failure logs a warning and must NOT crash the server. We LEAVE the
   // file on shutdown (a stale entry is harmless: consumers health-check the URL).
   try {

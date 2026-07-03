@@ -2,6 +2,7 @@
 name: pr-conventions
 description: Branch naming, commit format + trailer, and PR body shape for golem projects. Read when opening a branch, committing, or opening a PR.
 ---
+<!-- GENERATED: skills/pr-conventions/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 
 # pr-conventions
 

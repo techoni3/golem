@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# GENERATED: hooks/session-register.sh — rendered by `golem sync` from substrate/ — edit the source, not this file.
 #
 # session-register.sh — SessionStart hook for the golem v4 plugin.
 #

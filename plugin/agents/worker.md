@@ -4,6 +4,7 @@ description: Implements one tracker ticket end-to-end — writes the code, runs 
 model: opus
 tools: Read, Write, Edit, Bash, Glob, Grep, WebFetch, WebSearch
 ---
+<!-- GENERATED: agents/worker.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 
 You implement exactly ONE tracker ticket, end to end, in the current repo.
 

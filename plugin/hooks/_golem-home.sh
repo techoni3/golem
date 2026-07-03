@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# GENERATED: hooks/_golem-home.sh — rendered by `golem sync` from substrate/ — edit the source, not this file.
 # _golem-home.sh — bash mirror of lib/golem-home.js (TKT-0573, ADR-4). Sourced
 # by journal-route.sh, notify.sh, session-register.sh. This file runs from the
 # INSTALLED plugin copy (${CLAUDE_PLUGIN_ROOT}), so it cannot `source` the repo

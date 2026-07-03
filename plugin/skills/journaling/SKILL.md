@@ -2,6 +2,7 @@
 name: journaling
 description: Central journal paths and milestone append format for golem projects. Read when appending a milestone line, or reading/locating a project's journal.
 ---
+<!-- GENERATED: skills/journaling/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 
 # journaling
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# GENERATED: hooks/tracker-context.sh — rendered by `golem sync` from substrate/ — edit the source, not this file.
 # SessionStart hook — inject the golem tracker working-model into the session so
 # agents register/track their work as tickets BY DEFAULT (skills are opt-in; a
 # fresh session has the ticket_* MCP tools but no standing instruction to use

@@ -2,6 +2,7 @@
 name: get-consult
 description: Ask another live golem session for a fresh pair of eyes on a hard problem — a second opinion, not delegation. Use when genuinely stuck (a bug you can't crack, a suspected architectural blind spot, tunnel vision) and your own subagents haven't cracked it. Also when the user says "get consult from <session>". Fully async — you keep working; the reply pushes back later.
 ---
+<!-- GENERATED: skills/get-consult/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 
 # get-consult
 

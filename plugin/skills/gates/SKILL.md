@@ -2,6 +2,7 @@
 name: gates
 description: Human-gate primitive — write an approval gate to pause at a milestone the user asked for, or an input gate when a phase is blocked on a missing secret. Read when intake requested a pause, when work blocks on a credential, or when scanning for open gates on resume.
 ---
+<!-- GENERATED: skills/gates/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 
 # gates
 

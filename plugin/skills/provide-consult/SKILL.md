@@ -2,6 +2,7 @@
 name: provide-consult
 description: 'Answer another session''s consult — be the fresh pair of eyes. Triggered when a `<channel kind="consult">` event arrives: understand the peer''s problem, investigate independently (code, web), find root causes and blind spots, and reply with a proposal via the consult_reply tool. Advisory only — do not edit their repo, create tickets, or enter the work-loop.'
 ---
+<!-- GENERATED: skills/provide-consult/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 
 # provide-consult
 

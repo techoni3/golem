@@ -1,8 +1,9 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "$comment": "GENERATED: substrate/plugin-meta.json + package.json version — rendered by `golem sync` from substrate/ — edit the source, not this file.",
   "name": "golem",
   "displayName": "Golem",
-  "version": "4.5.14",
+  "version": "0.1.0",
   "description": "Thin orchestration layer over native Claude Code: central per-project journaling, an auto-populated project registry, ntfy push notifications, opus worker/reviewer/researcher sub-agents, and the golem channel MCP.",
   "author": {
     "name": "Lavee Singh",

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# GENERATED: hooks/notify.sh — rendered by `golem sync` from substrate/ — edit the source, not this file.
 #
 # notify.sh — Notification hook for the golem v4 plugin. Pushes the
 # notification message to an ntfy.sh topic so the user gets a phone ping when a

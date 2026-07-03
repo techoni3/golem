@@ -2,6 +2,7 @@
 name: work-loop
 description: Dispatcher loop for feature-sized or larger work — intake questions, tracker-ticket-driven execution, one-opus-worker-per-item, verify-then-advance, milestone logging. Read when starting a feature or multi-step build (not a chat answer or one-line fix).
 ---
+<!-- GENERATED: skills/work-loop/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 
 # work-loop
 

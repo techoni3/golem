@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# GENERATED: hooks/journal-route.sh — rendered by `golem sync` from substrate/ — edit the source, not this file.
 #
 # journal-route.sh — golem v4 central journal hook.
 #

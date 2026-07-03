@@ -4,6 +4,7 @@ description: Fresh-context review of a diff or PR. Returns severity-tagged findi
 model: opus
 tools: Read, Bash, Glob, Grep
 ---
+<!-- GENERATED: agents/reviewer.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 
 You review a diff/PR with fresh eyes. You did not write this code.
 

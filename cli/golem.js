@@ -16,7 +16,9 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { golemHome, legacyConfigDir, migratedHomeDir, trackerDbPath } from '../lib/golem-home.js';
+import { golemHome, legacyConfigDir, migratedHomeDir, trackerDbPath, renderDirFor } from '../lib/golem-home.js';
+import * as compiler from '../lib/compiler/engine.js';
+import * as ccAdapter from '../lib/compiler/adapters/cc.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -271,6 +273,79 @@ async function cmdMigrateHome(args) {
   log(`  (or restore from backup: tar -xzf ${backupPath} -C ${home})`);
 }
 
+const ADAPTERS = { cc: ccAdapter };
+
+function readPackageVersion() {
+  return JSON.parse(readFileSync(resolve(GOLEM_ROOT, 'package.json'), 'utf8')).version;
+}
+
+function planForTarget(target) {
+  const adapter = ADAPTERS[target];
+  if (!adapter) fatal(2, `Unknown sync target: ${target} (known: ${Object.keys(ADAPTERS).join(', ')})`);
+  const substrateRoot = resolve(GOLEM_ROOT, 'substrate');
+  return adapter.buildPlan({ substrateRoot, repoRoot: GOLEM_ROOT, packageVersion: readPackageVersion() });
+}
+
+async function cmdSync(args) {
+  const checkOnly = args.includes('--check');
+  const force = args.includes('--force');
+  const targetIdx = args.indexOf('--target');
+  const target = targetIdx !== -1 ? args[targetIdx + 1] : 'cc';
+  const outIdx = args.indexOf('--out');
+  const outDir = outIdx !== -1 ? resolve(args[outIdx + 1]) : renderDirFor(target);
+
+  const items = planForTarget(target);
+
+  if (checkOnly) {
+    const { clean, drifted, orphaned } = compiler.checkDrift({ target, outDir, items });
+    log('');
+    log(`golem sync --check --target ${target}`);
+    log(`  out: ${outDir}`);
+    if (clean) {
+      log('  OK clean — no drift');
+      return;
+    }
+    if (drifted.length) {
+      log('');
+      log('  drifted:');
+      for (const d of drifted) log(`    ${d.reason.padEnd(9)} ${d.key}`);
+    }
+    if (orphaned.length) {
+      log('');
+      log('  orphaned (source removed, output would be pruned):');
+      for (const o of orphaned) log(`    orphan    ${o.key}`);
+    }
+    process.exit(1);
+  }
+
+  const { written, unchanged, tampered, pruned } = compiler.render({
+    target,
+    outDir,
+    items,
+    packageVersion: readPackageVersion(),
+    force,
+  });
+  if (target === 'cc') {
+    ccAdapter.syncMcpChannelDeps({ repoRoot: GOLEM_ROOT, outDir });
+  }
+
+  log('');
+  log(`golem sync --target ${target}`);
+  log(`  out: ${outDir}`);
+  log(`  written: ${written.length}, unchanged: ${unchanged.length}, pruned: ${pruned.length}, tampered: ${tampered.length}`);
+  if (tampered.length) {
+    log('');
+    err('  TAMPER — refused to overwrite (hand-edited outside sync); re-run with --force to overwrite:');
+    for (const t of tampered) err(`    ${t.outputRelPath}`);
+    process.exit(1);
+  }
+  if (pruned.length) {
+    log('');
+    log('  pruned (source removed):');
+    for (const p of pruned) log(`    ${p.outputRelPath}`);
+  }
+}
+
 async function cmdDoctor() {
   let failures = 0;
   function ok(label) { log(`  OK ${label}`); }
@@ -317,6 +392,17 @@ async function cmdDoctor() {
   existsSync(dbPath) ? ok(`tracker DB readable (${dbPath})`) : fail(`tracker DB missing at ${dbPath}`);
 
   log('');
+  log('Substrate sync');
+  try {
+    const items = planForTarget('cc');
+    const outDir = renderDirFor('cc');
+    const { clean, drifted, orphaned } = compiler.checkDrift({ target: 'cc', outDir, items });
+    clean ? ok(`cc render clean (${outDir})`) : skip(`cc render drifted (${drifted.length} changed, ${orphaned.length} orphaned) — run \`golem sync --target cc\``);
+  } catch (e) {
+    skip(`could not check substrate drift — ${e.message}`);
+  }
+
+  log('');
   log('Dashboard server reachability');
   const probe = await probeDashboard();
   if (probe.ok) {
@@ -351,6 +437,13 @@ Run:
                        the old path to the new one, restarts. Explicit only —
                        never runs automatically. Rollback is one command
                        (printed on completion).
+  sync [--check] [--target cc] [--out <dir>] [--force]
+                       Render substrate/ sources into a harness bundle
+                       (default target: cc, default out: ~/.golem/renders/
+                       cc-plugin/). --check reports drift without writing
+                       (exit 0 clean, 1 drifted). --force overwrites a
+                       hand-edited (tampered) output; without it, sync warns
+                       and refuses that one file.
 
 Inspect:
   doctor               Sanity-check the environment.
@@ -397,6 +490,9 @@ async function main() {
       break;
     case 'migrate-home':
       await cmdMigrateHome(rest);
+      break;
+    case 'sync':
+      await cmdSync(rest);
       break;
     case 'doctor':
       await cmdDoctor();
