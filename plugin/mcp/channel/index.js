@@ -80,22 +80,27 @@ function deriveSessionId() {
   if (process.env.GOLEM_CEO_SESSION_ID) return process.env.GOLEM_CEO_SESSION_ID;
   const j = readParentSessionFile();
   if (j && typeof j.sessionId === 'string' && j.sessionId) return j.sessionId;
+  const bridge = readOpencodeBridgeForParent();
+  if (bridge?.session_id) return bridge.session_id;
   return process.env.CLAUDE_CODE_SESSION_ID || '';
 }
 function deriveSessionName() {
   const j = readParentSessionFile();
-  return j && typeof j.name === 'string' && j.name ? j.name : null;
+  if (j && typeof j.name === 'string' && j.name) return j.name;
+  const bridge = readOpencodeBridgeForParent();
+  return bridge && typeof bridge.name === 'string' && bridge.name ? bridge.name : null;
 }
-// Mutable: re-derived on each (re)register so a session file that wasn't written
-// yet at module load, or a later /rename, is picked up within one heartbeat.
-let SESSION_ID = deriveSessionId();
-let SESSION_NAME = deriveSessionName();
-
 // golem-home resolution (TKT-0573, ADR-4) lives in tracker-client.js's
 // golemHome() — reused here so this file doesn't carry a second hand-rolled
 // mirror of lib/golem-home.js within the same package.
 const CHANNELS_REGISTRY = path.join(tracker.golemHome(), 'channels.json');
 const CHANNELS_LOCK = `${CHANNELS_REGISTRY}.lock`;
+const OPENCODE_BRIDGES_REGISTRY = path.join(tracker.golemHome(), 'opencode-bridges.json');
+
+// Mutable: re-derived on each (re)register so a session file that wasn't written
+// yet at module load, or a later /rename, is picked up within one heartbeat.
+let SESSION_ID = deriveSessionId();
+let SESSION_NAME = deriveSessionName();
 
 // --- Outbound: SSE listeners on /events ------------------------------------
 /** @type {Set<(chunk: string) => void>} */
@@ -157,6 +162,33 @@ function readChannelsRegistry() {
   return { version: 1, channels: [] };
 }
 
+function pidAlive(pid) {
+  if (!pid || pid === 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err && err.code === 'EPERM';
+  }
+}
+
+function readOpencodeBridgeForParent() {
+  try {
+    const raw = fs.readFileSync(OPENCODE_BRIDGES_REGISTRY, 'utf8');
+    const json = JSON.parse(raw);
+    const bridges = Array.isArray(json?.bridges) ? json.bridges : [];
+    const candidates = bridges.filter((b) => {
+      if (!b || Number(b.opencode_pid) !== Number(process.ppid)) return false;
+      if (b.pid && !pidAlive(Number(b.pid))) return false;
+      return !!(b.session_id && b.host && b.port);
+    });
+    candidates.sort((a, b) => Date.parse(b.updated_at || b.started_at || 0) - Date.parse(a.updated_at || a.started_at || 0));
+    return candidates[0] || null;
+  } catch {
+    return null;
+  }
+}
+
 function writeChannelsRegistry(reg) {
   const tmp = `${CHANNELS_REGISTRY}.tmp.${process.pid}`;
   fs.writeFileSync(tmp, JSON.stringify(reg, null, 2));
@@ -173,6 +205,7 @@ function registerChannel(port) {
   // self-heals a channel that first registered under a fallback run-id.
   SESSION_ID = deriveSessionId() || SESSION_ID;
   SESSION_NAME = deriveSessionName();
+  const bridge = readOpencodeBridgeForParent();
   if (!SESSION_ID) {
     process.stderr.write('[golem-channel] no session id (parent session file + GOLEM_CEO_SESSION_ID/CLAUDE_CODE_SESSION_ID all empty); channel will not register\n');
     return;
@@ -189,6 +222,7 @@ function registerChannel(port) {
       host: HOST,
       port,
       version: VERSION,
+      harness: bridge && bridge.session_id === SESSION_ID ? 'opencode' : undefined,
       started_at: STARTED_AT,
     });
     writeChannelsRegistry(reg);
@@ -315,6 +349,25 @@ async function postToChannel(baseUrl, pathSuffix, bodyObj) {
     return { ok: resp.ok, status: resp.status, body: text };
   } catch (err) {
     return { ok: false, status: 0, error: String((err && err.message) || err) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function postToOpencodeBridge(bridge, bodyObj) {
+  const url = `http://${bridge.host}:${bridge.port}/push`;
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 5000);
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bodyObj),
+      signal: ctl.signal,
+    });
+    const text = await resp.text();
+    if (!resp.ok) throw new Error(`opencode bridge ${resp.status}: ${text}`);
+    return { ok: true, status: resp.status, body: text };
   } finally {
     clearTimeout(timer);
   }
@@ -883,6 +936,11 @@ async function pushEvent(kind, content, extraMeta = {}) {
   // meta keys must be identifiers (letters/digits/underscore) — hyphens
   // are silently dropped by Claude Code. snake_case only.
   const meta = { kind, ...extraMeta };
+  const bridge = readOpencodeBridgeForParent();
+  if (bridge && bridge.session_id === SESSION_ID) {
+    await postToOpencodeBridge(bridge, { session_id: SESSION_ID, kind, content, meta });
+    return;
+  }
   await mcp.notification({
     method: 'notifications/claude/channel',
     params: { content, meta },

@@ -26,7 +26,8 @@
 // ~/.golem/logs/opencode-shim.log; no hook throws back into the harness.
 
 import { spawn, execFileSync } from "node:child_process";
-import { appendFileSync, mkdirSync, existsSync } from "node:fs";
+import { createServer } from "node:http";
+import { appendFileSync, mkdirSync, existsSync, readFileSync, writeFileSync, renameSync, rmdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import os from "node:os";
@@ -48,6 +49,13 @@ function golemHome() {
 
 const LOG_DIR = join(golemHome(), "logs");
 const LOG_FILE = join(LOG_DIR, "opencode-shim.log");
+const HOST = "127.0.0.1";
+const VERSION = "0.1.0";
+const BRIDGES_REGISTRY = join(golemHome(), "opencode-bridges.json");
+const BRIDGES_LOCK = `${BRIDGES_REGISTRY}.lock`;
+const SESSIONS_REGISTRY = join(golemHome(), "sessions.json");
+const SESSIONS_LOCK = `${SESSIONS_REGISTRY}.lock`;
+let currentSessionID = "";
 
 function logErr(context, detail) {
   try {
@@ -57,6 +65,220 @@ function logErr(context, detail) {
   } catch {
     // last resort: swallow — the shim must never throw.
   }
+}
+
+function withFileLock(lockPath, fn) {
+  try { mkdirSync(dirname(lockPath), { recursive: true }); } catch { /* ignore */ }
+  for (let i = 0; i < 50; i++) {
+    try {
+      mkdirSync(lockPath);
+      try { return fn(); }
+      finally { try { rmdirSync(lockPath); } catch { /* ignore */ } }
+    } catch (err) {
+      if (err?.code === "EEXIST") {
+        const wait = Date.now() + 20;
+        while (Date.now() < wait) { /* brief spin */ }
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error(`failed to acquire ${lockPath}`);
+}
+
+function readJson(file, key) {
+  try {
+    const parsed = JSON.parse(readFileSync(file, "utf8"));
+    if (Array.isArray(parsed?.[key])) return parsed;
+  } catch { /* ignore */ }
+  return { version: 1, [key]: [] };
+}
+
+function writeJson(file, obj) {
+  mkdirSync(dirname(file), { recursive: true });
+  const tmp = `${file}.tmp.${process.pid}`;
+  writeFileSync(tmp, JSON.stringify(obj, null, 2));
+  renameSync(tmp, file);
+}
+
+function registerBridge({ sessionID, cwd, status, port, name }) {
+  if (!sessionID || !port) return;
+  const now = new Date().toISOString();
+  withFileLock(BRIDGES_LOCK, () => {
+    const reg = readJson(BRIDGES_REGISTRY, "bridges");
+    reg.bridges = reg.bridges.filter((b) => b.opencode_pid !== process.pid && b.session_id !== sessionID);
+    reg.bridges.push({
+      session_id: sessionID,
+      opencode_pid: process.pid,
+      pid: process.pid,
+      host: HOST,
+      port,
+      version: VERSION,
+      harness: "opencode",
+      cwd: cwd || null,
+      name: name || null,
+      status: status || null,
+      started_at: now,
+      updated_at: now,
+    });
+    writeJson(BRIDGES_REGISTRY, reg);
+  });
+}
+
+function updateBridge({ sessionID, cwd, status, port, name }) {
+  if (!sessionID || !port) return;
+  const now = new Date().toISOString();
+  withFileLock(BRIDGES_LOCK, () => {
+    const reg = readJson(BRIDGES_REGISTRY, "bridges");
+    let found = false;
+    reg.bridges = reg.bridges.map((b) => {
+      if (b.opencode_pid !== process.pid || b.session_id !== sessionID) return b;
+      found = true;
+      return { ...b, cwd: cwd || b.cwd || null, name: name || b.name || null, status: status || b.status || null, updated_at: now };
+    });
+    if (!found) {
+      reg.bridges.push({
+        session_id: sessionID,
+        opencode_pid: process.pid,
+        pid: process.pid,
+        host: HOST,
+        port,
+        version: VERSION,
+        harness: "opencode",
+        cwd: cwd || null,
+        name: name || null,
+        status: status || null,
+        started_at: now,
+        updated_at: now,
+      });
+    }
+    writeJson(BRIDGES_REGISTRY, reg);
+  });
+}
+
+function unregisterBridges() {
+  try {
+    withFileLock(BRIDGES_LOCK, () => {
+      const reg = readJson(BRIDGES_REGISTRY, "bridges");
+      const before = reg.bridges.length;
+      reg.bridges = reg.bridges.filter((b) => b.opencode_pid !== process.pid);
+      if (reg.bridges.length !== before) writeJson(BRIDGES_REGISTRY, reg);
+    });
+  } catch (e) {
+    logErr("bridge unregister", e);
+  }
+}
+
+function updateSessionRegistry({ sessionID, cwd, status, name }) {
+  if (!sessionID) return;
+  try {
+    const now = new Date().toISOString();
+    withFileLock(SESSIONS_LOCK, () => {
+      const reg = readJson(SESSIONS_REGISTRY, "sessions");
+      let found = false;
+      reg.sessions = reg.sessions.map((s) => {
+        if (s.session_id !== sessionID) return s;
+        found = true;
+        return {
+          ...s,
+          project_path: cwd || s.project_path,
+          harness: "opencode",
+          status: status || s.status || null,
+          name: name || s.name || null,
+          last_seen_at: now,
+        };
+      });
+      if (!found) {
+        reg.sessions.push({
+          session_id: sessionID,
+          hook_ppid: process.pid,
+          project_path: cwd || null,
+          harness: "opencode",
+          status: status || null,
+          name: name || null,
+          boot_time: now,
+          last_seen_at: now,
+        });
+      }
+      writeJson(SESSIONS_REGISTRY, reg);
+    });
+  } catch (e) {
+    logErr("session registry update", e);
+  }
+}
+
+function xmlAttr(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function channelTag(kind, content, meta = {}) {
+  const attrs = { source: "golem", kind, ...meta };
+  const attrText = Object.entries(attrs)
+    .filter(([, v]) => v !== undefined && v !== null && String(v) !== "")
+    .map(([k, v]) => `${k}="${xmlAttr(v)}"`)
+    .join(" ");
+  return `<channel ${attrText}>\n${String(content || "")}\n</channel>`;
+}
+
+function sendJson(res, status, body) {
+  const data = JSON.stringify(body);
+  res.writeHead(status, {
+    "Content-Type": "application/json",
+    "Content-Length": Buffer.byteLength(data),
+  });
+  res.end(data);
+}
+
+async function readBody(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+function startBridge({ client, dirFor, logErr }) {
+  let port = null;
+  const server = createServer(async (req, res) => {
+    try {
+      if (req.method === "GET" && req.url === "/healthz") {
+        return sendJson(res, 200, { ok: true, harness: "opencode", version: VERSION });
+      }
+      if (req.method !== "POST" || req.url !== "/push") {
+        return sendJson(res, 404, { ok: false, error: "not found" });
+      }
+      const raw = await readBody(req);
+      let payload = {};
+      try { payload = JSON.parse(raw || "{}"); } catch { payload = {}; }
+      const kind = String(payload.kind || payload.meta?.kind || "brief");
+      const content = String(payload.content || "");
+      const meta = payload.meta && typeof payload.meta === "object" ? payload.meta : { kind };
+      const sessionID = String(payload.session_id || meta.session_id || currentSessionID || "");
+      if (!sessionID) return sendJson(res, 409, { ok: false, error: "no active opencode session" });
+
+      const text = channelTag(kind, content, meta);
+      client.session.prompt({
+        path: { id: sessionID },
+        body: { parts: [{ type: "text", text }] },
+      }).catch((e) => logErr("bridge prompt", e));
+      updateSessionRegistry({ sessionID, cwd: dirFor(sessionID), status: "busy" });
+      if (port) updateBridge({ sessionID, cwd: dirFor(sessionID), status: "busy", port });
+      return sendJson(res, 202, { ok: true, kind, session_id: sessionID });
+    } catch (e) {
+      logErr("bridge request", e);
+      return sendJson(res, 500, { ok: false, error: String(e?.message || e) });
+    }
+  });
+  server.on("error", (e) => logErr("bridge server", e));
+  server.listen(0, HOST, () => {
+    const addr = server.address();
+    port = typeof addr === "object" && addr ? addr.port : null;
+  });
+  server.unref();
+  process.once("exit", unregisterBridges);
+  return { port: () => port };
 }
 
 // Fire-and-forget: spawn a hook script, write CC-shaped stdin, DO NOT await.
@@ -103,6 +325,13 @@ export default async (input) => {
 
   const dirFor = (sid) => sessionDir.get(sid) || initCwd;
   const base = (sessionID, cwd) => ({ session_id: sessionID || "", cwd: cwd || initCwd, harness: "opencode" });
+  const bridge = startBridge({ client: input?.client, dirFor, logErr });
+  const publishBridge = (sessionID, status = null, name = null) => {
+    const port = bridge.port();
+    if (!sessionID || !port) return;
+    updateBridge({ sessionID, cwd: dirFor(sessionID), status, port, name });
+    updateSessionRegistry({ sessionID, cwd: dirFor(sessionID), status, name });
+  };
 
   return {
     event: async ({ event }) => {
@@ -113,11 +342,28 @@ export default async (input) => {
           const info = p.info || {};
           if (info.parentID) return; // child/subagent session — journaled via the task tool, not as a top-level start
           if (info.directory) sessionDir.set(info.id, info.directory);
+          currentSessionID = info.id || currentSessionID;
           const stdin = base(info.id, info.directory);
           runHook("session-register.sh", [], stdin);
           runHook("journal-route.sh", ["session-start"], stdin);
+          const status = info.status || "idle";
+          const name = info.title || info.name || null;
+          const register = () => {
+            const port = bridge.port();
+            if (!port) return false;
+            registerBridge({ sessionID: info.id, cwd: info.directory || dirFor(info.id), status, port, name });
+            updateSessionRegistry({ sessionID: info.id, cwd: info.directory || dirFor(info.id), status, name });
+            return true;
+          };
+          if (!register()) setTimeout(register, 100).unref?.();
         } else if (t === "session.idle") {
+          currentSessionID = p.sessionID || currentSessionID;
+          publishBridge(p.sessionID, "idle");
           runHook("journal-route.sh", ["stop"], base(p.sessionID, dirFor(p.sessionID)));
+        } else if (t === "session.status") {
+          const sid = p.sessionID || p.info?.id || currentSessionID;
+          currentSessionID = sid || currentSessionID;
+          publishBridge(sid, p.status || p.info?.status || null, p.info?.title || p.info?.name || null);
         } else if (t === "session.compacted") {
           runHook("journal-route.sh", ["pre-compact"], base(p.sessionID, dirFor(p.sessionID)));
         } else if (t === "session.deleted") {
@@ -131,6 +377,8 @@ export default async (input) => {
 
     "chat.message": async (inp) => {
       try {
+        currentSessionID = inp?.sessionID || currentSessionID;
+        publishBridge(inp?.sessionID, "busy");
         runHook("journal-route.sh", ["user-prompt"], base(inp?.sessionID, dirFor(inp?.sessionID)));
       } catch (e) {
         logErr("chat.message", e);
@@ -139,6 +387,8 @@ export default async (input) => {
 
     "tool.execute.before": async (inp, out) => {
       try {
+        currentSessionID = inp?.sessionID || currentSessionID;
+        publishBridge(inp?.sessionID, "busy");
         const kind = inp?.tool === "task" ? "agent-spawn" : "tool-pre";
         runHook("journal-route.sh", [kind], {
           ...base(inp?.sessionID, dirFor(inp?.sessionID)),
@@ -152,6 +402,8 @@ export default async (input) => {
 
     "tool.execute.after": async (inp) => {
       try {
+        currentSessionID = inp?.sessionID || currentSessionID;
+        publishBridge(inp?.sessionID, null);
         const kind = inp?.tool === "task" ? "agent-return" : "tool-post";
         runHook("journal-route.sh", [kind], {
           ...base(inp?.sessionID, dirFor(inp?.sessionID)),

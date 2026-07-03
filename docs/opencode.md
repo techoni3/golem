@@ -116,3 +116,30 @@ Current artifact-set decision for P6: no real project-scoped substrate content i
 shipped yet. The mechanism is verified with scratch-only fixtures so golem does
 not start writing generated files into real user repos before an explicit policy
 decision.
+
+## Dispatch bridge
+
+P5.5 makes live opencode sessions dispatchable without forking the dashboard
+dispatch path. The opencode shim owns a tiny localhost bridge because it is the
+only process with both the active `ses_*` id and opencode's SDK `client`; the MCP
+channel server remains the dashboard-facing endpoint so existing `/events`,
+`ack`, `respond`, consult, and tracker tools keep using one channel protocol.
+
+Runtime flow:
+
+- `session.created` starts/updates `~/.golem/opencode-bridges.json` with the
+  `ses_*` id, opencode process pid, bridge port, cwd, and status.
+- The MCP channel process is a child of the opencode process, so its heartbeat
+  resolves the matching bridge by `process.ppid`, registers its own HTTP port in
+  `~/.golem/channels.json` under that `ses_*` id, and marks the row
+  `harness:"opencode"`.
+- Dashboard dispatch still POSTs to the registered channel server. For opencode
+  parents, the channel server forwards the push to the shim bridge; the shim
+  injects the canonical `<channel source="golem" kind="...">...</channel>` text
+  into the live session with `client.session.prompt(...)`.
+- `session.idle`, `session.status`, `chat.message`, and tool events update the
+  bridge and `sessions.json` status so `sessions_dispatchable` can show idle/busy
+  and queue `when_idle` dispatches the same way it does for Claude Code sessions.
+
+The bridge is fail-open: HTTP or SDK errors are logged to
+`~/.golem/logs/opencode-shim.log` and must not crash or stall opencode.

@@ -17,7 +17,7 @@ import url from 'node:url';
 import crypto from 'node:crypto';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
-const DASHBOARD_SERVER = path.resolve(__dirname, '../../../dashboard/server/index.js');
+const DASHBOARD_SERVER = path.resolve(__dirname, '../../dashboard/server/index.js');
 
 const PORT = 7616;
 const HOST = '127.0.0.1';
