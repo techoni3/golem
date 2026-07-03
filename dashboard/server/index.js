@@ -18,6 +18,7 @@ import { applyGateVerdict } from './projects.js';
 import { listIdeas, createIdea, popIdea } from './ideas.js';
 import { initDispatchDrainer } from './dispatch-queue.js';
 import { golemHome, dashboardJsonPath } from '../../lib/golem-home.js';
+import { SESSION_ROLES, setSessionRole } from '../../lib/session-role.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const WEB_ROOT = path.resolve(__dirname, '..', 'web');
@@ -841,6 +842,7 @@ async function main() {
         name: s.name ?? null,
         label: s.name || `session ${String(s.session_id ?? '').slice(0, 8)}`,
         status: s.status ?? null,
+        role: s.role ?? null,
         project_id: s.project_id ?? null,
         reachable: !!ch,
         channel_url: ch ? (ch.url ?? (ch.host && ch.port ? `http://${ch.host}:${ch.port}` : null)) : null,
@@ -852,6 +854,27 @@ async function main() {
       });
     }
     return out;
+  });
+
+  fastify.post('/api/sessions/:id/role', async (req, reply) => {
+    const id = req.params.id;
+    const body = req.body ?? {};
+    const role = body.role === 'clear' ? null : (body.role ?? null);
+    if (role != null && !SESSION_ROLES.includes(role)) {
+      return reply.code(400).send({ error: `invalid role: ${role}` });
+    }
+    try {
+      const row = setSessionRole(id, role, { by: 'human:dashboard' });
+      const text = `session role ${role ?? 'cleared'} for ${row.name || id}`;
+      chat.record('system', 'session_role', text, { session_id: id });
+      if (typeof state.refreshNativeSessions === 'function') await state.refreshNativeSessions();
+      broadcastWS({ type: 'native-sessions-update', native_sessions: state.nativeSessions(), channels: state.channels() });
+      return { ok: true, session: row };
+    } catch (err) {
+      const msg = String(err?.message ?? err);
+      const code = /not found/i.test(msg) ? 404 : 400;
+      return reply.code(code).send({ error: msg });
+    }
   });
 
   // GET /api/templates — genre scaffolds (feature/bug/design-doc/prd/brainstorm/

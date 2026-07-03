@@ -157,6 +157,9 @@ function normalizeGolemRegistry(row) {
     updated_at: msFromIso(row.last_seen_at) ?? msFromIso(row.boot_time),
     kind: null,
     harness: row.harness ?? 'claudecode',
+    role: row.role ?? null,
+    role_updated_at: row.role_updated_at ?? null,
+    role_updated_by: row.role_updated_by ?? null,
     source: 'native',
     _from: 'golem',
   };
@@ -230,6 +233,9 @@ function mergeSources(cliRows, registryRows, golemRows = []) {
           updated_at: r.updated_at ?? prev.updated_at,
           name: r.name ?? prev.name,
           harness: r.harness ?? prev.harness, // only the golem source sets harness
+          role: r.role ?? prev.role, // only the golem source sets role metadata
+          role_updated_at: r.role_updated_at ?? prev.role_updated_at,
+          role_updated_by: r.role_updated_by ?? prev.role_updated_by,
         });
       } else {
         byKey.set(k, r);
@@ -331,6 +337,9 @@ export async function readNativeSessions(registeredIdLookup) {
       started_at: s.started_at,
       updated_at: s.updated_at,
       harness,
+      role: s.role ?? null,
+      role_updated_at: s.role_updated_at ?? null,
+      role_updated_by: s.role_updated_by ?? null,
       source: 'native',
     });
   }

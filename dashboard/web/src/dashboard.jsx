@@ -185,6 +185,7 @@ function SessionCard({ session: s, setRoute }) {
       <div className="cc-session-row1">
         <span className={`orch-dot ${dotClass}`}/>
         <span className="cc-session-name" title={s.cwd || ''}>{title}</span>
+        {s.role && <span className="cc-role-chip">{s.role}</span>}
         <span className={`cc-status-badge badge-${statusKind}`}>
           {statusKind === 'busy' && <span className="cc-status-pulse"/>}
           {statusLabel}
@@ -200,6 +201,20 @@ function SessionCard({ session: s, setRoute }) {
 
       <div className="cc-session-row2">
         <ProjectChip project={project} projectId={s.project_id} registered={registered} setRoute={setRoute}/>
+        <select
+          className="cc-role-select"
+          value={s.role || ''}
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => window.SubstrateAPI.setSessionRole(s.session_id, e.target.value || null).catch((err) => console.error('set role failed', err))}
+          disabled={!s.session_id}
+          title="session role"
+        >
+          <option value="">role: clear</option>
+          <option value="planner">planner</option>
+          <option value="builder">builder</option>
+          <option value="researcher">researcher</option>
+          <option value="ui-tester">ui-tester</option>
+        </select>
         <span className="cc-session-ages mono">
           {s.started_at && <span title="started">↑ {window.SubstrateFmt.fmtTimeAgo(s.started_at)}</span>}
           {s.updated_at && s.updated_at !== s.started_at && <span title="updated">· {window.SubstrateFmt.fmtTimeAgo(s.updated_at)}</span>}

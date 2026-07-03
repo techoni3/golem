@@ -126,6 +126,7 @@ function SessionCard({ session, name, queueCount = 0 }) {
       <div className="native-session-top">
         <Icon.Gear size={16} className={`gear gear-${working ? 'working' : 'idle'}`}/>
         <span className="native-session-name">{name}</span>
+        {session.role && <span className="native-session-role-chip">{session.role}</span>}
         {queueCount > 0 && (
           <span className="native-session-queue-chip" title={`${queueCount} dispatch${queueCount === 1 ? '' : 'es'} queued — delivers when this session is idle`}>⏳ {queueCount} queued</span>
         )}
@@ -151,6 +152,22 @@ function SessionCard({ session, name, queueCount = 0 }) {
             {window.SubstrateFmt?.fmtClock?.(session.updated_at) || ''}
           </span>
         )}
+      </div>
+      <div className="native-session-role" onClick={(e) => e.stopPropagation()}>
+        <label>
+          Role{' '}
+          <select
+            value={session.role || ''}
+            onChange={(e) => window.SubstrateAPI.setSessionRole(session.session_id, e.target.value || null).catch((err) => console.error('set role failed', err))}
+            disabled={!session.session_id}
+          >
+            <option value="">clear</option>
+            <option value="planner">planner</option>
+            <option value="builder">builder</option>
+            <option value="researcher">researcher</option>
+            <option value="ui-tester">ui-tester</option>
+          </select>
+        </label>
       </div>
     </div>
   );

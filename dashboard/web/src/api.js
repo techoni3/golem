@@ -190,6 +190,8 @@
     channels: () => getJSON('/api/channels'),
     channelHealth: (sessionId) =>
       getJSON(`/api/channel/health${sessionId ? `?session=${encodeURIComponent(sessionId)}` : ''}`),
+    setSessionRole: (sessionId, role) =>
+      postJSON(`/api/sessions/${encodeURIComponent(sessionId)}/role`, { role }),
 
     // ---- Cross-project tracker (tracker.db) ----
     // These are SEPARATE from the legacy markdown `tickets(projectId)` above.

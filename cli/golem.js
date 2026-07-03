@@ -18,8 +18,9 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, resolve, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { golemHome, legacyConfigDir, migratedHomeDir, trackerDbPath, renderDirFor, projectsJsonPath } from '../lib/golem-home.js';
+import { golemHome, legacyConfigDir, migratedHomeDir, trackerDbPath, renderDirFor, projectsJsonPath, sessionsJsonPath } from '../lib/golem-home.js';
 import { projectIdFor } from '../lib/project-id.js';
+import { SESSION_ROLES, setSessionRole } from '../lib/session-role.js';
 import * as compiler from '../lib/compiler/engine.js';
 import * as ccAdapter from '../lib/compiler/adapters/cc.js';
 import * as ocAdapter from '../lib/compiler/adapters/opencode.js';
@@ -121,6 +122,81 @@ async function cmdStatus(args) {
     log(`  not reachable (${probe.error})`);
     log(`  start it with: golem dashboard`);
   }
+}
+
+function readSessionsRegistry() {
+  try {
+    const parsed = JSON.parse(readFileSync(sessionsJsonPath(), 'utf8'));
+    return Array.isArray(parsed?.sessions) ? parsed.sessions : [];
+  } catch {
+    return [];
+  }
+}
+
+function resolveSessionArg(value, sessions) {
+  if (!value) return null;
+  const exact = sessions.find((s) => s.session_id === value || s.name === value);
+  if (exact) return exact;
+  const pref = sessions.filter((s) => typeof s.session_id === 'string' && s.session_id.startsWith(value));
+  if (pref.length === 1) return pref[0];
+  if (pref.length > 1) {
+    throw new Error(`ambiguous session prefix "${value}" (${pref.length} matches)`);
+  }
+  throw new Error(`session not found: ${value}`);
+}
+
+function liveSessionLines(sessions) {
+  return sessions
+    .slice()
+    .sort((a, b) => String(b.last_seen_at || '').localeCompare(String(a.last_seen_at || '')))
+    .map((s) => `  ${s.session_id}${s.name ? `  ${s.name}` : ''}${s.project_path ? `  ${s.project_path}` : ''}`);
+}
+
+async function cmdRole(args) {
+  const roleArg = args[0];
+  if (!roleArg || roleArg === '-h' || roleArg === '--help') {
+    log(`Usage: golem role <${SESSION_ROLES.join('|')}|clear> [--session <id-or-name>]`);
+    return;
+  }
+  const role = roleArg === 'clear' ? null : roleArg;
+  if (role != null && !SESSION_ROLES.includes(role)) {
+    fatal(2, `invalid role: ${roleArg} (expected ${SESSION_ROLES.join('|')} or clear)`);
+  }
+  let sessionOpt = null;
+  for (let i = 1; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--session') {
+      sessionOpt = args[++i];
+      if (!sessionOpt) fatal(2, '--session requires a value');
+    } else if (a.startsWith('--session=')) {
+      sessionOpt = a.slice('--session='.length);
+    } else {
+      fatal(2, `unknown role option: ${a}`);
+    }
+  }
+  const sessions = readSessionsRegistry();
+  let target;
+  try {
+    if (sessionOpt) {
+      target = resolveSessionArg(sessionOpt, sessions);
+    } else if (process.env.CLAUDE_CODE_SESSION_ID) {
+      target = resolveSessionArg(process.env.CLAUDE_CODE_SESSION_ID, sessions);
+    } else {
+      const lines = liveSessionLines(sessions);
+      fatal(2, `--session is required when CLAUDE_CODE_SESSION_ID is unset.${lines.length ? `\n\nKnown sessions:\n${lines.join('\n')}` : ''}`);
+    }
+  } catch (e) {
+    fatal(2, e.message);
+  }
+  const updated = setSessionRole(target.session_id, role, { by: 'human:cli' });
+  log(JSON.stringify({
+    ok: true,
+    session_id: updated.session_id,
+    name: updated.name ?? null,
+    role: updated.role,
+    role_updated_at: updated.role_updated_at,
+    role_updated_by: updated.role_updated_by,
+  }, null, 2));
 }
 
 async function cmdDashboard(args) {
@@ -830,6 +906,8 @@ Run:
                        --public binds 0.0.0.0 (LAN-reachable, no auth).
   dashboard:restart [--public] [npm-start-args…]
                        Stop the running dashboard and restart it detached.
+  role <role|clear> [--session <id-or-name>]
+                       Set or clear a session role (${SESSION_ROLES.join(', ')}).
   migrate-home         One-time move of ~/.config/golem -> ~/.golem (ADR-4).
                        Backs up first, stops the dashboard, moves, symlinks
                        the old path to the new one, restarts. Explicit only —
@@ -899,6 +977,9 @@ async function main() {
       break;
     case 'dashboard:restart':
       await cmdDashboardRestart(rest);
+      break;
+    case 'role':
+      await cmdRole(rest);
       break;
     case 'migrate-home':
       await cmdMigrateHome(rest);
