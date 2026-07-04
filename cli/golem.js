@@ -9,6 +9,7 @@
 //   dashboard:restart
 //                Stop and restart the admin dashboard detached.
 //   doctor       Sanity-check the environment.
+//   map          Generate a cached repo map for a project.
 //   status       Dashboard health + canonical URL.
 //   help         Show this message.
 
@@ -21,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 import { golemHome, legacyConfigDir, migratedHomeDir, trackerDbPath, renderDirFor, projectsJsonPath, sessionsJsonPath } from '../lib/golem-home.js';
 import { projectIdFor } from '../lib/project-id.js';
 import { SESSION_ROLES, pushRoleBriefDirect, setSessionRole } from '../lib/session-role.js';
+import { generateRepoMap, updateProjectLsp } from '../lib/repomap.js';
 import * as compiler from '../lib/compiler/engine.js';
 import * as ccAdapter from '../lib/compiler/adapters/cc.js';
 import * as ocAdapter from '../lib/compiler/adapters/opencode.js';
@@ -198,6 +200,31 @@ async function cmdRole(args) {
     role_updated_at: updated.role_updated_at,
     role_updated_by: updated.role_updated_by,
   }, null, 2));
+}
+
+async function cmdMap(args) {
+  const force = args.includes('--force');
+  const positional = args.filter((a) => a !== '--force');
+  if (positional.includes('-h') || positional.includes('--help')) {
+    log('Usage: golem map [path] [--force]');
+    log('Generate a cached repo map in ~/.golem/repomap/<project_id>/<commit>.md.');
+    return;
+  }
+  if (positional.length > 1) fatal(2, `too many map arguments: ${positional.join(' ')}`);
+  const start = positional[0] ? resolve(positional[0]) : process.cwd();
+  const version = readPackageVersion();
+  const started = performance.now();
+  const result = await generateRepoMap(start, { force, version });
+  const elapsedMs = Math.round(performance.now() - started);
+  await updateProjectLsp(result.root);
+  log('');
+  log(`golem map ${result.cacheHit ? '(cache hit)' : '(generated)'}`);
+  log(`  project_id: ${result.projectId}`);
+  log(`  root: ${result.root}`);
+  log(`  out: ${result.path}`);
+  log(`  commit: ${result.commit.slice(0, 7)}${result.dirty ? ' dirty' : ''}`);
+  log(`  bytes: ${result.bytes}`);
+  log(`  elapsed_ms: ${elapsedMs}`);
 }
 
 async function cmdDashboard(args) {
@@ -886,6 +913,27 @@ async function cmdDoctor() {
   }
 
   log('');
+  log('LSP capability');
+  try {
+    const projects = knownProjects();
+    if (!projects.length) {
+      skip('no registered projects to check');
+    }
+    for (const p of projects) {
+      try {
+        const { projectId, lsp } = await updateProjectLsp(p.path);
+        const label = p.name || projectId;
+        if (lsp.available) ok(`${label}: ${lsp.servers.join(', ')}`);
+        else skip(`${label}: none detected`);
+      } catch (e) {
+        skip(`${p.name || p.id || p.path}: could not check LSP — ${e.message}`);
+      }
+    }
+  } catch (e) {
+    skip(`could not record LSP capability — ${e.message}`);
+  }
+
+  log('');
   log('Dashboard server reachability');
   const probe = await probeDashboard();
   if (probe.ok) {
@@ -918,7 +966,9 @@ Run:
   dashboard:restart [--public] [npm-start-args…]
                        Stop the running dashboard and restart it detached.
   role <role|clear> [--session <id-or-name>]
-                       Set or clear a session role (${SESSION_ROLES.join(', ')}).
+                        Set or clear a session role (${SESSION_ROLES.join(', ')}).
+  map [path] [--force] Generate a cached repo map under ~/.golem/repomap/ and
+                       record LSP capability for that project.
   migrate-home         One-time move of ~/.config/golem -> ~/.golem (ADR-4).
                        Backs up first, stops the dashboard, moves, symlinks
                        the old path to the new one, restarts. Explicit only —
@@ -991,6 +1041,9 @@ async function main() {
       break;
     case 'role':
       await cmdRole(rest);
+      break;
+    case 'map':
+      await cmdMap(rest);
       break;
     case 'migrate-home':
       await cmdMigrateHome(rest);

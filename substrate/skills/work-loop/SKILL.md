@@ -47,6 +47,9 @@ tickets the brief/dispatch already points at instead of duplicating them.
   verify-done, tracker).
 - **Never two writer agents in the same repo concurrently** — serialize all writes.
   Read-only research may fan out in parallel.
+- Prefer LSP for targeted symbol resolution (definitions, references,
+  signatures) when available. Glob/Grep/Read remain the fallback; fallback is
+  resilience, not a reason to skip LSP.
 - On worker return, run `golem:verify-done` BEFORE advancing the ticket. Claims aren't
   evidence.
 - Then `ticket_update` the ticket to `review`/`done` (per your gate policy), and
