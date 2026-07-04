@@ -88,6 +88,9 @@ try {
   await page.goto(`${BASE}/settings`, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('[data-testid="sync-matrix"]', { timeout: 15000 });
   check('settings page: matrix renders', await page.locator('[data-testid="sync-matrix"]').count() === 1);
+  check('settings page: commands are neutral', await page.locator('tbody tr', { hasText: 'commands' }).locator('.settings-chip.error').count() === 0);
+  check('settings page: opencode hooks managed by runtime shim', await page.locator('.settings-chip', { hasText: 'runtime shim' }).count() > 0);
+  check('settings page: opencode mcp managed by config merge', await page.locator('.settings-chip', { hasText: 'config merge' }).count() > 0);
   check('settings page: initial drift is visible', await page.locator('.settings-chip.drifted').count() > 0);
 
   const oc = page.locator('[data-testid="harness-opencode"]');
@@ -102,7 +105,10 @@ try {
   await page.locator('[data-testid="sync-now"]').click();
   await page.waitForSelector('[data-testid="sync-result"]', { timeout: 30000 });
   const syncText = await page.locator('[data-testid="sync-result"]').innerText();
-  check('settings page: Sync Now result appears', /"status":\s*"ok"/.test(syncText) || /"status":\s*"skipped"/.test(syncText), syncText.slice(0, 160));
+  check('settings page: Sync Now result appears', /Sync complete|Sync skipped/.test(syncText), syncText.slice(0, 160));
+  check('settings page: raw JSON hidden by default', !/"generated_at"/.test(syncText), syncText.slice(0, 160));
+  await page.locator('[data-testid="sync-result"] summary').click();
+  check('settings page: raw JSON available in details', /"generated_at"/.test(await page.locator('[data-testid="sync-result"]').innerText()));
   await page.waitForFunction(() => {
     return document.querySelectorAll('tbody tr td:nth-child(2) .settings-chip.drifted').length === 0;
   }, null, { timeout: 15000 });

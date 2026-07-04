@@ -196,6 +196,20 @@ async function run() {
   const hasOcDisabled = statusCells.some((c) => c.harness === 'opencode' && c.status === 'disabled');
   check('GET /api/substrate/status: cc active + opencode disabled cells', subStatus.status === 200 && hasCc && hasOcDisabled, `status ${subStatus.status}`);
 
+  const subPutEnabled = await jsend('PUT', '/api/substrate/config', { harnesses: { opencode: { enabled: true } } });
+  check('PUT /api/substrate/config: toggle opencode on', subPutEnabled.status === 200 && subPutEnabled.body?.harnesses?.opencode?.enabled === true, `status ${subPutEnabled.status}`);
+
+  const subStatusEnabled = await jget('/api/substrate/status');
+  const enabledCells = subStatusEnabled.body?.global || [];
+  const commandCells = enabledCells.filter((c) => c.artifact === 'commands');
+  const commandsNeutral = commandCells.length === 2 && commandCells.every((c) => ['empty', 'disabled'].includes(c.status));
+  const ocHooksManaged = enabledCells.some((c) => c.harness === 'opencode' && c.artifact === 'hooks' && c.status === 'managed' && c.label === 'runtime shim');
+  const ocMcpManaged = enabledCells.some((c) => c.harness === 'opencode' && c.artifact === 'mcp' && c.status === 'managed' && c.label === 'config merge');
+  check('GET /api/substrate/status: neutral unsupported/empty cells', subStatusEnabled.status === 200 && commandsNeutral && ocHooksManaged && ocMcpManaged, `status ${subStatusEnabled.status}`);
+
+  const subPutDisabledAgain = await jsend('PUT', '/api/substrate/config', { harnesses: { opencode: { enabled: false } } });
+  check('PUT /api/substrate/config: toggle opencode off again', subPutDisabledAgain.status === 200 && subPutDisabledAgain.body?.harnesses?.opencode?.enabled === false, `status ${subPutDisabledAgain.status}`);
+
   const syncDisabled = await jsend('POST', '/api/substrate/sync', { target: 'opencode' });
   check('POST /api/substrate/sync: disabled opencode skips', syncDisabled.status === 200 && syncDisabled.body?.results?.[0]?.status === 'disabled', `status ${syncDisabled.status}`);
 

@@ -176,6 +176,8 @@
     meta: () => getJSON('/api/meta'),
     projects: () => getJSON('/api/projects'),
     workspaces: () => getJSON('/api/workspaces'),
+    generateRepoMap: (projectId, body) =>
+      postJSON(`/api/projects/${encodeURIComponent(projectId)}/repo-map`, body),
     // v4 (fix round 2): peek payload for one native session — recent central-
     // journal events + milestones + best-effort transcript path.
     nativeSessionPeek: (sessionId) =>
@@ -192,6 +194,22 @@
       getJSON(`/api/channel/health${sessionId ? `?session=${encodeURIComponent(sessionId)}` : ''}`),
     setSessionRole: (sessionId, role) =>
       postJSON(`/api/sessions/${encodeURIComponent(sessionId)}/role`, { role }),
+    listRoles: () => getJSON('/api/roles'),
+    saveRole: (name, body) =>
+      fetch(`/api/roles/${encodeURIComponent(name)}`, {
+        method: 'PUT',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body }),
+      }).then(async (r) => {
+        const json = await r.json().catch(() => null);
+        if (!r.ok) {
+          const err = new Error(`${r.status} ${r.statusText} /api/roles/${name}`);
+          err.payload = json;
+          throw err;
+        }
+        return json;
+      }),
+    pushRole: (name) => postJSON(`/api/roles/${encodeURIComponent(name)}/push`, {}),
 
     // ---- Cross-project tracker (tracker.db) ----
     // These are SEPARATE from the legacy markdown `tickets(projectId)` above.
@@ -212,6 +230,8 @@
       postJSON(`/api/tickets/${encodeURIComponent(id)}/comments/${encodeURIComponent(commentId)}/reply`, body),
     dispatchTicket: (id, { session_id, note, mode }) =>
       postJSON(`/api/tickets/${encodeURIComponent(id)}/dispatch`, { session_id, note, mode }),
+    dismissUnackedDispatch: (id, deliveryEventId) =>
+      postJSON(`/api/tickets/${encodeURIComponent(id)}/unacked/${encodeURIComponent(deliveryEventId)}/dismiss`, { actor: 'human:dashboard' }),
     listDispatchable: (projectId) =>
       getJSON(`/api/sessions/dispatchable${qs({ project: projectId })}`),
     // TKT-0245: cancel a queued dispatch (DELETE /api/dispatch-queue/:qid).

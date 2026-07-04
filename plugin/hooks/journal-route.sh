@@ -37,10 +37,14 @@ PAYLOAD="$(cat 2>/dev/null || true)"
 
 SESSION_ID=""
 CWD="$PWD"
+HARNESS=""
+MODEL=""
 if command -v jq >/dev/null 2>&1 && [ -n "$PAYLOAD" ]; then
   SESSION_ID="$(printf '%s' "$PAYLOAD" | jq -r '.session_id // empty' 2>/dev/null || true)"
   _pcwd="$(printf '%s' "$PAYLOAD" | jq -r '.cwd // empty' 2>/dev/null || true)"
   [ -n "$_pcwd" ] && CWD="$_pcwd"
+  HARNESS="$(printf '%s' "$PAYLOAD" | jq -r '.harness // empty' 2>/dev/null || true)"
+  MODEL="$(printf '%s' "$PAYLOAD" | jq -r '.model // .modelID // .model_id // .session.model // .session.modelID // .info.model // .info.modelID // empty' 2>/dev/null || true)"
 fi
 
 # --- resolve project root (same rule as session-register.sh) ---------------
@@ -87,11 +91,71 @@ PROJECT_ID="${SLUG}-$(sha6 "$ROOT")"
 
 JOURNAL_DIR="$CONFIG_DIR/journals/$PROJECT_ID"
 JOURNAL_FILE="$JOURNAL_DIR/hook.jsonl"
+SESSIONS_JSON="$CONFIG_DIR/sessions.json"
 
 mkdir -p "$JOURNAL_DIR" 2>/dev/null || {
   echo "journal-route: could not create $JOURNAL_DIR" >&2
   exit 0
 }
+
+# Keep ~/.golem/sessions.json fresh from per-turn/tool hook payloads. If a
+# payload has no model, preserve the last reported model and only bump recency.
+refresh_session_registry() {
+  [ -z "$SESSION_ID" ] && return 0
+  [ ! -f "$SESSIONS_JSON" ] && return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  local tmp="$SESSIONS_JSON.tmp.$$"
+  jq \
+    --arg sid "$SESSION_ID" \
+    --arg pid "$PROJECT_ID" \
+    --arg ppath "$ROOT" \
+    --arg harness "$HARNESS" \
+    --arg model "$MODEL" \
+    --arg now "$TS" \
+    '
+    (.version // 1) as $v
+    | (.sessions // []) as $ss
+    | {
+        version: $v,
+        sessions: [ $ss[]
+          | if .session_id == $sid then
+              . + {
+                last_seen_at: $now,
+                project_id: (.project_id // $pid),
+                project_path: (.project_path // $ppath),
+                harness: (if $harness == "" then (.harness // "claudecode") else $harness end),
+                model: (if $model == "" then (.model // null) else $model end)
+              }
+            else . end
+        ]
+      }
+    ' "$SESSIONS_JSON" > "$tmp" 2>/dev/null && mv "$tmp" "$SESSIONS_JSON" 2>/dev/null
+  rm -f "$tmp" 2>/dev/null || true
+}
+
+with_session_lock() {
+  local lock="$SESSIONS_JSON.lock" tries=50 i=0
+  mkdir -p "$(dirname "$lock")" 2>/dev/null || true
+  while [ "$i" -lt "$tries" ]; do
+    if mkdir "$lock" 2>/dev/null; then
+      refresh_session_registry
+      local rc=$?
+      rmdir "$lock" 2>/dev/null || true
+      return $rc
+    fi
+    if [ -d "$lock" ]; then
+      local age
+      age="$(($(date +%s) - $(stat -f %m "$lock" 2>/dev/null || stat -c %Y "$lock" 2>/dev/null || echo 0)))"
+      if [ "$age" -gt 5 ] 2>/dev/null; then
+        rmdir "$lock" 2>/dev/null || true
+      fi
+    fi
+    i=$((i + 1))
+  done
+  return 1
+}
+
+with_session_lock || true
 
 # --- subagent-stop exit classification (ported, portable) ------------------
 # clean     — closing reflex (golem-summarise-session Skill call) in tail

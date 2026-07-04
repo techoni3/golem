@@ -63,6 +63,35 @@ const SESSIONS_LOCK = `${SESSIONS_REGISTRY}.lock`;
 const SESSION_HEARTBEAT_MS = 30_000;
 let currentSessionID = "";
 
+function opencodeStateDir() {
+  if (process.env.OPENCODE_STATE_DIR) return process.env.OPENCODE_STATE_DIR;
+  if (process.env.XDG_STATE_HOME) return join(process.env.XDG_STATE_HOME, "opencode");
+  return join(os.homedir(), ".local", "state", "opencode");
+}
+
+function normalizeModelId(value) {
+  const s = typeof value === "string" ? value.trim() : "";
+  return s || null;
+}
+
+function modelFromObject(obj) {
+  if (!obj || typeof obj !== "object") return null;
+  return normalizeModelId(
+    obj.modelID || obj.modelId || obj.model_id || obj.model || obj.activeModel ||
+    obj.session?.modelID || obj.session?.model || obj.info?.modelID || obj.info?.model,
+  );
+}
+
+function readOpencodeModel() {
+  try {
+    const parsed = JSON.parse(readFileSync(join(opencodeStateDir(), "model.json"), "utf8"));
+    const recent = Array.isArray(parsed?.recent) ? parsed.recent[0] : null;
+    return modelFromObject(recent) || modelFromObject(parsed);
+  } catch {
+    return null;
+  }
+}
+
 function logErr(context, detail) {
   try {
     mkdirSync(LOG_DIR, { recursive: true });
@@ -107,7 +136,7 @@ function writeJson(file, obj) {
   renameSync(tmp, file);
 }
 
-function registerBridge({ sessionID, cwd, status, port, name }) {
+function registerBridge({ sessionID, cwd, status, port, name, model }) {
   if (!sessionID || !port) return;
   const now = new Date().toISOString();
   withFileLock(BRIDGES_LOCK, () => {
@@ -124,6 +153,7 @@ function registerBridge({ sessionID, cwd, status, port, name }) {
       cwd: cwd || null,
       name: name || null,
       status: status || null,
+      model: model || null,
       started_at: now,
       updated_at: now,
     });
@@ -149,7 +179,7 @@ function topLevelSession(info) {
   return info && info.id && !info.parentID;
 }
 
-function updateBridge({ sessionID, cwd, status, port, name, insert = true }) {
+function updateBridge({ sessionID, cwd, status, port, name, model, insert = true }) {
   if (!sessionID || !port) return;
   const now = new Date().toISOString();
   withFileLock(BRIDGES_LOCK, () => {
@@ -158,7 +188,7 @@ function updateBridge({ sessionID, cwd, status, port, name, insert = true }) {
     reg.bridges = reg.bridges.map((b) => {
       if (b.opencode_pid !== process.pid || b.session_id !== sessionID) return b;
       found = true;
-      return { ...b, cwd: cwd || b.cwd || null, name: name || b.name || null, status: status || b.status || null, updated_at: now };
+      return { ...b, cwd: cwd || b.cwd || null, name: name || b.name || null, status: status || b.status || null, model: model || b.model || null, updated_at: now };
     });
     if (!found) {
       if (!insert) return; // child/unknown session — never create a phantom endpoint
@@ -173,6 +203,7 @@ function updateBridge({ sessionID, cwd, status, port, name, insert = true }) {
         cwd: cwd || null,
         name: name || null,
         status: status || null,
+        model: model || null,
         started_at: now,
         updated_at: now,
       });
@@ -194,7 +225,7 @@ function unregisterBridges() {
   }
 }
 
-function updateSessionRegistry({ sessionID, cwd, status, name, insert = true }) {
+function updateSessionRegistry({ sessionID, cwd, status, name, model, insert = true }) {
   if (!sessionID) return;
   try {
     const now = new Date().toISOString();
@@ -210,6 +241,7 @@ function updateSessionRegistry({ sessionID, cwd, status, name, insert = true }) 
           harness: "opencode",
           status: status || s.status || null,
           name: name || s.name || null,
+          model: model || s.model || null,
           last_seen_at: now,
         };
       });
@@ -222,6 +254,7 @@ function updateSessionRegistry({ sessionID, cwd, status, name, insert = true }) 
           harness: "opencode",
           status: status || null,
           name: name || null,
+          model: model || null,
           boot_time: now,
           last_seen_at: now,
         });
@@ -289,8 +322,9 @@ function startBridge({ client, dirFor, logErr }) {
         path: { id: sessionID },
         body: { parts: [{ type: "text", text }] },
       }).catch((e) => logErr("bridge prompt", e));
-      updateSessionRegistry({ sessionID, cwd: dirFor(sessionID), status: "busy" });
-      if (port) updateBridge({ sessionID, cwd: dirFor(sessionID), status: "busy", port });
+      const model = readOpencodeModel();
+      updateSessionRegistry({ sessionID, cwd: dirFor(sessionID), status: "busy", model });
+      if (port) updateBridge({ sessionID, cwd: dirFor(sessionID), status: "busy", port, model });
       return sendJson(res, 202, { ok: true, kind, session_id: sessionID });
     } catch (e) {
       logErr("bridge request", e);
@@ -365,7 +399,7 @@ export default async (input) => {
   };
 
   const dirFor = (sid) => sessionDir.get(sid) || initCwd;
-  const base = (sessionID, cwd) => ({ session_id: sessionID || "", cwd: cwd || initCwd, harness: "opencode" });
+  const base = (sessionID, cwd, extra = {}) => ({ session_id: sessionID || "", cwd: cwd || initCwd, harness: "opencode", model: readOpencodeModel(), ...extra });
   const bridge = startBridge({ client: input?.client, dirFor, logErr });
   // insert:false is the default so events from child/subagent sessions (whose
   // ids also flow through chat.message/tool.* hooks) can only UPDATE existing
@@ -375,8 +409,9 @@ export default async (input) => {
     const port = bridge.port();
     if (!sessionID || !port) return;
     const st = statusString(status);
-    updateBridge({ sessionID, cwd: dirFor(sessionID), status: st, port, name, insert });
-    updateSessionRegistry({ sessionID, cwd: dirFor(sessionID), status: st, name, insert });
+    const model = readOpencodeModel();
+    updateBridge({ sessionID, cwd: dirFor(sessionID), status: st, port, name, model, insert });
+    updateSessionRegistry({ sessionID, cwd: dirFor(sessionID), status: st, name, model, insert });
   };
   const registerWhenBridgeReady = (fn, attempt = 0) => {
     if (fn()) return;
@@ -442,7 +477,7 @@ export default async (input) => {
           knownSessionIDs.add(info.id);
           currentSessionID = info.id || currentSessionID;
           if (info.id) trackerContextCache.delete(info.id);
-          const stdin = base(info.id, info.directory);
+          const stdin = base(info.id, info.directory, modelFromObject(info) ? { model: modelFromObject(info) } : {});
           runHook("session-register.sh", [], stdin);
           runHook("journal-route.sh", ["session-start"], stdin);
           const status = info.status || "idle";
@@ -450,8 +485,9 @@ export default async (input) => {
           const register = () => {
             const port = bridge.port();
             if (!port) return false;
-            registerBridge({ sessionID: info.id, cwd: info.directory || dirFor(info.id), status, port, name });
-            updateSessionRegistry({ sessionID: info.id, cwd: info.directory || dirFor(info.id), status, name });
+            const model = modelFromObject(info) || readOpencodeModel();
+            registerBridge({ sessionID: info.id, cwd: info.directory || dirFor(info.id), status, port, name, model });
+            updateSessionRegistry({ sessionID: info.id, cwd: info.directory || dirFor(info.id), status, name, model });
             return true;
           };
           registerWhenBridgeReady(register);

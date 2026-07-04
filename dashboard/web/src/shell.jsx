@@ -4,7 +4,7 @@ function Sidebar({ route, setRoute }) {
   useStore();
   const [includeStale, setIncludeStale] = React.useState(false);
   const projects = window.Store.getState().projects;
-  const activeCount = window.Store.getAliveSessionCount();
+  const activeCount = window.Store.getNativeSessions().length;
   // TKT-0107: bucket by last_activity_at instead of the binary stale flag.
   // Thresholds: ≤7d = Active, ≤30d = Recent, ≤90d = Stale, >90d = Archived (only
   // shown when "Include stale" is on).
@@ -164,12 +164,6 @@ function Sidebar({ route, setRoute }) {
 
 function Topbar({ route, setRoute }) {
   useStore();
-  const [now, setNow] = React.useState(Date.now());
-  React.useEffect(() => {
-    const i = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(i);
-  }, []);
-
   const crumbs = [];
   crumbs.push({ label: 'Workspace', href: window.Router.buildHref({ kind: 'dashboard' }), onClick: () => setRoute({ kind: 'dashboard' }) });
   if (route.kind === 'dashboard') crumbs.push({ label: 'Dashboard', current: true });
@@ -187,6 +181,7 @@ function Topbar({ route, setRoute }) {
   // v4 (fix round 2, defect 3): count ALIVE native sessions, not stale v3
   // journal agents — these are what is actually running on the machine.
   const live = window.Store.getAliveSessionCount();
+  const working = window.Store.getWorkingSessionCount();
   const connection = window.Store.getState().connection;
 
   return (
@@ -203,13 +198,10 @@ function Topbar({ route, setRoute }) {
       </div>
       <div className="topbar-spacer"/>
       <div className="topbar-meta">
+        <span className="topbar-meta-item">
+          <Icon.Activity/> {live} live <span className="topbar-meta-sep">|</span> {working} working
+        </span>
         <ConnectionPill status={connection}/>
-        <span className="topbar-meta-item">
-          <Icon.Activity/> {live} session{live === 1 ? '' : 's'} live
-        </span>
-        <span className="topbar-meta-item">
-          <Icon.Clock/> {window.SubstrateFmt.fmtClock(now)}
-        </span>
       </div>
     </header>
   );

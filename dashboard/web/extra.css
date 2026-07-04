@@ -17,11 +17,16 @@
   white-space: nowrap;
 }
 .conn-pill.connected { color: var(--status-active); border-color: rgba(74,222,128,0.3); background: rgba(74,222,128,0.08); }
-.conn-pill.connected .dot { box-shadow: 0 0 6px var(--status-active); animation: pulse-dot 1.6s ease-in-out infinite; }
+.conn-pill.connected .dot { box-shadow: 0 0 9px var(--status-active); animation: conn-pill-pulse 1.15s ease-in-out infinite; }
 .conn-pill.disconnected { color: var(--status-blocked); border-color: rgba(248,113,113,0.3); background: rgba(248,113,113,0.08); }
 .conn-pill .dot {
   width: 6px; height: 6px; border-radius: 50%; background: currentColor;
 }
+@keyframes conn-pill-pulse {
+  0%, 100% { opacity: .32; transform: scale(.72); box-shadow: 0 0 2px currentColor; }
+  50% { opacity: 1; transform: scale(1.45); box-shadow: 0 0 12px currentColor, 0 0 22px color-mix(in oklab, currentColor 45%, transparent); }
+}
+.topbar-meta-sep { color: var(--text-4); margin: 0 2px; }
 
 /* Empty / loading states for the dashboard cards */
 .empty-card {
@@ -214,9 +219,20 @@
 .settings-chip.in_sync { color: var(--status-active); border-color: rgba(74,222,128,.32); background: rgba(74,222,128,.08); }
 .settings-chip.drifted { color: var(--status-review); border-color: rgba(251,191,36,.32); background: rgba(251,191,36,.08); }
 .settings-chip.error { color: var(--status-blocked); border-color: rgba(248,113,113,.32); background: rgba(248,113,113,.08); }
+.settings-chip.empty, .settings-chip.managed { color: var(--text-3); border-style: dashed; background: color-mix(in srgb, var(--bg-2) 88%, transparent); }
 .settings-chip.disabled { color: var(--text-4); border-style: dashed; }
-.sync-result pre { margin: 0; max-height: 260px; overflow: auto; color: var(--text-1); font-size: 11px; }
 .sync-result.error { border-color: rgba(248,113,113,.35); }
+.sync-summary { display: flex; flex-direction: column; gap: 10px; }
+.sync-summary-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--text-1); }
+.sync-summary-pill { font-family: var(--font-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; border-radius: 999px; padding: 3px 8px; border: 1px solid var(--border-2); color: var(--text-2); background: var(--bg-2); }
+.sync-summary.success .sync-summary-pill { color: var(--status-active); border-color: rgba(74,222,128,.32); background: rgba(74,222,128,.08); }
+.sync-summary.error .sync-summary-pill { color: var(--status-blocked); border-color: rgba(248,113,113,.32); background: rgba(248,113,113,.08); }
+.sync-summary-meta { color: var(--text-3); font-size: 12px; }
+.sync-summary-results { display: flex; flex-direction: column; gap: 6px; }
+.sync-summary-row { display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 12px; }
+.sync-summary-error { color: var(--status-blocked); }
+.sync-summary-details summary { cursor: pointer; color: var(--text-3); font-size: 12px; }
+.sync-summary-details pre { margin: 8px 0 0; max-height: 260px; overflow: auto; color: var(--text-1); font-size: 11px; }
 .settings-future { opacity: .78; }
 
 /* Anonymous-agent placeholder avatar */
@@ -928,10 +944,95 @@
 }
 .native-session-card.busy { border-color: var(--accent-border); }
 .native-session-card.dead { opacity: 0.55; }
+.agent-card {
+  position: relative;
+  overflow: hidden;
+}
+.agent-card.status-busy { border-color: var(--accent-border); box-shadow: 0 0 0 1px var(--accent-soft) inset; }
+.agent-card.status-waiting { border-color: color-mix(in oklab, var(--status-review) 40%, var(--border-2)); }
+.agent-card.status-dead { opacity: 0.55; }
+.agent-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.agent-card-titleblock {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.agent-card-name-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.agent-card-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agent-project-link {
+  width: fit-content;
+  max-width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 11.5px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.agent-project-link:hover:not(:disabled) { color: var(--accent); text-decoration: underline; }
+.agent-project-link:disabled { cursor: default; color: var(--text-3); }
+.agent-project-link.unregistered { color: var(--status-blocked); }
+.agent-harness-icon, .agent-model-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  color: var(--text-2);
+}
+.agent-harness-icon svg, .agent-model-icon svg { width: 100%; height: 100%; display: block; }
+.agent-harness-icon.claudecode { color: var(--status-review); }
+.agent-harness-icon.opencode { color: var(--status-active); }
+.agent-card-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.agent-model-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  border: 1px solid color-mix(in oklab, var(--accent) 28%, var(--border-2));
+  background: color-mix(in oklab, var(--accent) 8%, var(--bg-2));
+  color: var(--text-1);
+  border-radius: 999px;
+  padding: 2px 8px 2px 5px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+.agent-model-pill span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agent-status-badge { margin-left: auto; }
+.agent-card-role {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.agent-card-seen { color: var(--text-3); font-size: 10.5px; }
+.agent-card.compact { padding: 10px 12px; }
 .native-session-top {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 .native-session-name {
   font-weight: 600;
@@ -965,6 +1066,41 @@
   font-size: 11px;
   padding: 2px 7px;
 }
+.native-session-current, .cc-session-current, .nsd-current-ticket {
+  display: block;
+  color: var(--accent);
+  text-decoration: none;
+}
+.native-session-current {
+  font-size: 12px;
+  line-height: 1.35;
+  font-weight: 600;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in oklab, var(--accent) 24%, var(--border-1));
+  border-radius: var(--radius-1);
+  background: color-mix(in oklab, var(--accent) 6%, var(--bg-1));
+}
+.native-session-current:hover, .cc-session-current:hover, .nsd-current-ticket:hover { text-decoration: underline; }
+.native-session-nochannel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  font-size: 11px;
+  color: var(--text-3);
+  background: color-mix(in oklab, var(--text-3) 8%, var(--bg-2));
+  border: 1px dashed var(--border-2);
+  border-radius: var(--radius-1);
+  padding: 3px 7px;
+}
+.nsd-current-ticket {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-1);
+  background: var(--bg-1);
+}
+.nsd-nochannel { color: var(--text-3); }
 .native-session-badge {
   margin-left: auto;
   font-size: 10px;
@@ -977,9 +1113,83 @@
   border: 1px solid color-mix(in oklab, var(--status-blocked) 35%, transparent);
   white-space: nowrap;
 }
-.native-session-cwd {
-  font-size: 11px;
+
+.repo-map-budget {
+  width: 6.5rem;
+  padding: .45rem .55rem;
+  border-radius: .65rem;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--text-1);
+  font: inherit;
+}
+
+.repo-map-result {
+  display: grid;
+  gap: .45rem;
   color: var(--text-2);
+}
+
+.repo-map-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .35rem;
+}
+
+.roles-panel { margin-bottom: 18px; }
+.roles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+}
+.role-editor-card {
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-2);
+  background: color-mix(in oklab, var(--bg-2) 78%, transparent);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.role-editor-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.role-editor-name {
+  font-weight: 700;
+  color: var(--text-1);
+}
+.roles-save-state, .roles-push-result {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.roles-save-state.error, .roles-push-result.error, .native-session-meta-chip.error {
+  color: var(--status-blocked);
+  border-color: rgba(248,113,113,.35);
+}
+.role-editor-body {
+  min-height: 180px;
+  resize: vertical;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-1);
+  background: var(--bg-1);
+  color: var(--text-1);
+  padding: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.roles-push-list {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.native-session-path {
+  font-size: 11px;
+  color: var(--text-3);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -987,9 +1197,27 @@
 .native-session-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 6px;
   font-size: 10.5px;
   color: var(--text-3);
+}
+.native-session-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 2px 7px;
+  border: 1px solid var(--border-1);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--bg-2) 72%, transparent);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.native-session-meta-chip span {
+  color: var(--text-4);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  font-size: 9px;
 }
 
 /* ---- TKT-0007: gear icon status on the Agents page ---- */
@@ -3675,6 +3903,32 @@ mark.anno.anno-tail::after {
   white-space: nowrap;
   margin-left: 2px;
 }
+.unacked-dispatch-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  font-size: 10.5px;
+  font-family: "JetBrains Mono", monospace;
+  color: var(--status-review);
+  background: color-mix(in oklab, var(--status-review) 14%, var(--bg-1));
+  border: 1px solid color-mix(in oklab, var(--status-review) 34%, transparent);
+  border-radius: var(--radius-1);
+  padding: 1px 4px 1px 7px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.unacked-dispatch-badge:hover { border-color: color-mix(in oklab, var(--status-review) 55%, transparent); }
+.unacked-dispatch-dismiss {
+  border: 0;
+  background: transparent;
+  color: var(--status-review);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+  padding: 0 2px;
+}
+.unacked-dispatch-dismiss:hover { color: var(--text-0); }
 
 /* Offline-orphans section rows (pending dispatches whose target session is
    dead). Mirrors the agents-section styling family. */

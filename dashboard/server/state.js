@@ -129,8 +129,14 @@ export function createState() {
     return plans.get(projectId) ?? null;
   }
 
+  // Resolve the FULL internal project record (with `path`) by either the
+  // registry `id` (dir name, e.g. "trialroom-ai") OR the contract `project_id`
+  // (<slug>-<6hex>, e.g. "trialroomai-74ac11"). The web UI sends the contract
+  // project_id, which is NOT the projectsById key — without the project_id
+  // fallback, callers that expect a `path` (e.g. repo-map generation) silently
+  // missed and downstream fell back to cwd, generating a map for the wrong repo.
   function project(id) {
-    return projectsById.get(id) ?? null;
+    return projectsById.get(id) ?? projects.find((p) => p.project_id === id) ?? null;
   }
 
   // v4: decide whether a native session belongs to a registered project.

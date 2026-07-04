@@ -2,7 +2,7 @@
 //
 // Surfaces ALL live Claude Code sessions on this machine — not just the
 // substrated/golem ones — so the dashboard reflects every `cd any-repo &&
-// claude` session. Two sources, in order of preference:
+// claude` session. Sources, in order of preference:
 //
 //   (a) `claude agents --json`  — authoritative; the CLI's own view of live
 //       background/interactive sessions. Observed schema (claude 2.1.x):
@@ -17,10 +17,15 @@
 //           peerProtocol, kind, entrypoint, name?, updatedAt(ms),
 //           status?, statusUpdatedAt?, bridgeSessionId? }
 //
-// Liveness = pid liveness (process.kill(pid,0), same as orchestrator.js) AND
-// the native status — NOT file mtime. A registry file can linger after the
-// process dies; the pid check is ground truth. The CLI list only contains
-// live sessions, but we still pid-check defensively.
+//   (c) ~/.golem/sessions.json — written by golem hooks/shims for Claude Code
+//       and non-CC harnesses. Claude Code rows here carry hook_ppid (the hook's
+//       shell), not the session pid, so they use a short recency window rather
+//       than pid-liveness. Non-CC harnesses use the same recency rule.
+//
+// Liveness is source-specific: the CLI list is authoritative, ~/.claude files
+// use pid liveness (process.kill(pid,0)), and golem-registry rows use recency.
+// Registry files can linger after death; stale files must not be resurrected by
+// pid reuse.
 //
 // project_id is derived per the v4 contract from the session cwd's nearest
 // project root (walk up to .git / CLAUDE.md), via the shared project-id helper.
@@ -114,6 +119,7 @@ function normalizeCli(row) {
     name: row.name ?? null,
     status: row.status ?? null,
     waiting_for: row.waitingFor ?? null,
+    model: row.model ?? row.modelID ?? row.model_id ?? null,
     started_at: Number.isFinite(row.startedAt) ? row.startedAt : null,
     updated_at: Number.isFinite(row.startedAt) ? row.startedAt : null,
     kind: row.kind ?? null,
@@ -134,6 +140,7 @@ function normalizeRegistry(row) {
     name: row.name ?? null,
     status: row.status ?? null,
     waiting_for: null,
+    model: row.model ?? row.modelID ?? row.model_id ?? null,
     started_at: Number.isFinite(row.startedAt) ? row.startedAt : null,
     updated_at: Number.isFinite(row.updatedAt) ? row.updatedAt : (Number.isFinite(row.startedAt) ? row.startedAt : null),
     kind: row.kind ?? null,
@@ -157,6 +164,7 @@ function normalizeGolemRegistry(row) {
     updated_at: msFromIso(row.last_seen_at) ?? msFromIso(row.boot_time),
     kind: null,
     harness: row.harness ?? 'claudecode',
+    model: row.model ?? null,
     role: row.role ?? null,
     role_updated_at: row.role_updated_at ?? null,
     role_updated_by: row.role_updated_by ?? null,
@@ -233,6 +241,7 @@ function mergeSources(cliRows, registryRows, golemRows = []) {
           updated_at: r.updated_at ?? prev.updated_at,
           name: r.name ?? prev.name,
           harness: r.harness ?? prev.harness, // only the golem source sets harness
+          model: r.model ?? prev.model,
           role: r.role ?? prev.role, // only the golem source sets role metadata
           role_updated_at: r.role_updated_at ?? prev.role_updated_at,
           role_updated_by: r.role_updated_by ?? prev.role_updated_by,
@@ -290,9 +299,13 @@ export async function readNativeSessions(registeredIdLookup) {
   for (const s of merged) {
     const harness = s.harness ?? 'claudecode';
     // Non-CC harness sessions (opencode) have no reliable pid — judge liveness
-    // by recency of last_seen_at instead. CC sessions keep pid-liveness.
+    // by recency of last_seen_at instead. Golem-registry Claude Code rows also
+    // carry hook_ppid (the hook shell), not the real session pid, so pid-liveness
+    // can be faked by pid reuse; only native CLI / ~/.claude registry rows trust
+    // pid-liveness.
     const isNonCc = harness !== 'claudecode';
-    const alive = isNonCc
+    const isGolemRegistryCc = harness === 'claudecode' && s._from === 'golem';
+    const alive = isNonCc || isGolemRegistryCc
       ? !!(s.updated_at && (Date.now() - s.updated_at) < GOLEM_SESSION_RECENT_MS)
       : pidAlive(s.pid);
     // Drop dead sessions whose only evidence is a stale registry/golem file.
@@ -337,6 +350,7 @@ export async function readNativeSessions(registeredIdLookup) {
       started_at: s.started_at,
       updated_at: s.updated_at,
       harness,
+      model: s.model ?? null,
       role: s.role ?? null,
       role_updated_at: s.role_updated_at ?? null,
       role_updated_by: s.role_updated_by ?? null,

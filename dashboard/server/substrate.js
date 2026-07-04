@@ -27,6 +27,15 @@ const CAPABILITY_WARNINGS = {
   ],
 };
 
+const GLOBAL_ARTIFACTS = ['skills', 'agents', 'commands', 'hooks', 'mcp', 'config-fragment'];
+
+const MANAGED_ELSEWHERE = {
+  opencode: {
+    hooks: 'runtime shim',
+    mcp: 'config merge',
+  },
+};
+
 function packageVersion() {
   try {
     return JSON.parse(fs.readFileSync(PACKAGE_JSON, 'utf8')).version || null;
@@ -54,6 +63,7 @@ function statusFromDrift(res) {
   // artifact lock entries appear as orphans in that subset, so cell drift is
   // determined by the subset's own changed/new/tampered files.
   if ((res.drifted ?? []).length === 0) return 'in_sync';
+  if ((res.drifted ?? []).some((d) => d.reason === 'tampered')) return 'error';
   return 'drifted';
 }
 
@@ -87,6 +97,21 @@ function cell({ harness, scope, artifact, target, outDir, items, enabled, projec
   } catch (err) {
     return { ...base, status: 'error', error: String(err?.message ?? err), config };
   }
+}
+
+function neutralCell({ harness, scope = 'global', artifact, target, enabled, status, label, details = null }) {
+  return {
+    harness,
+    scope,
+    artifact,
+    target,
+    out_dir: null,
+    status: enabled ? status : 'disabled',
+    label: enabled ? label : null,
+    details,
+    lock: null,
+    warnings: CAPABILITY_WARNINGS[harness] ?? [],
+  };
 }
 
 function artifactTypeForCc(relPath) {
@@ -181,16 +206,32 @@ function globalCells(cfg) {
   const ccEnabled = cfg.harnesses?.claudecode?.enabled !== false;
   const ccItems = ccAdapter.buildPlan({ substrateRoot: root, repoRoot: REPO_ROOT, packageVersion: packageVersion() });
   const ccGroups = splitItems(ccItems, artifactTypeForCc);
-  for (const [artifact, items] of ccGroups) {
-    rows.push(cell({ harness: 'claudecode', scope: 'global', artifact, target: 'cc', outDir: renderDirFor('cc'), items, enabled: ccEnabled }));
+  for (const artifact of GLOBAL_ARTIFACTS) {
+    const items = ccGroups.get(artifact) ?? [];
+    rows.push(items.length
+      ? cell({ harness: 'claudecode', scope: 'global', artifact, target: 'cc', outDir: renderDirFor('cc'), items, enabled: ccEnabled })
+      : neutralCell({ harness: 'claudecode', artifact, target: 'cc', enabled: ccEnabled, status: 'empty', label: 'empty', details: { clean: true, drifted_count: 0, orphaned_count: 0 } }));
   }
 
   const ocEnabled = !!cfg.harnesses?.opencode?.enabled;
   const ocAgentItems = ocAdapter.buildAgentPlan({ substrateRoot: root });
   const ocSkillItems = ocAdapter.buildSkillPlan({ substrateRoot: root });
-  rows.push(cell({ harness: 'opencode', scope: 'global', artifact: 'agents', target: 'opencode', outDir: ocAdapter.agentOutDir(), items: ocAgentItems, enabled: ocEnabled, config: { testedVersion: cfg.harnesses?.opencode?.testedVersion ?? null, currentVersion: opencodeVersion() } }));
-  rows.push(cell({ harness: 'opencode', scope: 'global', artifact: 'skills', target: 'opencode', outDir: ocAdapter.skillsOutDir(), items: ocSkillItems, enabled: ocEnabled }));
-  rows.push(opencodeConfigCell(cfg, ocEnabled));
+  const ocRows = new Map([
+    ['agents', cell({ harness: 'opencode', scope: 'global', artifact: 'agents', target: 'opencode', outDir: ocAdapter.agentOutDir(), items: ocAgentItems, enabled: ocEnabled, config: { testedVersion: cfg.harnesses?.opencode?.testedVersion ?? null, currentVersion: opencodeVersion() } })],
+    ['skills', cell({ harness: 'opencode', scope: 'global', artifact: 'skills', target: 'opencode', outDir: ocAdapter.skillsOutDir(), items: ocSkillItems, enabled: ocEnabled })],
+    ['config-fragment', opencodeConfigCell(cfg, ocEnabled)],
+  ]);
+  for (const artifact of GLOBAL_ARTIFACTS) {
+    rows.push(ocRows.get(artifact) ?? neutralCell({
+      harness: 'opencode',
+      artifact,
+      target: 'opencode',
+      enabled: ocEnabled,
+      status: MANAGED_ELSEWHERE.opencode[artifact] ? 'managed' : 'empty',
+      label: MANAGED_ELSEWHERE.opencode[artifact] ?? 'empty',
+      details: { clean: true, drifted_count: 0, orphaned_count: 0 },
+    }));
+  }
   return rows;
 }
 

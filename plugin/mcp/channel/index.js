@@ -30,6 +30,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import * as tracker from './tracker-client.js';
 import { SESSION_ROLES, pushRoleBriefDirect, setSessionRole } from '../../lib/session-role.js';
+import { generateRepoMap } from '../../lib/repomap.js';
 
 const VERSION = '0.1.0';
 // Port selection (multi-CEO safe by default):
@@ -454,6 +455,22 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ['text'],
       },
     },
+    {
+      name: 'repo_map',
+      description:
+        'Generate or read the golem repo map for a project using the pinned aider-backed engine. Returns path, metadata, and optionally content. Focused maps are generated without replacing the cached full map.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Project path. Defaults to the MCP process cwd.' },
+          force: { type: 'boolean', description: 'Regenerate even if a clean cached map exists.' },
+          budget: { type: 'number', description: 'Token budget for the map.' },
+          focus_files: { type: 'array', items: { type: 'string' }, description: 'Files to focus the map around.' },
+          focus_symbols: { type: 'array', items: { type: 'string' }, description: 'Symbols/identifiers to focus the map around.' },
+          include_content: { type: 'boolean', description: 'Include markdown content in the response.' },
+        },
+      },
+    },
 
     // --- Golem tracker tools (thin HTTP clients of the dashboard REST API) ---
     // The tracker is the cross-project source of truth for work — it REPLACES
@@ -583,11 +600,11 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'session_role',
-      description: 'Set or clear this live session role. role must be planner|builder|researcher|ui-tester or null/clear.',
+      description: 'Set or clear this live session role. role must be planner|builder|researcher|ui-tester|general or null/clear.',
       inputSchema: {
         type: 'object',
         properties: {
-          role: { type: 'string', description: 'planner|builder|researcher|ui-tester|clear' },
+          role: { type: 'string', description: 'planner|builder|researcher|ui-tester|general|clear' },
         },
         required: ['role'],
       },
@@ -719,6 +736,25 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     };
     broadcast('response', payload);
     return { content: [{ type: 'text', text: 'response broadcast' }] };
+  }
+
+  if (name === 'repo_map') {
+    try {
+      const focus = (args.focus_files?.length || args.focus_symbols?.length)
+        ? { files: args.focus_files || [], symbols: args.focus_symbols || [] }
+        : null;
+      const result = await generateRepoMap(args.path || process.cwd(), {
+        force: args.force === true,
+        budget: args.budget,
+        focus,
+        version: VERSION,
+      });
+      const payload = { ...result.meta, path: result.path };
+      if (args.include_content === true) payload.content = result.content;
+      return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
+    } catch (err) {
+      return { isError: true, content: [{ type: 'text', text: String(err?.message ?? err) }] };
+    }
   }
 
   if (name === 'session_role') {

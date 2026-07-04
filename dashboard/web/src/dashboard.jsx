@@ -55,7 +55,7 @@ function Dashboard({ setRoute }) {
           ) : (
             <div className="cc-session-list">
               {sessions.map((s) => (
-                <SessionCard key={s.session_id || s.pid} session={s} setRoute={setRoute}/>
+                <AgentCard key={s.session_id || s.pid} session={s} setRoute={setRoute} showControls/>
               ))}
             </div>
           )}
@@ -139,186 +139,6 @@ function ProjectChip({ project, projectId, registered, setRoute }) {
       <span className="cc-chip-text mono">{projectId ? projectId : '—'}</span>
       <span className="cc-chip-tag">unregistered</span>
     </span>
-  );
-}
-
-// ── Zone 1: one native session, with status + (channel-gated) controls ──
-function SessionCard({ session: s, setRoute }) {
-  // Match on the CONTRACT project_id (registry id ≠ contract id for most
-  // registered projects), falling back to the server's `registered` flag.
-  const project = window.Store.getProjectByContractId(s.project_id);
-  const channel = window.Store.getChannelForSession(s.session_id);
-  const hasChannel = !!channel;
-  const registered = s.registered || !!project;
-
-  const statusKind = !s.alive ? 'dead'
-    : s.status === 'busy' ? 'busy'
-    : s.status === 'waiting' ? 'waiting'
-    : 'idle';
-  const dotClass = statusKind === 'busy' ? 'live'
-    : statusKind === 'waiting' ? 'waiting'
-    : statusKind === 'idle' ? 'idle'
-    : 'offline';
-  const statusLabel = statusKind === 'busy' ? 'Working'
-    : statusKind === 'waiting' ? 'Waiting'
-    : statusKind === 'idle' ? 'Idle'
-    : 'Dead';
-
-  const title = s.name || (s.cwd ? s.cwd.split('/').filter(Boolean).pop() : null) || (s.session_id ? s.session_id.slice(0, 8) : `pid ${s.pid}`);
-  const currentTicket = s.current_in_progress_ticket;
-  const pendingCount = Number(s.pending_count || 0);
-  const hasUnacked = !!s.has_unacked_dispatch || window.Store.getTrackerTickets({ includeArchived: true })
-    .some((t) => t.has_unacked_dispatch && (t.assignee === s.session_id || t.dispatched_to === s.session_id));
-
-  // Whole card opens the native-session peek drawer. Inner controls
-  // (composer / Interrupt / Halt / project chip) stopPropagation so they never
-  // trigger the drawer.
-  const openPeek = () => {
-    if (s.session_id) window.openNativeSessionDrawer(s.session_id);
-  };
-
-  return (
-    <div
-      className={`cc-session-card status-${statusKind} cc-clickable`}
-      onClick={openPeek}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPeek(); } }}
-      title="open session details"
-    >
-      <div className="cc-session-row1">
-        <span className={`orch-dot ${dotClass}`}/>
-        <span className="cc-session-name" title={s.cwd || ''}>{title}</span>
-        {s.role && <span className="cc-role-chip">{s.role}</span>}
-        {pendingCount > 0 && <span className="cc-role-chip" title={`${pendingCount} queued dispatch${pendingCount === 1 ? '' : 'es'}`}>⏳ {pendingCount}</span>}
-        {hasUnacked && <span className="cc-role-chip" title="one or more dispatches to this session appear unacknowledged">⚠ unacked</span>}
-        <span className={`cc-status-badge badge-${statusKind}`}>
-          {statusKind === 'busy' && <span className="cc-status-pulse"/>}
-          {statusLabel}
-        </span>
-      </div>
-
-      {statusKind === 'waiting' && s.waiting_for && (
-        <div className="cc-session-waiting" title="what this session is stuck on">
-          <Icon.Clock size={12}/>
-          <span>{s.waiting_for}</span>
-        </div>
-      )}
-
-      <div className="cc-session-row2">
-        <ProjectChip project={project} projectId={s.project_id} registered={registered} setRoute={setRoute}/>
-        <select
-          className="cc-role-select"
-          value={s.role || ''}
-          onClick={(e) => e.stopPropagation()}
-          onChange={(e) => window.SubstrateAPI.setSessionRole(s.session_id, e.target.value || null).catch((err) => console.error('set role failed', err))}
-          disabled={!s.session_id}
-          title="session role"
-        >
-          <option value="">role: clear</option>
-          <option value="planner">planner</option>
-          <option value="builder">builder</option>
-          <option value="researcher">researcher</option>
-          <option value="ui-tester">ui-tester</option>
-        </select>
-        <span className="cc-session-ages mono">
-          {s.started_at && <span title="started">↑ {window.SubstrateFmt.fmtTimeAgo(s.started_at)}</span>}
-          {s.updated_at && s.updated_at !== s.started_at && <span title="updated">· {window.SubstrateFmt.fmtTimeAgo(s.updated_at)}</span>}
-        </span>
-      </div>
-
-      {s.cwd && <div className="cc-session-cwd mono" title={s.cwd}>{s.cwd}</div>}
-
-      {currentTicket && (
-        <div className="cc-session-cwd mono" title={currentTicket.title}>
-          current: {currentTicket.display_id || currentTicket.id} · {currentTicket.title}
-        </div>
-      )}
-
-      {hasChannel ? (
-        <SessionControls session={s} channel={channel}/>
-      ) : (
-        s.alive && (
-          <div className="cc-session-nochannel" onClick={(e) => e.stopPropagation()} title="no golem channel registered for this session — briefs/interrupts cannot be delivered">
-            <span className="cc-nochannel-dot"/>
-            {/* When the channel mechanism is demonstrably working (other live
-                channels exist), this session is simply a pre-v4 holdover that
-                needs a restart. Otherwise stay neutral. */}
-            {window.Store.getChannels().length > 0
-              ? 'no channel (pre-v4 session) — restart to enable controls'
-              : 'no channel — controls unavailable'}
-          </div>
-        )
-      )}
-    </div>
-  );
-}
-
-// One-line brief composer + interrupt/halt, shown only when a live channel
-// exists for this session. POSTs to the existing /api/brief?session= route.
-function SessionControls({ session: s, channel }) {
-  const [text, setText] = useDState('');
-  const [busy, setBusy] = useDState(false);
-  const [toast, setToast] = useDState(null);
-  const sid = s.session_id;
-
-  const flash = (msg, kind = 'ok') => {
-    setToast({ msg, kind, id: Math.random() });
-    setTimeout(() => setToast(null), 2600);
-  };
-
-  const run = useDCallback(async (fn, label) => {
-    setBusy(true);
-    try {
-      await fn();
-      flash(`${label} sent`, 'ok');
-      return true;
-    } catch (err) {
-      console.error(`${label} failed`, err);
-      flash(`${label} failed`, 'err');
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  }, []);
-
-  const sendBrief = useDCallback(async () => {
-    const t = text.trim();
-    if (!t || busy) return;
-    const ok = await run(() => window.SubstrateAPI.pushBrief(t, sid), 'Brief');
-    if (ok) setText('');
-  }, [text, busy, sid, run]);
-
-  const onInterrupt = useDCallback(() => {
-    const t = text.trim();
-    run(() => window.SubstrateAPI.pushInterrupt(t || 'interrupt from dashboard', sid), 'Interrupt');
-  }, [text, sid, run]);
-
-  const onHalt = useDCallback(() => {
-    if (!confirm(`Halt session ${(sid || '').slice(0, 8)} — gracefully yield after current dispatch?`)) return;
-    run(() => window.SubstrateAPI.pushHalt('Halt requested from dashboard', sid), 'Halt');
-  }, [sid, run]);
-
-  return (
-    <div className="cc-session-controls" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-      <div className="cc-composer">
-        <input
-          className="cc-composer-input"
-          placeholder="Send a brief to this session…"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); sendBrief(); } }}
-          disabled={busy}
-        />
-        <button className="orch-btn primary small" disabled={busy || !text.trim()} onClick={sendBrief}>Send</button>
-      </div>
-      <div className="cc-session-buttons">
-        <button className="orch-btn small" disabled={busy} onClick={onInterrupt} title="fold a course-correction into in-flight work">Interrupt</button>
-        <button className="orch-btn small ghost" disabled={busy} onClick={onHalt} title="gracefully halt this session">Halt</button>
-        <span className="cc-channel-tag mono" title={`channel ${channel.url || `${channel.host}:${channel.port}`}`}>:{channel.port}</span>
-      </div>
-      {toast && <div className={`orch-toast ${toast.kind} cc-toast`} key={toast.id}>{toast.msg}</div>}
-    </div>
   );
 }
 
@@ -442,7 +262,6 @@ function EmptyCard({ label, hint }) {
 
 window.Dashboard = Dashboard;
 window.EmptyCard = EmptyCard;
-window.SessionCard = SessionCard;
 window.WorkCard = WorkCard;
 window.MilestoneFeed = MilestoneFeed;
 window.ProjectChip = ProjectChip;
