@@ -26,6 +26,8 @@
 // This module does NOT add another session poll. It reads state.nativeSessions()
 // (already refreshed every 3s by state.js) on its own 5s tick.
 
+import { loadConfig } from '../../lib/golem-config.js';
+
 const TICK_MS = 5_000;
 const COOLDOWN_MS = 60_000;
 const OFFLINE_EXPIRY_MS = 60 * 60_000; // 60 min
@@ -45,6 +47,40 @@ export function initDispatchDrainer({
   let timer = null;
   let stopped = false;
 
+  function unackedWindowMinutes() {
+    const n = Number(loadConfig()?.dispatch?.unackedWindowMinutes);
+    return Number.isFinite(n) && n >= 0 ? n : 10;
+  }
+
+  function checkUnackedDispatches() {
+    let rows = [];
+    try {
+      rows = tracker.unackedDispatchesForWindow(unackedWindowMinutes());
+    } catch (err) {
+      console.error('[dispatch-drainer] unacked check failed:', err);
+      return false;
+    }
+    let changed = false;
+    for (const row of rows) {
+      try {
+        tracker.recordUnackedDispatchWarning(row);
+        const label = row.display_id || row.ticket_id;
+        chat.record(
+          'system',
+          'warning',
+          `dispatch of ${label} to ${row.session_id} appears unacknowledged — no ticket activity from target since delivery attempt at ${row.delivered_at}`,
+          { session_id: row.session_id, ticket_id: row.ticket_id },
+        );
+        const ticket = tracker.getTicket(row.ticket_id);
+        if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
+        changed = true;
+      } catch (err) {
+        console.error('[dispatch-drainer] unacked warning failed:', err);
+      }
+    }
+    return changed;
+  }
+
   async function tick() {
     if (stopped) return;
     let pending;
@@ -54,7 +90,11 @@ export function initDispatchDrainer({
       console.error('[dispatch-drainer] listPendingDispatches failed:', err);
       return;
     }
-    if (!pending || pending.length === 0) return;
+    let queueChanged = checkUnackedDispatches();
+    if (!pending || pending.length === 0) {
+      if (queueChanged) broadcastWS({ type: 'dispatch-queue-updated' });
+      return;
+    }
 
     const sessions = state.nativeSessions();
     // TKT-0369: sessions whose channel MCP is down are UNREACHABLE — treat
@@ -77,7 +117,7 @@ export function initDispatchDrainer({
     }
 
     const now = Date.now();
-    let queueChanged = false; // TKT-0286: broadcast dispatch-queue-updated once if any row transitioned this tick.
+    // TKT-0286: broadcast dispatch-queue-updated once if any row transitioned this tick.
     for (const [sessionId, rows] of bySession) {
       const s = byId.get(sessionId);
 

@@ -159,6 +159,7 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
       CREATE INDEX IF NOT EXISTS idx_tickets_project  ON tickets(project_id);
       CREATE INDEX IF NOT EXISTS idx_tickets_state    ON tickets(state);
       CREATE INDEX IF NOT EXISTS idx_tickets_assignee ON tickets(assignee);
+      CREATE INDEX IF NOT EXISTS idx_tickets_dispatched_to ON tickets(dispatched_to);
       -- The two indexes that depend on lifecycle columns (state_rank, done_at)
       -- are created LATER in the migration block, AFTER the ALTER TABLE that
       -- adds those columns to pre-existing DBs. Doing them here would fail on
@@ -465,6 +466,12 @@ WHERE state_changed_at IS NULL`).run();
       countPendingForSession: db.prepare(
         "SELECT COUNT(*) AS n FROM dispatch_queue WHERE session_id = ? AND status = 'pending'"
       ),
+      countPendingBySession: db.prepare(
+        "SELECT session_id, COUNT(*) AS n FROM dispatch_queue WHERE status = 'pending' GROUP BY session_id"
+      ),
+      currentInProgressForSession: db.prepare(
+        "SELECT id, display_id, title FROM tickets WHERE state = 'in_progress' AND (assignee = ? OR dispatched_to = ?) ORDER BY state_changed_at DESC, updated_at DESC, seq DESC LIMIT 1"
+      ),
       setTicketAssignee: db.prepare(
         'UPDATE tickets SET assignee = @assignee, updated_at = @updated_at WHERE id = @id'
       ),
@@ -698,6 +705,10 @@ WHERE state_changed_at IS NULL`).run();
       const hydrated = hydrateTicket(row);
       hydrated.assignee_label = resolveAssigneeLabel(row.assignee);
       hydrated.dispatched_to_label = resolveAssigneeLabel(row.dispatched_to);
+      hydrated.has_pending_dispatch = !!stmts.getPendingForTicket.get(id);
+      hydrated.has_unacked_dispatch = !!db.prepare(
+        "SELECT 1 FROM events WHERE ticket_id = ? AND type = 'dispatch_unacked_warning' LIMIT 1"
+      ).get(id);
       // TKT-0284: child tickets (any kind with parent_id = this id). The drawer
       // only renders the panel for specs (separation by view, not by entity),
       // but populating children is cheap and any ticket can have them. Ordered
@@ -782,19 +793,21 @@ WHERE state_changed_at IS NULL`).run();
         // TKT-0286: 0/1 flag — does this ticket have a pending dispatch-queue
         // row? Powers the board card ⏳ glyph (detail payloads already carry
         // the full pending_dispatch; this is for list/snapshot contexts).
-        "EXISTS(SELECT 1 FROM dispatch_queue dq WHERE dq.ticket_id = t.id AND dq.status = 'pending') AS has_pending_dispatch " +
+        "EXISTS(SELECT 1 FROM dispatch_queue dq WHERE dq.ticket_id = t.id AND dq.status = 'pending') AS has_pending_dispatch, " +
+        "EXISTS(SELECT 1 FROM events e WHERE e.ticket_id = t.id AND e.type = 'dispatch_unacked_warning') AS has_unacked_dispatch " +
         'FROM tickets t ' +
         'LEFT JOIN session_labels sa ON sa.session_id = t.assignee ' +
         'LEFT JOIN session_labels sd ON sd.session_id = t.dispatched_to ' +
         (where.length ? ` WHERE ${where.join(' AND ')}` : '') +
         ' ORDER BY t.seq ASC';
       return db.prepare(sql).all(params).map((row) => {
-        const { assignee_label, dispatched_to_label, has_pending_dispatch, ...ticketFields } = row;
+        const { assignee_label, dispatched_to_label, has_pending_dispatch, has_unacked_dispatch, ...ticketFields } = row;
         return {
           ...hydrateTicket(ticketFields),
           assignee_label: assignee_label ?? null,
           dispatched_to_label: dispatched_to_label ?? null,
           has_pending_dispatch: !!has_pending_dispatch,
+          has_unacked_dispatch: !!has_unacked_dispatch,
         };
       });
     },
@@ -1178,9 +1191,30 @@ WHERE state_changed_at IS NULL`).run();
         stmts.markQueueDeliveredRow.run({
           delivered_at: ts, last_error: error ?? null, resolved_at: ts, id: queueId,
         });
+        recordEvent({
+          ticket_id: row.ticket_id,
+          project_id: row.project_id,
+          type: 'dispatch_delivery_attempted',
+          actor: 'golem-drainer',
+          data: { queue_id: queueId, session_id: row.session_id, delivered_at: ts, error: error ?? null },
+        });
         return stmts.getQueueRow.get(queueId);
       });
       return txn();
+    },
+
+    markDispatchDeliveryAttempted(ticketId, { session_id, actor = 'human', error = null } = {}) {
+      const ticket = stmts.getTicket.get(ticketId);
+      if (!ticket) throw new Error(`markDispatchDeliveryAttempted: ticket '${ticketId}' not found`);
+      if (!session_id) throw new Error('markDispatchDeliveryAttempted: session_id is required');
+      const ts = now();
+      return recordEvent({
+        ticket_id: ticketId,
+        project_id: ticket.project_id,
+        type: 'dispatch_delivery_attempted',
+        actor,
+        data: { session_id, delivered_at: ts, error: error ?? null },
+      });
     },
 
     listPendingDispatches() {
@@ -1225,6 +1259,64 @@ WHERE state_changed_at IS NULL`).run();
 
     countPendingDispatchesForSession(sessionId) {
       return Number(stmts.countPendingForSession.get(sessionId)?.n ?? 0);
+    },
+
+    countPendingDispatchesBySession() {
+      const out = new Map();
+      for (const r of stmts.countPendingBySession.all()) out.set(r.session_id, Number(r.n ?? 0));
+      return out;
+    },
+
+    currentInProgressTicketForSession(sessionId) {
+      if (!sessionId) return null;
+      return stmts.currentInProgressForSession.get(sessionId, sessionId) ?? null;
+    },
+
+    unackedDispatchesForWindow(windowMinutes = 10) {
+      const rawMinutes = Number(windowMinutes);
+      const minutes = Math.max(0, Number.isFinite(rawMinutes) ? rawMinutes : 10);
+      const cutoff = new Date(Date.now() - minutes * 60_000).toISOString();
+      // Target-session activity is approximated by existing actor fields: MCP
+      // ticket_update records events.actor=sessionId; ticket_comment records
+      // comments.author=sessionId and a matching commented event actor. That is
+      // the smallest reliable identity signal currently stored in tracker.db.
+      return db.prepare(`
+        SELECT e.id AS delivery_event_id, e.ticket_id, e.project_id, e.created_at AS delivered_at,
+               json_extract(e.data, '$.session_id') AS session_id,
+               t.display_id, t.title
+        FROM events e
+        JOIN tickets t ON t.id = e.ticket_id
+        WHERE e.type = 'dispatch_delivery_attempted'
+          AND e.created_at <= @cutoff
+          AND json_extract(e.data, '$.session_id') IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM events a
+            WHERE a.ticket_id = e.ticket_id
+              AND a.actor = json_extract(e.data, '$.session_id')
+              AND a.id > e.id
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM events w
+            WHERE w.ticket_id = e.ticket_id
+              AND w.type = 'dispatch_unacked_warning'
+              AND json_extract(w.data, '$.delivery_event_id') = e.id
+          )
+        ORDER BY e.created_at ASC
+      `).all({ cutoff });
+    },
+
+    recordUnackedDispatchWarning(row, { actor = 'system' } = {}) {
+      return recordEvent({
+        ticket_id: row.ticket_id,
+        project_id: row.project_id,
+        type: 'dispatch_unacked_warning',
+        actor,
+        data: {
+          delivery_event_id: row.delivery_event_id,
+          session_id: row.session_id,
+          delivered_at: row.delivered_at,
+        },
+      });
     },
 
     addComment(ticket_id, input = {}) {

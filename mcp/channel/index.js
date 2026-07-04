@@ -29,6 +29,7 @@ import {
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import * as tracker from './tracker-client.js';
+import { SESSION_ROLES, pushRoleBriefDirect, setSessionRole } from '../../lib/session-role.js';
 
 const VERSION = '0.1.0';
 // Port selection (multi-CEO safe by default):
@@ -581,6 +582,17 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: 'session_role',
+      description: 'Set or clear this live session role. role must be planner|builder|researcher|ui-tester or null/clear.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          role: { type: 'string', description: 'planner|builder|researcher|ui-tester|clear' },
+        },
+        required: ['role'],
+      },
+    },
+    {
       name: 'ticket_dispatch',
       description:
         'Golem tracker — dispatch a ticket to a live session: assigns the ticket and pushes a brief to it over the channel. Use sessions_dispatchable to find live session ids (each carries a status: idle|busy|waiting, and a pending_count of queued dispatches). The target session must be a channel consumer (golemc) to receive the push. By default the brief is pushed immediately (mode "now"); pass when_idle:true to queue it until the target is idle — use this when the session is busy/waiting so the brief is not buried mid-turn.',
@@ -707,6 +719,23 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     };
     broadcast('response', payload);
     return { content: [{ type: 'text', text: 'response broadcast' }] };
+  }
+
+  if (name === 'session_role') {
+    const role = args.role === 'clear' ? null : args.role;
+    if (role != null && !SESSION_ROLES.includes(role)) {
+      return { isError: true, content: [{ type: 'text', text: `invalid role: ${args.role}` }] };
+    }
+    if (!SESSION_ID) {
+      return { isError: true, content: [{ type: 'text', text: 'session_role: no current session id' }] };
+    }
+    try {
+      const row = setSessionRole(SESSION_ID, role, { by: 'self:mcp' });
+      if (role) await pushRoleBriefDirect(SESSION_ID, role, row);
+      return { content: [{ type: 'text', text: JSON.stringify({ ok: true, session_id: row.session_id, role: row.role }, null, 2) }] };
+    } catch (err) {
+      return { isError: true, content: [{ type: 'text', text: String(err?.message ?? err) }] };
+    }
   }
 
   // --- Session-to-session consult tools --------------------------------------

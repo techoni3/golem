@@ -9,6 +9,7 @@
 //   dashboard:restart
 //                Stop and restart the admin dashboard detached.
 //   doctor       Sanity-check the environment.
+//   map          Generate a cached repo map for a project.
 //   status       Dashboard health + canonical URL.
 //   help         Show this message.
 
@@ -18,8 +19,10 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, resolve, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { golemHome, legacyConfigDir, migratedHomeDir, trackerDbPath, renderDirFor, projectsJsonPath } from '../lib/golem-home.js';
+import { golemHome, legacyConfigDir, migratedHomeDir, trackerDbPath, renderDirFor, projectsJsonPath, sessionsJsonPath } from '../lib/golem-home.js';
 import { projectIdFor } from '../lib/project-id.js';
+import { SESSION_ROLES, pushRoleBriefDirect, setSessionRole } from '../lib/session-role.js';
+import { generateRepoMap, updateProjectLsp } from '../lib/repomap.js';
 import * as compiler from '../lib/compiler/engine.js';
 import * as ccAdapter from '../lib/compiler/adapters/cc.js';
 import * as ocAdapter from '../lib/compiler/adapters/opencode.js';
@@ -121,6 +124,107 @@ async function cmdStatus(args) {
     log(`  not reachable (${probe.error})`);
     log(`  start it with: golem dashboard`);
   }
+}
+
+function readSessionsRegistry() {
+  try {
+    const parsed = JSON.parse(readFileSync(sessionsJsonPath(), 'utf8'));
+    return Array.isArray(parsed?.sessions) ? parsed.sessions : [];
+  } catch {
+    return [];
+  }
+}
+
+function resolveSessionArg(value, sessions) {
+  if (!value) return null;
+  const exact = sessions.find((s) => s.session_id === value || s.name === value);
+  if (exact) return exact;
+  const pref = sessions.filter((s) => typeof s.session_id === 'string' && s.session_id.startsWith(value));
+  if (pref.length === 1) return pref[0];
+  if (pref.length > 1) {
+    throw new Error(`ambiguous session prefix "${value}" (${pref.length} matches)`);
+  }
+  throw new Error(`session not found: ${value}`);
+}
+
+function liveSessionLines(sessions) {
+  return sessions
+    .slice()
+    .sort((a, b) => String(b.last_seen_at || '').localeCompare(String(a.last_seen_at || '')))
+    .map((s) => `  ${s.session_id}${s.name ? `  ${s.name}` : ''}${s.project_path ? `  ${s.project_path}` : ''}`);
+}
+
+async function cmdRole(args) {
+  const roleArg = args[0];
+  if (!roleArg || roleArg === '-h' || roleArg === '--help') {
+    log(`Usage: golem role <${SESSION_ROLES.join('|')}|clear> [--session <id-or-name>]`);
+    return;
+  }
+  const role = roleArg === 'clear' ? null : roleArg;
+  if (role != null && !SESSION_ROLES.includes(role)) {
+    fatal(2, `invalid role: ${roleArg} (expected ${SESSION_ROLES.join('|')} or clear)`);
+  }
+  let sessionOpt = null;
+  for (let i = 1; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--session') {
+      sessionOpt = args[++i];
+      if (!sessionOpt) fatal(2, '--session requires a value');
+    } else if (a.startsWith('--session=')) {
+      sessionOpt = a.slice('--session='.length);
+    } else {
+      fatal(2, `unknown role option: ${a}`);
+    }
+  }
+  const sessions = readSessionsRegistry();
+  let target;
+  try {
+    if (sessionOpt) {
+      target = resolveSessionArg(sessionOpt, sessions);
+    } else if (process.env.CLAUDE_CODE_SESSION_ID) {
+      target = resolveSessionArg(process.env.CLAUDE_CODE_SESSION_ID, sessions);
+    } else {
+      const lines = liveSessionLines(sessions);
+      fatal(2, `--session is required when CLAUDE_CODE_SESSION_ID is unset.${lines.length ? `\n\nKnown sessions:\n${lines.join('\n')}` : ''}`);
+    }
+  } catch (e) {
+    fatal(2, e.message);
+  }
+  const updated = setSessionRole(target.session_id, role, { by: 'human:cli' });
+  if (role) await pushRoleBriefDirect(updated.session_id, role, updated);
+  log(JSON.stringify({
+    ok: true,
+    session_id: updated.session_id,
+    name: updated.name ?? null,
+    role: updated.role,
+    role_updated_at: updated.role_updated_at,
+    role_updated_by: updated.role_updated_by,
+  }, null, 2));
+}
+
+async function cmdMap(args) {
+  const force = args.includes('--force');
+  const positional = args.filter((a) => a !== '--force');
+  if (positional.includes('-h') || positional.includes('--help')) {
+    log('Usage: golem map [path] [--force]');
+    log('Generate a cached repo map in ~/.golem/repomap/<project_id>/<commit>.md.');
+    return;
+  }
+  if (positional.length > 1) fatal(2, `too many map arguments: ${positional.join(' ')}`);
+  const start = positional[0] ? resolve(positional[0]) : process.cwd();
+  const version = readPackageVersion();
+  const started = performance.now();
+  const result = await generateRepoMap(start, { force, version });
+  const elapsedMs = Math.round(performance.now() - started);
+  await updateProjectLsp(result.root);
+  log('');
+  log(`golem map ${result.cacheHit ? '(cache hit)' : '(generated)'}`);
+  log(`  project_id: ${result.projectId}`);
+  log(`  root: ${result.root}`);
+  log(`  out: ${result.path}`);
+  log(`  commit: ${result.commit.slice(0, 7)}${result.dirty ? ' dirty' : ''}`);
+  log(`  bytes: ${result.bytes}`);
+  log(`  elapsed_ms: ${elapsedMs}`);
 }
 
 async function cmdDashboard(args) {
@@ -559,12 +663,14 @@ async function cmdSyncCheckAll() {
     const root = substrateRoot();
     const a = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.agentOutDir(), items: ocAdapter.buildAgentPlan({ substrateRoot: root }) });
     const s = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.skillsOutDir(), items: ocAdapter.buildSkillPlan({ substrateRoot: root }) });
-    const clean = a.clean && s.clean;
+    const r = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.rolesOutDir(), items: ocAdapter.buildRolePlan({ substrateRoot: root }) });
+    const clean = a.clean && s.clean && r.clean;
     log('');
     log('global opencode:');
     log(`  agents out: ${ocAdapter.agentOutDir()}`);
     log(`  skills out: ${ocAdapter.skillsOutDir()}`);
-    printDrift({ clean, drifted: [...a.drifted, ...s.drifted], orphaned: [...a.orphaned, ...s.orphaned] });
+    log(`  roles out: ${ocAdapter.rolesOutDir()}`);
+    printDrift({ clean, drifted: [...a.drifted, ...s.drifted, ...r.drifted], orphaned: [...a.orphaned, ...s.orphaned, ...r.orphaned] });
     drift = drift || !clean;
   }
 
@@ -610,17 +716,21 @@ async function cmdSyncOpencode({ checkOnly, force }) {
   const packageVersion = readPackageVersion();
   const agentItems = ocAdapter.buildAgentPlan({ substrateRoot: root });
   const skillItems = ocAdapter.buildSkillPlan({ substrateRoot: root });
+  const roleItems = ocAdapter.buildRolePlan({ substrateRoot: root });
   const agentDir = ocAdapter.agentOutDir();
   const skillsDir = ocAdapter.skillsOutDir();
+  const rolesDir = ocAdapter.rolesOutDir();
 
   if (checkOnly) {
     const a = compiler.checkDrift({ target: 'opencode', outDir: agentDir, items: agentItems });
     const s = compiler.checkDrift({ target: 'opencode', outDir: skillsDir, items: skillItems });
+    const r = compiler.checkDrift({ target: 'opencode', outDir: rolesDir, items: roleItems });
     log(`  agents out: ${agentDir}`);
     log(`  skills out: ${skillsDir}`);
-    const drifted = [...a.drifted, ...s.drifted];
-    const orphaned = [...a.orphaned, ...s.orphaned];
-    if (a.clean && s.clean) {
+    log(`  roles out: ${rolesDir}`);
+    const drifted = [...a.drifted, ...s.drifted, ...r.drifted];
+    const orphaned = [...a.orphaned, ...s.orphaned, ...r.orphaned];
+    if (a.clean && s.clean && r.clean) {
       log('  OK clean — no drift');
       return;
     }
@@ -639,12 +749,15 @@ async function cmdSyncOpencode({ checkOnly, force }) {
 
   const ra = compiler.render({ target: 'opencode', outDir: agentDir, items: agentItems, packageVersion, force });
   const rs = compiler.render({ target: 'opencode', outDir: skillsDir, items: skillItems, packageVersion, force });
+  const rr = compiler.render({ target: 'opencode', outDir: rolesDir, items: roleItems, packageVersion, force });
   log(`  agents out: ${agentDir}`);
   log(`    written: ${ra.written.length}, unchanged: ${ra.unchanged.length}, pruned: ${ra.pruned.length}, tampered: ${ra.tampered.length}`);
   log(`  skills out: ${skillsDir}`);
   log(`    written: ${rs.written.length}, unchanged: ${rs.unchanged.length}, pruned: ${rs.pruned.length}, tampered: ${rs.tampered.length}`);
+  log(`  roles out: ${rolesDir}`);
+  log(`    written: ${rr.written.length}, unchanged: ${rr.unchanged.length}, pruned: ${rr.pruned.length}, tampered: ${rr.tampered.length}`);
 
-  const tampered = [...ra.tampered, ...rs.tampered];
+  const tampered = [...ra.tampered, ...rs.tampered, ...rr.tampered];
   if (tampered.length) {
     log('');
     err('  TAMPER — refused to overwrite (hand-edited outside sync); re-run with --force:');
@@ -776,9 +889,10 @@ async function cmdDoctor() {
       const substrateRoot = resolve(GOLEM_ROOT, 'substrate');
       const a = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.agentOutDir(), items: ocAdapter.buildAgentPlan({ substrateRoot }) });
       const s = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.skillsOutDir(), items: ocAdapter.buildSkillPlan({ substrateRoot }) });
-      (a.clean && s.clean)
-        ? ok('opencode render clean (agents + skills)')
-        : skip(`opencode render drifted (${a.drifted.length + s.drifted.length} changed, ${a.orphaned.length + s.orphaned.length} orphaned) — run \`golem sync --target opencode\``);
+      const r = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.rolesOutDir(), items: ocAdapter.buildRolePlan({ substrateRoot }) });
+      (a.clean && s.clean && r.clean)
+        ? ok('opencode render clean (agents + skills + roles)')
+        : skip(`opencode render drifted (${a.drifted.length + s.drifted.length + r.drifted.length} changed, ${a.orphaned.length + s.orphaned.length + r.orphaned.length} orphaned) — run \`golem sync --target opencode\``);
     } catch (e) {
       skip(`could not check opencode drift — ${e.message}`);
     }
@@ -796,6 +910,27 @@ async function cmdDoctor() {
     } else if (actual) {
       ok(`opencode ${actual}${pinned ? ' (matches pinned render)' : ' (no pinned version yet)'}`);
     }
+  }
+
+  log('');
+  log('LSP capability');
+  try {
+    const projects = knownProjects();
+    if (!projects.length) {
+      skip('no registered projects to check');
+    }
+    for (const p of projects) {
+      try {
+        const { projectId, lsp } = await updateProjectLsp(p.path);
+        const label = p.name || projectId;
+        if (lsp.available) ok(`${label}: ${lsp.servers.join(', ')}`);
+        else skip(`${label}: none detected`);
+      } catch (e) {
+        skip(`${p.name || p.id || p.path}: could not check LSP — ${e.message}`);
+      }
+    }
+  } catch (e) {
+    skip(`could not record LSP capability — ${e.message}`);
   }
 
   log('');
@@ -830,6 +965,10 @@ Run:
                        --public binds 0.0.0.0 (LAN-reachable, no auth).
   dashboard:restart [--public] [npm-start-args…]
                        Stop the running dashboard and restart it detached.
+  role <role|clear> [--session <id-or-name>]
+                        Set or clear a session role (${SESSION_ROLES.join(', ')}).
+  map [path] [--force] Generate a cached repo map under ~/.golem/repomap/ and
+                       record LSP capability for that project.
   migrate-home         One-time move of ~/.config/golem -> ~/.golem (ADR-4).
                        Backs up first, stops the dashboard, moves, symlinks
                        the old path to the new one, restarts. Explicit only —
@@ -899,6 +1038,12 @@ async function main() {
       break;
     case 'dashboard:restart':
       await cmdDashboardRestart(rest);
+      break;
+    case 'role':
+      await cmdRole(rest);
+      break;
+    case 'map':
+      await cmdMap(rest);
       break;
     case 'migrate-home':
       await cmdMigrateHome(rest);
