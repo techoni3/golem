@@ -129,6 +129,11 @@ Runtime flow:
 
 - `session.created` starts/updates `~/.golem/opencode-bridges.json` with the
   `ses_*` id, opencode process pid, bridge port, cwd, and status.
+- On plugin startup, the shim also seeds bridge/session rows from opencode's
+  `client.session.list()` + `client.session.status()` result. This covers
+  resumed sessions where opencode does not immediately emit `session.created` or
+  `session.updated`; an idle resumed session must become dispatchable without a
+  manual ping/pong poke.
 - The MCP channel process is a child of the opencode process, so its heartbeat
   resolves the matching bridge by `process.ppid`, registers its own HTTP port in
   `~/.golem/channels.json` under that `ses_*` id, and marks the row
