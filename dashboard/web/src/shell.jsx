@@ -44,6 +44,7 @@ function Sidebar({ route, setRoute }) {
     { id: 'projects', label: 'Projects', icon: Icon.Projects, count: buckets.active.length },
     { id: 'agents', label: 'Agents', icon: Icon.Agents, count: activeCount },
     { id: 'logs', label: 'Journals & Logs', icon: Icon.Logs },
+    { id: 'settings', label: 'Settings', icon: Icon.Gear },
   ];
 
   const isActive = (id) => {
@@ -176,6 +177,7 @@ function Topbar({ route, setRoute }) {
   if (route.kind === 'projects') crumbs.push({ label: 'Projects', current: true });
   if (route.kind === 'agents') crumbs.push({ label: 'Agents', current: true });
   if (route.kind === 'logs') crumbs.push({ label: 'Journals & Logs', current: true });
+  if (route.kind === 'settings') crumbs.push({ label: 'Settings', current: true });
   if (route.kind === 'project') {
     crumbs.push({ label: 'Projects', href: window.Router.buildHref({ kind: 'projects' }), onClick: () => setRoute({ kind: 'projects' }) });
     const p = window.Store.getProject(route.id);

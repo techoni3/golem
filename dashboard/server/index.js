@@ -17,6 +17,7 @@ import { readChannels } from './channels.js';
 import { applyGateVerdict } from './projects.js';
 import { listIdeas, createIdea, popIdea } from './ideas.js';
 import { initDispatchDrainer } from './dispatch-queue.js';
+import { registerSubstrateRoutes } from './substrate.js';
 import { golemHome, dashboardJsonPath } from '../../lib/golem-home.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
@@ -154,6 +155,7 @@ async function main() {
   }
 
   await fastify.register(websocket);
+  await registerSubstrateRoutes(fastify);
   await fastify.register(fastifyStatic, {
     root: WEB_ROOT,
     prefix: '/',
