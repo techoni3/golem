@@ -54,8 +54,9 @@ export function initDispatchDrainer({
 
   function checkUnackedDispatches() {
     let rows = [];
+    const windowMinutes = unackedWindowMinutes();
     try {
-      rows = tracker.unackedDispatchesForWindow(unackedWindowMinutes());
+      rows = tracker.unackedDispatchesForWindow(windowMinutes);
     } catch (err) {
       console.error('[dispatch-drainer] unacked check failed:', err);
       return false;
@@ -63,12 +64,12 @@ export function initDispatchDrainer({
     let changed = false;
     for (const row of rows) {
       try {
-        tracker.recordUnackedDispatchWarning(row);
+        tracker.recordUnackedDispatchWarning(row, { windowMinutes });
         const label = row.display_id || row.ticket_id;
         chat.record(
           'system',
           'warning',
-          `dispatch of ${label} to ${row.session_id} appears unacknowledged — no ticket activity from target since delivery attempt at ${row.delivered_at}`,
+          `dispatch of ${label} to ${row.session_id} appears unacknowledged — no ticket activity from target since delivery attempt at ${row.delivered_at} (${windowMinutes}m window)`,
           { session_id: row.session_id, ticket_id: row.ticket_id },
         );
         const ticket = tracker.getTicket(row.ticket_id);

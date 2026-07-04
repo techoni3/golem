@@ -529,6 +529,100 @@ WHERE state_changed_at IS NULL`).run();
     }
   }
 
+  function activeActorFormsForSession(sessionId) {
+    const out = new Set([sessionId].filter(Boolean));
+    const label = resolveAssigneeLabel(sessionId);
+    if (label) out.add(label);
+    return [...out];
+  }
+
+  function hasSupersedingDispatch(ticketId, deliveryEventId) {
+    return !!db.prepare(`
+      SELECT 1 FROM events
+      WHERE ticket_id = @ticket_id
+        AND id > @delivery_event_id
+        AND type IN ('dispatch_queued', 'dispatched', 'dispatch_delivery_attempted')
+      LIMIT 1
+    `).get({ ticket_id: ticketId, delivery_event_id: deliveryEventId });
+  }
+
+  function hasUnackedDismissal(ticketId, deliveryEventId) {
+    return !!db.prepare(`
+      SELECT 1 FROM events
+      WHERE ticket_id = @ticket_id
+        AND type = 'dispatch_unacked_dismissed'
+        AND CAST(json_extract(data, '$.delivery_event_id') AS INTEGER) = @delivery_event_id
+      LIMIT 1
+    `).get({ ticket_id: ticketId, delivery_event_id: deliveryEventId });
+  }
+
+  function hasTargetTicketActivity(ticketId, deliveryEventId, sessionId) {
+    const ticket = stmts.getTicket.get(ticketId);
+    if (!ticket) return false;
+    const actorForms = activeActorFormsForSession(sessionId);
+    const actorPlaceholders = actorForms.map((_, i) => `@actor${i}`).join(', ');
+    const params = { ticket_id: ticketId, delivery_event_id: deliveryEventId, session_id: sessionId };
+    actorForms.forEach((actor, i) => { params[`actor${i}`] = actor; });
+    const actorClause = actorForms.length ? `a.actor IN (${actorPlaceholders})` : '0';
+
+    // Some MCP/REST paths still record the acting session as `human` or a
+    // durable label instead of the raw session id. If the ticket is still owned
+    // by the delivered-to session, any later ticket/comment lifecycle event is
+    // sufficient proof that the target picked it up.
+    const ownerActivity = ticket.assignee === sessionId || ticket.dispatched_to === sessionId;
+    return !!db.prepare(`
+      SELECT 1 FROM events a
+      WHERE a.ticket_id = @ticket_id
+        AND a.id > @delivery_event_id
+        AND a.type NOT IN ('dispatch_unacked_warning', 'dispatch_unacked_dismissed')
+        AND (
+          ${actorClause}
+          OR (
+            @owner_activity = 1
+            AND a.type IN ('state_change', 'commented', 'comment_updated', 'assigned', 'rank_change')
+          )
+        )
+      LIMIT 1
+    `).get({ ...params, owner_activity: ownerActivity ? 1 : 0 });
+  }
+
+  function unackedWarningResolved({ ticket_id, delivery_event_id, session_id }) {
+    if (!ticket_id || !delivery_event_id || !session_id) return true;
+    return hasUnackedDismissal(ticket_id, delivery_event_id)
+      || hasSupersedingDispatch(ticket_id, delivery_event_id)
+      || hasTargetTicketActivity(ticket_id, delivery_event_id, session_id);
+  }
+
+  function activeUnackedWarnings(ticketId = null) {
+    const rows = db.prepare(`
+      SELECT w.id AS warning_event_id, w.ticket_id, w.project_id, w.created_at AS warned_at,
+             w.data AS warning_data, t.display_id, t.title, sl.label AS session_label
+      FROM events w
+      JOIN tickets t ON t.id = w.ticket_id
+      LEFT JOIN session_labels sl ON sl.session_id = json_extract(w.data, '$.session_id')
+      WHERE w.type = 'dispatch_unacked_warning'
+        AND (@ticket_id IS NULL OR w.ticket_id = @ticket_id)
+      ORDER BY w.created_at ASC, w.id ASC
+    `).all({ ticket_id: ticketId });
+    return rows.map((row) => {
+      const data = safeParse(row.warning_data);
+      const deliveryEventId = Number(data.delivery_event_id);
+      return {
+        warning_event_id: row.warning_event_id,
+        ticket_id: row.ticket_id,
+        project_id: row.project_id,
+        delivery_event_id: Number.isFinite(deliveryEventId) ? deliveryEventId : null,
+        session_id: data.session_id ?? null,
+        session_label: row.session_label ?? null,
+        delivered_at: data.delivered_at ?? null,
+        warned_at: row.warned_at,
+        window_minutes: data.window_minutes ?? null,
+        display_id: row.display_id ?? null,
+        title: row.title ?? null,
+      };
+    }).filter((w) => !unackedWarningResolved(w));
+  }
+
   // TKT-0519: derive + persist a project's display-id prefix. Candidates in
   // order: first 3 chars → first 4 → dash-split initials → base+2/3/… Take the
   // first not already in project_prefixes (UNIQUE enforces it). Once persisted,
@@ -706,9 +800,8 @@ WHERE state_changed_at IS NULL`).run();
       hydrated.assignee_label = resolveAssigneeLabel(row.assignee);
       hydrated.dispatched_to_label = resolveAssigneeLabel(row.dispatched_to);
       hydrated.has_pending_dispatch = !!stmts.getPendingForTicket.get(id);
-      hydrated.has_unacked_dispatch = !!db.prepare(
-        "SELECT 1 FROM events WHERE ticket_id = ? AND type = 'dispatch_unacked_warning' LIMIT 1"
-      ).get(id);
+      hydrated.active_unacked_dispatches = activeUnackedWarnings(id);
+      hydrated.has_unacked_dispatch = hydrated.active_unacked_dispatches.length > 0;
       // TKT-0284: child tickets (any kind with parent_id = this id). The drawer
       // only renders the panel for specs (separation by view, not by entity),
       // but populating children is cheap and any ticket can have them. Ordered
@@ -788,26 +881,33 @@ WHERE state_changed_at IS NULL`).run();
       // TKT-0266: LEFT JOIN session_labels twice (assignee + dispatched_to) so
       // the board snapshot carries durable labels in one query. Derived fields
       // — never stored on tickets; a rename retroactively improves old rows.
+      const activeWarningsByTicket = new Map();
+      for (const warning of activeUnackedWarnings()) {
+        const arr = activeWarningsByTicket.get(warning.ticket_id) ?? [];
+        arr.push(warning);
+        activeWarningsByTicket.set(warning.ticket_id, arr);
+      }
       const sql =
         'SELECT t.*, sa.label AS assignee_label, sd.label AS dispatched_to_label, ' +
         // TKT-0286: 0/1 flag — does this ticket have a pending dispatch-queue
         // row? Powers the board card ⏳ glyph (detail payloads already carry
         // the full pending_dispatch; this is for list/snapshot contexts).
-        "EXISTS(SELECT 1 FROM dispatch_queue dq WHERE dq.ticket_id = t.id AND dq.status = 'pending') AS has_pending_dispatch, " +
-        "EXISTS(SELECT 1 FROM events e WHERE e.ticket_id = t.id AND e.type = 'dispatch_unacked_warning') AS has_unacked_dispatch " +
+        "EXISTS(SELECT 1 FROM dispatch_queue dq WHERE dq.ticket_id = t.id AND dq.status = 'pending') AS has_pending_dispatch " +
         'FROM tickets t ' +
         'LEFT JOIN session_labels sa ON sa.session_id = t.assignee ' +
         'LEFT JOIN session_labels sd ON sd.session_id = t.dispatched_to ' +
         (where.length ? ` WHERE ${where.join(' AND ')}` : '') +
         ' ORDER BY t.seq ASC';
       return db.prepare(sql).all(params).map((row) => {
-        const { assignee_label, dispatched_to_label, has_pending_dispatch, has_unacked_dispatch, ...ticketFields } = row;
+        const { assignee_label, dispatched_to_label, has_pending_dispatch, ...ticketFields } = row;
+        const activeWarnings = activeWarningsByTicket.get(row.id) ?? [];
         return {
           ...hydrateTicket(ticketFields),
           assignee_label: assignee_label ?? null,
           dispatched_to_label: dispatched_to_label ?? null,
           has_pending_dispatch: !!has_pending_dispatch,
-          has_unacked_dispatch: !!has_unacked_dispatch,
+          has_unacked_dispatch: activeWarnings.length > 0,
+          active_unacked_dispatches: activeWarnings,
         };
       });
     },
@@ -1276,11 +1376,7 @@ WHERE state_changed_at IS NULL`).run();
       const rawMinutes = Number(windowMinutes);
       const minutes = Math.max(0, Number.isFinite(rawMinutes) ? rawMinutes : 10);
       const cutoff = new Date(Date.now() - minutes * 60_000).toISOString();
-      // Target-session activity is approximated by existing actor fields: MCP
-      // ticket_update records events.actor=sessionId; ticket_comment records
-      // comments.author=sessionId and a matching commented event actor. That is
-      // the smallest reliable identity signal currently stored in tracker.db.
-      return db.prepare(`
+      const candidates = db.prepare(`
         SELECT e.id AS delivery_event_id, e.ticket_id, e.project_id, e.created_at AS delivered_at,
                json_extract(e.data, '$.session_id') AS session_id,
                t.display_id, t.title
@@ -1290,12 +1386,6 @@ WHERE state_changed_at IS NULL`).run();
           AND e.created_at <= @cutoff
           AND json_extract(e.data, '$.session_id') IS NOT NULL
           AND NOT EXISTS (
-            SELECT 1 FROM events a
-            WHERE a.ticket_id = e.ticket_id
-              AND a.actor = json_extract(e.data, '$.session_id')
-              AND a.id > e.id
-          )
-          AND NOT EXISTS (
             SELECT 1 FROM events w
             WHERE w.ticket_id = e.ticket_id
               AND w.type = 'dispatch_unacked_warning'
@@ -1303,9 +1393,10 @@ WHERE state_changed_at IS NULL`).run();
           )
         ORDER BY e.created_at ASC
       `).all({ cutoff });
+      return candidates.filter((row) => !unackedWarningResolved(row));
     },
 
-    recordUnackedDispatchWarning(row, { actor = 'system' } = {}) {
+    recordUnackedDispatchWarning(row, { actor = 'system', windowMinutes = null } = {}) {
       return recordEvent({
         ticket_id: row.ticket_id,
         project_id: row.project_id,
@@ -1315,7 +1406,24 @@ WHERE state_changed_at IS NULL`).run();
           delivery_event_id: row.delivery_event_id,
           session_id: row.session_id,
           delivered_at: row.delivered_at,
+          window_minutes: windowMinutes,
         },
+      });
+    },
+
+    activeUnackedWarnings,
+
+    dismissUnackedDispatchWarning(ticketId, deliveryEventId, { actor = 'human' } = {}) {
+      const existing = stmts.getTicket.get(ticketId);
+      if (!existing) throw new Error(`dismissUnackedDispatchWarning: ticket '${ticketId}' not found`);
+      const idNum = Number(deliveryEventId);
+      if (!Number.isFinite(idNum)) throw new Error('dismissUnackedDispatchWarning: delivery_event_id is required');
+      return recordEvent({
+        ticket_id: ticketId,
+        project_id: existing.project_id,
+        type: 'dispatch_unacked_dismissed',
+        actor,
+        data: { delivery_event_id: idNum },
       });
     },
 

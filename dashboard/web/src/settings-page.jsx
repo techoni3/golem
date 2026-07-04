@@ -165,7 +165,7 @@ function SettingsPage() {
         {syncResult && (
           <section className={`settings-section sync-result ${syncResult.status === 'error' ? 'error' : ''}`} data-testid="sync-result">
             <div className="settings-section-head"><h2>Sync Result</h2></div>
-            <pre>{JSON.stringify(syncResult, null, 2)}</pre>
+            <SyncResultSummary result={syncResult}/>
           </section>
         )}
 
@@ -182,13 +182,55 @@ function SettingsPage() {
   );
 }
 
+function syncResultSummary(result) {
+  const rows = Array.isArray(result?.results) ? result.results : [];
+  const failed = result?.status === 'error' || rows.some((r) => r.status === 'error' || r.error);
+  const firstError = result?.error || rows.find((r) => r.error)?.error || null;
+  const ok = rows.filter((r) => r.status === 'ok').length;
+  const skipped = rows.filter((r) => r.status === 'skipped' || r.status === 'disabled').length;
+  const elapsed = rows.map((r) => Number(r.elapsed_ms)).filter(Number.isFinite).reduce((sum, n) => sum + n, 0);
+  if (failed) return { tone: 'error', title: `Sync failed${firstError ? `: ${firstError}` : ''}`, meta: `${rows.length} harness${rows.length === 1 ? '' : 'es'} checked` };
+  if (result?.status === 'skipped' || (rows.length && ok === 0)) return { tone: 'neutral', title: 'Sync skipped', meta: `${skipped} harness${skipped === 1 ? '' : 'es'} skipped` };
+  return { tone: 'success', title: `Sync complete${elapsed ? ` in ${elapsed}ms` : ''}`, meta: `${ok} harness${ok === 1 ? '' : 'es'} ok${skipped ? `, ${skipped} skipped` : ''}` };
+}
+
+function SyncResultSummary({ result }) {
+  const summary = syncResultSummary(result);
+  const rows = Array.isArray(result?.results) ? result.results : [];
+  return (
+    <div className={`sync-summary ${summary.tone}`}>
+      <div className="sync-summary-line">
+        <span className="sync-summary-pill">{summary.tone === 'error' ? 'failed' : summary.tone === 'success' ? 'success' : 'skipped'}</span>
+        <span>{summary.title}</span>
+        <span className="sync-summary-meta">{summary.meta}</span>
+      </div>
+      {rows.length > 0 && (
+        <div className="sync-summary-results">
+          {rows.map((r, i) => (
+            <div key={`${r.harness || r.artifact || 'row'}-${i}`} className="sync-summary-row">
+              <span className="mono">{r.harness || r.artifact || 'sync'}</span>
+              <span>{r.status || 'ok'}</span>
+              {r.elapsed_ms != null && <span className="sync-summary-meta">{r.elapsed_ms}ms</span>}
+              {r.error && <span className="sync-summary-error">{r.error}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      <details className="sync-summary-details">
+        <summary>Raw details</summary>
+        <pre>{JSON.stringify(result, null, 2)}</pre>
+      </details>
+    </div>
+  );
+}
+
 function renderCell(cell, harness) {
   const status = cell?.status || (harness.enabled ? 'error' : 'disabled');
   const detail = cell?.error || cell?.out_dir || 'not produced by this harness';
   const title = [detail, cell?.details ? `${cell.details.drifted_count} drifted, ${cell.details.orphaned_count} orphaned` : null].filter(Boolean).join(' · ');
   return (
     <span className={`settings-chip ${status}`} title={title} data-status={status}>
-      {status.replace('_', ' ')}
+      {cell?.label || status.replace('_', ' ')}
     </span>
   );
 }

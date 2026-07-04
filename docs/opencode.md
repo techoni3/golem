@@ -148,6 +148,12 @@ Runtime flow:
   `session.status` carries `status` as an OBJECT (`{type:"idle"|"retry"|"busy"}`);
   the shim collapses it to the plain string the dashboard compares against
   (`retry` counts as `busy`).
+- The shim also records the active opencode model in `~/.golem/sessions.json`
+  from opencode's runtime state file (`~/.local/state/opencode/model.json`,
+  `recent[0].modelID`). Model changes are refreshed immediately on shim-visible
+  session/chat/tool/status activity and by the 30s heartbeat while a session is
+  otherwise idle; the dashboard then publishes the next `native-sessions-update`
+  snapshot on its 3s native-session refresh.
 - `session.updated` (parentID-guarded) refreshes the registry `name` from
   `info.title` — the only real-time source of the session title (auto-generated
   after the first message, updated on rename). Events from child/subagent

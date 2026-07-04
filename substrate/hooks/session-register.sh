@@ -39,12 +39,14 @@ CWD="$PWD"
 # "opencode" so the dashboard can distinguish the two. Additive — old readers
 # ignore it.
 HARNESS="claudecode"
+MODEL=""
 if command -v jq >/dev/null 2>&1 && [ -n "$PAYLOAD" ]; then
   SESSION_ID="$(printf '%s' "$PAYLOAD" | jq -r '.session_id // empty' 2>/dev/null || true)"
   _pcwd="$(printf '%s' "$PAYLOAD" | jq -r '.cwd // empty' 2>/dev/null || true)"
   [ -n "$_pcwd" ] && CWD="$_pcwd"
   _ph="$(printf '%s' "$PAYLOAD" | jq -r '.harness // empty' 2>/dev/null || true)"
   [ -n "$_ph" ] && HARNESS="$_ph"
+  MODEL="$(printf '%s' "$PAYLOAD" | jq -r '.model // .modelID // .model_id // .session.model // .session.modelID // .info.model // .info.modelID // empty' 2>/dev/null || true)"
 fi
 
 # --- resolve project root --------------------------------------------------
@@ -179,6 +181,7 @@ upsert_sessions() {
     --arg pid_root "$ROOT" \
     --arg pid_proj "$PROJECT_ID" \
     --arg harness "$HARNESS" \
+    --arg model "$MODEL" \
     --arg now "$NOW" \
     '
     (.version // 1) as $v
@@ -190,7 +193,7 @@ upsert_sessions() {
           if $exists then
             [ $ss[]
               | if .session_id == $sid
-                then . + {last_seen_at: $now, project_id: $pid_proj, project_path: $pid_root, harness: $harness}
+                then . + {last_seen_at: $now, project_id: $pid_proj, project_path: $pid_root, harness: $harness, model: (if $model == "" then (.model // null) else $model end)}
                 else . end
             ]
           else
@@ -200,6 +203,7 @@ upsert_sessions() {
               project_id: $pid_proj,
               project_path: $pid_root,
               harness: $harness,
+              model: (if $model == "" then null else $model end),
               boot_time: $now,
               last_seen_at: $now
             }]

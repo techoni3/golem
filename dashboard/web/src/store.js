@@ -41,6 +41,7 @@
     // TKT-0286: bumped on every dispatch-queue-updated WS signal so queue-aware
     // surfaces (Agents page, session peek drawer) refetch the queue.
     dispatchQueueRev: 0,
+    rolesRev: 0,
   };
 
   const listeners = new Set();
@@ -355,6 +356,10 @@
             state.dispatchQueueRev = (state.dispatchQueueRev || 0) + 1;
             notify();
             break;
+          case 'roles-updated':
+            state.rolesRev = (state.rolesRev || 0) + 1;
+            notify();
+            break;
           case 'pong':
             state.serverTime = msg.ts;
             break;
@@ -371,6 +376,14 @@
   function getChatForSession(sessionId) {
     if (!sessionId) return state.chat.slice();
     return state.chat.filter((m) => !m.session_id || m.session_id === sessionId);
+  }
+
+  function sessionRecency(s) {
+    return s?.updated_at ?? s?.started_at ?? 0;
+  }
+
+  function sortSessionsByRecency(rows) {
+    return (Array.isArray(rows) ? rows.slice() : []).sort((a, b) => sessionRecency(b) - sessionRecency(a));
   }
 
   window.Store = {
@@ -392,8 +405,10 @@
       sessionId ? (state.nativeSessions.find((s) => s.session_id === sessionId) ?? null) : null,
     getChat: () => state.chat,
     getChatForSession,
-    getNativeSessions: () => state.nativeSessions,
+    sortSessionsByRecency,
+    getNativeSessions: () => sortSessionsByRecency(state.nativeSessions),
     getChannels: () => state.channels,
+    getRolesRev: () => state.rolesRev || 0,
     // The live channel for a given session_id, or null.
     getChannelForSession: (sessionId) =>
       sessionId ? (state.channels.find((c) => c.session_id === sessionId) ?? null) : null,
@@ -403,16 +418,17 @@
     getProjectSessions: (project) => {
       if (!project) return [];
       const ids = new Set([project.project_id, project.id].filter(Boolean));
-      return state.nativeSessions.filter((s) => s.project_id && ids.has(s.project_id));
+      return sortSessionsByRecency(state.nativeSessions.filter((s) => s.project_id && ids.has(s.project_id)));
     },
     // v4: alive native sessions belonging to a project.
     getProjectAliveSessions: (project) => {
       if (!project) return [];
       const ids = new Set([project.project_id, project.id].filter(Boolean));
-      return state.nativeSessions.filter((s) => s.alive && s.project_id && ids.has(s.project_id));
+      return sortSessionsByRecency(state.nativeSessions.filter((s) => s.alive && s.project_id && ids.has(s.project_id)));
     },
     // v4: count of ALL alive native Claude Code sessions on the machine.
     getAliveSessionCount: () => state.nativeSessions.filter((s) => s.alive).length,
+    getWorkingSessionCount: () => state.nativeSessions.filter((s) => s.alive && s.status === 'busy').length,
   };
 
   // Kick off as soon as DOM is ready (script in <body>, so it already is).

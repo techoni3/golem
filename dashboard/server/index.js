@@ -19,7 +19,8 @@ import { listIdeas, createIdea, popIdea } from './ideas.js';
 import { initDispatchDrainer } from './dispatch-queue.js';
 import { registerSubstrateRoutes } from './substrate.js';
 import { golemHome, dashboardJsonPath } from '../../lib/golem-home.js';
-import { SESSION_ROLES, roleChangeBrief, setSessionRole } from '../../lib/session-role.js';
+import { SESSION_ROLES, listRoleCards, roleChangeBrief, setSessionRole, writeRoleCard } from '../../lib/session-role.js';
+import { generateRepoMap } from '../../lib/repomap.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const WEB_ROOT = path.resolve(__dirname, '..', 'web');
@@ -158,14 +159,12 @@ async function main() {
   function enrichSessionRows(rows, channels = []) {
     const channelIds = new Set((channels || []).map((c) => c.session_id).filter(Boolean));
     const pendingBySession = tracker.countPendingDispatchesBySession();
-    const unackedBySession = new Set(
-      tracker.raw().prepare(`
-        SELECT DISTINCT json_extract(data, '$.session_id') AS session_id
-        FROM events
-        WHERE type = 'dispatch_unacked_warning'
-          AND json_extract(data, '$.session_id') IS NOT NULL
-      `).all().map((r) => r.session_id).filter(Boolean)
-    );
+    const unackedBySession = new Map();
+    for (const warning of tracker.activeUnackedWarnings()) {
+      const arr = unackedBySession.get(warning.session_id) ?? [];
+      arr.push(warning);
+      unackedBySession.set(warning.session_id, arr);
+    }
     return (rows || []).map((s) => ({
       ...s,
       role: s.role ?? null,
@@ -173,7 +172,8 @@ async function main() {
       reachable: channelIds.has(s.session_id),
       pending_count: pendingBySession.get(s.session_id) ?? 0,
       current_in_progress_ticket: tracker.currentInProgressTicketForSession(s.session_id),
-      has_unacked_dispatch: unackedBySession.has(s.session_id),
+      has_unacked_dispatch: (unackedBySession.get(s.session_id) ?? []).length > 0,
+      active_unacked_dispatches: unackedBySession.get(s.session_id) ?? [],
       project_id: s.project_id ?? null,
     }));
   }
@@ -359,6 +359,32 @@ async function main() {
     const plan = state.projectPlan(req.params.id);
     if (!plan) return { title: null, total: 0, done: 0, items: [] };
     return plan;
+  });
+
+  fastify.post('/api/projects/:id/repo-map', async (req, reply) => {
+    // state.project() resolves by registry id OR contract project_id and
+    // returns the FULL record (with `path`). Do NOT fall back to
+    // state.projects() here — those are pathless summaries, and generateRepoMap
+    // with an undefined path silently maps process.cwd() (the golem root)
+    // instead of the requested project. See state.js project().
+    const p = state.project(req.params.id);
+    if (!p) return reply.code(404).send({ error: 'project_not_found' });
+    if (!p.path) return reply.code(500).send({ error: `project ${req.params.id} has no path on record` });
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    try {
+      const focus = (Array.isArray(body.focus_files) && body.focus_files.length) || (Array.isArray(body.focus_symbols) && body.focus_symbols.length)
+        ? { files: body.focus_files || [], symbols: body.focus_symbols || [] }
+        : null;
+      const result = await generateRepoMap(p.path, {
+        force: body.force === true,
+        budget: body.budget,
+        focus,
+        version: 'dashboard',
+      });
+      return { ...result.meta, path: result.path };
+    } catch (err) {
+      return reply.code(500).send({ error: String(err?.message ?? err) });
+    }
   });
 
   // TKT-0194: apply a human verdict to a gate (approve | deny | cancel).
@@ -639,6 +665,22 @@ async function main() {
     }
   });
 
+  fastify.post('/api/tickets/:id/unacked/:deliveryEventId/dismiss', async (req, reply) => {
+    const { id, deliveryEventId } = req.params;
+    const actor = req.body?.actor || 'human:dashboard';
+    try {
+      const event = tracker.dismissUnackedDispatchWarning(id, deliveryEventId, { actor });
+      const ticket = tracker.getTicket(id);
+      if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
+      broadcastWS({ type: 'native-sessions-update', native_sessions: enrichSessionRows(state.nativeSessions(), state.channels()), channels: state.channels() });
+      return event;
+    } catch (err) {
+      const msg = String(err?.message ?? err);
+      const code = /not found/i.test(msg) ? 404 : 400;
+      return reply.code(code).send({ error: msg });
+    }
+  });
+
   // POST /api/tickets/:id/links — add a link from this ticket. Re-fetch + send
   // the from-ticket as a ticket-updated delta.
   fastify.post('/api/tickets/:id/links', async (req, reply) => {
@@ -888,6 +930,44 @@ async function main() {
       });
     }
     return out;
+  });
+
+  fastify.get('/api/roles', async () => listRoleCards());
+
+  fastify.put('/api/roles/:name', async (req, reply) => {
+    const name = req.params.name;
+    if (!SESSION_ROLES.includes(name)) return reply.code(404).send({ error: 'role_not_found' });
+    try {
+      const body = typeof req.body?.body === 'string' ? req.body.body : '';
+      const role = writeRoleCard(name, body);
+      broadcastWS({ type: 'roles-updated', roles: listRoleCards() });
+      return role;
+    } catch (err) {
+      return reply.code(400).send({ error: String(err?.message ?? err) });
+    }
+  });
+
+  fastify.post('/api/roles/:name/push', async (req, reply) => {
+    const name = req.params.name;
+    if (!SESSION_ROLES.includes(name)) return reply.code(404).send({ error: 'role_not_found' });
+    if (typeof state.refreshNativeSessions === 'function') await state.refreshNativeSessions();
+    const targets = state.nativeSessions().filter((s) => s.alive && s.role === name);
+    const results = [];
+    for (const session of targets) {
+      const brief = roleChangeBrief(name, session);
+      const result = brief ? await pushBrief(brief, session.session_id) : { ok: false, error: 'no role brief' };
+      results.push({
+        session_id: session.session_id,
+        name: session.name ?? null,
+        ok: !!result.ok,
+        status: result.status ?? null,
+        error: result.error ?? null,
+        target: result.target ?? null,
+      });
+      chat.record(result.ok ? 'system' : 'error', 'session_role_push', `role ${name} push ${result.ok ? 'delivered' : 'failed'} for ${session.name || session.session_id}`, { session_id: session.session_id });
+    }
+    broadcastWS({ type: 'roles-updated', roles: listRoleCards(), push: { role: name, results } });
+    return { role: name, count: results.length, results };
   });
 
   fastify.post('/api/sessions/:id/role', async (req, reply) => {

@@ -23,6 +23,7 @@ import { golemHome, legacyConfigDir, migratedHomeDir, trackerDbPath, renderDirFo
 import { projectIdFor } from '../lib/project-id.js';
 import { SESSION_ROLES, pushRoleBriefDirect, setSessionRole } from '../lib/session-role.js';
 import { generateRepoMap, updateProjectLsp } from '../lib/repomap.js';
+import { doctorExternalTools } from '../lib/ext-tools.js';
 import * as compiler from '../lib/compiler/engine.js';
 import * as ccAdapter from '../lib/compiler/adapters/cc.js';
 import * as ocAdapter from '../lib/compiler/adapters/opencode.js';
@@ -204,27 +205,67 @@ async function cmdRole(args) {
 
 async function cmdMap(args) {
   const force = args.includes('--force');
-  const positional = args.filter((a) => a !== '--force');
+  const wantJson = args.includes('--json');
+  let budget = null;
+  const focus = { files: [], symbols: [] };
+  const positional = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--force' || a === '--json') continue;
+    if (a === '--budget') {
+      budget = Number(args[++i]);
+      if (!Number.isFinite(budget) || budget <= 0) fatal(2, '--budget requires a positive number');
+    } else if (a.startsWith('--budget=')) {
+      budget = Number(a.slice('--budget='.length));
+      if (!Number.isFinite(budget) || budget <= 0) fatal(2, '--budget requires a positive number');
+    } else if (a === '--focus') {
+      const value = args[++i];
+      if (!value) fatal(2, '--focus requires a file or symbol');
+      if (value.startsWith('symbol:')) focus.symbols.push(value.slice('symbol:'.length));
+      else focus.files.push(value);
+    } else if (a.startsWith('--focus=')) {
+      const value = a.slice('--focus='.length);
+      if (value.startsWith('symbol:')) focus.symbols.push(value.slice('symbol:'.length));
+      else focus.files.push(value);
+    } else {
+      positional.push(a);
+    }
+  }
   if (positional.includes('-h') || positional.includes('--help')) {
-    log('Usage: golem map [path] [--force]');
-    log('Generate a cached repo map in ~/.golem/repomap/<project_id>/<commit>.md.');
+    log('Usage: golem map [path] [--force] [--budget <tokens>] [--focus <file|symbol:name>] [--json]');
+    log('Generate an aider-backed repo map in ~/.golem/repomap/<project_id>/<commit>.md. Focused maps print only and do not replace the cache.');
     return;
   }
   if (positional.length > 1) fatal(2, `too many map arguments: ${positional.join(' ')}`);
   const start = positional[0] ? resolve(positional[0]) : process.cwd();
   const version = readPackageVersion();
   const started = performance.now();
-  const result = await generateRepoMap(start, { force, version });
+  const hasFocus = focus.files.length || focus.symbols.length;
+  const result = await generateRepoMap(start, { force, version, budget, focus: hasFocus ? focus : null });
   const elapsedMs = Math.round(performance.now() - started);
   await updateProjectLsp(result.root);
+  if (wantJson) {
+    log(JSON.stringify({ ...result.meta, path: result.path, elapsed_ms: elapsedMs }, null, 2));
+    return;
+  }
   log('');
-  log(`golem map ${result.cacheHit ? '(cache hit)' : '(generated)'}`);
+  log(`golem map ${result.cacheHit ? '(cache hit)' : result.meta.focused ? '(focused)' : '(generated)'}`);
   log(`  project_id: ${result.projectId}`);
   log(`  root: ${result.root}`);
-  log(`  out: ${result.path}`);
+  log(`  out: ${result.path || '(focused map printed only)'}`);
   log(`  commit: ${result.commit.slice(0, 7)}${result.dirty ? ' dirty' : ''}`);
   log(`  bytes: ${result.bytes}`);
+  log(`  budget: ${result.meta.budget}`);
+  if (result.meta.backend) log(`  backend: ${result.meta.backend} via ${result.meta.runner}`);
   log(`  elapsed_ms: ${elapsedMs}`);
+  if (result.meta.topFiles?.length) {
+    log('  top_files:');
+    for (const f of result.meta.topFiles.slice(0, 8)) log(`    - ${f}`);
+  }
+  if (result.meta.focused) {
+    log('');
+    log(result.content);
+  }
 }
 
 async function cmdDashboard(args) {
@@ -487,26 +528,24 @@ function printDrift({ clean, drifted, orphaned }) {
   }
 }
 
-function gitQuiet(args, cwd) {
-  const res = spawnSync('git', args, { cwd, stdio: 'ignore' });
-  return res.status === 0;
-}
-
 function warnVisibleGeneratedFiles({ projectRoot, outDir, items, result }) {
-  if (!gitQuiet(['rev-parse', '--is-inside-work-tree'], projectRoot)) return;
   const byKey = new Map(items.map((item) => [item.key, item.outputRelPath]));
-  const visible = [];
-  for (const key of result.written) {
+  const relPaths = [];
+  for (const key of new Set([...(result.written ?? []), ...(result.unchanged ?? [])])) {
     const relOut = byKey.get(key);
     if (!relOut) continue;
-    const relProject = pathRelative(projectRoot, join(outDir, relOut));
-    const ignored = gitQuiet(['check-ignore', '--quiet', '--', relProject], projectRoot);
-    const tracked = gitQuiet(['ls-files', '--error-unmatch', '--', relProject], projectRoot);
-    if (!ignored && !tracked) visible.push(relProject);
+    relPaths.push(pathRelative(projectRoot, join(outDir, relOut)));
   }
+  if (!relPaths.length) return;
+  const status = spawnSync('git', ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', ...relPaths], { cwd: projectRoot, encoding: 'utf8' });
+  if (status.status !== 0) return;
+  const visible = status.stdout.split('\0')
+    .filter(Boolean)
+    .filter((entry) => entry.startsWith('?? '))
+    .map((entry) => entry.slice(3));
   if (!visible.length) return;
   err('');
-  err('  WARNING project render wrote generated files that are untracked and not gitignored:');
+  err('  WARNING project render has generated files that are untracked and not gitignored:');
   for (const rel of visible) err(`    ${rel}`);
   err('  Add an ignore rule or intentionally track them before using project-scoped artifacts in this repo.');
 }
@@ -817,6 +856,13 @@ async function cmdDoctor() {
   (await hasCommand('npm')) ? ok('npm on PATH') : fail('npm on PATH');
 
   log('');
+  log('External tools');
+  for (const tool of doctorExternalTools()) {
+    if (tool.ok) ok(`${tool.name}: ${tool.message} via ${tool.runner}`);
+    else skip(`${tool.name}: ${tool.message}`);
+  }
+
+  log('');
   log('Dashboard');
   existsSync(DASHBOARD_DIR) ? ok(`dashboard dir exists (${DASHBOARD_DIR})`) : fail('dashboard dir exists');
   existsSync(resolve(GOLEM_ROOT, 'node_modules')) ? ok('root node_modules') : fail('root node_modules — npm install (from the repo root)');
@@ -967,8 +1013,9 @@ Run:
                        Stop the running dashboard and restart it detached.
   role <role|clear> [--session <id-or-name>]
                         Set or clear a session role (${SESSION_ROLES.join(', ')}).
-  map [path] [--force] Generate a cached repo map under ~/.golem/repomap/ and
-                       record LSP capability for that project.
+  map [path] [--force] [--budget <tokens>] [--focus <file|symbol:name>] [--json]
+                       Generate an aider-backed repo map under ~/.golem/repomap/
+                       and record LSP capability for that project.
   migrate-home         One-time move of ~/.config/golem -> ~/.golem (ADR-4).
                        Backs up first, stops the dashboard, moves, symlinks
                        the old path to the new one, restarts. Explicit only —

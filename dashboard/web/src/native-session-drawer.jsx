@@ -85,6 +85,8 @@ function NativeSessionDrawer({ open, sessionId, onClose }) {
   const events = peek?.events ?? [];
   const milestones = peek?.milestones ?? [];
   const loaded = !!peek;
+  const currentTicket = s?.current_in_progress_ticket ?? null;
+  const pendingCount = Number(s?.pending_count || queue.length || 0);
 
   const metaRows = [
     ['cwd', s?.cwd || '—', true],
@@ -107,11 +109,14 @@ function NativeSessionDrawer({ open, sessionId, onClose }) {
               <h2 className="drawer-title" title={s?.cwd || ''}>{title}</h2>
               <div className="mono" style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span className={`nsd-status status-${statusKind}`}>{statusLabel}</span>
+                {s?.role && <span className="native-session-role-chip">{s.role}</span>}
+                {pendingCount > 0 && <span className="native-session-queue-chip" title={`${pendingCount} queued dispatch${pendingCount === 1 ? '' : 'es'}`}>⏳ {pendingCount}</span>}
                 {project
                   ? <><span>·</span><span style={{ color: project.color }}>{project.name}</span></>
                   : registered
                     ? <><span>·</span><span>{s?.project_id || ''}</span></>
                     : <><span>·</span><span style={{ color: 'var(--status-blocked)' }}>unregistered</span></>}
+                {s?.alive && s.reachable === false && <><span>·</span><span className="nsd-nochannel">no channel</span></>}
               </div>
             </div>
             <button className="drawer-close" onClick={onClose}><Icon.Close/></button>
@@ -127,6 +132,17 @@ function NativeSessionDrawer({ open, sessionId, onClose }) {
               </React.Fragment>
             ))}
           </div>
+
+          {currentTicket && (
+            <a
+              className="nsd-current-ticket mono"
+              href={window.Router.buildHref({ kind: 'ticket', id: currentTicket.id })}
+              onClick={(e) => { e.preventDefault(); window.Router.openTicket(currentTicket.id); }}
+              title={currentTicket.title}
+            >
+              current: {currentTicket.display_id || currentTicket.id} · {currentTicket.title}
+            </a>
+          )}
 
           <div className="nsd-section-head">
             Recent activity

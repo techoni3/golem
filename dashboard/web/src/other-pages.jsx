@@ -1,8 +1,51 @@
 // Agents / Projects / Logs pages. All read live store.
 
+function UnackedDispatchBadge({ warning, compact = false }) {
+  if (!warning) return null;
+  const ticketId = warning.ticket_id;
+  const deliveryId = warning.delivery_event_id;
+  const label = warning.display_id || ticketId || 'ticket';
+  const deliveredMs = warning.delivered_at ? Date.parse(warning.delivered_at) : NaN;
+  const age = Number.isFinite(deliveredMs) ? window.SubstrateFmt?.fmtTimeAgo?.(deliveredMs) : null;
+  const session = warning.session_label || warning.session_id || 'target session';
+  const title = [
+    `dispatch to ${session} appears unacknowledged`,
+    warning.delivered_at ? `delivered ${warning.delivered_at}` : null,
+    warning.window_minutes != null ? `${warning.window_minutes}m window` : null,
+    warning.title || null,
+  ].filter(Boolean).join(' · ');
+  const open = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (ticketId) window.Router.openTicket(ticketId);
+  };
+  const dismiss = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!ticketId || deliveryId == null) return;
+    window.SubstrateAPI.dismissUnackedDispatch(ticketId, deliveryId).catch((err) => console.error('dismiss unacked failed', err));
+  };
+  return (
+    <span className="unacked-dispatch-badge" title={title} onClick={open} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') open(e); }}>
+      <span>⚠ {compact ? label : `${label}${age ? ` · ${age}` : ''}`}</span>
+      <button className="unacked-dispatch-dismiss" title="dismiss warning" onClick={dismiss} disabled={!ticketId || deliveryId == null}>×</button>
+    </span>
+  );
+}
+
+window.UnackedDispatchBadge = UnackedDispatchBadge;
+
+function compactPath(p) {
+  if (!p) return '—';
+  const parts = String(p).split('/').filter(Boolean);
+  if (parts.length <= 2) return p;
+  return `.../${parts.slice(-2).join('/')}`;
+}
+
 function AgentsPage({ setRoute }) {
   useStore();
   const all = window.Store.getNativeSessions();
+  const rolesRev = window.Store.getRolesRev ? window.Store.getRolesRev() : 0;
 
   // v4: the server already pid-checks native sessions and marks them .alive.
   // Drop anything not alive so dead registry rows / stale CLI entries never
@@ -62,6 +105,8 @@ function AgentsPage({ setRoute }) {
         </div>
       </div>
 
+      <RolesPanel rev={rolesRev}/>
+
       {alive.length === 0 && orphans.length === 0 ? (
         <EmptyCard
           label="no native sessions online"
@@ -78,7 +123,7 @@ function AgentsPage({ setRoute }) {
               </div>
               <div className="native-sessions">
                 {working.map((s) => (
-                  <SessionCard key={s.session_id || s.pid} session={s} name={formatName(s)} queueCount={queueBySession.get(s.session_id)?.length || 0}/>
+                  <AgentCard key={s.session_id || s.pid} session={s} name={formatName(s)} queueCount={queueBySession.get(s.session_id)?.length || 0} setRoute={setRoute}/>
                 ))}
               </div>
             </div>
@@ -93,7 +138,7 @@ function AgentsPage({ setRoute }) {
               </div>
               <div className="native-sessions">
                 {idle.map((s) => (
-                  <SessionCard key={s.session_id || s.pid} session={s} name={formatName(s)} queueCount={queueBySession.get(s.session_id)?.length || 0}/>
+                  <AgentCard key={s.session_id || s.pid} session={s} name={formatName(s)} queueCount={queueBySession.get(s.session_id)?.length || 0} setRoute={setRoute}/>
                 ))}
               </div>
             </div>
@@ -108,13 +153,109 @@ function AgentsPage({ setRoute }) {
   );
 }
 
-function SessionCard({ session, name, queueCount = 0 }) {
+function RolesPanel({ rev }) {
+  const [roles, setRoles] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    window.SubstrateAPI.listRoles()
+      .then((list) => {
+        if (cancelled) return;
+        setRoles(Array.isArray(list) ? list : []);
+        setError(null);
+      })
+      .catch((err) => { if (!cancelled) setError(err.message || String(err)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [rev]);
+
+  return (
+    <div className="agents-section roles-panel">
+      <div className="agents-section-head">
+        <Icon.Agents size={16}/>
+        <span className="agents-section-title">Roles</span>
+        <span className="agents-section-count">{roles.length}</span>
+        {loading && <span className="roles-save-state">loading…</span>}
+        {error && <span className="roles-save-state error">{error}</span>}
+      </div>
+      <div className="roles-grid">
+        {roles.map((role) => <RoleEditor key={role.name} role={role}/>)}
+      </div>
+    </div>
+  );
+}
+
+function RoleEditor({ role }) {
+  const [body, setBody] = React.useState(role.body || '');
+  const [state, setState] = React.useState('saved');
+  const [pushResult, setPushResult] = React.useState(null);
+  React.useEffect(() => {
+    setBody(role.body || '');
+    setState('saved');
+    setPushResult(null);
+  }, [role.name, role.body]);
+
+  React.useEffect(() => {
+    if (body === (role.body || '')) return;
+    setState('saving');
+    const timer = setTimeout(() => {
+      window.SubstrateAPI.saveRole(role.name, body)
+        .then(() => setState('saved'))
+        .catch((err) => setState(err?.payload?.error || err.message || 'save failed'));
+    }, 650);
+    return () => clearTimeout(timer);
+  }, [body, role.name, role.body]);
+
+  const push = () => {
+    setPushResult({ state: 'pushing' });
+    window.SubstrateAPI.pushRole(role.name)
+      .then((result) => setPushResult({ state: 'done', result }))
+      .catch((err) => setPushResult({ state: 'error', error: err?.payload?.error || err.message || String(err) }));
+  };
+  const status = state === 'saved' ? (role.overridden ? `saved override${role.updated_at ? ` · ${window.SubstrateFmt?.fmtTimeAgo?.(role.updated_at) || role.updated_at}` : ''}` : 'using default') : state;
+  const pushed = pushResult?.result;
+  const okCount = pushed?.results?.filter((r) => r.ok).length ?? 0;
+  return (
+    <div className="role-editor-card">
+      <div className="role-editor-head">
+        <div>
+          <div className="role-editor-name">{role.name}</div>
+          <div className={`roles-save-state ${String(state).includes('failed') || String(state).includes('error') ? 'error' : ''}`}>{status}</div>
+        </div>
+        <button className="orch-btn" onClick={push} disabled={state === 'saving' || pushResult?.state === 'pushing'}>Update running agents</button>
+      </div>
+      <textarea
+        className="role-editor-body mono"
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        spellCheck="false"
+        aria-label={`${role.name} role card`}
+      />
+      {pushResult?.state === 'pushing' && <div className="roles-push-result">pushing…</div>}
+      {pushResult?.state === 'error' && <div className="roles-push-result error">{pushResult.error}</div>}
+      {pushed && (
+        <div className="roles-push-result">
+          pushed to {okCount}/{pushed.count} live {role.name} session{pushed.count === 1 ? '' : 's'}
+          {pushed.results?.length > 0 && (
+            <div className="roles-push-list">
+              {pushed.results.map((r) => <span key={r.session_id} className={`native-session-meta-chip mono ${r.ok ? '' : 'error'}`} title={r.error || r.target || ''}>{r.ok ? 'ok' : 'fail'} · {r.name || r.session_id.slice(0, 8)}</span>)}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LegacyNativeCardUnused({ session, name, queueCount = 0 }) {
   const working = session.status === 'busy' || session.status === 'waiting';
   const registered = session.registered || !!window.Store.getProjectByContractId(session.project_id);
   const pendingCount = Number(session.pending_count || queueCount || 0);
   const currentTicket = session.current_in_progress_ticket;
-  const hasUnacked = !!session.has_unacked_dispatch || window.Store.getTrackerTickets({ includeArchived: true })
-    .some((t) => t.has_unacked_dispatch && (t.assignee === session.session_id || t.dispatched_to === session.session_id));
+  const unackedWarnings = session.active_unacked_dispatches || [];
+  const pathLabel = compactPath(session.cwd);
   const openPeek = () => {
     if (session.session_id) window.openNativeSessionDrawer(session.session_id);
   };
@@ -134,7 +275,7 @@ function SessionCard({ session, name, queueCount = 0 }) {
         {pendingCount > 0 && (
           <span className="native-session-queue-chip" title={`${pendingCount} dispatch${pendingCount === 1 ? '' : 'es'} queued — delivers when this session is idle`}>⏳ {pendingCount} queued</span>
         )}
-        {hasUnacked && <span className="native-session-queue-chip" title="one or more dispatches to this session appear unacknowledged">⚠ unacked</span>}
+        {unackedWarnings.map((w) => <UnackedDispatchBadge key={w.delivery_event_id || w.warning_event_id} warning={w}/>)}
         <span className={`native-session-status status-${working ? 'busy' : 'idle'}`}>
           {session.status || 'idle'}
           {session.waiting_for ? ` · ${session.waiting_for}` : ''}
@@ -145,20 +286,32 @@ function SessionCard({ session, name, queueCount = 0 }) {
           </span>
         )}
       </div>
-      <div className="native-session-cwd mono" title={session.cwd || ''}>
-        {session.cwd || '—'}
+      <div className="native-session-path mono" title={session.cwd || ''}>
+        {pathLabel}
       </div>
       {currentTicket && (
-        <div className="native-session-cwd mono" title={currentTicket.title}>
+        <a
+          className="native-session-current mono"
+          href={window.Router.buildHref({ kind: 'ticket', id: currentTicket.id })}
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); window.Router.openTicket(currentTicket.id); }}
+          title={currentTicket.title}
+        >
           current: {currentTicket.display_id || currentTicket.id} · {currentTicket.title}
+        </a>
+      )}
+      {session.reachable === false && session.alive && (
+        <div className="native-session-nochannel" title="live session with no golem channel registered — dispatches can queue, but briefs/interrupts cannot be delivered now">
+          <span className="cc-nochannel-dot"/>
+          no channel — dispatches queue until reachable
         </div>
       )}
       <div className="native-session-meta">
-        <span className="mono">pid {session.pid ?? '?'}</span>
-        {session.session_id && <span className="mono" title={session.session_id}>{session.session_id.slice(0, 8)}</span>}
-        {session.project_id && <span className="mono" title="derived project_id">{session.project_id}</span>}
+        <span className="native-session-meta-chip mono" title="process id"><span>pid</span>{session.pid ?? '?'}</span>
+        {session.session_id && <span className="native-session-meta-chip mono" title={session.session_id}><span>sid</span>{session.session_id.slice(0, 8)}</span>}
+        {session.project_id && <span className="native-session-meta-chip mono" title="derived project_id"><span>project</span>{session.project_id}</span>}
         {session.updated_at && (
-          <span title="last updated">
+          <span className="native-session-meta-chip mono" title="last updated">
+            <span>seen</span>
             {window.SubstrateFmt?.fmtClock?.(session.updated_at) || ''}
           </span>
         )}
@@ -176,6 +329,7 @@ function SessionCard({ session, name, queueCount = 0 }) {
             <option value="builder">builder</option>
             <option value="researcher">researcher</option>
             <option value="ui-tester">ui-tester</option>
+            <option value="general">general</option>
           </select>
         </label>
       </div>
