@@ -53,7 +53,7 @@ flowchart LR
 **Genre templates.** Pick the template that matches the ticket kind and fill
 it in — they're tension-forcing scaffolds, not cages:
 
-- `work-item` → `templates/feature.md` — Problem / Appetite / Solution sketch / Rabbit holes / No-gos / Acceptance
+- `work-item` → `templates/feature.md` — Problem / Appetite / Solution sketch / optional Context notes (orientation, not boundary) / Rabbit holes / No-gos / Acceptance
 - `fix` → `templates/bug.md` — Repro / Expected / Actual / Environment / Suspected cause / Fix
 - `spec` → `templates/design-doc.md` — arc42 MVP + C4 container diagram + ADRs
 - `decision` → `templates/decision.md` — MADR bare-minimum: Status / Context / Decision / Consequences / Rejected alternatives

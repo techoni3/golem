@@ -321,6 +321,7 @@ export function createState() {
     project,
     projectPlan,
     nativeSessions: () => nativeSessions,
+    refreshNativeSessions,
     channels: () => channels,
   };
 }

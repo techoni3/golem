@@ -183,6 +183,25 @@ async function run() {
   const dispAll = await jget('/api/sessions/dispatchable');
   check('GET /api/sessions/dispatchable (no project): array, no 500', dispAll.status === 200 && Array.isArray(dispAll.body), `status ${dispAll.status}`);
 
+  // --- substrate settings/status/sync ----------------------------------
+  const subCfg = await jget('/api/substrate/config');
+  check('GET /api/substrate/config: harness config', subCfg.status === 200 && subCfg.body?.harnesses?.claudecode && subCfg.body?.harnesses?.opencode, `status ${subCfg.status}`);
+
+  const subPut = await jsend('PUT', '/api/substrate/config', { harnesses: { opencode: { enabled: false } } });
+  check('PUT /api/substrate/config: toggle opencode off', subPut.status === 200 && subPut.body?.harnesses?.opencode?.enabled === false, `status ${subPut.status}`);
+
+  const subStatus = await jget('/api/substrate/status');
+  const statusCells = subStatus.body?.global || [];
+  const hasCc = statusCells.some((c) => c.harness === 'claudecode' && ['in_sync', 'drifted'].includes(c.status));
+  const hasOcDisabled = statusCells.some((c) => c.harness === 'opencode' && c.status === 'disabled');
+  check('GET /api/substrate/status: cc active + opencode disabled cells', subStatus.status === 200 && hasCc && hasOcDisabled, `status ${subStatus.status}`);
+
+  const syncDisabled = await jsend('POST', '/api/substrate/sync', { target: 'opencode' });
+  check('POST /api/substrate/sync: disabled opencode skips', syncDisabled.status === 200 && syncDisabled.body?.results?.[0]?.status === 'disabled', `status ${syncDisabled.status}`);
+
+  const syncCc = await jsend('POST', '/api/substrate/sync', { target: 'claudecode' });
+  check('POST /api/substrate/sync: claudecode runs', syncCc.status === 200 && syncCc.body?.results?.[0]?.status === 'ok', `status ${syncCc.status}`);
+
   // --- snapshot folds tracker tables ----------------------------------
   const snap = await jget('/api/snapshot');
   check('GET /api/snapshot: tickets present', Array.isArray(snap.body?.tickets) && snap.body.tickets.length === 2, `tickets ${snap.body?.tickets?.length}`);

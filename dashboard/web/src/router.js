@@ -26,7 +26,7 @@
 // spammed — preserves the original "don't spam history" intent.
 
 (function () {
-  const TOP_LEVEL = ['dashboard', 'tracker', 'projects', 'agents', 'logs'];
+  const TOP_LEVEL = ['dashboard', 'tracker', 'projects', 'agents', 'logs', 'settings'];
 
   const parseQuery = (search) => {
     const out = {};
@@ -65,6 +65,7 @@
     if (p === '/projects') return { kind: 'projects' };
     if (p === '/agents') return { kind: 'agents' };
     if (p === '/logs') return { kind: 'logs' };
+    if (p === '/settings') return { kind: 'settings' };
     const pm = p.match(/^\/project\/(.+)$/);
     if (pm) {
       return {
@@ -94,6 +95,7 @@
       case 'projects': return '/projects';
       case 'agents': return '/agents';
       case 'logs': return '/logs';
+      case 'settings': return '/settings';
       case 'project': {
         const q = {};
         if (route.tab) q.tab = route.tab;

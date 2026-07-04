@@ -436,6 +436,7 @@ function TrackerCard({ ticket: t, project, assigneeLabel }) {
   // from a ticket-updated broadcast — the || covers both). Complements the
   // drawer's pending row + the Agents-page queue view.
   const queued = !!(t.has_pending_dispatch || t.pending_dispatch);
+  const unacked = !!t.has_unacked_dispatch;
   // TKT-0103: drag handle. Activation distance (6px, set in TicketColumns's
   // PointerSensor activationConstraint) prevents accidental drags on click.
   // The drag listeners are bound to the card root; a click without a drag
@@ -472,6 +473,7 @@ function TrackerCard({ ticket: t, project, assigneeLabel }) {
         )}
         <span className="pill tracker-kind-pill" data-kind={t.kind}>{t.kind}</span>
         {needsAnswer && <span className="pill tracker-answer-badge">❓ needs answer</span>}
+        {unacked && <span className="pill tracker-answer-badge" title="dispatch delivered but target session has not produced ticket activity">⚠ unacked</span>}
       </div>
       <div className="ticket-id">{t.display_id || t.id}</div>
       <div className="ticket-title">{t.title}</div>

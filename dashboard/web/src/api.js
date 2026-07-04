@@ -190,6 +190,8 @@
     channels: () => getJSON('/api/channels'),
     channelHealth: (sessionId) =>
       getJSON(`/api/channel/health${sessionId ? `?session=${encodeURIComponent(sessionId)}` : ''}`),
+    setSessionRole: (sessionId, role) =>
+      postJSON(`/api/sessions/${encodeURIComponent(sessionId)}/role`, { role }),
 
     // ---- Cross-project tracker (tracker.db) ----
     // These are SEPARATE from the legacy markdown `tickets(projectId)` above.
@@ -234,6 +236,24 @@
     listIdeas: () => getJSON('/api/ideas'),
     createIdea: (body) => postJSON('/api/ideas', { body }),
     popIdea: (id) => postJSON(`/api/ideas/${encodeURIComponent(id)}/pop`, {}),
+    substrateStatus: (project) => getJSON(`/api/substrate/status${qs({ project })}`),
+    substrateConfig: () => getJSON('/api/substrate/config'),
+    updateSubstrateConfig: (body) => {
+      return fetch('/api/substrate/config', {
+        method: 'PUT',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify(body ?? {}),
+      }).then(async (r) => {
+        const json = await r.json().catch(() => null);
+        if (!r.ok) {
+          const err = new Error(`${r.status} ${r.statusText} /api/substrate/config`);
+          err.payload = json;
+          throw err;
+        }
+        return json;
+      });
+    },
+    syncSubstrate: (body) => postJSON('/api/substrate/sync', body),
     // Ticket links (WS5b). `from` is the ticket id the link hangs off of.
     addLink: (id, { to_ticket, type }) =>
       postJSON(`/api/tickets/${encodeURIComponent(id)}/links`, { to_ticket, type }),
