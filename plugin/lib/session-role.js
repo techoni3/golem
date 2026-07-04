@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 
 export const SESSION_ROLES = Object.freeze(['planner', 'builder', 'researcher', 'ui-tester']);
 export const SESSION_ROLE_UPDATED_BY = Object.freeze(['human:dashboard', 'human:cli', 'self:mcp']);
@@ -20,6 +21,41 @@ function golemHome() {
 
 export function sessionsJsonPath() {
   return path.join(golemHome(), 'sessions.json');
+}
+
+function channelsJsonPath() {
+  return path.join(golemHome(), 'channels.json');
+}
+
+function roleCardPath(role) {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    process.env.GOLEM_ROLES_DIR ? path.join(process.env.GOLEM_ROLES_DIR, `${role}.md`) : null,
+    path.join(here, '..', 'roles', `${role}.md`),
+    path.join(here, '..', 'plugin', 'roles', `${role}.md`),
+    path.join(here, '..', 'substrate', 'roles', `${role}.md`),
+  ].filter(Boolean);
+  for (const p of candidates) {
+    try { if (fs.statSync(p).isFile()) return p; } catch { /* ignore */ }
+  }
+  return null;
+}
+
+export function readRoleCard(role) {
+  const normalized = normalizeRole(role);
+  if (!normalized) return null;
+  const p = roleCardPath(normalized);
+  if (!p) return null;
+  try { return fs.readFileSync(p, 'utf8').trimEnd(); } catch { return null; }
+}
+
+export function roleChangeBrief(role, row = {}) {
+  const normalized = normalizeRole(role);
+  if (!normalized) return null;
+  const card = readRoleCard(normalized);
+  if (!card) return null;
+  const name = row.name || row.session_id || 'this session';
+  return `your role is now ${normalized}\n\n${card}\n\nRoster: ${name} is assigned role ${normalized}.`;
 }
 
 function readRegistry(file) {
@@ -123,6 +159,48 @@ export function setSessionRole(sessionId, role, { by } = {}) {
     appendRoleJournal(updated, nextRole, by, now);
     return updated;
   });
+}
+
+function pidAlive(pid) {
+  if (!pid || pid === 0) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err?.code === 'EPERM';
+  }
+}
+
+function readChannels() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(channelsJsonPath(), 'utf8'));
+    return Array.isArray(parsed?.channels) ? parsed.channels : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function pushRoleBriefDirect(sessionId, role, row = {}) {
+  const content = roleChangeBrief(role, { session_id: sessionId, ...row });
+  if (!sessionId || !content) return { ok: false, skipped: true };
+  const ch = readChannels().find((c) => c.session_id === sessionId && pidAlive(c.pid));
+  const baseUrl = ch?.url || (ch?.host && ch?.port ? `http://${ch.host}:${ch.port}` : null);
+  if (!baseUrl) return { ok: false, skipped: true };
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 1500);
+  try {
+    const resp = await fetch(`${baseUrl.replace(/\/$/, '')}/brief`, {
+      method: 'POST',
+      headers: { 'X-Sender': 'cli', 'Content-Type': 'text/plain' },
+      body: content,
+      signal: ctl.signal,
+    });
+    return { ok: resp.ok, status: resp.status, target: baseUrl };
+  } catch {
+    return { ok: false, skipped: true, target: baseUrl };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function validateSessionRole(role) {

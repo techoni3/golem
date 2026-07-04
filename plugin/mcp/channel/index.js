@@ -29,7 +29,7 @@ import {
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import * as tracker from './tracker-client.js';
-import { SESSION_ROLES, setSessionRole } from '../../lib/session-role.js';
+import { SESSION_ROLES, pushRoleBriefDirect, setSessionRole } from '../../lib/session-role.js';
 
 const VERSION = '0.1.0';
 // Port selection (multi-CEO safe by default):
@@ -731,6 +731,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
     try {
       const row = setSessionRole(SESSION_ID, role, { by: 'self:mcp' });
+      if (role) await pushRoleBriefDirect(SESSION_ID, role, row);
       return { content: [{ type: 'text', text: JSON.stringify({ ok: true, session_id: row.session_id, role: row.role }, null, 2) }] };
     } catch (err) {
       return { isError: true, content: [{ type: 'text', text: String(err?.message ?? err) }] };

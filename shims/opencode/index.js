@@ -318,14 +318,18 @@ function runHook(script, args, stdinObj) {
   }
 }
 
-// Run tracker-context.sh once and extract its additionalContext string (R2).
-// Synchronous, at plugin init only; failures degrade to no injection.
-function loadTrackerContext() {
+// Run tracker-context.sh and extract its additionalContext string. When a
+// session id is known, pass it both as --session and CC-shaped stdin so the
+// shared hook can append the role card for that session.
+function loadTrackerContext(sessionID = "", cwd = initCwdFallback()) {
   try {
-    const out = execFileSync("bash", [join(HOOKS_DIR, "tracker-context.sh")], {
+    const args = [join(HOOKS_DIR, "tracker-context.sh")];
+    if (sessionID) args.push("--session", sessionID);
+    const out = execFileSync("bash", args, {
       encoding: "utf8",
       timeout: 3000,
-      stdio: ["ignore", "pipe", "ignore"], // capture stdout only; never leak a broken script's stderr into the harness
+      input: JSON.stringify({ session_id: sessionID || "", cwd: cwd || initCwdFallback(), harness: "opencode" }),
+      stdio: ["pipe", "pipe", "ignore"], // capture stdout only; never leak a broken script's stderr into the harness
     });
     const parsed = JSON.parse(out);
     return parsed?.hookSpecificOutput?.additionalContext || null;
@@ -335,10 +339,20 @@ function loadTrackerContext() {
   }
 }
 
+let initialCwdForContext = process.cwd();
+function initCwdFallback() { return initialCwdForContext; }
+
 export default async (input) => {
   const initCwd = input?.directory || process.cwd();
+  initialCwdForContext = initCwd;
   const sessionDir = new Map(); // sessionID → directory (tool events carry no dir)
-  const trackerContext = loadTrackerContext();
+  const trackerContextCache = new Map();
+
+  const trackerContextFor = (sessionID, cwd) => {
+    const key = sessionID || "__base__";
+    if (!trackerContextCache.has(key)) trackerContextCache.set(key, loadTrackerContext(sessionID || "", cwd || dirFor(sessionID)));
+    return trackerContextCache.get(key);
+  };
 
   const dirFor = (sid) => sessionDir.get(sid) || initCwd;
   const base = (sessionID, cwd) => ({ session_id: sessionID || "", cwd: cwd || initCwd, harness: "opencode" });
@@ -373,6 +387,7 @@ export default async (input) => {
           if (info.parentID) return; // child/subagent session — journaled via the task tool, not as a top-level start
           if (info.directory) sessionDir.set(info.id, info.directory);
           currentSessionID = info.id || currentSessionID;
+          if (info.id) trackerContextCache.delete(info.id);
           const stdin = base(info.id, info.directory);
           runHook("session-register.sh", [], stdin);
           runHook("journal-route.sh", ["session-start"], stdin);
@@ -456,12 +471,21 @@ export default async (input) => {
       }
     },
 
-    "experimental.chat.system.transform": async (_inp, output) => {
+    "experimental.chat.system.transform": async (inp, output) => {
       try {
+        const sid = inp?.sessionID || inp?.session_id || inp?.session?.id || currentSessionID;
+        if (sid) currentSessionID = sid;
+        const trackerContext = trackerContextFor(sid, sid ? dirFor(sid) : initCwd);
         // Idempotent: opencode may init the plugin more than once per session,
         // so guard against injecting the same context twice.
-        if (trackerContext && Array.isArray(output?.system) && !output.system.includes(trackerContext)) {
-          output.system.push(trackerContext);
+        if (trackerContext && Array.isArray(output?.system)) {
+          const baseContext = trackerContextFor("", initCwd);
+          const alreadyHasBase = baseContext && output.system.includes(baseContext);
+          const roleOnly = alreadyHasBase && trackerContext !== baseContext && trackerContext.startsWith(baseContext)
+            ? trackerContext.slice(baseContext.length).trimStart()
+            : null;
+          const toInject = roleOnly || trackerContext;
+          if (toInject && !output.system.includes(toInject) && !output.system.includes(trackerContext)) output.system.push(toInject);
         }
       } catch (e) {
         logErr("system.transform", e);

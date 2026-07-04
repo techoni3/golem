@@ -18,7 +18,7 @@ import { applyGateVerdict } from './projects.js';
 import { listIdeas, createIdea, popIdea } from './ideas.js';
 import { initDispatchDrainer } from './dispatch-queue.js';
 import { golemHome, dashboardJsonPath } from '../../lib/golem-home.js';
-import { SESSION_ROLES, setSessionRole } from '../../lib/session-role.js';
+import { SESSION_ROLES, roleChangeBrief, setSessionRole } from '../../lib/session-role.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const WEB_ROOT = path.resolve(__dirname, '..', 'web');
@@ -899,6 +899,10 @@ async function main() {
       const row = setSessionRole(id, role, { by: 'human:dashboard' });
       const text = `session role ${role ?? 'cleared'} for ${row.name || id}`;
       chat.record('system', 'session_role', text, { session_id: id });
+      if (role) {
+        const brief = roleChangeBrief(role, row);
+        if (brief) pushBrief(brief, id).catch(() => {});
+      }
       if (typeof state.refreshNativeSessions === 'function') await state.refreshNativeSessions();
       broadcastWS({ type: 'native-sessions-update', native_sessions: enrichSessionRows(state.nativeSessions(), state.channels()), channels: state.channels() });
       return { ok: true, session: row };

@@ -90,6 +90,12 @@ entry).
   `experimental.chat.system.transform` hook rather than CC's `additionalContext`
   stdout. See `docs/opencode.md` for the P4 rendering that installs the shim.
 
+Role boot cards live in `substrate/roles/*.md` and render into both harness
+artifact sets. `tracker-context.sh` reads the current session id from CC-shaped
+stdin, `--session`, or `CLAUDE_CODE_SESSION_ID`; when `sessions.json` has a
+matching `role`, it appends that compact card plus one roster line to the normal
+tracker context. Role-less sessions receive only the base tracker context.
+
 Adapters MUST be non-blocking and fail-open: a slow or broken script can never
 stall or crash the harness session (the opencode shim shells out
 fire-and-forget and logs failures to `~/.golem/logs/opencode-shim.log`).
