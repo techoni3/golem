@@ -24,6 +24,13 @@ flowchart LR
   C -.proposed.-> D[one step, pain gone]
 ```
 
+## Context notes (orientation, not boundary)
+
+Optional for tiny fixes; expected for larger executable items. Use this for repo
+map excerpts, LSP/symbol hints, prior research, or likely files to inspect.
+Workers still verify from source and dig deeper whenever needed. Workers should
+comment when these notes are stale, misleading, or incomplete.
+
 ## Rabbit holes
 
 Where could this get stuck or balloon? List the two or three places you'd

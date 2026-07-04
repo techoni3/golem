@@ -30,6 +30,18 @@ tickets the brief/dispatch already points at instead of duplicating them.
 
 - Pick the next ticket; `ticket_update` it to `in_progress` (one in-progress per
   work-stream).
+- **Role-aware delegation preference** — before cross-session delegation, check
+  `sessions_dispatchable` for same-project teammates: role, status,
+  `pending_count`, and `current_in_progress_ticket`.
+- Prefer a live teammate with the matching role when the work is separable;
+  otherwise spawn the inline subagent that fits the work. Keep sensitive,
+  ambiguous, or tightly-coupled work local.
+- Typical handoffs: planner → researcher for web/codebase discovery; planner →
+  builder for implementation; builder → ui-tester for UI verification;
+  ui-tester files follow-up bug tickets with evidence.
+- Same-project only. Never reassign tickets away from `human` autonomously.
+  Delegated work of substance gets a child ticket so lineage is explicit and
+  duplicate work is avoided.
 - Spawn exactly ONE worker subagent (`model: opus`) for it. Prompt = the ticket id +
   its title/body + the names of relevant skills (e.g. test-policy, pr-conventions,
   verify-done, tracker).
