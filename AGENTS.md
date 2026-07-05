@@ -59,3 +59,4 @@ tracker, and long waits should use bus subscriptions (`ticket/<display_id>` or
 `spec/<display_id>/tree`) instead of polling. Via-manager verification is manual:
 the team API suggests a least-loaded explorer, but the manager dispatches and
 records the transition evidence.
+
