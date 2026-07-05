@@ -17,8 +17,9 @@ import { marked } from 'marked';
 import TurndownService from 'turndown';
 import { gfm as turndownGfm } from 'turndown-plugin-gfm';
 import { trackerDbPath } from '../../lib/golem-home.js';
+import { createCommentDispatchService, defaultDispatchStateForComment } from './comment-dispatch.js';
 
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 8;
 
 const KINDS = new Set(['work-item', 'decision', 'spec', 'question', 'fix']);
 const STATES = new Set(['todo', 'in_progress', 'blocked', 'review', 'done', 'archived']);
@@ -53,6 +54,14 @@ function serializeLabels(labels) {
     return JSON.stringify(parsed.length ? parsed : []);
   }
   return JSON.stringify(Array.isArray(labels) ? labels : []);
+}
+
+function normalizeWave(value, context = 'wave') {
+  if (value == null) return null;
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`${context}: wave must be a positive integer or null`);
+  }
+  return value;
 }
 
 /**
@@ -142,6 +151,7 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
         labels        TEXT NOT NULL DEFAULT '[]',
         stream_id     TEXT,
         parent_id     TEXT,
+        wave          INTEGER,
         assignee      TEXT,
         created_by    TEXT NOT NULL DEFAULT 'human',
         dispatched_to TEXT,
@@ -177,11 +187,27 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
         section_id  TEXT,
         tag         TEXT NOT NULL DEFAULT 'note',
         status      TEXT NOT NULL DEFAULT 'open',
+        dispatch_state TEXT NOT NULL DEFAULT 'undispatched',
         parent_id   TEXT,
         created_at  TEXT NOT NULL,
         updated_at  TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_comments_ticket ON comments(ticket_id);
+
+      CREATE TABLE IF NOT EXISTS comment_dispatches (
+        id           TEXT PRIMARY KEY,
+        comment_id   TEXT NOT NULL REFERENCES comments(id) ON DELETE CASCADE,
+        ticket_id    TEXT NOT NULL,
+        project_id   TEXT NOT NULL,
+        session_id   TEXT NOT NULL,
+        batch_id     TEXT,
+        status       TEXT NOT NULL DEFAULT 'pending',
+        created_at   TEXT NOT NULL,
+        delivered_at TEXT,
+        addressed_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_comment_dispatches_comment ON comment_dispatches(comment_id);
+      CREATE INDEX IF NOT EXISTS idx_comment_dispatches_pending ON comment_dispatches(status) WHERE status IN ('pending','delivered');
 
       CREATE TABLE IF NOT EXISTS streams (
         id          TEXT PRIMARY KEY,
@@ -387,6 +413,58 @@ WHERE state_changed_at IS NULL`).run();
       }
     }
 
+    // Schema migration v6 -> v7 (TKT-0642): per-comment dispatch state and
+    // per-attempt dispatch history for spec comment fan-out.
+    const commentCols7 = db.prepare("PRAGMA table_info(comments)").all().map((c) => c.name);
+    if (!commentCols7.includes('dispatch_state')) {
+      db.exec("ALTER TABLE comments ADD COLUMN dispatch_state TEXT NOT NULL DEFAULT 'undispatched'");
+    }
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS comment_dispatches (
+        id           TEXT PRIMARY KEY,
+        comment_id   TEXT NOT NULL REFERENCES comments(id) ON DELETE CASCADE,
+        ticket_id    TEXT NOT NULL,
+        project_id   TEXT NOT NULL,
+        session_id   TEXT NOT NULL,
+        batch_id     TEXT,
+        status       TEXT NOT NULL DEFAULT 'pending',
+        created_at   TEXT NOT NULL,
+        delivered_at TEXT,
+        addressed_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_comment_dispatches_comment ON comment_dispatches(comment_id);
+      CREATE INDEX IF NOT EXISTS idx_comment_dispatches_pending ON comment_dispatches(status) WHERE status IN ('pending','delivered');
+    `);
+    if (schemaVersion && Number(schemaVersion) < 7) {
+      db.prepare(`
+        UPDATE comments
+        SET dispatch_state = CASE
+          WHEN author IN ('human', 'you', 'human:dashboard') AND status = 'open' THEN 'undispatched'
+          ELSE 'n/a'
+        END
+      `).run();
+    }
+
+    // Schema migration v7 -> v8 (TKT-0643): dependency-wave metadata for
+    // spec fan-out tickets. NULL means the ticket is not wave-managed.
+    const ticketCols8 = db.prepare("PRAGMA table_info(tickets)").all().map((c) => c.name);
+    if (!ticketCols8.includes('wave')) {
+      db.exec('ALTER TABLE tickets ADD COLUMN wave INTEGER');
+    }
+    if (schemaVersion && Number(schemaVersion) < 8) {
+      db.prepare(`
+        UPDATE tickets
+        SET wave = CASE
+          WHEN title LIKE '[W1]%' THEN 1
+          WHEN title LIKE '[W2]%' THEN 2
+          WHEN title LIKE '[W3]%' THEN 3
+          ELSE wave
+        END
+        WHERE parent_id = 'TKT-0638'
+          AND (title LIKE '[W1]%' OR title LIKE '[W2]%' OR title LIKE '[W3]%')
+      `).run();
+    }
+
     // Indexes that depend on lifecycle columns. Idempotent: no-op on fresh
     // DBs (CREATE TABLE above already created them), first-time-create on
     // existing DBs (where the ALTER TABLE above just added the columns).
@@ -398,16 +476,17 @@ WHERE state_changed_at IS NULL`).run();
 
   // ---- prepared statements (built lazily after migrate) ----------------
   let stmts = null;
+  let commentDispatch = null;
   function prepare() {
     stmts = {
       insertTicket: db.prepare(`
         INSERT INTO tickets
           (id, seq, project_id, kind, title, body, state, priority, labels,
-           stream_id, parent_id, assignee, created_by, dispatched_to,
+           stream_id, parent_id, wave, assignee, created_by, dispatched_to,
            dispatched_at, source_ref, created_at, updated_at, pseq, display_id)
         VALUES
           (@id, @seq, @project_id, @kind, @title, @body, @state, @priority, @labels,
-           @stream_id, @parent_id, @assignee, @created_by, @dispatched_to,
+           @stream_id, @parent_id, @wave, @assignee, @created_by, @dispatched_to,
            @dispatched_at, @source_ref, @created_at, @updated_at, @pseq, @display_id)
       `),
       getTicket: db.prepare('SELECT * FROM tickets WHERE id = ?'),
@@ -415,10 +494,10 @@ WHERE state_changed_at IS NULL`).run();
       insertComment: db.prepare(`
         INSERT INTO comments
           (id, ticket_id, author, body, quote, prefix, suffix, section, section_id,
-           tag, status, parent_id, block_id, created_at, updated_at)
+           tag, status, dispatch_state, parent_id, block_id, created_at, updated_at)
         VALUES
           (@id, @ticket_id, @author, @body, @quote, @prefix, @suffix, @section, @section_id,
-           @tag, @status, @parent_id, @block_id, @created_at, @updated_at)
+            @tag, @status, @dispatch_state, @parent_id, @block_id, @created_at, @updated_at)
       `),
       touchTicket: db.prepare('UPDATE tickets SET updated_at = ? WHERE id = ?'),
       insertStream: db.prepare(`
@@ -684,6 +763,12 @@ WHERE state_changed_at IS NULL`).run();
     init() {
       migrate();
       prepare();
+      commentDispatch = createCommentDispatchService({
+        db,
+        now,
+        recordEvent,
+        actorFormsForSession: activeActorFormsForSession,
+      });
       return api;
     },
 
@@ -739,6 +824,7 @@ WHERE state_changed_at IS NULL`).run();
         labels = [],
         stream_id = null,
         parent_id = null,
+        wave = null,
         assignee = null,
         created_by = 'human',
         source_ref = null,
@@ -748,6 +834,7 @@ WHERE state_changed_at IS NULL`).run();
       if (!title) throw new Error('createTicket: title is required');
       if (!KINDS.has(kind)) throw new Error(`createTicket: invalid kind '${kind}'`);
       if (!STATES.has(state)) throw new Error(`createTicket: invalid state '${state}'`);
+      const normalizedWave = normalizeWave(wave, 'createTicket');
 
       const ts = now();
       const bodyMd = toMarkdownBody(body);
@@ -765,6 +852,7 @@ WHERE state_changed_at IS NULL`).run();
           labels: serializeLabels(labels),
           stream_id,
           parent_id,
+          wave: normalizedWave,
           assignee,
           created_by,
           dispatched_to: null,
@@ -807,7 +895,7 @@ WHERE state_changed_at IS NULL`).run();
       // but populating children is cheap and any ticket can have them. Ordered
       // by created_at so the spec's work items appear in creation order.
       const children = db.prepare(
-        "SELECT id, title, kind, state, assignee FROM tickets WHERE parent_id = ? ORDER BY created_at ASC, id ASC"
+        "SELECT id, display_id, title, body, kind, state, assignee, wave FROM tickets WHERE parent_id = ? ORDER BY created_at ASC, id ASC"
       ).all(id).map((c) => ({
         ...c,
         assignee_label: resolveAssigneeLabel(c.assignee),
@@ -998,7 +1086,7 @@ WHERE state_changed_at IS NULL`).run();
       if (!existing) throw new Error(`updateTicket: ticket '${id}' not found`);
 
       const actor = patch.actor ?? 'human';
-      const ALLOWED = ['title', 'body', 'kind', 'state', 'priority', 'labels', 'stream_id', 'parent_id', 'assignee'];
+      const ALLOWED = ['title', 'body', 'kind', 'state', 'priority', 'labels', 'stream_id', 'parent_id', 'wave', 'assignee'];
       const updates = {};
       for (const key of ALLOWED) {
         if (Object.prototype.hasOwnProperty.call(patch, key)) {
@@ -1016,6 +1104,9 @@ WHERE state_changed_at IS NULL`).run();
       }
       if ('body' in updates) {
         updates.body = toMarkdownBody(updates.body);
+      }
+      if ('wave' in updates) {
+        updates.wave = normalizeWave(updates.wave, 'updateTicket');
       }
 
       const ts = now();
@@ -1051,6 +1142,7 @@ WHERE state_changed_at IS NULL`).run();
             actor,
             data: { from: existing.state, to: updates.state },
           });
+          commentDispatch.markAddressedForTicketActivity(id, actor);
         }
         if ('assignee' in updates && updates.assignee !== existing.assignee) {
           recordEvent({
@@ -1128,6 +1220,7 @@ WHERE state_changed_at IS NULL`).run();
             actor,
             data: { from: existing.state, to: state, before_id, after_id, new_rank: newRank },
           });
+          commentDispatch.markAddressedForTicketActivity(id, actor);
         } else {
           recordEvent({
             ticket_id: id,
@@ -1321,6 +1414,29 @@ WHERE state_changed_at IS NULL`).run();
       return stmts.listPendingDispatches.all();
     },
 
+    waveGateForTicket(ticketId) {
+      const ticket = stmts.getTicket.get(ticketId);
+      if (!ticket) return { blocked: false, missing: true };
+      if (!ticket.parent_id || ticket.wave == null) {
+        return { blocked: false, ticket_id: ticket.id, parent_id: ticket.parent_id ?? null, wave: ticket.wave ?? null, min_open_wave: null };
+      }
+      const row = db.prepare(`
+        SELECT MIN(wave) AS min_open_wave
+        FROM tickets
+        WHERE parent_id = ?
+          AND wave IS NOT NULL
+          AND state NOT IN ('done', 'archived')
+      `).get(ticket.parent_id);
+      const minOpenWave = row?.min_open_wave ?? null;
+      return {
+        blocked: minOpenWave != null && ticket.wave > minOpenWave,
+        ticket_id: ticket.id,
+        parent_id: ticket.parent_id,
+        wave: ticket.wave,
+        min_open_wave: minOpenWave,
+      };
+    },
+
     listPendingDispatchesForSession(sessionId) {
       // TKT-0286: thin wrapper over the enriched listDispatchQueue so 0245's
       // REST (?session_id=) keeps working — rows now also carry ticket_title
@@ -1448,8 +1564,11 @@ WHERE state_changed_at IS NULL`).run();
         section_id: section_id ?? null,
         tag,
         status,
+        dispatch_state: defaultDispatchStateForComment({ author, status }),
         parent_id: parent_id ?? null,
-        block_id: block_id ?? null,
+        block_id: block_id ?? (parent_id
+          ? db.prepare('SELECT block_id FROM comments WHERE id = ? AND ticket_id = ?').get(parent_id, ticket_id)?.block_id ?? null
+          : null),
         created_at: ts,
         updated_at: ts,
       };
@@ -1463,9 +1582,43 @@ WHERE state_changed_at IS NULL`).run();
           actor: author,
           data: { comment_id: row.id },
         });
+        commentDispatch.markAddressedByComment(row);
         return row;
       });
       return txn();
+    },
+
+    enqueueCommentDispatch(comment, sessionId, batchId = null) {
+      return commentDispatch.enqueueDispatch(comment, sessionId, batchId);
+    },
+
+    enqueueCommentDispatchBatch(ticketId, sessionId) {
+      return commentDispatch.enqueueBatch(ticketId, sessionId);
+    },
+
+    markCommentAddressed(commentId, bySession) {
+      return commentDispatch.markAddressed(commentId, bySession);
+    },
+
+    listUndispatchedCommentsForSpec(ticketId) {
+      return commentDispatch.listUndispatchedForSpec(ticketId);
+    },
+
+    getComment(commentId) {
+      if (!commentId) return null;
+      return db.prepare('SELECT * FROM comments WHERE id = ?').get(commentId) ?? null;
+    },
+
+    recomputeCommentDispatchState(commentId) {
+      return commentDispatch.recomputeState(commentId);
+    },
+
+    recomputeAllCommentDispatchStates() {
+      return commentDispatch.recomputeAll();
+    },
+
+    markCommentDispatchesDeliveredForTicket(ticketId, sessionId) {
+      return commentDispatch.markDeliveredForTicket(ticketId, sessionId);
     },
 
     updateComment(ticket_id, comment_id, patch = {}) {

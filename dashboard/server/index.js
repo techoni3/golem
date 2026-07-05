@@ -20,7 +20,6 @@ import { initDispatchDrainer } from './dispatch-queue.js';
 import { registerSubstrateRoutes } from './substrate.js';
 import { golemHome, dashboardJsonPath, journalDirFor } from '../../lib/golem-home.js';
 import { SESSION_ROLES, listRoleCards, roleChangeBrief, setSessionRole, writeRoleCard } from '../../lib/session-role.js';
-import { generateRepoMap } from '../../lib/repomap.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const WEB_ROOT = path.resolve(__dirname, '..', 'web');
@@ -167,6 +166,77 @@ function reviveCommandFor(session) {
   ].filter(Boolean).join('\n');
 }
 
+function slugWords(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/`[^`]*`/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length >= 4)
+    .slice(0, 8);
+}
+
+function sectionBetween(body, startRe, endRe) {
+  const text = String(body || '');
+  const start = text.search(startRe);
+  if (start < 0) return '';
+  const after = text.slice(start);
+  const next = after.slice(1).search(endRe);
+  return next < 0 ? after : after.slice(0, next + 1);
+}
+
+function extractBehaviourItems(body) {
+  const section = sectionBetween(body, /^##\s+2\.\s*Behaviour\b/im, /^##\s+\d+\.\s+/m);
+  if (!section) return [];
+  const items = [];
+  for (const line of section.split('\n')) {
+    const h = line.match(/^###\s+(.+?)\s*$/);
+    if (h) { items.push(h[1].trim()); continue; }
+    const bullet = line.match(/^\s*[-*]\s+(.+?)\s*$/);
+    if (bullet && !/^\[[ xX]\]/.test(bullet[1])) items.push(bullet[1].trim());
+  }
+  return [...new Set(items.filter(Boolean))];
+}
+
+function extractOpenQuestions(body) {
+  const section = sectionBetween(body, /^##\s+5\.\s*Open questions\b/im, /^##\s+\d+\.\s+/m);
+  if (!section) return [];
+  const out = [];
+  for (const line of section.split('\n')) {
+    const bullet = line.match(/^\s*(?:[-*]|\d+\.)\s+(.+?)\s*$/);
+    if (bullet) out.push(bullet[1].trim());
+  }
+  return out.filter(Boolean);
+}
+
+function validateSpecFinalisation(ticket) {
+  if (!ticket) return { result: 'fail', notes: ['Ticket not found.'] };
+  if (ticket.kind !== 'spec') return { result: 'fail', notes: ['Finalisation validation only applies to spec tickets.'] };
+  const notes = [];
+  const behaviourItems = extractBehaviourItems(ticket.body);
+  const children = ticket.children || [];
+  if (behaviourItems.length === 0) {
+    notes.push('No `## 2. Behaviour` H3 headings or major bullets found.');
+  }
+  for (const item of behaviourItems) {
+    const words = slugWords(item);
+    const phrase = words.join(' ');
+    const matched = words.length > 0 && children.some((child) => {
+      const haystack = `${child.title || ''}\n${child.body || ''}`
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ');
+      return haystack.includes(phrase) || words.every((word) => haystack.includes(word));
+    });
+    if (!matched) notes.push(`Behaviour item has no matching child work item: ${item}`);
+  }
+  const openQuestions = extractOpenQuestions(ticket.body);
+  for (const q of openQuestions) {
+    if (!/deferred|answered|decision/i.test(q)) notes.push(`Open question is not answered or deferred: ${q}`);
+  }
+  if (notes.some((n) => /^No `## 2\. Behaviour`/.test(n))) return { result: 'fail', notes };
+  return { result: notes.length ? 'concerns' : 'pass', notes };
+}
 
 function firstClosingBriefLine(comment) {
   const text = String(comment?.body || '').replace(/<[^>]+>/g, ' ').trim();
@@ -313,6 +383,7 @@ async function main() {
   // here (it auto-inits / migrates). GOLEM_TRACKER_DB override flows through
   // openTrackerDb → defaultDbPath. Closed in shutdown() below.
   const tracker = openTrackerDb();
+  tracker.recomputeAllCommentDispatchStates();
 
   // Load the dashboard state (projects, plans, milestones, channels). State
   // init does an initial rediscover that consumes the tracker reference for
@@ -589,32 +660,6 @@ async function main() {
     return plan;
   });
 
-  fastify.post('/api/projects/:id/repo-map', async (req, reply) => {
-    // state.project() resolves by registry id OR contract project_id and
-    // returns the FULL record (with `path`). Do NOT fall back to
-    // state.projects() here — those are pathless summaries, and generateRepoMap
-    // with an undefined path silently maps process.cwd() (the golem root)
-    // instead of the requested project. See state.js project().
-    const p = state.project(req.params.id);
-    if (!p) return reply.code(404).send({ error: 'project_not_found' });
-    if (!p.path) return reply.code(500).send({ error: `project ${req.params.id} has no path on record` });
-    const body = req.body && typeof req.body === 'object' ? req.body : {};
-    try {
-      const focus = (Array.isArray(body.focus_files) && body.focus_files.length) || (Array.isArray(body.focus_symbols) && body.focus_symbols.length)
-        ? { files: body.focus_files || [], symbols: body.focus_symbols || [] }
-        : null;
-      const result = await generateRepoMap(p.path, {
-        force: body.force === true,
-        budget: body.budget,
-        focus,
-        version: 'dashboard',
-      });
-      return { ...result.meta, path: result.path };
-    } catch (err) {
-      return reply.code(500).send({ error: String(err?.message ?? err) });
-    }
-  });
-
   // TKT-0194: apply a human verdict to a gate (approve | deny | cancel).
   // Writes the new status to the gate file and returns the new state. The
   // dashboard refreshes the projects list (which re-reads gates on the
@@ -719,6 +764,7 @@ async function main() {
         labels: b.labels,
         stream_id: b.stream_id,
         parent_id: resolveTicketIdField(b.parent_id),
+        wave: b.wave,
         assignee: b.assignee,
         created_by: b.created_by,
       });
@@ -756,6 +802,12 @@ async function main() {
     } catch (err) {
       return reply.code(400).send({ error: String(err?.message ?? err) });
     }
+  });
+
+  fastify.post('/api/tickets/:id/validate-finalisation', async (req, reply) => {
+    const ticket = resolveTicketRef(req.params.id);
+    if (!ticket) return reply.code(404).send({ error: 'not_found' });
+    return validateSpecFinalisation(ticket);
   });
 
   // TKT-0105: POST /api/tickets/:id/move — atomic state + rank change used by
@@ -872,7 +924,10 @@ async function main() {
       });
       broadcastWS({ type: 'ticket-comment', ticket_id: id, comment });
       const ticket = tracker.getTicket(id);
-      if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
+      if (ticket) {
+        broadcastWS({ type: 'ticket-updated', ticket });
+        for (const c of ticket.comments || []) broadcastWS({ type: 'ticket-comment-updated', ticket_id: id, comment: c });
+      }
       return reply.code(201).send(publicComment(comment, ticketRef));
     } catch (err) {
       const msg = String(err?.message ?? err);
@@ -929,8 +984,116 @@ async function main() {
       });
       broadcastWS({ type: 'ticket-comment', ticket_id: id, comment });
       const ticket = tracker.getTicket(id);
-      if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
+      if (ticket) {
+        broadcastWS({ type: 'ticket-updated', ticket });
+        for (const c of ticket.comments || []) broadcastWS({ type: 'ticket-comment-updated', ticket_id: id, comment: c });
+      }
       return reply.code(201).send(publicComment(comment, ticketRef));
+    } catch (err) {
+      const msg = String(err?.message ?? err);
+      const code = /not found/i.test(msg) ? 404 : 400;
+      return reply.code(code).send({ error: msg });
+    }
+  });
+
+  function commentDispatchTarget(ticket, body = {}) {
+    const explicit = typeof body.session_id === 'string' && body.session_id.trim() ? body.session_id.trim() : null;
+    if (explicit) return explicit;
+    const assignee = typeof ticket?.assignee === 'string' && ticket.assignee.trim() ? ticket.assignee.trim() : null;
+    return assignee && assignee !== 'human' ? assignee : null;
+  }
+
+  function commentBrief(ticket, comments, { batchId = null } = {}) {
+    const list = Array.isArray(comments) ? comments : [comments];
+    const label = ticket?.display_id || ticket?.id;
+    const title = ticket?.title || ticket?.id || 'ticket';
+    const lines = [
+      `Comment dispatch for ${label}: ${title}`,
+      '',
+      'You have been sent human comment feedback on this spec. Re-read the ticket and address the dispatched comment(s).',
+      '',
+      batchId ? `Batch id: ${batchId}` : null,
+      `Ticket: ${label}`,
+      '',
+      ...list.flatMap((comment, idx) => [
+        `## Comment ${idx + 1}: ${comment.id}`,
+        comment.block_id ? `Block: ${comment.block_id}` : null,
+        comment.quote ? `Quote: ${comment.quote}` : null,
+        '',
+        comment.body || '',
+        '',
+      ]),
+      'Use the tracker ticket tools or dashboard to reply on the same anchored block/comment so the dispatch flips to addressed.',
+    ].filter((line) => line != null);
+    return lines.join('\n');
+  }
+
+  async function deliverCommentDispatch(ticket, comments, sessionId, { batchId = null } = {}) {
+    const brief = commentBrief(ticket, comments, { batchId });
+    let channelResult = null;
+    try {
+      channelResult = await pushBrief(brief, sessionId);
+    } catch (err) {
+      channelResult = { ok: false, error: String(err?.message ?? err) };
+    }
+    if (channelResult?.ok) {
+      chat.record('user', 'brief', brief, { session_id: sessionId });
+      tracker.markCommentDispatchesDeliveredForTicket(ticket.id, sessionId);
+    } else {
+      const detail = channelResult?.error || `status ${channelResult?.status ?? '?'}`;
+      chat.record('system', 'error', `comment dispatch of ${ticket.id} to ${sessionId} — channel ${detail}`);
+    }
+    const updated = tracker.getTicket(ticket.id);
+    if (updated) {
+      broadcastWS({ type: 'ticket-updated', ticket: updated });
+      for (const comment of updated.comments || []) {
+        broadcastWS({ type: 'ticket-comment-updated', ticket_id: updated.id, comment });
+      }
+    }
+    return { channel: channelResult, ticket: updated };
+  }
+
+  // POST /api/comments/:id/dispatch — enqueue and deliver one comment as a
+  // mini-brief to the spec's assigned session (or explicit fallback session_id).
+  fastify.post('/api/comments/:cid/dispatch', async (req, reply) => {
+    const cid = req.params.cid;
+    const b = req.body ?? {};
+    try {
+      const comment = tracker.getComment(cid);
+      if (!comment) return reply.code(404).send({ error: 'comment_not_found' });
+      const ticket = tracker.getTicket(comment.ticket_id);
+      if (!ticket) return reply.code(404).send({ error: 'ticket_not_found' });
+      if (ticket.kind !== 'spec') return reply.code(400).send({ error: 'comment dispatch is only available for spec tickets' });
+      const sessionId = commentDispatchTarget(ticket, b);
+      if (!sessionId) return reply.code(400).send({ error: 'session_id is required when the spec has no session assignee' });
+      const dispatch = tracker.enqueueCommentDispatch(comment, sessionId);
+      const delivered = await deliverCommentDispatch(ticket, comment, sessionId);
+      return { ok: true, dispatch, ...delivered };
+    } catch (err) {
+      const msg = String(err?.message ?? err);
+      const code = /not found/i.test(msg) ? 404 : 400;
+      return reply.code(code).send({ error: msg });
+    }
+  });
+
+  // POST /api/tickets/:id/comments/batch-dispatch — enqueue all undispatched
+  // comments on a spec using one shared batch_id and deliver one combined brief.
+  fastify.post('/api/tickets/:id/comments/batch-dispatch', async (req, reply) => {
+    const ticketRef = resolveTicketRef(req.params.id);
+    if (!ticketRef) return reply.code(404).send({ error: 'not_found' });
+    const id = ticketRef.id;
+    const b = req.body ?? {};
+    try {
+      const ticket = ticketRef;
+      if (!ticket) return reply.code(404).send({ error: 'not_found' });
+      if (ticket.kind !== 'spec') return reply.code(400).send({ error: 'comment dispatch is only available for spec tickets' });
+      const sessionId = commentDispatchTarget(ticket, b);
+      if (!sessionId) return reply.code(400).send({ error: 'session_id is required when the spec has no session assignee' });
+      const comments = tracker.listUndispatchedCommentsForSpec(id);
+      if (comments.length === 0) return { ok: true, batch_id: null, dispatches: [], ticket };
+      const batch = tracker.enqueueCommentDispatchBatch(id, sessionId);
+      const delivered = await deliverCommentDispatch(ticket, comments, sessionId, { batchId: batch.batch_id });
+      return { ok: true, ...batch, ...delivered };
     } catch (err) {
       const msg = String(err?.message ?? err);
       const code = /not found/i.test(msg) ? 404 : 400;
@@ -1026,7 +1189,11 @@ async function main() {
         channelResult = { ok: false, error: String(err?.message ?? err) };
       }
       if (channelResult?.ok) chat.record('user', 'brief', briefString, { session_id: sessionId });
-      tracker.markDispatchDeliveryAttempted(ticketRef.id, { session_id: sessionId, actor: 'human:revival', error: channelResult?.ok ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`) });
+      tracker.markDispatchDeliveryAttempted(ticketRef.id, {
+        session_id: sessionId,
+        actor: 'human:revival',
+        error: channelResult?.ok ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),
+      });
       const ticket = tracker.getTicket(ticketRef.id);
       broadcastWS({ type: 'ticket-updated', ticket });
       broadcastWS({ type: 'dispatch-queue-updated' });
@@ -1120,6 +1287,9 @@ async function main() {
       actor: 'human',
       error: channelResult && channelResult.ok ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),
     });
+    if (channelResult && channelResult.ok) {
+      tracker.markCommentDispatchesDeliveredForTicket(id, sessionId);
+    }
 
     const ticket = tracker.getTicket(id);
     broadcastWS({ type: 'ticket-updated', ticket });
