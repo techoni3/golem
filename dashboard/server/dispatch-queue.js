@@ -83,6 +83,30 @@ export function initDispatchDrainer({
     return changed;
   }
 
+  function eventLine(ev) {
+    const label = ev.topic || ev.ticket_id || ev.project_id || 'event';
+    const actor = ev.actor_label || ev.actor || ev.actor_kind || 'unknown';
+    return `- #${ev.id} ${label} ${ev.type} by ${actor} (${ev.created_at})`;
+  }
+
+  function digestBrief(sessionId, digests) {
+    const fromSeq = Math.min(...digests.map((d) => d.from_seq + 1));
+    const toSeq = Math.max(...digests.map((d) => d.to_seq));
+    const lines = [
+      `Event subscription digest (${fromSeq}-${toSeq})`,
+      '',
+      `Subscriber: ${sessionId}`,
+      '',
+    ];
+    for (const d of digests) {
+      lines.push(`## ${d.subscription.topic}`);
+      if (d.truncated) lines.push(`Backlog truncated: ${d.omitted} event(s) elided. Re-read the ticket/spec for full state.`);
+      for (const ev of d.events) lines.push(eventLine(ev));
+      lines.push('');
+    }
+    return lines.join('\n').trim();
+  }
+
   async function tick() {
     if (stopped) return;
     let pending;
@@ -93,10 +117,7 @@ export function initDispatchDrainer({
       return;
     }
     let queueChanged = checkUnackedDispatches();
-    if (!pending || pending.length === 0) {
-      if (queueChanged) broadcastWS({ type: 'dispatch-queue-updated' });
-      return;
-    }
+    pending = pending || [];
 
     const sessions = state.nativeSessions();
     // TKT-0369: sessions whose channel MCP is down are UNREACHABLE — treat
@@ -209,6 +230,7 @@ export function initDispatchDrainer({
             dispatchedMs > createdMs
           ) {
             tracker.cancelQueuedDispatch(row.id, { actor: 'golem-drainer' });
+            try { await pushBrief(`Dispatch revoked for ${ticket.display_id || ticket.id}: ${ticket.title || ''}\n\nReason: superseded before queued delivery. Stand down unless you receive a new dispatch.`, row.session_id); } catch { /* best-effort */ }
             queueChanged = true;
             const refreshed = tracker.getTicket(row.ticket_id);
             if (refreshed) broadcastWS({ type: 'ticket-updated', ticket: refreshed });
@@ -218,7 +240,10 @@ export function initDispatchDrainer({
 
         // Durable-first: setDispatched BEFORE pushBrief (crash between →
         // ticket assigned, not lost).
-        tracker.setDispatched(ticket.id, { session_id: sessionId, actor: 'golem-drainer' });
+        const assigned = tracker.setDispatched(ticket.id, { session_id: sessionId, actor: 'golem-drainer' });
+        if (assigned.revoked_session_id) {
+          try { await pushBrief(`Dispatch revoked for ${assigned.display_id || assigned.id}: ${assigned.title || ''}\n\nReason: queued dispatch delivered to another session. Stand down unless you receive a new dispatch.`, assigned.revoked_session_id); } catch { /* best-effort */ }
+        }
         const briefString = buildDispatchBrief(ticket, row.note);
 
         let pushResult;
@@ -257,9 +282,43 @@ export function initDispatchDrainer({
         console.error(`[dispatch-drainer] delivery for ${row.id} failed:`, err);
       }
     }
+    let digestChanged = false;
+    try {
+      const subsBySession = tracker.activeSubscriptionsBySession();
+      for (const [sessionId, subs] of subsBySession) {
+        const s = byId.get(sessionId);
+        if (!s || !s.alive || !channelIds.has(sessionId)) continue;
+        const last = lastDeliveredAt.get(sessionId);
+        if (last != null && now - last < COOLDOWN_MS) continue;
+        if (s.status !== 'idle') continue;
+        const digests = subs
+          .map((sub) => tracker.pendingEventsForSubscription(sub))
+          .filter((d) => d.to_seq > d.from_seq && (d.events.length > 0 || d.truncated));
+        if (!digests.length) continue;
+        const brief = digestBrief(sessionId, digests);
+        let pushResult;
+        try {
+          pushResult = await pushBrief(brief, sessionId);
+        } catch (err) {
+          pushResult = { ok: false, error: String(err?.message ?? err) };
+        }
+        if (!pushResult?.ok) {
+          const detail = pushResult?.error || `status ${pushResult?.status ?? '?'}`;
+          chat.record('system', 'error', `subscription digest to ${sessionId} failed — channel ${detail}`, { session_id: sessionId });
+          continue;
+        }
+        chat.record('user', 'brief', brief, { session_id: sessionId });
+        for (const d of digests) tracker.advanceSubscriptionCursor(d.subscription.id, d.from_seq, d.to_seq);
+        lastDeliveredAt.set(sessionId, Date.now());
+        digestChanged = true;
+      }
+    } catch (err) {
+      console.error('[dispatch-drainer] subscription digest failed:', err);
+    }
     // TKT-0286: one signal per tick if any queue row transitioned (deliver,
     // expire, or a drainer-internal cancel) — queue-aware surfaces refetch.
     if (queueChanged) broadcastWS({ type: 'dispatch-queue-updated' });
+    if (digestChanged) broadcastWS({ type: 'bus-subscriptions-updated' });
   }
 
   timer = setInterval(() => {

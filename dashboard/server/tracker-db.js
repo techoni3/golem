@@ -19,13 +19,16 @@ import { gfm as turndownGfm } from 'turndown-plugin-gfm';
 import { trackerDbPath } from '../../lib/golem-home.js';
 import { createCommentDispatchService, defaultDispatchStateForComment } from './comment-dispatch.js';
 
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 const KINDS = new Set(['work-item', 'decision', 'spec', 'question', 'fix']);
 const STATES = new Set(['todo', 'in_progress', 'blocked', 'review', 'done', 'archived']);
 const STREAM_MODES = new Set(['sequential', 'parallel']);
 const LINK_TYPES = new Set(['blocks', 'relates', 'duplicates']);
 const COMMENT_TAGS = new Set(['confirmed', 'partial', 'disputed', 'fix', 'risk', 'question', 'note']);
+const EVENT_CLASSES = new Set(['tracker', 'lifecycle', 'activity', 'custom']);
+const DEFAULT_SUBSCRIPTION_CLASSES = ['tracker', 'lifecycle', 'custom'];
+const SUBSCRIPTION_BACKLOG_CAP = 500;
 
 /** Default DB path: <golem home>/tracker.db, overridable by GOLEM_TRACKER_DB. */
 export function defaultDbPath() {
@@ -62,6 +65,41 @@ function normalizeWave(value, context = 'wave') {
     throw new Error(`${context}: wave must be a positive integer or null`);
   }
   return value;
+}
+
+function normalizeEventClass(value) {
+  const cls = String(value || 'tracker').trim() || 'tracker';
+  if (!EVENT_CLASSES.has(cls)) throw new Error(`event class must be one of ${[...EVENT_CLASSES].join(', ')}`);
+  return cls;
+}
+
+function normalizeClassFilter(value) {
+  if (value == null) return DEFAULT_SUBSCRIPTION_CLASSES;
+  const raw = Array.isArray(value) ? value : String(value).split(',');
+  const classes = [...new Set(raw.map((x) => String(x || '').trim()).filter(Boolean))];
+  for (const cls of classes) normalizeEventClass(cls);
+  return classes.length ? classes : DEFAULT_SUBSCRIPTION_CLASSES;
+}
+
+function serializeClasses(classes) {
+  return JSON.stringify(normalizeClassFilter(classes));
+}
+
+function parseClasses(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    return normalizeClassFilter(parsed);
+  } catch {
+    return normalizeClassFilter(raw);
+  }
+}
+
+function actorKind(actor) {
+  const a = String(actor || '').trim();
+  if (!a) return 'system';
+  if (a === 'system' || a.startsWith('system:') || a.startsWith('golem-') || a === 'golem-drainer') return 'system';
+  if (a === 'human' || a === 'you' || a.startsWith('human:') || a === 'unattributed') return 'human';
+  return 'session';
 }
 
 /**
@@ -231,13 +269,34 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
         ticket_id  TEXT,
         project_id TEXT,
+        topic      TEXT,
+        class      TEXT NOT NULL DEFAULT 'tracker',
         type       TEXT NOT NULL,
         actor      TEXT,
+        actor_kind TEXT NOT NULL DEFAULT 'system',
+        actor_label TEXT,
         data       TEXT NOT NULL DEFAULT '{}',
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_events_ticket  ON events(ticket_id);
       CREATE INDEX IF NOT EXISTS idx_events_project ON events(project_id);
+      CREATE INDEX IF NOT EXISTS idx_events_topic ON events(topic, id);
+      CREATE INDEX IF NOT EXISTS idx_events_class ON events(class, id);
+
+      CREATE TABLE IF NOT EXISTS subscriptions (
+        id             TEXT PRIMARY KEY,
+        session_id     TEXT NOT NULL,
+        topic          TEXT NOT NULL,
+        classes_filter TEXT NOT NULL DEFAULT '["tracker","lifecycle","custom"]',
+        status         TEXT NOT NULL DEFAULT 'active',
+        cursor_seq     INTEGER NOT NULL DEFAULT 0,
+        created_at     TEXT NOT NULL,
+        expires_at     TEXT,
+        reason         TEXT,
+        UNIQUE(session_id, topic)
+      );
+      CREATE INDEX IF NOT EXISTS idx_subscriptions_session ON subscriptions(session_id, status);
+      CREATE INDEX IF NOT EXISTS idx_subscriptions_topic ON subscriptions(topic, status);
 
       CREATE TABLE IF NOT EXISTS meta (
         key   TEXT PRIMARY KEY,
@@ -465,6 +524,53 @@ WHERE state_changed_at IS NULL`).run();
       `).run();
     }
 
+    // Schema migration v8 -> v9 (GOL-311): tracker events become the named bus
+    // with topic/class/actor metadata plus durable per-session subscriptions.
+    const eventCols9 = db.prepare('PRAGMA table_info(events)').all().map((c) => c.name);
+    for (const [col, def] of [
+      ['topic', 'TEXT'],
+      ['class', "TEXT NOT NULL DEFAULT 'tracker'"],
+      ['actor_kind', "TEXT NOT NULL DEFAULT 'system'"],
+      ['actor_label', 'TEXT'],
+    ]) {
+      if (!eventCols9.includes(col)) db.exec(`ALTER TABLE events ADD COLUMN ${col} ${def}`);
+    }
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_events_topic ON events(topic, id);
+      CREATE INDEX IF NOT EXISTS idx_events_class ON events(class, id);
+      CREATE TABLE IF NOT EXISTS subscriptions (
+        id             TEXT PRIMARY KEY,
+        session_id     TEXT NOT NULL,
+        topic          TEXT NOT NULL,
+        classes_filter TEXT NOT NULL DEFAULT '["tracker","lifecycle","custom"]',
+        status         TEXT NOT NULL DEFAULT 'active',
+        cursor_seq     INTEGER NOT NULL DEFAULT 0,
+        created_at     TEXT NOT NULL,
+        expires_at     TEXT,
+        reason         TEXT,
+        UNIQUE(session_id, topic)
+      );
+      CREATE INDEX IF NOT EXISTS idx_subscriptions_session ON subscriptions(session_id, status);
+      CREATE INDEX IF NOT EXISTS idx_subscriptions_topic ON subscriptions(topic, status);
+    `);
+    db.prepare(`
+      UPDATE events
+      SET class = COALESCE(class, 'tracker'),
+          actor_kind = CASE
+            WHEN actor IS NULL OR actor = '' THEN 'system'
+            WHEN actor = 'system' OR actor LIKE 'system:%' OR actor LIKE 'golem-%' THEN 'system'
+            WHEN actor = 'human' OR actor = 'you' OR actor LIKE 'human:%' OR actor = 'unattributed' THEN 'human'
+            ELSE 'session'
+          END,
+          actor_label = COALESCE(actor_label, actor),
+          topic = COALESCE(topic, (
+            SELECT 'ticket/' || COALESCE(t.display_id, t.id)
+            FROM tickets t
+            WHERE t.id = events.ticket_id
+          ))
+      WHERE topic IS NULL OR class IS NULL OR actor_kind IS NULL OR actor_label IS NULL
+    `).run();
+
     // Indexes that depend on lifecycle columns. Idempotent: no-op on fresh
     // DBs (CREATE TABLE above already created them), first-time-create on
     // existing DBs (where the ALTER TABLE above just added the columns).
@@ -510,9 +616,27 @@ WHERE state_changed_at IS NULL`).run();
       deleteLink: db.prepare('DELETE FROM links WHERE from_ticket = ? AND to_ticket = ? AND type = ?'),
       listLinks: db.prepare('SELECT * FROM links WHERE from_ticket = ? OR to_ticket = ? ORDER BY type ASC'),
       insertEvent: db.prepare(`
-        INSERT INTO events (ticket_id, project_id, type, actor, data, created_at)
-        VALUES (@ticket_id, @project_id, @type, @actor, @data, @created_at)
+        INSERT INTO events (ticket_id, project_id, topic, class, type, actor, actor_kind, actor_label, data, created_at)
+        VALUES (@ticket_id, @project_id, @topic, @class, @type, @actor, @actor_kind, @actor_label, @data, @created_at)
       `),
+      upsertSubscription: db.prepare(`
+        INSERT INTO subscriptions (id, session_id, topic, classes_filter, status, cursor_seq, created_at, expires_at, reason)
+        VALUES (@id, @session_id, @topic, @classes_filter, 'active', @cursor_seq, @created_at, @expires_at, @reason)
+        ON CONFLICT(session_id, topic) DO UPDATE SET
+          classes_filter = excluded.classes_filter,
+          status = 'active',
+          expires_at = excluded.expires_at,
+          reason = excluded.reason
+      `),
+      suspendSubscription: db.prepare(`
+        UPDATE subscriptions
+        SET status = 'suspended', reason = @reason
+        WHERE session_id = @session_id AND topic = @topic AND status = 'active'
+      `),
+      getSubscriptionById: db.prepare('SELECT * FROM subscriptions WHERE id = ?'),
+      listSubscriptions: db.prepare('SELECT * FROM subscriptions WHERE (@session_id IS NULL OR session_id = @session_id) ORDER BY created_at ASC, id ASC'),
+      listActiveSubscriptions: db.prepare("SELECT * FROM subscriptions WHERE status = 'active' ORDER BY created_at ASC, id ASC"),
+      advanceSubscriptionCursor: db.prepare("UPDATE subscriptions SET cursor_seq = @to_seq WHERE id = @id AND cursor_seq = @from_seq AND status = 'active'"),
       getMeta: db.prepare('SELECT value FROM meta WHERE key = ?'),
       setMeta: db.prepare('INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'),
       // TKT-0245: dispatch_queue prepared statements.
@@ -569,20 +693,62 @@ WHERE state_changed_at IS NULL`).run();
 
   // ---- internal helpers -------------------------------------------------
 
+  function ticketTopic(ticket) {
+    return ticket ? `ticket/${ticket.display_id || ticket.id}` : null;
+  }
+
+  function specTreeTopicForTicket(ticket) {
+    if (!ticket?.parent_id) return null;
+    const parent = stmts.getTicket.get(ticket.parent_id);
+    if (!parent || parent.kind !== 'spec') return null;
+    return `spec/${parent.display_id || parent.id}/tree`;
+  }
+
+  function actorLabel(actor, kind = actorKind(actor)) {
+    const a = String(actor || '').trim();
+    if (kind === 'session') return resolveAssigneeLabel(a) || a;
+    return a || kind;
+  }
+
+  function maxEventSeqForTopic(topic) {
+    if (!topic) return 0;
+    return Number(db.prepare('SELECT MAX(id) AS m FROM events WHERE topic = ?').get(topic)?.m ?? 0);
+  }
+
   // recordEvent — internal, also exported on the returned object. Persists one
-  // event row; `data` is JSON-serialized.
-  function recordEvent({ ticket_id = null, project_id = null, type, actor = null, data = {} } = {}) {
+  // bus row; `data` is JSON-serialized. Ticket-scoped tracker events default to
+  // `ticket/<display_id>` and child tickets mirror onto `spec/<parent>/tree` so
+  // managers/planners can subscribe to a whole spec tree without joins.
+  function recordEvent({ ticket_id = null, project_id = null, topic = null, class: eventClass = 'tracker', type, actor = null, actor_kind = null, actor_label = null, data = {} } = {}) {
     if (!type) throw new Error('recordEvent: type is required');
+    const cls = normalizeEventClass(eventClass);
+    const ticket = ticket_id ? stmts.getTicket.get(ticket_id) : null;
+    const derivedTopic = topic || ticketTopic(ticket);
+    const kind = actor_kind || actorKind(actor);
     const row = {
       ticket_id,
-      project_id,
+      project_id: project_id ?? ticket?.project_id ?? null,
+      topic: derivedTopic,
+      class: cls,
       type,
       actor,
+      actor_kind: kind,
+      actor_label: actor_label ?? actorLabel(actor, kind),
       data: typeof data === 'string' ? data : JSON.stringify(data ?? {}),
       created_at: now(),
     };
     const info = stmts.insertEvent.run(row);
-    return { id: Number(info.lastInsertRowid), ...row, data: safeParse(row.data) };
+    const out = { id: Number(info.lastInsertRowid), ...row, data: safeParse(row.data) };
+    const mirrorTopic = !topic && cls === 'tracker' ? specTreeTopicForTicket(ticket) : null;
+    if (mirrorTopic && mirrorTopic !== derivedTopic) {
+      const mirror = {
+        ...row,
+        topic: mirrorTopic,
+        data: JSON.stringify({ ...safeParse(row.data), mirrored_from_seq: out.id, mirrored_from_topic: derivedTopic }),
+      };
+      stmts.insertEvent.run(mirror);
+    }
+    return out;
   }
 
   function safeParse(s) {
@@ -623,6 +789,79 @@ WHERE state_changed_at IS NULL`).run();
         AND type IN ('dispatch_queued', 'dispatched', 'dispatch_delivery_attempted')
       LIMIT 1
     `).get({ ticket_id: ticketId, delivery_event_id: deliveryEventId });
+  }
+
+  function hydrateSubscription(row) {
+    return row ? { ...row, classes_filter: parseClasses(row.classes_filter) } : null;
+  }
+
+  function subscribeSession({ session_id, topic, classes = null, cursor_seq = null, expires_at = null, reason = null } = {}) {
+    if (!session_id) throw new Error('subscribe: session_id is required');
+    if (!topic) throw new Error('subscribe: topic is required');
+    const ts = now();
+    const row = {
+      id: crypto.randomUUID(),
+      session_id,
+      topic,
+      classes_filter: serializeClasses(classes),
+      cursor_seq: cursor_seq == null ? maxEventSeqForTopic(topic) : Math.max(0, Number(cursor_seq) || 0),
+      created_at: ts,
+      expires_at: expires_at ?? null,
+      reason: reason ?? null,
+    };
+    stmts.upsertSubscription.run(row);
+    const existing = db.prepare('SELECT * FROM subscriptions WHERE session_id = ? AND topic = ?').get(session_id, topic);
+    return hydrateSubscription(existing);
+  }
+
+  function autoSubscribe(sessionId, topic, reason) {
+    if (!sessionId || !topic || sessionId === 'human') return null;
+    return subscribeSession({ session_id: sessionId, topic, reason: reason || 'auto' });
+  }
+
+  function activeSubscriptionsBySession() {
+    const out = new Map();
+    for (const row of stmts.listActiveSubscriptions.all()) {
+      const sub = hydrateSubscription(row);
+      const arr = out.get(sub.session_id) ?? [];
+      arr.push(sub);
+      out.set(sub.session_id, arr);
+    }
+    return out;
+  }
+
+  function pendingEventsForSubscription(sub, cap = SUBSCRIPTION_BACKLOG_CAP) {
+    const classes = parseClasses(sub.classes_filter);
+    const placeholders = classes.map((_, i) => `@c${i}`).join(', ');
+    const params = { topic: sub.topic, cursor_seq: Number(sub.cursor_seq) || 0, limit: cap + 1 };
+    classes.forEach((cls, i) => { params[`c${i}`] = cls; });
+    const rows = db.prepare(`
+      SELECT * FROM events
+      WHERE topic = @topic
+        AND id > @cursor_seq
+        AND class IN (${placeholders})
+      ORDER BY id ASC
+      LIMIT @limit
+    `).all(params);
+    const maxRow = db.prepare(`
+      SELECT MAX(id) AS max_seq, COUNT(*) AS count
+      FROM events
+      WHERE topic = @topic
+        AND id > @cursor_seq
+        AND class IN (${placeholders})
+    `).get(params);
+    const count = Number(maxRow?.count ?? rows.length);
+    const maxSeq = Number(maxRow?.max_seq ?? sub.cursor_seq ?? 0);
+    const truncated = count > cap;
+    return {
+      subscription: sub,
+      events: rows.slice(0, cap).map((e) => ({ ...e, data: safeParse(e.data) })),
+      count,
+      truncated,
+      omitted: truncated ? Math.max(0, count - cap) : 0,
+      from_seq: Number(sub.cursor_seq) || 0,
+      to_seq: maxSeq,
+    };
   }
 
   function hasUnackedDismissal(ticketId, deliveryEventId) {
@@ -784,6 +1023,75 @@ WHERE state_changed_at IS NULL`).run();
 
     recordEvent,
 
+    subscribe({ session_id, topic, classes = null, cursor_seq = null, expires_at = null, reason = null } = {}) {
+      return subscribeSession({ session_id, topic, classes, cursor_seq, expires_at, reason });
+    },
+
+    unsubscribe({ session_id, topic, reason = 'unsubscribe' } = {}) {
+      if (!session_id) throw new Error('unsubscribe: session_id is required');
+      if (!topic) throw new Error('unsubscribe: topic is required');
+      const info = stmts.suspendSubscription.run({ session_id, topic, reason });
+      return { ok: true, removed: info.changes, session_id, topic };
+    },
+
+    listSubscriptions({ session_id = null } = {}) {
+      return stmts.listSubscriptions.all({ session_id }).map(hydrateSubscription);
+    },
+
+    activeSubscriptionsBySession,
+
+    pendingEventsForSubscription,
+
+    advanceSubscriptionCursor(id, fromSeq, toSeq) {
+      const info = stmts.advanceSubscriptionCursor.run({ id, from_seq: fromSeq, to_seq: toSeq });
+      return { advanced: info.changes };
+    },
+
+    busStats() {
+      const rows_per_class = db.prepare('SELECT class, COUNT(*) AS count FROM events GROUP BY class ORDER BY class ASC').all();
+      const oldest = db.prepare('SELECT MIN(id) AS oldest_seq, MIN(created_at) AS oldest_created_at FROM events').get();
+      const subscriptions_by_status = db.prepare('SELECT status, COUNT(*) AS count FROM subscriptions GROUP BY status ORDER BY status ASC').all();
+      return { rows_per_class, oldest_seq: oldest?.oldest_seq ?? null, oldest_created_at: oldest?.oldest_created_at ?? null, subscriptions_by_status };
+    },
+
+    pruneBus({ nowTs = now(), lifecycleDays = 30, activityDays = 7, activityProjectCap = 100000, actor = 'system:bus-prune' } = {}) {
+      const ts = nowTs;
+      const lifecycleCutoff = new Date(Date.parse(ts) - Number(lifecycleDays || 30) * 86400_000).toISOString();
+      const activityCutoff = new Date(Date.parse(ts) - Number(activityDays || 7) * 86400_000).toISOString();
+      const txn = db.transaction(() => {
+        const lifecycle = db.prepare("DELETE FROM events WHERE class = 'lifecycle' AND created_at < ?").run(lifecycleCutoff).changes;
+        let activityAge = db.prepare("DELETE FROM events WHERE class = 'activity' AND created_at < ?").run(activityCutoff).changes;
+        let activityCap = 0;
+        const projects = db.prepare("SELECT project_id, COUNT(*) AS n FROM events WHERE class = 'activity' GROUP BY project_id").all();
+        for (const p of projects) {
+          const over = Number(p.n) - Number(activityProjectCap || 100000);
+          if (over <= 0) continue;
+          activityCap += db.prepare(`
+            DELETE FROM events
+            WHERE id IN (
+              SELECT id FROM events
+              WHERE class = 'activity' AND project_id IS @project_id
+              ORDER BY id ASC
+              LIMIT @over
+            )
+          `).run({ project_id: p.project_id, over }).changes;
+        }
+        const deleted = lifecycle + activityAge + activityCap;
+        if (deleted > 0) {
+          recordEvent({
+            project_id: null,
+            topic: 'bus/prune',
+            class: 'lifecycle',
+            type: 'bus_pruned',
+            actor,
+            data: { lifecycle, activity_age: activityAge, activity_cap: activityCap, deleted },
+          });
+        }
+        return { deleted, lifecycle, activity_age: activityAge, activity_cap: activityCap };
+      });
+      return txn();
+    },
+
     // TKT-0266: persist a durable session-name label. Change-gated + 5-min
     // staleness gate so the 3s native-sessions refresh tick does NOT write a
     // row every tick for every session. Writes only when the label actually
@@ -871,6 +1179,9 @@ WHERE state_changed_at IS NULL`).run();
           actor: created_by,
           data: { kind, state, title },
         });
+        const topic = ticketTopic(row);
+        autoSubscribe(created_by, topic, 'ticket_creator');
+        autoSubscribe(assignee, topic, 'ticket_assignee');
         return row;
       });
       return hydrateTicket(txn());
@@ -1152,6 +1463,7 @@ WHERE state_changed_at IS NULL`).run();
             actor,
             data: { from: existing.assignee, to: updates.assignee },
           });
+          autoSubscribe(updates.assignee, ticketTopic(stmts.getTicket.get(id)), 'ticket_assignee');
         }
         return stmts.getTicket.get(id);
       });
@@ -1249,19 +1561,17 @@ WHERE state_changed_at IS NULL`).run();
         const update = db.prepare(
           "UPDATE tickets SET state = 'archived', archived_at = @ts, state_changed_at = @ts, updated_at = @ts WHERE id = @id"
         );
-        const record = db.prepare(
-          "INSERT INTO events(ticket_id, project_id, type, actor, data, created_at) VALUES (@ticket_id, @project_id, 'auto_archived', 'system', @data, @ts)"
-        );
         const updated = [];
         for (const { id } of rows) {
           const t = stmts.getTicket.get(id);
           if (!t) continue;
           update.run({ id, ts });
-          record.run({
+          recordEvent({
             ticket_id: id,
             project_id: t.project_id,
-            ts,
-            data: JSON.stringify({ from: 'done', to: 'archived', done_at: t.done_at }),
+            type: 'auto_archived',
+            actor: 'system',
+            data: { from: 'done', to: 'archived', done_at: t.done_at },
           });
           updated.push(id);
         }
@@ -1276,9 +1586,20 @@ WHERE state_changed_at IS NULL`).run();
       if (!session_id) throw new Error('setDispatched: session_id is required');
       const ts = now();
       const txn = db.transaction(() => {
+        const previous = existing.dispatched_to && existing.dispatched_to !== session_id ? existing.dispatched_to : null;
+        if (previous) {
+          recordEvent({
+            ticket_id: id,
+            project_id: existing.project_id,
+            type: 'dispatch_revoked',
+            actor,
+            data: { previous_session_id: previous, next_session_id: session_id, reason: 'redispatched' },
+          });
+        }
         db.prepare(
           'UPDATE tickets SET assignee = @s, dispatched_to = @s, dispatched_at = @ts, updated_at = @ts WHERE id = @id',
         ).run({ s: session_id, ts, id });
+        const updated = stmts.getTicket.get(id);
         recordEvent({
           ticket_id: id,
           project_id: existing.project_id,
@@ -1286,9 +1607,16 @@ WHERE state_changed_at IS NULL`).run();
           actor,
           data: { session_id },
         });
-        return stmts.getTicket.get(id);
+        const topic = ticketTopic(updated);
+        autoSubscribe(actor, topic, 'ticket_dispatcher');
+        autoSubscribe(session_id, topic, 'ticket_assignee');
+        if (updated.kind === 'spec') autoSubscribe(session_id, `spec/${updated.display_id || updated.id}/tree`, 'spec_tree_dispatch_target');
+        return { row: updated, revoked_session_id: previous };
       });
-      return hydrateTicket(txn());
+      const result = txn();
+      const ticket = hydrateTicket(result.row);
+      if (result.revoked_session_id) ticket.revoked_session_id = result.revoked_session_id;
+      return ticket;
     },
 
     // TKT-0245: asynchronous dispatch queue. The queue lives in SQLite so it
@@ -1325,6 +1653,9 @@ WHERE state_changed_at IS NULL`).run();
           actor,
           data: { session_id, queue_id: queueId },
         });
+        autoSubscribe(actor, ticketTopic(existing), 'ticket_dispatcher');
+        autoSubscribe(session_id, ticketTopic(existing), 'ticket_assignee');
+        if (existing.kind === 'spec') autoSubscribe(session_id, `spec/${existing.display_id || existing.id}/tree`, 'spec_tree_dispatch_target');
         return stmts.getQueueRow.get(queueId);
       });
       return txn();
@@ -1345,6 +1676,13 @@ WHERE state_changed_at IS NULL`).run();
           type: 'dispatch_cancelled',
           actor,
           data: { queue_id: queueId, session_id: row.session_id },
+        });
+        recordEvent({
+          ticket_id: row.ticket_id,
+          project_id: row.project_id,
+          type: 'dispatch_revoked',
+          actor,
+          data: { queue_id: queueId, previous_session_id: row.session_id, reason: 'queue_cancelled' },
         });
         return stmts.getQueueRow.get(queueId);
       });

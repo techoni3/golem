@@ -331,3 +331,15 @@ export function postBrief(sessionId, text) {
   if (!sessionId) throw new Error('postBrief: sessionId is required');
   return request('POST', '/api/brief', { body: { session_id: sessionId, text } });
 }
+
+export function subscribeBus({ session_id, topic, classes } = {}) {
+  return request('POST', '/api/bus/subscribe', { body: { session_id, topic, classes } });
+}
+
+export function unsubscribeBus({ session_id, topic } = {}) {
+  return request('POST', '/api/bus/unsubscribe', { body: { session_id, topic } });
+}
+
+export function listBusSubscriptions(session_id) {
+  return request('GET', '/api/bus/subscriptions', { params: session_id ? { session_id } : {} });
+}

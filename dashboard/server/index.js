@@ -1158,6 +1158,21 @@ async function main() {
     }
   });
 
+  async function pushDispatchRevoked(ticket, previousSessionId, reason = 'dispatch revoked') {
+    if (!ticket || !previousSessionId) return null;
+    const label = ticket.display_id || ticket.id;
+    const body = `Dispatch revoked for ${label}: ${ticket.title || ''}\n\nReason: ${reason}\n\nStand down unless you receive a new dispatch.`;
+    let result = null;
+    try {
+      result = await pushBrief(body, previousSessionId);
+    } catch (err) {
+      result = { ok: false, error: String(err?.message ?? err) };
+    }
+    if (result?.ok) chat.record('system', 'dispatch_revoked', body, { session_id: previousSessionId, ticket_id: ticket.id });
+    else chat.record('system', 'error', `dispatch_revoked for ${label} to ${previousSessionId} not delivered — ${result?.error || result?.status || 'unknown error'}`);
+    return result;
+  }
+
   fastify.get('/api/tickets/:id/revival', async (req, reply) => {
     const ticketRef = resolveTicketRef(req.params.id);
     if (!ticketRef) return reply.code(404).send({ error: 'not_found' });
@@ -1177,8 +1192,12 @@ async function main() {
     const hasChannel = state.channels().some((c) => c.session_id === sessionId);
     if (!live || !live.alive || !hasChannel) return reply.code(400).send({ error: 'target session is not live/reachable' });
     try {
-      if (revival.pending_dispatch?.id) tracker.cancelQueuedDispatch(revival.pending_dispatch.id, { actor: 'human:revival' });
-      tracker.setDispatched(ticketRef.id, { session_id: sessionId, actor: 'human:revival' });
+      if (revival.pending_dispatch?.id) {
+        const cancelled = tracker.cancelQueuedDispatch(revival.pending_dispatch.id, { actor: 'human:revival' });
+        await pushDispatchRevoked(ticketRef, cancelled.session_id, 'revival redispatch cancelled queued dispatch');
+      }
+      const assigned = tracker.setDispatched(ticketRef.id, { session_id: sessionId, actor: 'human:revival' });
+      if (assigned.revoked_session_id) await pushDispatchRevoked(assigned, assigned.revoked_session_id, 'redispatched during revival');
       const updated = tracker.getTicket(ticketRef.id);
       const note = typeof b.note === 'string' && b.note.trim() ? b.note.trim() : 'Revival re-dispatch from dead-session warning.';
       const briefString = buildDispatchBrief(updated, note);
@@ -1260,7 +1279,8 @@ async function main() {
     }
 
     // 1) Durable write — assign + record the dispatched event. Source of truth.
-    tracker.setDispatched(id, { session_id: sessionId, actor: 'human' });
+    const assigned = tracker.setDispatched(id, { session_id: sessionId, actor: 'human' });
+    if (assigned.revoked_session_id) await pushDispatchRevoked(assigned, assigned.revoked_session_id, 'redispatched');
 
     // 2) Build a clear, self-contained brief so the receiving session knows
     //    exactly what it's been handed and how to pick it up. The tracker MCP
@@ -1327,6 +1347,7 @@ async function main() {
     try {
       const row = tracker.cancelQueuedDispatch(qid, { actor: 'human' });
       const ticket = tracker.getTicket(row.ticket_id);
+      await pushDispatchRevoked(ticket, row.session_id, 'queued dispatch cancelled');
       if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
       // TKT-0286: signal queue-aware surfaces to refetch (the row is gone).
       broadcastWS({ type: 'dispatch-queue-updated' });
@@ -1335,6 +1356,52 @@ async function main() {
       const msg = String(err?.message ?? err);
       if (/not found|not pending/i.test(msg)) return reply.code(404).send({ error: msg });
       return reply.code(400).send({ error: msg });
+    }
+  });
+
+  fastify.post('/api/bus/subscribe', async (req, reply) => {
+    const b = req.body ?? {};
+    try {
+      const sub = tracker.subscribe({
+        session_id: b.session_id,
+        topic: b.topic,
+        classes: b.classes,
+        cursor_seq: b.cursor_seq,
+        expires_at: b.expires_at,
+        reason: b.reason || 'manual',
+      });
+      broadcastWS({ type: 'bus-subscriptions-updated' });
+      return reply.code(201).send(sub);
+    } catch (err) {
+      return reply.code(400).send({ error: String(err?.message ?? err) });
+    }
+  });
+
+  fastify.post('/api/bus/unsubscribe', async (req, reply) => {
+    const b = req.body ?? {};
+    try {
+      const result = tracker.unsubscribe({ session_id: b.session_id, topic: b.topic, reason: b.reason || 'manual' });
+      broadcastWS({ type: 'bus-subscriptions-updated' });
+      return result;
+    } catch (err) {
+      return reply.code(400).send({ error: String(err?.message ?? err) });
+    }
+  });
+
+  fastify.get('/api/bus/subscriptions', async (req) => {
+    const sessionId = typeof req.query?.session_id === 'string' ? req.query.session_id : null;
+    return tracker.listSubscriptions({ session_id: sessionId });
+  });
+
+  fastify.get('/api/bus/stats', async () => tracker.busStats());
+
+  fastify.post('/api/bus/prune', async (req, reply) => {
+    try {
+      const result = tracker.pruneBus(req.body ?? {});
+      broadcastWS({ type: 'bus-pruned', result });
+      return result;
+    } catch (err) {
+      return reply.code(400).send({ error: String(err?.message ?? err) });
     }
   });
 

@@ -646,6 +646,35 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
 
+    {
+      name: 'subscribe',
+      description: 'Subscribe this session to a named golem event-bus topic such as ticket/GOL-311 or spec/GOL-306/tree. Classes default to tracker,lifecycle,custom; include activity explicitly for the firehose.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          topic: { type: 'string', description: 'Exact topic to subscribe to, e.g. ticket/GOL-311 or spec/GOL-306/tree.' },
+          classes: { type: 'array', items: { type: 'string' }, description: 'Optional event classes: tracker, lifecycle, activity, custom.' },
+        },
+        required: ['topic'],
+      },
+    },
+    {
+      name: 'unsubscribe',
+      description: 'Unsubscribe this session from a named golem event-bus topic.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          topic: { type: 'string', description: 'Exact topic to unsubscribe from.' },
+        },
+        required: ['topic'],
+      },
+    },
+    {
+      name: 'subscriptions_list',
+      description: 'List this session\'s golem event-bus subscriptions and cursors.',
+      inputSchema: { type: 'object', properties: {} },
+    },
+
     // --- Session-to-session notification -----------------------------------
     {
       name: 'session_notify',
@@ -843,6 +872,26 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       return { content: [{ type: 'text', text: JSON.stringify({ ok: true, to: target.label || target.name || target.session_id, session_id: target.session_id, delivery }, null, 2) }] };
     } catch (err) {
       return { isError: true, content: [{ type: 'text', text: `session_notify: delivery failed — ${err instanceof Error ? err.message : String(err)}` }] };
+    }
+  }
+
+  if (name === 'subscribe' || name === 'unsubscribe' || name === 'subscriptions_list') {
+    if (!SESSION_ID) return { isError: true, content: [{ type: 'text', text: `${name}: no current session id` }] };
+    try {
+      if (name === 'subscribe') {
+        if (!args.topic) throw new Error('subscribe: topic is required');
+        const out = await tracker.subscribeBus({ session_id: SESSION_ID, topic: String(args.topic), classes: args.classes });
+        return { content: [{ type: 'text', text: JSON.stringify(out, null, 2) }] };
+      }
+      if (name === 'unsubscribe') {
+        if (!args.topic) throw new Error('unsubscribe: topic is required');
+        const out = await tracker.unsubscribeBus({ session_id: SESSION_ID, topic: String(args.topic) });
+        return { content: [{ type: 'text', text: JSON.stringify(out, null, 2) }] };
+      }
+      const out = await tracker.listBusSubscriptions(SESSION_ID);
+      return { content: [{ type: 'text', text: JSON.stringify(out, null, 2) }] };
+    } catch (err) {
+      return { isError: true, content: [{ type: 'text', text: err instanceof Error ? err.message : String(err) }] };
     }
   }
 
