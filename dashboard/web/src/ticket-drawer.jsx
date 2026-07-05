@@ -48,6 +48,7 @@ const TD_STATE_PILL = {
   done: 'done',
   archived: 'done',
 };
+const TD_TERMINAL_STATES = new Set(['done', 'archived']);
 
 
 function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
@@ -787,6 +788,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                 <SpecChildrenPanel
                   specId={ticket.id}
                   projectContractId={ticket.project_id}
+                  seedChildren={ticket.children || []}
                   resolveAssignee={resolveActor}
                 />
               )}
@@ -823,6 +825,10 @@ function tdAgo(iso) {
   return window.SubstrateFmt?.fmtTimeAgo?.(t) || '';
 }
 
+function tdTicketRef(t) {
+  return t?.display_id || t?.id || '';
+}
+
 // TKT-0284: spec → work-items panel. Renders the spec's children (work items
 // with parent_id = this spec) as a clickable list, aligned to the 1200px
 // document column like .td-props. Children are read LIVE from the store on
@@ -831,18 +837,38 @@ function tdAgo(iso) {
 // parent ticket-updated, so the server's ticket.children would go stale
 // without a re-fetch). "+ Work item" opens the composer with Kind=work-item
 // + Parent=this spec (Router.openComposer presets).
-function SpecChildrenPanel({ specId, projectContractId, resolveAssignee }) {
+function SpecChildrenPanel({ specId, projectContractId, seedChildren = [], resolveAssignee }) {
   useStore();
   // No memo: the store Map mutates in place on upsert (applyTicketCreated /
   // applyTicketUpdated do .set on the same Map ref), so a useMemo keyed on the
   // Map would not recompute. Recompute on every render instead — cheap at v1
   // spec volume, and useStore guarantees a re-render on every store change.
   const all = window.Store.getState().trackerTickets;
-  const children = [];
-  for (const t of all.values()) {
-    if (t.parent_id === specId) children.push(t);
+  const byId = new Map();
+  for (const t of seedChildren) {
+    if (t?.id) byId.set(t.id, t);
   }
+  for (const t of all.values()) {
+    if (t.parent_id === specId) byId.set(t.id, { ...(byId.get(t.id) || {}), ...t });
+  }
+  const children = [...byId.values()];
   children.sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
+  const currentWave = children
+    .filter((c) => c.wave != null && !TD_TERMINAL_STATES.has(c.state))
+    .reduce((min, c) => Math.min(min, Number(c.wave)), Infinity);
+  const byWave = new Map();
+  const unwaved = [];
+  for (const child of children) {
+    if (child.wave == null) { unwaved.push(child); continue; }
+    const wave = Number(child.wave);
+    const list = byWave.get(wave) || [];
+    list.push(child);
+    byWave.set(wave, list);
+  }
+  const groups = [...byWave.keys()]
+    .sort((a, b) => a - b)
+    .map((wave) => ({ key: `wave-${wave}`, label: `Wave ${wave}`, wave, children: byWave.get(wave) }));
+  if (unwaved.length) groups.push({ key: 'unwaved', label: 'Unwaved', wave: null, children: unwaved });
   const onNewWorkItem = () => {
     window.Router.openComposer(projectContractId, { kind: 'work-item', parent: specId });
   };
@@ -858,19 +884,31 @@ function SpecChildrenPanel({ specId, projectContractId, resolveAssignee }) {
         <div className="td-children-empty">No work items yet — they'll emerge as sections lock in.</div>
       ) : (
         <div className="td-children-list">
-          {children.map((c) => (
-            <a key={c.id}
-              className="td-child-row"
-              href={window.Router.buildHref({ kind: 'ticket', id: c.id })}
-              onClick={(e) => { e.preventDefault(); window.Router.openTicket(c.id); }}
-              title={c.title}
-            >
-              <span className="td-child-id mono">{c.id}</span>
-              <span className="td-child-title">{c.title}</span>
-              <span className={`pill ${TD_STATE_PILL[c.state] || 'idle'}`}>{c.state}</span>
-              <span className="td-child-assignee">{resolveAssignee(c.assignee, c.assignee_label)}</span>
-            </a>
-          ))}
+          {groups.map((group) => {
+            const isCurrent = group.wave != null && group.wave === currentWave;
+            return (
+              <div key={group.key} className="td-child-wave" style={{ display: 'grid', gap: 6 }}>
+                <div className="td-child-wave-head" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 10, background: isCurrent ? 'color-mix(in oklab, var(--accent) 12%, transparent)' : 'rgba(255,255,255,.025)', border: isCurrent ? '1px solid color-mix(in oklab, var(--accent) 34%, transparent)' : '1px solid var(--line)' }}>
+                  <span className="mono" style={{ fontSize: 11, fontWeight: 700 }}>{group.label}</span>
+                  <span className="pill">{group.children.length}</span>
+                  {isCurrent && <span className="pill active">current open wave</span>}
+                </div>
+                {group.children.map((c) => (
+                  <a key={c.id}
+                    className="td-child-row"
+                    href={window.Router.buildHref({ kind: 'ticket', id: tdTicketRef(c) })}
+                    onClick={(e) => { e.preventDefault(); window.Router.openTicket(tdTicketRef(c)); }}
+                    title={c.title}
+                  >
+                    <span className="td-child-id mono">{tdTicketRef(c)}</span>
+                    <span className="td-child-title">{c.title}</span>
+                    <span className={`pill ${TD_STATE_PILL[c.state] || 'idle'}`}>{c.state}</span>
+                    <span className="td-child-assignee">{resolveAssignee(c.assignee, c.assignee_label)}</span>
+                  </a>
+                ))}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

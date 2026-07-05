@@ -1,6 +1,7 @@
 // Work-streams panel (WS6) — renders a project's streams, each grouping its
-// member tickets into sequential or parallel work. Mounted inside project-view
-// as a "Streams" section above the per-project tracker board.
+// member tickets into sequential or parallel work. Human-facing mounts keep it
+// tucked behind an "Internal sequencing" disclosure; MCP/agent stream APIs are
+// unchanged.
 //
 // A stream is `{id, project_id, name, mode:'sequential'|'parallel', description,
 // created_at, updated_at}`. Member tickets are the project's tracker tickets
@@ -45,15 +46,16 @@ function StreamsPanel({ contractId }) {
     String(a.created_at || '').localeCompare(String(b.created_at || '')));
 
   return (
-    <div className="pv-section pv-streams">
-      <div className="pv-section-head">
-        <span className="pv-section-title">Streams</span>
+    <details className="pv-section pv-streams" data-internal-sequencing>
+      <summary className="pv-section-head" style={{ cursor: 'pointer' }}>
+        <span className="pv-section-title">Internal sequencing</span>
         <span className="pv-section-count tnum">{streams.length}</span>
-        <div className="pv-streams-tools">
-          <button className="orch-btn small" onClick={() => setAdding((a) => !a)}>
-            {adding ? 'Cancel' : '+ New stream'}
-          </button>
-        </div>
+        <span className="pv-quiet-line" style={{ margin: 0 }}>agent/MCP stream controls</span>
+      </summary>
+      <div className="pv-streams-tools" style={{ marginTop: 10 }}>
+        <button className="orch-btn small" onClick={() => setAdding((a) => !a)}>
+          {adding ? 'Cancel' : '+ New stream'}
+        </button>
       </div>
 
       {adding && (
@@ -79,7 +81,7 @@ function StreamsPanel({ contractId }) {
           ))}
         </div>
       )}
-    </div>
+    </details>
   );
 }
 
