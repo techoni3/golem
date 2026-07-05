@@ -20,10 +20,12 @@
 //   (c) ~/.golem/sessions.json — written by golem hooks/shims for Claude Code
 //       and non-CC harnesses. Claude Code rows here carry hook_ppid (the hook's
 //       shell), not the session pid, so they use a short recency window rather
-//       than pid-liveness. Non-CC harnesses use the same recency rule.
+//       than pid-liveness. opencode rows are joined to opencode-bridges.json and
+//       use the owning opencode server pid as the liveness truth.
 //
 // Liveness is source-specific: the CLI list is authoritative, ~/.claude files
-// use pid liveness (process.kill(pid,0)), and golem-registry rows use recency.
+// use pid liveness (process.kill(pid,0)), golem-registry Claude Code rows use
+// recency, and opencode rows use bridge pid liveness.
 // Registry files can linger after death; stale files must not be resurrected by
 // pid reuse.
 //
@@ -38,10 +40,12 @@ import {
   projectIdFor,
   resolveProjectRoot,
 } from './project-id.js';
-import { sessionsJsonPath } from '../../lib/golem-home.js';
+import { channelsJsonPath, golemHome, sessionsJsonPath } from '../../lib/golem-home.js';
 
 const HOME = os.homedir();
 const SESSIONS_DIR = path.join(HOME, '.claude', 'sessions');
+const OPENCODE_BRIDGES_REGISTRY = path.join(golemHome(), 'opencode-bridges.json');
+const CHANNELS_REGISTRY = channelsJsonPath();
 
 // Non-CC harness sessions (opencode, TKT-0577) self-register into
 // ~/.golem/sessions.json but have no `claude agents` row, no ~/.claude/sessions
@@ -168,9 +172,54 @@ function normalizeGolemRegistry(row) {
     role: row.role ?? null,
     role_updated_at: row.role_updated_at ?? null,
     role_updated_by: row.role_updated_by ?? null,
+    ended_at: msFromIso(row.ended_at),
     source: 'native',
     _from: 'golem',
   };
+}
+
+async function readOpencodeBridges() {
+  let raw;
+  try {
+    raw = await fs.readFile(OPENCODE_BRIDGES_REGISTRY, 'utf8');
+  } catch {
+    return new Map();
+  }
+  let json;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    return new Map();
+  }
+  const rows = Array.isArray(json?.bridges) ? json.bridges : [];
+  const bySession = new Map();
+  for (const b of rows) {
+    if (!b?.session_id) continue;
+    const bridgePid = Number(b.opencode_pid || b.pid) || null;
+    if (!pidAlive(bridgePid)) continue;
+    const prev = bySession.get(b.session_id);
+    const bt = Date.parse(b.updated_at || b.started_at || 0) || 0;
+    const pt = prev ? (Date.parse(prev.updated_at || prev.started_at || 0) || 0) : -1;
+    if (!prev || bt > pt) bySession.set(b.session_id, b);
+  }
+  return bySession;
+}
+
+async function readLiveChannelSessionIds() {
+  let raw;
+  try {
+    raw = await fs.readFile(CHANNELS_REGISTRY, 'utf8');
+  } catch {
+    return new Set();
+  }
+  let json;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    return new Set();
+  }
+  const rows = Array.isArray(json?.channels) ? json.channels : [];
+  return new Set(rows.filter((c) => c?.session_id && pidAlive(Number(c.pid) || null)).map((c) => c.session_id));
 }
 
 // Read ~/.golem/sessions.json (the golem session registry written by
@@ -256,6 +305,30 @@ function mergeSources(cliRows, registryRows, golemRows = []) {
   return [...byKey.values()];
 }
 
+function dropTransientClaudeGolemRows(golemRows, nativeRows) {
+  const nativeByPid = new Map();
+  const nativeIds = new Set();
+  for (const r of nativeRows) {
+    if (r.session_id) nativeIds.add(r.session_id);
+    if (r.pid && r.session_id) nativeByPid.set(Number(r.pid), r.session_id);
+  }
+  return golemRows.filter((r) => {
+    const harness = r.harness ?? 'claudecode';
+    if (harness !== 'claudecode') return true;
+    // Claude Code liveness must come from Claude's own CLI/registry sources.
+    // sessions.json is enrichment (role/model/project recency), not standalone
+    // evidence of a live Claude session; otherwise transient hook ids survive as
+    // unnamed phantom cards after resume/reload.
+    if (!nativeIds.has(r.session_id)) return false;
+    const nativeSessionId = r.pid ? nativeByPid.get(Number(r.pid)) : null;
+    // Claude resume/reload can hand hooks a transient per-run id while the
+    // parent ~/.claude/sessions/<pid>.json carries the logical renamed id. If a
+    // golem row points at a live native pid under a different id, it is an
+    // orphaned transient and must not surface as a second unnamed session.
+    return !(nativeSessionId && nativeSessionId !== r.session_id);
+  });
+}
+
 // project_id cache keyed by resolved cwd → avoids re-walking the FS every tick.
 const projectIdCache = new Map();
 
@@ -285,29 +358,36 @@ async function deriveProjectId(cwd) {
  * @returns {Promise<Array<object>>}
  */
 export async function readNativeSessions(registeredIdLookup) {
-  const [cliRaw, registryRaw, golemRaw] = await Promise.all([
+  const [cliRaw, registryRaw, golemRaw, opencodeBridges, liveChannelSessionIds] = await Promise.all([
     runClaudeAgentsJson(),
     readRegistrySessions(),
     readGolemRegistrySessions(),
+    readOpencodeBridges(),
+    readLiveChannelSessionIds(),
   ]);
 
   const cliRows = Array.isArray(cliRaw) ? cliRaw.map(normalizeCli).filter(Boolean) : [];
   const registryRows = registryRaw; // already normalized
-  const merged = mergeSources(cliRows, registryRows, golemRaw);
+  const filteredGolemRows = dropTransientClaudeGolemRows(golemRaw, [...registryRows, ...cliRows]);
+  const merged = mergeSources(cliRows, registryRows, filteredGolemRows);
 
   const out = [];
   for (const s of merged) {
     const harness = s.harness ?? 'claudecode';
-    // Non-CC harness sessions (opencode) have no reliable pid — judge liveness
-    // by recency of last_seen_at instead. Golem-registry Claude Code rows also
-    // carry hook_ppid (the hook shell), not the real session pid, so pid-liveness
-    // can be faked by pid reuse; only native CLI / ~/.claude registry rows trust
-    // pid-liveness.
+    // Golem-registry Claude Code rows carry hook_ppid (the hook shell), not the
+    // real session pid, so pid-liveness can be faked by pid reuse; only native
+    // CLI / ~/.claude registry rows trust pid-liveness. opencode rows are live
+    // only while a matching bridge exists and its owning opencode server pid is
+    // alive; missing bridge means a graceful exit already unregistered it.
     const isNonCc = harness !== 'claudecode';
     const isGolemRegistryCc = harness === 'claudecode' && s._from === 'golem';
-    const alive = isNonCc || isGolemRegistryCc
-      ? !!(s.updated_at && (Date.now() - s.updated_at) < GOLEM_SESSION_RECENT_MS)
-      : pidAlive(s.pid);
+    const bridge = harness === 'opencode' ? opencodeBridges.get(s.session_id) : null;
+    const bridgePid = Number(bridge?.opencode_pid || bridge?.pid) || null;
+    const alive = harness === 'opencode'
+      ? !!(!s.ended_at && bridge && liveChannelSessionIds.has(s.session_id) && pidAlive(bridgePid))
+      : (isNonCc || isGolemRegistryCc
+        ? !!(!s.ended_at && s.updated_at && (Date.now() - s.updated_at) < GOLEM_SESSION_RECENT_MS)
+        : pidAlive(s.pid));
     // Drop dead sessions whose only evidence is a stale registry/golem file.
     // Keep a CLI-sourced row even if pid-check disagrees (CLI just listed it
     // live), but mark alive honestly.
@@ -338,7 +418,7 @@ export async function readNativeSessions(registeredIdLookup) {
 
     out.push({
       session_id: s.session_id,
-      pid: s.pid,
+      pid: bridgePid || s.pid,
       alive,
       cwd: s.cwd,
       project_id,

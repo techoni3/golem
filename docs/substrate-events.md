@@ -84,9 +84,11 @@ entry).
   maps `session.created`→`session-start`, `chat.message`→`user-prompt`,
   `tool.execute.before/after`→`tool-pre/tool-post` (the `task` tool →
   `agent-spawn`/`agent-return`), `session.idle`→`stop`,
-  `session.compacted`→`pre-compact`. `session-end` has no reliable opencode
-  event (`session.deleted` does not fire on normal exit) and degrades
-  gracefully. Session-start context injection uses opencode's
+  `session.compacted`→`pre-compact`, and `session.deleted`→`session-end` for
+  per-session deletion. Normal server shutdown is tracked via
+  `server.instance.disposed` plus opencode bridge pid liveness; those lifecycle
+  signals mark sessions dead without faking `last_seen_at` activity.
+  Session-start context injection uses opencode's
   `experimental.chat.system.transform` hook rather than CC's `additionalContext`
   stdout. See `docs/opencode.md` for the P4 rendering that installs the shim.
 

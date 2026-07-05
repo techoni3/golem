@@ -25,6 +25,7 @@ import { readPlan } from './plan.js';
 import { readNativeSessions } from './native-sessions.js';
 import { readChannels } from './channels.js';
 import { readProjectMilestones } from './milestones.js';
+import { updateProjectLsp } from '../../lib/lsp.js';
 
 export function createState() {
   const ee = new EventEmitter();
@@ -48,6 +49,7 @@ export function createState() {
   let rediscoverTimer = null;
   let nativeSessionsTimer = null;
   const refreshTimers = new Map();
+  const lspCheckedProjects = new Set();
 
   function projectSummary(p) {
     const plan = plans.get(p.id) ?? null;
@@ -129,9 +131,8 @@ export function createState() {
   // Resolve the FULL internal project record (with `path`) by either the
   // registry `id` (dir name, e.g. "trialroom-ai") OR the contract `project_id`
   // (<slug>-<6hex>, e.g. "trialroomai-74ac11"). The web UI sends the contract
-  // project_id, which is NOT the projectsById key — without the project_id
-  // fallback, callers that expect a `path` (e.g. repo-map generation) silently
-  // missed and downstream fell back to cwd, generating a map for the wrong repo.
+  // project_id, which is NOT the projectsById key; callers that need the full
+  // record must not fall back to pathless summaries.
   function project(id) {
     return projectsById.get(id) ?? projects.find((p) => p.project_id === id) ?? null;
   }
@@ -243,6 +244,10 @@ export function createState() {
       if (!prevIds.has(p.id)) {
         plans.set(p.id, await readPlan(p.path));
         milestonesByProject.set(p.id, await readProjectMilestones(p));
+      }
+      if (p.path && !lspCheckedProjects.has(p.id)) {
+        lspCheckedProjects.add(p.id);
+        updateProjectLsp(p.path).catch((err) => console.error(`[lsp:${p.id}]`, err));
       }
       projectsById.set(p.id, p);
     }

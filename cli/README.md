@@ -17,8 +17,7 @@ npx golem <command>
 | Command | What it does |
 | --- | --- |
 | `golem dashboard [--public]` | Start the admin dashboard on `http://dashboard.golem.localhost:7420`. Pass extra args through to `npm start`. |
-| `golem doctor` | Sanity-check the environment, including external repo-map tooling (`uvx`/`pipx` + pinned `aider-chat`). |
-| `golem map [path] [--force] [--budget <tokens>] [--focus <file|symbol:name>] [--json]` | Generate an aider-backed repo map under `~/.golem/repomap/<project_id>/<commit>.md` and record project LSP capability. Focused maps print without replacing the cached full map. |
+| `golem doctor` | Sanity-check the environment. |
 | `golem status [--json]` | Probe the dashboard `/api/health` endpoint and print the canonical URL. |
 | `golem help` | Show usage. |
 

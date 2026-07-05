@@ -129,11 +129,10 @@ Runtime flow:
 
 - `session.created` starts/updates `~/.golem/opencode-bridges.json` with the
   `ses_*` id, opencode process pid, bridge port, cwd, and status.
-- On plugin startup, the shim also seeds bridge/session rows from opencode's
-  `client.session.list()` + `client.session.status()` result. This covers
-  resumed sessions where opencode does not immediately emit `session.created` or
-  `session.updated`; an idle resumed session must become dispatchable without a
-  manual ping/pong poke.
+- On plugin startup, the shim seeds bridge/session rows only for sessions that
+  `client.session.status()` reports as active. If opencode returns no active ids,
+  the shim falls back to the single most-recent top-level session only when it was
+  updated recently, so persistent opencode history is not resurrected as live.
 - The MCP channel process is a child of the opencode process, so its heartbeat
   resolves the matching bridge by `process.ppid`, registers its own HTTP port in
   `~/.golem/channels.json` under that `ses_*` id, and marks the row
@@ -142,23 +141,27 @@ Runtime flow:
   parents, the channel server forwards the push to the shim bridge; the shim
   injects the canonical `<channel source="golem" kind="...">...</channel>` text
   into the live session with `client.session.prompt(...)`.
-- `session.idle`, `session.status`, `chat.message`, and tool events update the
-  bridge and `sessions.json` status so `sessions_dispatchable` can show idle/busy
-  and queue `when_idle` dispatches the same way it does for Claude Code sessions.
+- `session.idle`, busy `session.status`, `chat.message`, and tool events update
+  the bridge and `sessions.json` status/recency so `sessions_dispatchable` can
+  show idle/busy and queue `when_idle` dispatches the same way it does for Claude
+  Code sessions.
   `session.status` carries `status` as an OBJECT (`{type:"idle"|"retry"|"busy"}`);
   the shim collapses it to the plain string the dashboard compares against
   (`retry` counts as `busy`).
 - The shim also records the active opencode model in `~/.golem/sessions.json`
   from opencode's runtime state file (`~/.local/state/opencode/model.json`,
-  `recent[0].modelID`). Model changes are refreshed immediately on shim-visible
-  session/chat/tool/status activity and by the 30s heartbeat while a session is
-  otherwise idle; the dashboard then publishes the next `native-sessions-update`
-  snapshot on its 3s native-session refresh.
+  `recent[0].modelID`). Model changes are refreshed on shim-visible
+  session/chat/tool/status activity; there is no idle heartbeat that fakes recent
+  activity.
 - `session.updated` (parentID-guarded) refreshes the registry `name` from
   `info.title` — the only real-time source of the session title (auto-generated
   after the first message, updated on rename). Events from child/subagent
   sessions can only update existing rows, never insert, so they cannot create
   phantom sessions or dispatch endpoints.
+- `session.deleted`, `server.instance.disposed`, and opencode bridge pid liveness
+  drive death. The dashboard treats an opencode session with no matching bridge,
+  or a bridge whose owning opencode pid is gone, as dead; `last_seen_at` is only
+  a recency/activity hint.
 
 The bridge is fail-open: HTTP or SDK errors are logged to
 `~/.golem/logs/opencode-shim.log` and must not crash or stall opencode.
