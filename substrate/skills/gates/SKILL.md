@@ -20,7 +20,7 @@ Use the dashboard helper when available:
 ```bash
 curl -fsS -X POST http://dashboard.golem.localhost:7420/api/projects/<project_id-or-registry-id>/gates \
   -H 'content-type: application/json' \
-  -d '{"kind":"approval","spec_ticket_id":"TKT-...","requested_by":"'"${CLAUDE_CODE_SESSION_ID:-$OPENCODE_SESSION_ID}"'","ask":"Approve moving from specs to build?","next_phase":"build"}'
+  -d '{"kind":"approval","spec_ticket_id":"GOL-...","requested_by":"'"${CLAUDE_CODE_SESSION_ID:-$OPENCODE_SESSION_ID}"'","ask":"Approve moving from specs to build?","next_phase":"build"}'
 ```
 
 If `spec_ticket_id` is omitted, the dashboard uses the project's most recent

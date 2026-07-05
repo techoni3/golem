@@ -105,7 +105,7 @@ function getProcessComm(pid) {
 // paths. `note` is an already-trimmed string or null.
 function buildDispatchBrief(ticket, note) {
   if (ticket?.kind === 'spec') return buildSpecBrief(ticket, note);
-  const id = ticket.id;
+  const id = ticket.display_id || ticket.id;
   return (
     `You've been assigned tracker ticket ${id}: "${ticket.title}" (project ${ticket.project_id}, kind ${ticket.kind}).\n\n` +
     `${note ? note + '\n\n' : ''}` +
@@ -339,6 +339,22 @@ async function main() {
   // read the table directly rather than iterating the projects list).
   function listAllStreams() {
     return tracker.raw().prepare('SELECT * FROM streams ORDER BY created_at ASC, id ASC').all();
+  }
+
+  function resolveTicketRef(ref) {
+    if (!ref) return null;
+    return tracker.getTicket(ref) || tracker.getTicketByDisplayId(ref);
+  }
+
+  function publicComment(comment, ticket) {
+    return comment && ticket?.display_id ? { ...comment, ticket_id: ticket.display_id } : comment;
+  }
+
+  function resolveTicketIdField(ref) {
+    if (ref == null || ref === '') return ref;
+    const ticket = resolveTicketRef(ref);
+    if (!ticket) throw new Error(`ticket ref '${ref}' not found`);
+    return ticket.id;
   }
 
   function deadSessionRevival(ticket, opts = {}) {
@@ -665,7 +681,7 @@ async function main() {
     // filter (drawer's children panel). Both mirror the existing pattern —
     // cheap WHERE additions, no new entity.
     if (q.excludeKind != null) filter.exclude_kind = q.excludeKind;
-    if (q.parent != null) filter.parent_id = q.parent;
+    if (q.parent != null) filter.parent_id = resolveTicketIdField(q.parent);
     if (q.stream != null) filter.stream_id = q.stream;
     if (q.includeArchived != null) {
       filter.includeArchived = q.includeArchived === 'true' || q.includeArchived === true || q.includeArchived === '1';
@@ -702,7 +718,7 @@ async function main() {
         priority: b.priority,
         labels: b.labels,
         stream_id: b.stream_id,
-        parent_id: b.parent_id,
+        parent_id: resolveTicketIdField(b.parent_id),
         assignee: b.assignee,
         created_by: b.created_by,
       });
@@ -716,23 +732,20 @@ async function main() {
   // GET /api/tickets/:id — ticket (+ comments/links from getTicket) plus its
   // event history. 404 if unknown.
   fastify.get('/api/tickets/:id', async (req, reply) => {
-    const id = req.params.id;
-    let ticket = tracker.getTicket(id);
-    // TKT-0519: lookup convenience — if the exact canonical id misses, try the
-    // display id (e.g. pasting GOL-42 in the URL) before 404ing.
-    if (!ticket) ticket = tracker.getTicketByDisplayId(id);
+    const ticket = resolveTicketRef(req.params.id);
     if (!ticket) return reply.code(404).send({ error: 'not_found' });
     return { ...ticket, events: tracker.listEvents({ ticket_id: ticket.id }) };
   });
 
   // PATCH /api/tickets/:id — partial update. 404 if missing, 400 on invalid.
   fastify.patch('/api/tickets/:id', async (req, reply) => {
-    const id = req.params.id;
-    const existing = tracker.getTicket(id);
+    const existing = resolveTicketRef(req.params.id);
     if (!existing) return reply.code(404).send({ error: 'not_found' });
     try {
-      const ticket = tracker.updateTicket(id, req.body ?? {});
-      const closeResult = handleSpecClosed(tracker, existing, ticket, req.body?.actor || 'human');
+      const patch = { ...(req.body ?? {}) };
+      if (Object.prototype.hasOwnProperty.call(patch, 'parent_id')) patch.parent_id = resolveTicketIdField(patch.parent_id);
+      const ticket = tracker.updateTicket(existing.id, patch);
+      const closeResult = handleSpecClosed(tracker, existing, ticket, patch.actor || 'human');
       if (closeResult) {
         broadcastWS({ type: 'ticket-comment', ticket_id: closeResult.ticket.id, comment: closeResult.comment });
         broadcastWS({ type: 'ticket-updated', ticket: closeResult.ticket });
@@ -752,12 +765,14 @@ async function main() {
   // {state}" path for drag operations (Phase B tracker-board.jsx still calls
   // PATCH; follow-up ticket will switch it to /move).
   fastify.post('/api/tickets/:id/move', async (req, reply) => {
-    const id = req.params.id;
-    const existing = tracker.getTicket(id);
+    const existing = resolveTicketRef(req.params.id);
     if (!existing) return reply.code(404).send({ error: 'not_found' });
     try {
-      const ticket = tracker.moveTicket(id, req.body ?? {});
-      const closeResult = handleSpecClosed(tracker, existing, ticket, req.body?.actor || 'human');
+      const patch = { ...(req.body ?? {}) };
+      if (Object.prototype.hasOwnProperty.call(patch, 'before_id')) patch.before_id = resolveTicketIdField(patch.before_id);
+      if (Object.prototype.hasOwnProperty.call(patch, 'after_id')) patch.after_id = resolveTicketIdField(patch.after_id);
+      const ticket = tracker.moveTicket(existing.id, patch);
+      const closeResult = handleSpecClosed(tracker, existing, ticket, patch.actor || 'human');
       if (closeResult) {
         broadcastWS({ type: 'ticket-comment', ticket_id: closeResult.ticket.id, comment: closeResult.comment });
         broadcastWS({ type: 'ticket-updated', ticket: closeResult.ticket });
@@ -837,7 +852,9 @@ async function main() {
   // POST /api/tickets/:id/comments — add a comment (plain or inline anchored).
   // Body: { author, body, quote?, prefix?, suffix?, section?, section_id?, tag?, status?, parent_id?, block_id? }
   fastify.post('/api/tickets/:id/comments', async (req, reply) => {
-    const id = req.params.id;
+    const ticketRef = resolveTicketRef(req.params.id);
+    if (!ticketRef) return reply.code(404).send({ error: 'not_found' });
+    const id = ticketRef.id;
     const b = req.body ?? {};
     try {
       const comment = tracker.addComment(id, {
@@ -856,7 +873,7 @@ async function main() {
       broadcastWS({ type: 'ticket-comment', ticket_id: id, comment });
       const ticket = tracker.getTicket(id);
       if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
-      return reply.code(201).send(comment);
+      return reply.code(201).send(publicComment(comment, ticketRef));
     } catch (err) {
       const msg = String(err?.message ?? err);
       const code = /not found/i.test(msg) ? 404 : 400;
@@ -866,7 +883,10 @@ async function main() {
 
   // PATCH /api/tickets/:id/comments/:cid — update a comment (status, tag, body).
   fastify.patch('/api/tickets/:id/comments/:cid', async (req, reply) => {
-    const { id, cid } = req.params;
+    const { cid } = req.params;
+    const ticketRef = resolveTicketRef(req.params.id);
+    if (!ticketRef) return reply.code(404).send({ error: 'not_found' });
+    const id = ticketRef.id;
     const b = req.body ?? {};
     try {
       // TKT-0244: only include keys actually present on the request body, so a
@@ -885,7 +905,7 @@ async function main() {
       broadcastWS({ type: 'ticket-comment-updated', ticket_id: id, comment });
       const ticket = tracker.getTicket(id);
       if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
-      return comment;
+      return publicComment(comment, ticketRef);
     } catch (err) {
       const msg = String(err?.message ?? err);
       const code = /not found/i.test(msg) ? 404 : 400;
@@ -895,7 +915,10 @@ async function main() {
 
   // POST /api/tickets/:id/comments/:cid/reply — add a reply to a comment.
   fastify.post('/api/tickets/:id/comments/:cid/reply', async (req, reply) => {
-    const { id, cid } = req.params;
+    const { cid } = req.params;
+    const ticketRef = resolveTicketRef(req.params.id);
+    if (!ticketRef) return reply.code(404).send({ error: 'not_found' });
+    const id = ticketRef.id;
     const b = req.body ?? {};
     try {
       const comment = tracker.addComment(id, {
@@ -907,7 +930,7 @@ async function main() {
       broadcastWS({ type: 'ticket-comment', ticket_id: id, comment });
       const ticket = tracker.getTicket(id);
       if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
-      return reply.code(201).send(comment);
+      return reply.code(201).send(publicComment(comment, ticketRef));
     } catch (err) {
       const msg = String(err?.message ?? err);
       const code = /not found/i.test(msg) ? 404 : 400;
@@ -916,7 +939,10 @@ async function main() {
   });
 
   fastify.post('/api/tickets/:id/unacked/:deliveryEventId/dismiss', async (req, reply) => {
-    const { id, deliveryEventId } = req.params;
+    const { deliveryEventId } = req.params;
+    const ticketRef = resolveTicketRef(req.params.id);
+    if (!ticketRef) return reply.code(404).send({ error: 'not_found' });
+    const id = ticketRef.id;
     const actor = req.body?.actor || 'human:dashboard';
     try {
       const event = tracker.dismissUnackedDispatchWarning(id, deliveryEventId, { actor });
@@ -934,13 +960,16 @@ async function main() {
   // POST /api/tickets/:id/links — add a link from this ticket. Re-fetch + send
   // the from-ticket as a ticket-updated delta.
   fastify.post('/api/tickets/:id/links', async (req, reply) => {
-    const id = req.params.id;
+    const ticketRef = resolveTicketRef(req.params.id);
+    if (!ticketRef) return reply.code(404).send({ error: 'not_found' });
+    const id = ticketRef.id;
     const b = req.body ?? {};
     try {
-      tracker.addLink(id, b.to_ticket, b.type);
+      const toTicket = resolveTicketIdField(b.to_ticket);
+      tracker.addLink(id, toTicket, b.type);
       const ticket = tracker.getTicket(id);
       if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
-      return reply.code(201).send({ from_ticket: id, to_ticket: b.to_ticket, type: b.type });
+      return reply.code(201).send({ from_ticket: ticketRef.display_id, to_ticket: resolveTicketRef(toTicket)?.display_id || toTicket, type: b.type });
     } catch (err) {
       const msg = String(err?.message ?? err);
       const code = /not found/i.test(msg) ? 404 : 400;
@@ -951,10 +980,13 @@ async function main() {
   // DELETE /api/tickets/:id/links — remove a link. Re-fetch + send the
   // from-ticket as a ticket-updated delta.
   fastify.delete('/api/tickets/:id/links', async (req, reply) => {
-    const id = req.params.id;
+    const ticketRef = resolveTicketRef(req.params.id);
+    if (!ticketRef) return reply.code(404).send({ error: 'not_found' });
+    const id = ticketRef.id;
     const b = req.body ?? {};
     try {
-      const result = tracker.removeLink(id, b.to_ticket, b.type);
+      const toTicket = resolveTicketIdField(b.to_ticket);
+      const result = tracker.removeLink(id, toTicket, b.type);
       const ticket = tracker.getTicket(id);
       if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
       return result;
@@ -964,18 +996,14 @@ async function main() {
   });
 
   fastify.get('/api/tickets/:id/revival', async (req, reply) => {
-    const id = req.params.id;
-    let ticket = tracker.getTicket(id);
-    if (!ticket) ticket = tracker.getTicketByDisplayId(id);
-    if (!ticket) return reply.code(404).send({ error: 'not_found' });
+    const ticketRef = resolveTicketRef(req.params.id);
+    if (!ticketRef) return reply.code(404).send({ error: 'not_found' });
     const minutes = req.query?.min_age_minutes ?? req.query?.minAgeMinutes;
-    return deadSessionRevival(ticket, { minAgeMinutes: minutes });
+    return deadSessionRevival(ticketRef, { minAgeMinutes: minutes });
   });
 
   fastify.post('/api/tickets/:id/revival/redispatch', async (req, reply) => {
-    const id = req.params.id;
-    let ticketRef = tracker.getTicket(id);
-    if (!ticketRef) ticketRef = tracker.getTicketByDisplayId(id);
+    const ticketRef = resolveTicketRef(req.params.id);
     if (!ticketRef) return reply.code(404).send({ error: 'not_found' });
     const b = req.body ?? {};
     const sessionId = typeof b.session_id === 'string' && b.session_id.trim() ? b.session_id.trim() : null;
@@ -1025,7 +1053,9 @@ async function main() {
   // 'now' path. A bare POST (no mode) behaves exactly as before — the default
   // never changes, so existing MCP calls and older UIs are untouched.
   fastify.post('/api/tickets/:id/dispatch', async (req, reply) => {
-    const id = req.params.id;
+    const ticketRef = resolveTicketRef(req.params.id);
+    if (!ticketRef) return reply.code(404).send({ error: 'not_found' });
+    const id = ticketRef.id;
     const b = req.body ?? {};
     const sessionId = typeof b.session_id === 'string' && b.session_id.trim() ? b.session_id.trim() : null;
     const note = typeof b.note === 'string' && b.note.trim() ? b.note.trim() : null;
@@ -1034,8 +1064,7 @@ async function main() {
       return reply.code(400).send({ error: `mode must be 'now' or 'when_idle' (got '${mode}')` });
     }
 
-    const existing = tracker.getTicket(id);
-    if (!existing) return reply.code(404).send({ error: 'not_found' });
+    const existing = ticketRef;
     if (!sessionId) return reply.code(400).send({ error: 'session_id is required' });
 
     // 'when_idle': queue for delivery on idle unless the target is already idle
@@ -1084,7 +1113,7 @@ async function main() {
       chat.record('user', 'brief', briefString, { session_id: sessionId });
     } else {
       const detail = channelResult?.error || `status ${channelResult?.status ?? '?'}`;
-      chat.record('system', 'error', `dispatch of ${id} to ${sessionId} — channel ${detail} (ticket assigned; session will pick it up on resume)`);
+      chat.record('system', 'error', `dispatch of ${existing.display_id || id} to ${sessionId} — channel ${detail} (ticket assigned; session will pick it up on resume)`);
     }
     tracker.markDispatchDeliveryAttempted(id, {
       session_id: sessionId,
