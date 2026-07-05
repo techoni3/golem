@@ -1,121 +1,62 @@
-# Substrate events — the normalized hook contract (ADR-7, P5)
+# Substrate Events And Bus
 
-golem journals and self-registers a session through a small set of **hook
-scripts** (`substrate/hooks/*.sh`). Those scripts were written for Claude
-Code's hook payloads, but nothing about them is CC-specific: they read a tiny
-JSON object on stdin and append a line to a central journal. P5 (TKT-0577)
-makes a second harness — opencode — feed the *same* scripts by normalizing its
-native events into the shape the scripts already parse.
+Golem keeps two event records:
 
-This doc is the contract between "some harness's event bus" and "golem's hook
-scripts". It is the proto-HCP (Harness Compatibility Protocol) surface from
-ADR-7: add a harness by writing an adapter that emits these events, not by
-touching the scripts.
+- Central hook journals at `~/.golem/journals/<project_id>/hook.jsonl` for durable local history.
+- The dashboard-owned tracker bus in `~/.golem/tracker.db` for subscriptions, digests, team choreography, and UI refresh.
 
-## The normalized event
+Hooks remain fail-open. `substrate/hooks/journal-route.sh` always writes the journal line first, then best-effort forwards to `POST /api/bus/ingest`; if the dashboard is down, the event is spooled locally under `~/.golem/spool/`.
 
-Conceptually every harness event golem cares about normalizes to:
+## Event Classes
 
-```
-{
-  schema_version: 1,
-  harness:     "claudecode" | "opencode",
-  event_kind:  <one of the vocabulary below>,
-  session_id:  <stable session id>,
-  project_root:<abs path; the scripts re-derive project_id from it>,
-  ts:          <ISO-8601 UTC>,
-  payload:     <the raw harness event, opaque to the scripts>
-}
-```
+The bus stores events in the tracker `events` table with a global sequence id.
 
-`event_kind` vocabulary (the CC hook names, kept as the canonical set):
+| Class | Sources | Default Subscription |
+|-------|---------|----------------------|
+| `tracker` | ticket/comment/dispatch/phase/subscription mutations | yes |
+| `lifecycle` | `session-start`, `session-end`, `user-prompt`, `stop`, `subagent-stop`, `pre-compact`, `notification` | yes |
+| `custom` | hook events that are not recognized lifecycle/activity classes | yes |
+| `activity` | `tool-pre`, `tool-post`, `agent-spawn`, `agent-return`, `send-message`, `send-message-post` | no |
 
-| event_kind | when | script invocation |
-|---|---|---|
-| `session-start` | a new top-level session begins | `session-register.sh` then `journal-route.sh session-start` |
-| `user-prompt` | the user submits a prompt | `journal-route.sh user-prompt` |
-| `tool-pre` | before a tool runs | `journal-route.sh tool-pre` |
-| `tool-post` | after a tool runs | `journal-route.sh tool-post` |
-| `agent-spawn` | a subagent/task starts | `journal-route.sh agent-spawn` |
-| `agent-return` | a subagent/task returns | `journal-route.sh agent-return` |
-| `stop` | the assistant turn finishes | `journal-route.sh stop` |
-| `pre-compact` | context compaction starts | `journal-route.sh pre-compact` |
-| `session-end` | the session ends | `journal-route.sh session-end` |
-| `notification` | a user-facing notification | `journal-route.sh notification` (+ `notify.sh`) |
+Activity is opt-in so normal subscription digests do not flood sessions with tool traces.
 
-## The two concrete shapes
+## Topics
 
-The normalized event is realized as two on-the-wire shapes, both keyed off the
-fields above:
+Tracker events default to `ticket/<display_id>`, for example `ticket/GOL-315`.
 
-**1. Script stdin** (what the harness adapter writes to each script's stdin):
+Child ticket events mirror onto the parent spec tree topic: `spec/<parent-display-id>/tree`. Managers subscribe to the spec tree to see child `built`, `verified`, `rejected`, and close-out events without polling every child.
 
-```json
-{ "session_id": "...", "cwd": "<project_root>", "harness": "opencode",
-  "tool_name": "bash", "tool_input": { "command": "..." } }
-```
+Hook ingest uses session/project context from the forwarded payload. Lifecycle roster events update materialized session status and can suspend/reactivate subscriptions:
 
-- `session_id` + `cwd` are the only fields every script needs; `cwd` is what
-  `project_root()` walks up from to find the `.git`/`CLAUDE.md` marker and
-  derive `project_id`.
-- `harness` is additive: absent ⇒ `session-register.sh` defaults it to
-  `claudecode`. It lands in the `sessions.json` entry so the dashboard can tell
-  the harnesses apart.
-- `tool_name` / `tool_input` are included on tool events; they end up inside the
-  journal line's `payload`.
+- `session-end` suspends that session's subscriptions.
+- `session-start` reactivates them without advancing their cursor.
 
-**2. Journal line** (what `journal-route.sh` appends to
-`~/.golem/journals/<project_id>/hook.jsonl`):
+## Ingest Contract
 
-```json
-{ "ts": "...", "event": "tool-pre", "session_id": "...", "cwd": "...",
-  "project_id": "...", "project_path": "...", "payload": "<stringified stdin>" }
-```
+`POST /api/bus/ingest` accepts one event or an event batch. Recognized fields include `uuid`/`event_uuid`, `event`, `type`, `session_id`, `project_id`, `cwd`, and arbitrary payload data. Source UUIDs are idempotency keys; duplicates are skipped and do not create duplicate roster events.
 
-This line schema is unchanged from CC — an opencode line is distinguished only
-by `harness:"opencode"` inside its `payload` (and the matching `sessions.json`
-entry).
+Hook names map to bus types with a `hook_` prefix, for example `session-end` becomes `hook_session_end`.
 
-## Harness adapters
+## Subscriptions
 
-- **Claude Code** — the harness delivers these events natively via
-  `substrate/hooks/hooks.json`; no adapter, the scripts run directly.
-- **opencode** — `shims/opencode/index.js` (a plugin on opencode's event bus)
-  maps `session.created`→`session-start`, `chat.message`→`user-prompt`,
-  `tool.execute.before/after`→`tool-pre/tool-post` (the `task` tool →
-  `agent-spawn`/`agent-return`), `session.idle`→`stop`,
-  `session.compacted`→`pre-compact`, and `session.deleted`→`session-end` for
-  per-session deletion. Normal server shutdown is tracked via
-  `server.instance.disposed` plus opencode bridge pid liveness; those lifecycle
-  signals mark sessions dead without faking `last_seen_at` activity.
-  Session-start context injection uses opencode's
-  `experimental.chat.system.transform` hook rather than CC's `additionalContext`
-  stdout. See `docs/opencode.md` for the P4 rendering that installs the shim.
+`POST /api/bus/subscribe` stores `{session_id, topic, classes, cursor_seq, expires_at, reason}`.
 
-Role boot cards live in `substrate/roles/*.md` and render into both harness
-artifact sets. `tracker-context.sh` reads the current session id from CC-shaped
-stdin, `--session`, or `CLAUDE_CODE_SESSION_ID`; when `sessions.json` has a
-matching `role`, it appends that compact card plus one roster line to the normal
-tracker context. Role-less sessions receive only the base tracker context.
+`classes` defaults to `tracker`, `lifecycle`, and `custom`. Pass `activity` explicitly only when tool-level events are needed.
 
-Adapters MUST be non-blocking and fail-open: a slow or broken script can never
-stall or crash the harness session (the opencode shim shells out
-fire-and-forget and logs failures to `~/.golem/logs/opencode-shim.log`).
+The dispatch drainer delivers subscription digests over the existing channel bridge. A cursor advances only after a successful push. Pending backlog is capped at 500 events per digest; overflow is reported as truncated with an omitted count.
 
-## Project-scoped sync on session-start
+Useful subscriptions:
 
-`session-register.sh` also owns P6 project-scoped substrate sync. After the
-registry upserts, it runs a fast check:
+- Builder/explorer on one assignment: `ticket/<display_id>`.
+- Manager on a spec: `spec/<display_id>/tree`.
+- Session lifecycle watcher: a session/project lifecycle topic with lifecycle class filtering.
 
-```bash
-golem sync --check --project <project_root> --harness <cc|opencode>
-```
+## Retention And Stats
 
-Exit `0` is the no-op clean path. Exit `1` means drift; the hook launches the
-full `golem sync --project ... --harness ...` render detached and writes output
-to `~/.golem/logs/sync-on-register.log`. Any other error is logged and ignored
-so session start remains fail-open.
+`POST /api/bus/prune` deletes old activity rows first; tracker/lifecycle/custom records are retained unless explicitly pruned by policy. Prune emits a `bus_pruned` event.
 
-The opencode shim does not duplicate this logic: its `session.created` handler
-passes `harness:"opencode"` to the same `session-register.sh`, so both harnesses
-share the registration and sync path.
+`GET /api/bus/stats` reports row counts by class and subscription status. Use it for operational checks, not as the work record.
+
+## Harness Normalization
+
+Claude Code hooks and the opencode shim both normalize into the same script stdin shape: `session_id`, `cwd`, `harness`, optional tool fields, and raw payload. The scripts derive project identity from the cwd, write the hook journal, and forward to the bus. Adapters must remain non-blocking and fail-open.

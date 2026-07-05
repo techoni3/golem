@@ -73,3 +73,13 @@ claude plugin install golem@golem-local --scope user
 ```
 
 See `substrate/README.md` for the channel-consumer launch (`golemc`) and the full setup.
+
+## Work Choreography
+
+Feature-sized work defaults through a live `manager` role session when available;
+the dashboard preselects that manager as the Assignee/dispatch target, but any
+explicit target overrides it. Specs and work items are phase-backed in the
+tracker, and long waits should use bus subscriptions (`ticket/<display_id>` or
+`spec/<display_id>/tree`) instead of polling. Via-manager verification is manual:
+the team API suggests a least-loaded explorer, but the manager dispatches and
+records the transition evidence.

@@ -78,6 +78,27 @@ entries for an explicit answered/decision/deferred marker. The spec drawer shows
 a Finalise button only for spec tickets in `in_progress`; pass moves the spec to
 `review`, while concerns/failures post a `risk` comment and leave state unchanged.
 
+## Phase Machine And Event Bus
+
+Tracker schema version 10 adds `tickets.phase`; version 11 adds hook-ingest UUID
+idempotency; version 12 adds dispatch-queue workspace fields. `dashboard/server/phase-machine.js` is the workflow source of truth.
+The DB layer derives board `state` from phase and rejects illegal transitions or
+missing artifacts such as closing briefs, manager dispatch evidence, verification
+reports, child waves, and spec close requirements.
+
+Tracker mutations emit bus events on `ticket/<display_id>`. Child ticket events
+mirror to `spec/<parent-display-id>/tree`, which is the manager subscription
+surface for via-manager verification. Hook ingest writes lifecycle/activity/custom
+events through `/api/bus/ingest`; subscriptions are managed through
+`/api/bus/subscribe`, `/api/bus/unsubscribe`, and `/api/bus/subscriptions`.
+
+The project team API returns `assists.suggested_manager` and
+`assists.suggested_explorer`, both chosen from live same-project role sessions by
+least in-progress work then pending queue. The create-ticket drawer uses the same
+manager-default intent by preselecting a live manager in the Assignee/dispatch
+dropdown when the user has not chosen another target. These are defaults and
+suggestions, never gates; explicit selections always win.
+
 ## Tracker Waves
 
 Tracker schema version 8 adds nullable `tickets.wave` for spec fan-out ordering.

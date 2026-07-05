@@ -1,106 +1,79 @@
 ---
 name: work-loop
-description: Dispatcher loop for feature-sized or larger work — intake questions, spec-ready fan-out, tracker-ticket-driven execution, closing-brief review, and spec close-out. Read when starting a feature or multi-step build (not a chat answer or one-line fix).
+description: Dispatcher loop for feature-sized or larger work — manager front door, phase-driven specs, role playbooks, tracker-ticket execution, verification routing, and close-out. Read when starting a feature or multi-step build (not a chat answer or one-line fix).
 ---
 <!-- GENERATED: skills/work-loop/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 
 # work-loop
 
-For feature-sized+ work only. Skip intake entirely for chat answers and tiny fixes — just do + verify.
+For feature-sized+ work only. Skip intake entirely for chat answers and tiny fixes: do the change, verify it, and report evidence.
 
-The **golem tracker** is the source of truth for the work — there is no PLAN.md.
-Tickets are the unit of work; you create them, transition their state, and comment
-milestones via the tracker MCP tools. Read `golem:tracker` for the tool contract.
+The golem tracker is the source of truth. Tickets carry both a board `state` and a workflow `phase`; the server derives state from phase for phase-backed tickets. Use `golem:tracker` for tool contracts and `golem:verify-done` before review/done.
 
-## 1. Intake — ask via AskUserQuestion (2–4 questions), then proceed on defaults
+## Shared Spine
 
-- **Journey size** — confirm this is feature-sized+ (not a one-off fix).
-- **Spec depth** — default: a one-paragraph PRD in the lead ticket's body (no separate spec doc).
-- **Test budget** — default: 10–20 journey-level integration/e2e (see test-policy).
-- **Gates wanted** — default: pre-merge gate only (no mid-phase approval gates).
+1. Size the request. Feature-sized work gets a tracker ticket or spec; tiny work does not need ceremony.
+2. Use a manager front door when available. The dashboard defaults new ticket dispatch to a live `manager` session; explicit user/session targets always override.
+3. Subscribe before waiting. For long-running handoffs, subscribe to `ticket/<display_id>` or `spec/<display_id>/tree` instead of polling.
+4. Keep one owner for each writing lane. Never run two writer agents in the same repo concurrently; read-only exploration may fan out.
+5. Advance by phase, not vibes. If `transitionTicket` rejects a move, add the missing artifact or stay in the current phase.
+6. Close every implementation with the four-part closing brief: what changed, acceptance checklist with evidence, human test instructions, and not-done/deferred.
+7. Verify with mechanical evidence before moving to `review`, `built`, `verified`, `done`, or claiming closure.
+8. If repo structure changed, read `golem:docs-maintenance` and update the map/doc in the same session.
 
-## 2. Shape or finalise the spec before fan-out
+## Phase Model
 
-For spec-led work (GOL-158), the spec body is the contract. Before finalising a
-spec, run a readiness gate:
+Specs: `drafting -> grounding -> grounded -> designing -> designed -> planning -> planned -> building -> done`, with `parked` as the blocked path.
 
-- **Clarify pass** — any underspecified behaviour becomes a `tag:'question'`
-  comment on the spec, not a side ticket and not a hidden worker note.
-- **Coverage check** — every Behaviour item maps to at least one planned work
-  item; every Open Question is answered or explicitly deferred.
-- Verdict is `PASS`, `CONCERNS`, or `FAIL`. `CONCERNS` moves the spec back to
-  Shaped with notes on the spec. `FAIL` stops the fan-out.
+Work items and fixes: `queued -> building -> built -> verifying -> verified -> done`; rejection routes `verifying -> rejected -> building`; blockers use `blocked -> building`.
 
-Finalisation is a state transition after human sign-off (dashboard button) or an
-explicit agent go-ahead in the spec thread. Do not infer sign-off from silence.
+Questions: `open -> answered -> closed`. Decisions: `open -> decided -> closed`.
 
-## 3. Lay down wave-grouped tickets in the tracker
+## Manager Playbook
 
-Create one ticket per work item (`ticket_create`, kind `work-item`), in your current
-project. Capture the journey context / PRD section in the lead ticket's `body`.
-For spec fan-out, group all children under one stream and set `tickets.wave` on
-each child: wave 1 for foundation work, wave N+1 only for work unblocked by wave
-N. Do not dispatch wave N+1 until every wave N child is `done` or `archived`.
-Reuse any pre-existing tickets the brief/dispatch already points at instead of
-duplicating them.
+Own intake, grounding, distribution, verification routing, and closure.
 
-When fan-out comes from a spec, extract the acceptance checklist for each child
-from the parent spec's Behaviour section and preserve it in the child ticket or
-its context notes. Spec-less fixes use the original brief as the checklist.
+- Intake: clarify only what blocks execution. Create or reuse a tracker ticket/spec and leave the acceptance checklist in the body.
+- Grounding: for specs, drive `drafting -> grounding -> grounded` with a grounding-summary comment. Use explorer help for discovery.
+- Distribution: when the spec is `planned`, dispatch child work items to live role-matching sessions from the team surface. Prefer least-loaded builders for implementation and explorers for verification.
+- Subscriptions: subscribe to `spec/<display_id>/tree` for child progress and to direct `ticket/<display_id>` topics when actively shepherding one item.
+- Built event loop: when a child reaches `built`, pick the suggested explorer from the team surface (or the least-loaded live explorer), dispatch verification, and move the child to `verifying` with `managerDispatch` evidence.
+- Verification close: on `verified`, move the child to `done`. On `rejected`, re-dispatch to the original builder with the verification report and move it to `building`.
+- Closure: when all children are terminal, move the spec to `done` and ensure the auto-retro/close artifact names shipped child tickets and deferred work.
+- Server assists are suggestions only. Do not rely on autonomous server-side dispatch; the manager makes the routing call.
 
-## 4. Execute — one item at a time
+## Planner Playbook
 
-- Pick the next ticket; `ticket_update` it to `in_progress` (one in-progress per
-  work-stream).
-- If a mid-item blocker needs human input, write a `tag:'question'` comment on
-  the **parent spec** in spec-level language. Do not create a human-assigned
-  question ticket and do not bury the question only inside the work item.
-- **Role-aware delegation preference** — before cross-session delegation, check
-  `sessions_dispatchable` for same-project teammates: role, status,
-  `pending_count`, and `current_in_progress_ticket`.
-- Prefer a live teammate with the matching role when the work is separable;
-  otherwise spawn the inline subagent that fits the work. Keep sensitive,
-  ambiguous, or tightly-coupled work local.
-- Typical handoffs: planner → researcher for web/codebase discovery; planner →
-  builder for implementation; builder → ui-tester for UI verification;
-  ui-tester files follow-up bug tickets with evidence.
-- Same-project only. Never reassign tickets away from `human` autonomously.
-  Delegated work of substance gets a child ticket so lineage is explicit and
-  duplicate work is avoided.
-- Spawn exactly ONE worker subagent (`model: opus`) for it. Prompt = the ticket id +
-  its title/body + the names of relevant skills (e.g. test-policy, pr-conventions,
-  verify-done, tracker).
-- **Never two writer agents in the same repo concurrently** — serialize all writes.
-  Read-only research may fan out in parallel.
-- Prefer LSP for targeted symbol resolution (definitions, references,
-  signatures) when available. Glob/Grep/Read remain the fallback; fallback is
-  resilience, not a reason to skip LSP.
-- On worker return, require a closing comment before the ticket advances to
-  `review`. The closing brief MUST contain all four parts:
-  1. What was done — prose plus commits/files changed.
-  2. Acceptance checklist — copied from the parent spec Behaviour section at
-     fan-out, or from the original brief for spec-less fixes; every item checked
-     with mechanical evidence.
-  3. Testing instructions for the human — exact commands, URLs, or clicks.
-  4. Not-done/deferred — explicit, even when the answer is "nothing".
-- Run `golem:verify-done` BEFORE advancing the ticket. Claims are not evidence,
-  and a missing/incomplete closing brief means the ticket is not ready for
-  `review`.
-- If the item changed repo structure (module, entry point, invariant, data flow), read `golem:docs-maintenance` and update REPO-MAP.md before advancing the ticket — "no map trigger" is an acceptable recorded outcome.
-- Then `ticket_update` the ticket to `review`/`done` (per your gate policy), and
-  `ticket_comment` the mechanical evidence (commands + output).
+Own design and fan-out. Avoid repo write ownership when a builder is available.
 
-## 5. Spec close-out and retrospective
+- Shape the spec body as the contract: Intent, Behaviour, Decisions, Non-goals, Open questions.
+- Before finalising, run a readiness gate: every Behaviour item maps to work, every Open Question is answered/deferred, and the verdict is `PASS`, `CONCERNS`, or `FAIL`.
+- Move `grounded -> designing -> designed` only when the design comment exists and concerns are addressed.
+- Human or explicit agent go-ahead is required for `designed -> planning`; do not infer sign-off from silence.
+- Fan out one child ticket per work item, grouped in a stream. Set `wave` so wave N+1 waits for wave N terminal.
+- Move the spec to `planned` only after children and waves exist; move to `building` when the first child starts.
+- Preserve each child's acceptance checklist from the parent Behaviour section.
 
-For GOL-158 spec-led work, milestones are spec-close artifacts, not a mandatory
-per-item journal step. When the spec closes, fill the auto-posted retrospective
-comment with:
+## Builder Playbook
 
-- What shipped — link or name accepted child tickets and their closing briefs.
-- Lessons — concise process/product notes from execution.
-- Proposed doc deltas — changes needed in `CLAUDE.md`, `AGENTS.md`,
-  `REPO-MAP.md`, or `docs/claude/*`; apply the deltas that are in scope and
-  leave explicit follow-ups for the rest.
+Own implementation for assigned tickets.
 
-The ticket thread remains the work record; the spec retrospective is the close
-artifact the human reviews.
+- On dispatch, `ticket_get`, then move/confirm the item in `building`/`in_progress`.
+- Read source before editing. Use LSP when available for definitions/references; Glob/Grep/Read are fallback.
+- Keep changes scoped to the ticket. Do not edit unrelated lanes or dispatch-directive internals unless assigned.
+- If blocked, move to `blocked` with a reason or add a parent-spec `question` comment when the blocker is product/spec-level.
+- Before handoff, post the four-part closing brief and run the relevant checks.
+- Move to `built` only when the closing brief exists. The manager/explorer owns verification unless explicitly assigned otherwise.
+
+## Explorer Playbook
+
+Own recon and verification reports.
+
+- For recon, return evidence: files, flows, observed behaviour, risks, and a recommended path. Do not implement unless reassigned.
+- For verification, start from the builder closing brief and acceptance checklist. Re-run or inspect the claimed evidence yourself.
+- Post a verification report that states `PASS` or `FAIL`, commands/clicks run, outputs observed, and any follow-up defects.
+- PASS lets the manager move `verifying -> verified`; FAIL means `verifying -> rejected` with the report copied into the re-dispatch.
+
+## Close-Out
+
+For spec-led work, the ticket thread is the work record. The spec close artifact should include what shipped, accepted child tickets, lessons, doc deltas applied, and explicit follow-ups for deferred items.

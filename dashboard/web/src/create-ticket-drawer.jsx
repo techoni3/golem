@@ -359,6 +359,14 @@ function CreateTicketDrawer({ open, preselectProject, preselectKind, preselectPa
     if (dispatchSession && !sessions.some((s) => s.session_id === dispatchSession)) setDispatchSession('');
   }, [sessions]); // eslint-disable-line
 
+  // GOL-315: manager front door. The assignee dropdown is also the dispatch
+  // target, so default new work to the least-loaded live manager when present.
+  React.useEffect(() => {
+    if (!open || !projectId || assignee) return;
+    const manager = sessions.find((s) => s.suggested === 'manager') || sessions.find((s) => s.role === 'manager');
+    if (manager?.session_id) setAssignee(manager.session_id);
+  }, [open, projectId, sessions, assignee]);
+
   // ── Autosave (debounced) on any field change while open ───────────────────
   // The "Restored unsaved draft" banner is cleared only by explicit Discard or
   // Submit — NOT by the first keystroke (matches GitHub, which keeps the draft

@@ -1,45 +1,45 @@
 ---
 name: verify-done
-description: Evidence commands that prove a work item is actually done before advancing its tracker ticket — run after a worker subagent returns. Use before moving any ticket to review/done or accepting a "done"/"PR is open" claim.
+description: Evidence commands that prove a work item is actually done before advancing its tracker ticket — run after a worker subagent returns. Use before moving any ticket to review/built/verified/done or accepting a done/PR-open claim.
 ---
 
 # verify-done
 
-An agent's textual claim ("done", "tests pass", "PR is open", "approved") is NOT
-evidence. Only command output you ran yourself is. Run the relevant checks below.
+An agent's textual claim is not evidence. Only command output, inspected artifacts, and tracker comments you personally verify count.
 
-**Closing brief before review** — before a tracker ticket advances to `review`,
-confirm its ticket thread contains a closing comment with all four required
-parts:
+## Required Tracker Artifacts
 
-- What was done — prose plus commits/files changed.
-- Acceptance checklist — from the parent spec Behaviour section captured at
-  fan-out, or from the original brief for spec-less fixes; every item checked
-  with mechanical evidence.
-- Testing instructions for the human — exact commands, URLs, or clicks.
-- Not-done/deferred — explicit, even when the answer is "nothing".
+Before `built` or `review`, confirm the ticket thread has the four-part closing brief:
 
-If the closing brief is missing or any section lacks evidence, the ticket is NOT
-ready for `review`; leave it `in_progress` or send it back with the missing
-contract called out.
+- What was done: prose plus commits/files changed.
+- Acceptance checklist: copied from the parent spec or original brief, with every item tied to evidence.
+- Testing instructions for the human: exact commands, URLs, or clicks.
+- Not-done/deferred: explicit, even when empty.
 
-**Tests** — detect and run the repo's test command, full suite not just new tests:
-- `package.json` scripts.test → `npm test` (or `pnpm test` / `yarn test`)
-- `pyproject.toml`/`pytest.ini`/`tests/` → `pytest -q`
-- `Cargo.toml` → `cargo test` · `go.mod` → `go test ./...` · `Makefile` test target → `make test`
-Lint/types likewise if the repo defines them (e.g. `ruff`, `tsc --noEmit`).
+Before `verifying`, confirm there is manager dispatch evidence naming the verifier or skip reason.
 
-**Commits exist** (the change is real, not just described):
+Before `verified` or `rejected`, confirm there is a verification report with PASS/FAIL, evidence, and follow-up defects if any.
+
+Before `done`, confirm the current phase is `verified` or a skip reason is recorded. For specs, all children must be terminal and the close/retro artifact must exist.
+
+The server enforces the same artifact classes for phase transitions. If `transitionTicket` rejects a move, the ticket is not done.
+
+## Checks
+
+Detect and run the repo's relevant test/check commands, full enough to prove the journey rather than just new code:
+
+- `package.json` scripts: `npm test`, `npm run check`, or the repo-specific smoke.
+- Python: `pytest -q` plus configured lint/type checks.
+- Go/Rust/Make: `go test ./...`, `cargo test`, or `make test` when defined.
+- UI/browser: use the repo headless helper, not a shared visible browser.
+
+Also inspect recent commits when a commit is claimed:
+
 ```bash
-git log --oneline -5 && git diff --stat HEAD~1
+git log --oneline -5
+git diff --stat HEAD~1
 ```
 
-**PR, when one is claimed** (`<n>` = PR number):
-```bash
-gh pr view <n> --json state,mergeable,statusCheckRollup
-```
-Done requires `state:"OPEN"` (or `"MERGED"`), `mergeable:"MERGEABLE"`, and every
-`statusCheckRollup` entry `conclusion:"SUCCESS"`. Anything else is not done.
+For a claimed PR, verify with `gh pr view <n> --json state,mergeable,statusCheckRollup` and require an open/merged PR plus successful checks.
 
-If any check fails or the command can't be run, the ticket is NOT done — leave it in
-progress (or move it to `blocked`) and return it to the worker with the failing output.
+If a command cannot be run, record why and keep the ticket in progress/blocked unless the ticket explicitly allows a documented skip reason.
