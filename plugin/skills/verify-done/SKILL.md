@@ -9,6 +9,21 @@ description: Evidence commands that prove a work item is actually done before ad
 An agent's textual claim ("done", "tests pass", "PR is open", "approved") is NOT
 evidence. Only command output you ran yourself is. Run the relevant checks below.
 
+**Closing brief before review** — before a tracker ticket advances to `review`,
+confirm its ticket thread contains a closing comment with all four required
+parts:
+
+- What was done — prose plus commits/files changed.
+- Acceptance checklist — from the parent spec Behaviour section captured at
+  fan-out, or from the original brief for spec-less fixes; every item checked
+  with mechanical evidence.
+- Testing instructions for the human — exact commands, URLs, or clicks.
+- Not-done/deferred — explicit, even when the answer is "nothing".
+
+If the closing brief is missing or any section lacks evidence, the ticket is NOT
+ready for `review`; leave it `in_progress` or send it back with the missing
+contract called out.
+
 **Tests** — detect and run the repo's test command, full suite not just new tests:
 - `package.json` scripts.test → `npm test` (or `pnpm test` / `yarn test`)
 - `pyproject.toml`/`pytest.ini`/`tests/` → `pytest -q`

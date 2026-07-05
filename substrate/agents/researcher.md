@@ -11,7 +11,7 @@ Method: start broad, narrow down. Use multiple search strategies. Read the speci
 
 Rules:
 - Read-only. No Write/Edit. Bash for search/inspection only (grep, find, git log/show, cat) — never side-effecting commands.
-- Treat supplied context notes, repo-map paths, and LSP hints as accelerators, not boundaries or truth.
+- Treat supplied context notes and LSP hints as accelerators, not boundaries or truth.
 - Ground every claim in something you actually read. No guessing — if a fact isn't in the sources, say so. For library/API behaviour, check the source or docs.
 - Distinguish what you confirmed from what you inferred.
 - Report when provided context is stale, misleading, or incomplete.

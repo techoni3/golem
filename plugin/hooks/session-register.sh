@@ -34,6 +34,8 @@ SESSIONS_JSON="$CONFIG_DIR/sessions.json"
 PAYLOAD="$(cat 2>/dev/null || true)"
 
 SESSION_ID=""
+RAW_SESSION_ID=""
+SESSION_NAME=""
 CWD="$PWD"
 # harness: which agentic harness this session runs under. CC sends no such
 # field (defaults to claudecode); the opencode shim (TKT-0577) sets it to
@@ -43,11 +45,26 @@ HARNESS="claudecode"
 MODEL=""
 if command -v jq >/dev/null 2>&1 && [ -n "$PAYLOAD" ]; then
   SESSION_ID="$(printf '%s' "$PAYLOAD" | jq -r '.session_id // empty' 2>/dev/null || true)"
+  RAW_SESSION_ID="$SESSION_ID"
   _pcwd="$(printf '%s' "$PAYLOAD" | jq -r '.cwd // empty' 2>/dev/null || true)"
   [ -n "$_pcwd" ] && CWD="$_pcwd"
   _ph="$(printf '%s' "$PAYLOAD" | jq -r '.harness // empty' 2>/dev/null || true)"
   [ -n "$_ph" ] && HARNESS="$_ph"
   MODEL="$(printf '%s' "$PAYLOAD" | jq -r '.model // .modelID // .model_id // .session.model // .session.modelID // .info.model // .info.modelID // empty' 2>/dev/null || true)"
+fi
+
+# Claude Code resume/reload can pass a fresh per-run id in the hook payload.
+# The stable logical id and /rename name live in the long-lived parent session
+# file keyed by the parent pid. Prefer that id so sessions.json, channels.json,
+# and ~/.claude/sessions agree on one identity.
+if [ "$HARNESS" = "claudecode" ] && command -v jq >/dev/null 2>&1; then
+  PARENT_SESSION_FILE="${HOME:-}/.claude/sessions/${PPID:-}.json"
+  if [ -f "$PARENT_SESSION_FILE" ]; then
+    _sid="$(jq -r '.sessionId // .session_id // empty' "$PARENT_SESSION_FILE" 2>/dev/null || true)"
+    _sname="$(jq -r '.name // empty' "$PARENT_SESSION_FILE" 2>/dev/null || true)"
+    [ -n "$_sid" ] && SESSION_ID="$_sid"
+    [ -n "$_sname" ] && SESSION_NAME="$_sname"
+  fi
 fi
 
 # --- resolve project root --------------------------------------------------
@@ -178,15 +195,17 @@ upsert_sessions() {
   local tmp="$SESSIONS_JSON.tmp.$$"
   jq \
     --arg sid "$SESSION_ID" \
+    --arg raw_sid "$RAW_SESSION_ID" \
     --arg pid "${PPID:-}" \
     --arg pid_root "$ROOT" \
     --arg pid_proj "$PROJECT_ID" \
     --arg harness "$HARNESS" \
+    --arg name "$SESSION_NAME" \
     --arg model "$MODEL" \
     --arg now "$NOW" \
     '
     (.version // 1) as $v
-    | (.sessions // []) as $ss
+    | (.sessions // [] | map(select(.session_id != $raw_sid or $raw_sid == "" or $raw_sid == $sid))) as $ss
     | ([ $ss[] | select(.session_id == $sid) ] | length > 0) as $exists
     | {
         version: $v,
@@ -194,7 +213,7 @@ upsert_sessions() {
           if $exists then
             [ $ss[]
               | if .session_id == $sid
-                then . + {last_seen_at: $now, project_id: $pid_proj, project_path: $pid_root, harness: $harness, model: (if $model == "" then (.model // null) else $model end)}
+                then . + {last_seen_at: $now, project_id: $pid_proj, project_path: $pid_root, harness: $harness, name: (if $name == "" then (.name // null) else $name end), model: (if $model == "" then (.model // null) else $model end)}
                 else . end
             ]
           else
@@ -204,6 +223,7 @@ upsert_sessions() {
               project_id: $pid_proj,
               project_path: $pid_root,
               harness: $harness,
+              name: (if $name == "" then null else $name end),
               model: (if $model == "" then null else $model end),
               boot_time: $now,
               last_seen_at: $now

@@ -5,8 +5,19 @@ description: Branch naming, commit format + trailer, and PR body shape for golem
 
 # pr-conventions
 
-**Branch:** `<type>/<kebab-slug>` — type ∈ `feat | fix | refactor | infra | docs | spike`.
-One branch per tracker ticket. e.g. `feat/stripe-webhook-handler`.
+## Branch policy — no implicit branching
+
+Never create a branch on your own initiative. Branch ONLY when the work item or
+the human explicitly says to branch. Otherwise, continue on the branch the
+session/ticket is already pointed at.
+
+How to know branching is allowed: the ticket body or dispatch brief names a
+branch with `branch: <name>` or an equivalent explicit instruction, or Lavee
+asks for a branch in chat. Absence of that directive means stay put.
+
+When branching is explicitly allowed, use `<type>/<kebab-slug>` — type ∈
+`feat | fix | refactor | infra | docs | spike`. One branch per tracker ticket,
+e.g. `feat/stripe-webhook-handler`.
 
 **Commits:** Conventional — `<type>(<scope>): <imperative subject>`. Subject ≤72 chars,
 no trailing period. `scope` optional (affected module: `api`, `db`, `webhooks`). Body

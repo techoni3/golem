@@ -71,27 +71,9 @@ function projectId(root) {
   const slug = path.basename(root).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'project';
   return `${slug}-${crypto.createHash('sha256').update(path.resolve(root)).digest('hex').slice(0, 6)}`;
 }
-function readMeta(file) {
-  const text = fs.readFileSync(file, 'utf8');
-  return {
-    commit: /^commit: ([^\n]+)/m.exec(text)?.[1] || path.basename(file, '.md'),
-    dirty: /^dirty: true$/m.test(text),
-  };
-}
 const root = rootFrom(start);
 const id = projectId(root);
 const lines = [];
-const dir = path.join(home, 'repomap', id);
-if (fs.existsSync(dir)) {
-  const maps = fs.readdirSync(dir)
-    .filter((name) => name.endsWith('.md'))
-    .map((name) => ({ file: path.join(dir, name), mtimeMs: fs.statSync(path.join(dir, name)).mtimeMs }))
-    .sort((a, b) => b.mtimeMs - a.mtimeMs);
-  if (maps[0]) {
-    const meta = readMeta(maps[0].file);
-    lines.push(`Repo map: ${maps[0].file} (commit ${String(meta.commit).slice(0, 7)}${meta.dirty ? ', dirty' : ''})`);
-  }
-}
 try {
   const projects = JSON.parse(fs.readFileSync(path.join(home, 'projects.json'), 'utf8')).projects || [];
   const project = projects.find((p) => p && (p.id === id || path.resolve(p.path || '') === root));

@@ -38,6 +38,7 @@ PAYLOAD="$(cat 2>/dev/null || true)"
 SESSION_ID=""
 CWD="$PWD"
 HARNESS=""
+SESSION_NAME=""
 MODEL=""
 if command -v jq >/dev/null 2>&1 && [ -n "$PAYLOAD" ]; then
   SESSION_ID="$(printf '%s' "$PAYLOAD" | jq -r '.session_id // empty' 2>/dev/null || true)"
@@ -45,6 +46,16 @@ if command -v jq >/dev/null 2>&1 && [ -n "$PAYLOAD" ]; then
   [ -n "$_pcwd" ] && CWD="$_pcwd"
   HARNESS="$(printf '%s' "$PAYLOAD" | jq -r '.harness // empty' 2>/dev/null || true)"
   MODEL="$(printf '%s' "$PAYLOAD" | jq -r '.model // .modelID // .model_id // .session.model // .session.modelID // .info.model // .info.modelID // empty' 2>/dev/null || true)"
+fi
+
+if [ "${HARNESS:-claudecode}" != "opencode" ] && command -v jq >/dev/null 2>&1; then
+  PARENT_SESSION_FILE="${HOME:-}/.claude/sessions/${PPID:-}.json"
+  if [ -f "$PARENT_SESSION_FILE" ]; then
+    _sid="$(jq -r '.sessionId // .session_id // empty' "$PARENT_SESSION_FILE" 2>/dev/null || true)"
+    _sname="$(jq -r '.name // empty' "$PARENT_SESSION_FILE" 2>/dev/null || true)"
+    [ -n "$_sid" ] && SESSION_ID="$_sid"
+    [ -n "$_sname" ] && SESSION_NAME="$_sname"
+  fi
 fi
 
 # --- resolve project root (same rule as session-register.sh) ---------------
@@ -110,6 +121,7 @@ refresh_session_registry() {
     --arg pid "$PROJECT_ID" \
     --arg ppath "$ROOT" \
     --arg harness "$HARNESS" \
+    --arg name "$SESSION_NAME" \
     --arg model "$MODEL" \
     --arg now "$TS" \
     '
@@ -124,6 +136,7 @@ refresh_session_registry() {
                 project_id: (.project_id // $pid),
                 project_path: (.project_path // $ppath),
                 harness: (if $harness == "" then (.harness // "claudecode") else $harness end),
+                name: (if $name == "" then (.name // null) else $name end),
                 model: (if $model == "" then (.model // null) else $model end)
               }
             else . end

@@ -54,14 +54,14 @@ it in — they're tension-forcing scaffolds, not cages:
 
 - `work-item` → `templates/feature.md` — Problem / Appetite / Solution sketch / optional Context notes (orientation, not boundary) / Rabbit holes / No-gos / Acceptance
 - `fix` → `templates/bug.md` — Repro / Expected / Actual / Environment / Suspected cause / Fix
-- `spec` → `templates/design-doc.md` — arc42 MVP + C4 container diagram + ADRs
+- `spec` → `templates/spec.md` — Intent / Behaviour / Decisions / Non-goals / Open questions; no fan-out section
 - `decision` → `templates/decision.md` — MADR bare-minimum: Status / Context / Decision / Consequences / Rejected alternatives
 - `prd` → `templates/prd.md` — Problem / Audience / Success criteria / Non-goals
 - `brainstorm` → `templates/brainstorm.md` — Question / Options with tradeoffs / Verdicts
 
 Files live at `plugin/skills/tracker/templates/*.md` in this repo, or query
 `GET /api/templates` on the dashboard for the live list. The create-ticket UI
-picks a default by kind (work-item→feature, fix→bug, spec→design-doc,
+picks a default by kind (work-item→feature, fix→bug, spec→spec,
 decision→decision; prd/brainstorm selectable) and pre-fills the body only when
 it's empty.
 
