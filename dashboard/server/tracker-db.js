@@ -18,7 +18,7 @@ import TurndownService from 'turndown';
 import { gfm as turndownGfm } from 'turndown-plugin-gfm';
 import { trackerDbPath } from '../../lib/golem-home.js';
 import { createCommentDispatchService, defaultDispatchStateForComment } from './comment-dispatch.js';
-import { canonicalStateForPhase, initialPhaseForKind, isKnownPhase, phaseFromLegacyState } from './phase-machine.js';
+import { canonicalStateForPhase, initialPhaseForKind, isKnownPhase, legalNextPhases, phaseFromLegacyState, requirementsForPhase } from './phase-machine.js';
 
 const SCHEMA_VERSION = 11;
 
@@ -1309,6 +1309,37 @@ WHERE state_changed_at IS NULL`).run();
       return nextPhase;
     },
 
+    validatePhaseTransition(ticket, toPhase, input = {}) {
+      const current = ticket.phase ?? phaseFromLegacyState(ticket.kind, ticket.state);
+      if (!legalNextPhases(ticket.kind, current).includes(toPhase)) {
+        throw new Error(`transitionTicket: illegal transition ${current} -> ${toPhase}`);
+      }
+      const comments = stmts.getComments.all(ticket.id);
+      const hasComment = (re) => comments.some((c) => re.test(String(c.body || '')));
+      const missing = [];
+      const req = requirementsForPhase(ticket.kind, toPhase);
+      if (req.reason && !String(input.reason || '').trim()) missing.push('reason');
+      if (req.closingBrief && !hasComment(/closing\s+brief/i) && !input.closingBrief) missing.push('closingBrief');
+      if (req.managerDispatch && !ticket.dispatched_to && !input.managerDispatch) missing.push('managerDispatch');
+      if (req.verificationReport && !hasComment(/verification|verify-done|smoke|test/i) && !input.verificationReport) missing.push('verificationReport');
+      if (req.verifiedOrSkipReason && current !== 'verified' && !String(input.skip_reason || input.reason || '').trim()) missing.push('verifiedOrSkipReason');
+      if (req.answerComment && comments.length === 0 && !input.answerComment) missing.push('answerComment');
+      if (req.decisionComment && !hasComment(/decision|decided/i) && !input.decisionComment) missing.push('decisionComment');
+      if (req.children || req.childrenTerminal || req.childStarted) {
+        const children = db.prepare('SELECT state FROM tickets WHERE parent_id = ?').all(ticket.id);
+        if (req.children && children.length === 0) missing.push('children');
+        if (req.childrenTerminal && children.some((c) => c.state !== 'done' && c.state !== 'archived')) missing.push('childrenTerminal');
+        if (req.childStarted && !children.some((c) => c.state !== 'todo')) missing.push('childStarted');
+      }
+      if (req.waves) {
+        const wave = db.prepare('SELECT COUNT(*) AS n FROM tickets WHERE parent_id = ? AND wave IS NOT NULL').get(ticket.id)?.n ?? 0;
+        if (!wave) missing.push('waves');
+      }
+      if (req.comment instanceof RegExp && !hasComment(req.comment)) missing.push('comment');
+      if (missing.length) throw new Error(`transitionTicket: missing required artifact(s): ${missing.join(', ')}`);
+      return { from: current, to: toPhase, missing: [] };
+    },
+
     createTicket(input = {}) {
       const {
         project_id,
@@ -1656,7 +1687,16 @@ WHERE state_changed_at IS NULL`).run();
             project_id: existing.project_id,
             type: 'state_change',
             actor,
-            data: { from: existing.state, to: updates.state },
+            data: { from: existing.state, to: updates.state, from_phase: existing.phase, to_phase: updates.phase ?? existing.phase },
+          });
+          commentDispatch.markAddressedForTicketActivity(id, actor);
+        } else if ('phase' in updates && updates.phase !== existing.phase) {
+          recordEvent({
+            ticket_id: id,
+            project_id: existing.project_id,
+            type: 'phase_change',
+            actor,
+            data: { from: existing.phase, to: updates.phase, state: updates.state ?? existing.state },
           });
           commentDispatch.markAddressedForTicketActivity(id, actor);
         }
@@ -1673,6 +1713,14 @@ WHERE state_changed_at IS NULL`).run();
         return stmts.getTicket.get(id);
       });
       return hydrateTicket(txn());
+    },
+
+    transitionTicket(id, input = {}) {
+      const existing = stmts.getTicket.get(id);
+      if (!existing) throw new Error(`transitionTicket: ticket '${id}' not found`);
+      const toPhase = api.normalizePhase(existing.kind, input.phase, 'transitionTicket');
+      api.validatePhaseTransition(existing, toPhase, input);
+      return api.updateTicket(id, { phase: toPhase, actor: input.actor ?? 'human' });
     },
 
     // TKT-0105: state + rank move in a single transaction. Used by the

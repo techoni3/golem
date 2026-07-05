@@ -559,7 +559,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
   const onTransitionPhase = React.useCallback((phase) => {
     if (!ticketId || !phase) return;
     setTransitionNote(null);
-    window.SubstrateAPI.transitionTicket(ticketId, { to_phase: phase, actor: 'human:dashboard' })
+    window.SubstrateAPI.transitionTicket(ticketId, { phase, actor: 'human:dashboard' })
       .then((updated) => {
         if (updated?.id) window.Store.upsertTrackerTicket(updated);
         setTransitionNote(`moved to ${phase}`);

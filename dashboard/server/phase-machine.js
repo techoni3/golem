@@ -111,6 +111,10 @@ export function legalNextPhases(kind, phase) {
   return machineForKind(kind).transitions[phase] || [];
 }
 
+export function requirementsForPhase(kind, phase) {
+  return machineForKind(kind).requirements?.[phase] || {};
+}
+
 export function phaseFromLegacyState(kind, state) {
   const machine = machineForKind(kind);
   if (state === 'archived') return machine.terminal[0] || machine.initial;
