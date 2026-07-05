@@ -4,8 +4,25 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
-export const SESSION_ROLES = Object.freeze(['planner', 'builder', 'researcher', 'ui-tester', 'general']);
+export const BUILTIN_ROLES = Object.freeze([
+  { name: 'manager', color: '#f59e0b', glyph: 'MG', builtin: true },
+  { name: 'planner', color: '#a78bfa', glyph: 'PL', builtin: true },
+  { name: 'builder', color: '#4ade80', glyph: 'BU', builtin: true },
+  { name: 'explorer', color: '#38bdf8', glyph: 'EX', builtin: true },
+]);
+export const ROLE_MIGRATIONS = Object.freeze({ general: 'manager', researcher: 'explorer', 'ui-tester': 'explorer' });
+export const SESSION_ROLES = new Proxy([], {
+  get(_target, prop) {
+    const roles = roleNames();
+    const value = roles[prop];
+    return typeof value === 'function' ? value.bind(roles) : value;
+  },
+  ownKeys() { return Reflect.ownKeys(roleNames()); },
+  getOwnPropertyDescriptor(_target, prop) { return Object.getOwnPropertyDescriptor(roleNames(), prop); },
+});
 export const SESSION_ROLE_UPDATED_BY = Object.freeze(['human:dashboard', 'human:cli', 'self:mcp']);
+
+let roleRegistryCache = null;
 
 function isRealDir(p) {
   try { return fs.statSync(p).isDirectory(); } catch { return false; }
@@ -29,6 +46,10 @@ function channelsJsonPath() {
 
 function rolesOverlayDir() {
   return path.join(golemHome(), 'roles');
+}
+
+function rolesIndexPath() {
+  return path.join(rolesOverlayDir(), 'index.json');
 }
 
 function roleOverlayPath(role) {
@@ -66,8 +87,149 @@ export function readRoleCard(role) {
   try { return fs.readFileSync(p, 'utf8').trimEnd(); } catch { return null; }
 }
 
+function normalizeRoleName(name) {
+  const value = String(name || '').trim().toLowerCase();
+  if (!/^[a-z][a-z0-9-]{1,31}$/.test(value)) throw new Error('role name must be 2-32 chars: a-z, 0-9, hyphen; start with a letter');
+  return value;
+}
+
+function normalizeRoleMeta(role, fallback = {}) {
+  const name = normalizeRoleName(role?.name ?? fallback.name);
+  const color = String(role?.color ?? fallback.color ?? '#8a909c').trim() || '#8a909c';
+  const glyph = String(role?.glyph ?? fallback.glyph ?? name.slice(0, 2).toUpperCase()).trim().slice(0, 4) || name.slice(0, 2).toUpperCase();
+  return { name, color, glyph, builtin: role?.builtin === true || fallback.builtin === true };
+}
+
+function readRolesIndexRaw() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(rolesIndexPath(), 'utf8'));
+    if (Array.isArray(parsed?.roles)) return parsed.roles;
+  } catch { /* seed below */ }
+  return null;
+}
+
+function writeRolesIndex(roles) {
+  fs.mkdirSync(rolesOverlayDir(), { recursive: true });
+  const target = rolesIndexPath();
+  const tmp = `${target}.tmp.${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify({ version: 1, roles }, null, 2) + '\n', 'utf8');
+  fs.renameSync(tmp, target);
+  roleRegistryCache = null;
+}
+
+export function migrateSessionRoles({ actor = 'system:role-migration' } = {}) {
+  const file = sessionsJsonPath();
+  const now = new Date().toISOString();
+  let changed = false;
+  let migrated = [];
+  try {
+    withFileLock(`${file}.lock`, () => {
+      const reg = readRegistry(file);
+      reg.sessions = reg.sessions.map((s) => {
+        const nextRole = ROLE_MIGRATIONS[s.role];
+        if (!nextRole) return s;
+        changed = true;
+        const next = {
+          ...s,
+          role: nextRole,
+          role_updated_at: now,
+          role_updated_by: actor,
+          role_migrated_from: s.role,
+        };
+        migrated.push({ session_id: s.session_id, name: s.name ?? null, from: s.role, to: nextRole });
+        return next;
+      });
+      if (changed) writeRegistry(file, reg);
+    });
+  } catch (err) {
+    if (err?.code !== 'ENOENT') throw err;
+  }
+  return { changed, migrated };
+}
+
+export function readRoleRegistry() {
+  if (roleRegistryCache) return roleRegistryCache.map((r) => ({ ...r }));
+  const byName = new Map(BUILTIN_ROLES.map((r) => [r.name, normalizeRoleMeta(r)]));
+  const raw = readRolesIndexRaw();
+  if (raw) {
+    byName.clear();
+    for (const item of raw) {
+      try {
+        const role = normalizeRoleMeta(item);
+        if (!ROLE_MIGRATIONS[role.name]) byName.set(role.name, role);
+      } catch { /* skip invalid old rows */ }
+    }
+    for (const builtin of BUILTIN_ROLES) if (!byName.has(builtin.name)) byName.set(builtin.name, normalizeRoleMeta(builtin));
+  }
+  const roles = [...byName.values()].sort((a, b) => Number(b.builtin) - Number(a.builtin) || a.name.localeCompare(b.name));
+  writeRolesIndex(roles);
+  migrateSessionRoles();
+  roleRegistryCache = roles;
+  return roles.map((r) => ({ ...r }));
+}
+
+export function roleNames() {
+  return readRoleRegistry().map((r) => r.name);
+}
+
+export function getRole(name) {
+  let normalized = null;
+  try {
+    normalized = normalizeRoleName(name);
+  } catch {
+    return null;
+  }
+  return readRoleRegistry().find((r) => r.name === normalized) || null;
+}
+
+export function createRole({ name, color, glyph, body } = {}) {
+  const meta = normalizeRoleMeta({ name, color, glyph, builtin: false });
+  const roles = readRoleRegistry();
+  if (roles.some((r) => r.name === meta.name)) throw new Error(`role already exists: ${meta.name}`);
+  writeRolesIndex([...roles, meta].sort((a, b) => Number(b.builtin) - Number(a.builtin) || a.name.localeCompare(b.name)));
+  if (body != null && String(body).trim()) writeRoleCard(meta.name, body);
+  return listRoleCards().find((r) => r.name === meta.name);
+}
+
+function assignedSessionsForRole(role) {
+  const reg = readRegistry(sessionsJsonPath());
+  return reg.sessions.filter((s) => s.role === role);
+}
+
+export function deleteRole(name, { force = false } = {}) {
+  const normalized = normalizeRoleName(name);
+  const roles = readRoleRegistry();
+  const role = roles.find((r) => r.name === normalized);
+  if (!role) throw new Error(`role not found: ${normalized}`);
+  if (role.builtin) throw new Error(`cannot delete builtin role: ${normalized}`);
+  const assigned = assignedSessionsForRole(normalized);
+  if (assigned.length && !force) throw new Error(`role is assigned to ${assigned.length} session(s)`);
+  if (assigned.length && force) {
+    const file = sessionsJsonPath();
+    const now = new Date().toISOString();
+    withFileLock(`${file}.lock`, () => {
+      const reg = readRegistry(file);
+      reg.sessions = reg.sessions.map((s) => s.role === normalized ? { ...s, role: null, role_updated_at: now, role_updated_by: 'system:role-delete' } : s);
+      writeRegistry(file, reg);
+    });
+  }
+  writeRolesIndex(roles.filter((r) => r.name !== normalized));
+  return { ok: true, role: normalized, cleared_sessions: force ? assigned.length : 0 };
+}
+
+export function updateRoleMeta(name, patch = {}) {
+  const normalized = normalizeRoleName(name);
+  const roles = readRoleRegistry();
+  const idx = roles.findIndex((r) => r.name === normalized);
+  if (idx < 0) throw new Error(`role not found: ${normalized}`);
+  roles[idx] = normalizeRoleMeta({ ...roles[idx], color: patch.color ?? roles[idx].color, glyph: patch.glyph ?? roles[idx].glyph, builtin: roles[idx].builtin });
+  writeRolesIndex(roles);
+  return roles[idx];
+}
+
 export function listRoleCards() {
-  return SESSION_ROLES.map((role) => {
+  return readRoleRegistry().map((meta) => {
+    const role = meta.name;
     const overlay = roleOverlayPath(role);
     const defaultPath = roleDefaultPath(role);
     let currentPath = null;
@@ -86,7 +248,7 @@ export function listRoleCards() {
     if (currentPath) {
       try { body = fs.readFileSync(currentPath, 'utf8').trimEnd(); } catch { body = ''; }
     }
-    return { name: role, body, overridden, updated_at, default_path: defaultPath, overlay_path: overlay };
+    return { ...meta, body, overridden, updated_at, default_path: defaultPath, overlay_path: overlay };
   });
 }
 
@@ -153,9 +315,10 @@ function withFileLock(lockPath, fn) {
 
 function normalizeRole(role) {
   if (role == null || role === '' || role === 'clear') return null;
-  const value = String(role);
-  if (!SESSION_ROLES.includes(value)) {
-    throw new Error(`invalid session role: ${value} (expected ${SESSION_ROLES.join('|')} or clear)`);
+  const value = normalizeRoleName(role);
+  const roles = roleNames();
+  if (!roles.includes(value)) {
+    throw new Error(`invalid session role: ${value} (expected ${roles.join('|')} or clear)`);
   }
   return value;
 }

@@ -193,11 +193,25 @@
     setSessionRole: (sessionId, role) =>
       postJSON(`/api/sessions/${encodeURIComponent(sessionId)}/role`, { role }),
     listRoles: () => getJSON('/api/roles'),
-    saveRole: (name, body) =>
+    createRole: (role) => postJSON('/api/roles', role),
+    saveRole: (name, patch) =>
       fetch(`/api/roles/${encodeURIComponent(name)}`, {
         method: 'PUT',
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ body }),
+        body: JSON.stringify(typeof patch === 'string' ? { body: patch } : patch),
+      }).then(async (r) => {
+        const json = await r.json().catch(() => null);
+        if (!r.ok) {
+          const err = new Error(`${r.status} ${r.statusText} /api/roles/${name}`);
+          err.payload = json;
+          throw err;
+        }
+        return json;
+      }),
+    deleteRole: (name, force = false) =>
+      fetch(`/api/roles/${encodeURIComponent(name)}${force ? '?force=true' : ''}`, {
+        method: 'DELETE',
+        headers: { Accept: 'application/json' },
       }).then(async (r) => {
         const json = await r.json().catch(() => null);
         if (!r.ok) {

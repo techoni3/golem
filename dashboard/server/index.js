@@ -8,7 +8,7 @@ import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
 import { CONFIG } from './config.js';
 import { createState } from './state.js';
-import { ROLES } from './roles.js';
+import { roleMetaMap } from './roles.js';
 import { pushBrief, pushInterrupt, pushHalt, pushGateVerdict, channelHealth, listChannels } from './brief.js';
 import { createChat } from './chat.js';
 import { readNativeSessionPeek } from './native-session-peek.js';
@@ -19,7 +19,7 @@ import { listIdeas, createIdea, popIdea, readIdea } from './ideas.js';
 import { initDispatchDrainer } from './dispatch-queue.js';
 import { registerSubstrateRoutes } from './substrate.js';
 import { golemHome, dashboardJsonPath, journalDirFor } from '../../lib/golem-home.js';
-import { SESSION_ROLES, listRoleCards, roleChangeBrief, setSessionRole, writeRoleCard } from '../../lib/session-role.js';
+import { createRole, deleteRole, getRole, listRoleCards, roleChangeBrief, setSessionRole, updateRoleMeta, writeRoleCard } from '../../lib/session-role.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const WEB_ROOT = path.resolve(__dirname, '..', 'web');
@@ -528,7 +528,7 @@ async function main() {
   }));
 
   fastify.get('/api/meta', async () => ({
-    roles: ROLES,
+    roles: roleMetaMap(),
     columns: TRACKER_COLUMNS,
     config: {
       projectsRoot: CONFIG.projectsRoot,
@@ -1497,22 +1497,7 @@ async function main() {
 
   fastify.get('/api/roles', async () => listRoleCards());
 
-  fastify.put('/api/roles/:name', async (req, reply) => {
-    const name = req.params.name;
-    if (!SESSION_ROLES.includes(name)) return reply.code(404).send({ error: 'role_not_found' });
-    try {
-      const body = typeof req.body?.body === 'string' ? req.body.body : '';
-      const role = writeRoleCard(name, body);
-      broadcastWS({ type: 'roles-updated', roles: listRoleCards() });
-      return role;
-    } catch (err) {
-      return reply.code(400).send({ error: String(err?.message ?? err) });
-    }
-  });
-
-  fastify.post('/api/roles/:name/push', async (req, reply) => {
-    const name = req.params.name;
-    if (!SESSION_ROLES.includes(name)) return reply.code(404).send({ error: 'role_not_found' });
+  async function pushRoleToLive(name) {
     if (typeof state.refreshNativeSessions === 'function') await state.refreshNativeSessions();
     const targets = state.nativeSessions().filter((s) => s.alive && s.role === name);
     const results = [];
@@ -1529,15 +1514,64 @@ async function main() {
       });
       chat.record(result.ok ? 'system' : 'error', 'session_role_push', `role ${name} push ${result.ok ? 'delivered' : 'failed'} for ${session.name || session.session_id}`, { session_id: session.session_id });
     }
-    broadcastWS({ type: 'roles-updated', roles: listRoleCards(), push: { role: name, results } });
     return { role: name, count: results.length, results };
+  }
+
+  fastify.post('/api/roles', async (req, reply) => {
+    try {
+      const role = createRole(req.body ?? {});
+      broadcastWS({ type: 'roles-updated', roles: listRoleCards(), meta: roleMetaMap() });
+      return reply.code(201).send(role);
+    } catch (err) {
+      const msg = String(err?.message ?? err);
+      const code = /already exists/i.test(msg) ? 409 : 400;
+      return reply.code(code).send({ error: msg });
+    }
+  });
+
+  fastify.put('/api/roles/:name', async (req, reply) => {
+    const name = req.params.name;
+    const existing = getRole(name);
+    if (!existing) return reply.code(404).send({ error: 'role_not_found' });
+    try {
+      const hasBody = typeof req.body?.body === 'string';
+      updateRoleMeta(name, req.body ?? {});
+      const role = hasBody ? writeRoleCard(existing.name, req.body.body) : listRoleCards().find((r) => r.name === existing.name);
+      const push = await pushRoleToLive(role.name);
+      broadcastWS({ type: 'roles-updated', roles: listRoleCards(), meta: roleMetaMap(), push });
+      return { ...role, push };
+    } catch (err) {
+      return reply.code(400).send({ error: String(err?.message ?? err) });
+    }
+  });
+
+  fastify.delete('/api/roles/:name', async (req, reply) => {
+    try {
+      const result = deleteRole(req.params.name, { force: req.query?.force === 'true' || req.query?.force === '1' });
+      broadcastWS({ type: 'roles-updated', roles: listRoleCards(), meta: roleMetaMap() });
+      if (typeof state.refreshNativeSessions === 'function') await state.refreshNativeSessions();
+      broadcastWS({ type: 'native-sessions-update', native_sessions: enrichSessionRows(state.nativeSessions(), state.channels()), channels: state.channels() });
+      return result;
+    } catch (err) {
+      const msg = String(err?.message ?? err);
+      const code = /not found/i.test(msg) ? 404 : /assigned|builtin/i.test(msg) ? 409 : 400;
+      return reply.code(code).send({ error: msg });
+    }
+  });
+
+  fastify.post('/api/roles/:name/push', async (req, reply) => {
+    const name = req.params.name;
+    if (!getRole(name)) return reply.code(404).send({ error: 'role_not_found' });
+    const push = await pushRoleToLive(name);
+    broadcastWS({ type: 'roles-updated', roles: listRoleCards(), meta: roleMetaMap(), push });
+    return push;
   });
 
   fastify.post('/api/sessions/:id/role', async (req, reply) => {
     const id = req.params.id;
     const body = req.body ?? {};
     const role = body.role === 'clear' ? null : (body.role ?? null);
-    if (role != null && !SESSION_ROLES.includes(role)) {
+    if (role != null && !getRole(role)) {
       return reply.code(400).send({ error: `invalid role: ${role}` });
     }
     try {

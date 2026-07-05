@@ -256,6 +256,11 @@
     if (!role) return state.roles.UNK;
     return state.roles[role] ?? state.roles.UNK;
   }
+  function getRoles() {
+    return Object.entries(state.roles)
+      .filter(([name]) => name !== 'UNK')
+      .map(([name, meta]) => ({ name, ...meta }));
+  }
 
   async function loadNativeSessionPeek(sessionId) {
     if (!sessionId) return null;
@@ -357,6 +362,7 @@
             notify();
             break;
           case 'roles-updated':
+            if (msg.meta) state.roles = { ...ROLES_FALLBACK, ...msg.meta };
             state.rolesRev = (state.rolesRev || 0) + 1;
             notify();
             break;
@@ -398,6 +404,7 @@
     seedTicketComments,
     upsertTrackerTicket,
     getRole,
+    getRoles,
     loadNativeSessionPeek,
     refreshProjects,
     getNativeSessionPeek,

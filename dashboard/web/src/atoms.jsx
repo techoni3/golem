@@ -27,6 +27,16 @@ function Avatar({ role, size = 32, pulse = false }) {
   );
 }
 
+function RoleSelect({ value, disabled, onChange }) {
+  const roles = window.Store.getRoles ? window.Store.getRoles() : [];
+  return (
+    <select value={value || ''} onChange={(e) => onChange(e.target.value || null)} disabled={disabled}>
+      <option value="">clear</option>
+      {roles.map((role) => <option key={role.name} value={role.name}>{role.name}</option>)}
+    </select>
+  );
+}
+
 function ProjectGlyph({ project, size = 32 }) {
   return (
     <div
@@ -238,18 +248,11 @@ function AgentCard({ session, name, queueCount = 0, setRoute, showControls = fal
       <div className="native-session-role agent-card-role" onClick={(e) => e.stopPropagation()}>
         <label>
           Role{' '}
-          <select
+          <RoleSelect
             value={s.role || ''}
-            onChange={(e) => window.SubstrateAPI.setSessionRole(s.session_id, e.target.value || null).catch((err) => console.error('set role failed', err))}
+            onChange={(role) => window.SubstrateAPI.setSessionRole(s.session_id, role).catch((err) => console.error('set role failed', err))}
             disabled={!s.session_id}
-          >
-            <option value="">clear</option>
-            <option value="planner">planner</option>
-            <option value="builder">builder</option>
-            <option value="researcher">researcher</option>
-            <option value="ui-tester">ui-tester</option>
-            <option value="general">general</option>
-          </select>
+          />
         </label>
         {s.updated_at && <span className="agent-card-seen mono" title="last updated">seen {window.SubstrateFmt?.fmtTimeAgo?.(s.updated_at) || ''}</span>}
       </div>

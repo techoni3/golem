@@ -157,6 +157,7 @@ function RolesPanel({ rev }) {
   const [roles, setRoles] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
+  const [draft, setDraft] = React.useState({ name: '', color: '#8a909c', glyph: '', body: '' });
   React.useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -183,30 +184,56 @@ function RolesPanel({ rev }) {
       <div className="roles-grid">
         {roles.map((role) => <RoleEditor key={role.name} role={role}/>)}
       </div>
+      <form className="role-editor-card" onSubmit={(e) => {
+        e.preventDefault();
+        setError(null);
+        window.SubstrateAPI.createRole(draft)
+          .then((role) => {
+            setRoles((prev) => [...prev.filter((r) => r.name !== role.name), role].sort((a, b) => a.name.localeCompare(b.name)));
+            setDraft({ name: '', color: '#8a909c', glyph: '', body: '' });
+          })
+          .catch((err) => setError(err?.payload?.error || err.message || String(err)));
+      }}>
+        <div className="role-editor-head">
+          <div>
+            <div className="role-editor-name">Create role</div>
+            <div className="roles-save-state">writes to ~/.golem/roles/index.json</div>
+          </div>
+          <button className="orch-btn" type="submit" disabled={!draft.name.trim()}>Create</button>
+        </div>
+        <div className="role-meta-row">
+          <input className="mono" placeholder="name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })}/>
+          <input className="mono" placeholder="glyph" value={draft.glyph} maxLength={4} onChange={(e) => setDraft({ ...draft, glyph: e.target.value })}/>
+          <input className="mono" type="color" value={draft.color} onChange={(e) => setDraft({ ...draft, color: e.target.value })}/>
+        </div>
+        <textarea className="role-editor-body mono" value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} placeholder="Optional role card body" spellCheck="false"/>
+      </form>
     </div>
   );
 }
 
 function RoleEditor({ role }) {
   const [body, setBody] = React.useState(role.body || '');
+  const [meta, setMeta] = React.useState({ color: role.color || '#8a909c', glyph: role.glyph || '' });
   const [state, setState] = React.useState('saved');
   const [pushResult, setPushResult] = React.useState(null);
   React.useEffect(() => {
     setBody(role.body || '');
+    setMeta({ color: role.color || '#8a909c', glyph: role.glyph || '' });
     setState('saved');
     setPushResult(null);
-  }, [role.name, role.body]);
+  }, [role.name, role.body, role.color, role.glyph]);
 
   React.useEffect(() => {
-    if (body === (role.body || '')) return;
+    if (body === (role.body || '') && meta.color === (role.color || '#8a909c') && meta.glyph === (role.glyph || '')) return;
     setState('saving');
     const timer = setTimeout(() => {
-      window.SubstrateAPI.saveRole(role.name, body)
+      window.SubstrateAPI.saveRole(role.name, { body, color: meta.color, glyph: meta.glyph })
         .then(() => setState('saved'))
         .catch((err) => setState(err?.payload?.error || err.message || 'save failed'));
     }, 650);
     return () => clearTimeout(timer);
-  }, [body, role.name, role.body]);
+  }, [body, meta.color, meta.glyph, role.name, role.body, role.color, role.glyph]);
 
   const push = () => {
     setPushResult({ state: 'pushing' });
@@ -221,10 +248,21 @@ function RoleEditor({ role }) {
     <div className="role-editor-card">
       <div className="role-editor-head">
         <div>
-          <div className="role-editor-name">{role.name}</div>
+          <div className="role-editor-name">{role.name}{role.builtin ? ' · builtin' : ''}</div>
           <div className={`roles-save-state ${String(state).includes('failed') || String(state).includes('error') ? 'error' : ''}`}>{status}</div>
         </div>
-        <button className="orch-btn" onClick={push} disabled={state === 'saving' || pushResult?.state === 'pushing'}>Update running agents</button>
+        <div className="role-editor-actions">
+          <button className="orch-btn" onClick={push} disabled={state === 'saving' || pushResult?.state === 'pushing'}>Update running agents</button>
+          {!role.builtin && <button className="orch-btn danger" onClick={() => {
+            window.SubstrateAPI.deleteRole(role.name)
+              .then(() => setState('deleted'))
+              .catch((err) => setState(err?.payload?.error || err.message || 'delete failed'));
+          }}>Delete</button>}
+        </div>
+      </div>
+      <div className="role-meta-row">
+        <input className="mono" value={meta.glyph} maxLength={4} onChange={(e) => setMeta({ ...meta, glyph: e.target.value })} aria-label={`${role.name} glyph`}/>
+        <input className="mono" type="color" value={meta.color} onChange={(e) => setMeta({ ...meta, color: e.target.value })} aria-label={`${role.name} color`}/>
       </div>
       <textarea
         className="role-editor-body mono"
@@ -319,18 +357,11 @@ function LegacyNativeCardUnused({ session, name, queueCount = 0 }) {
       <div className="native-session-role" onClick={(e) => e.stopPropagation()}>
         <label>
           Role{' '}
-          <select
+          <RoleSelect
             value={session.role || ''}
-            onChange={(e) => window.SubstrateAPI.setSessionRole(session.session_id, e.target.value || null).catch((err) => console.error('set role failed', err))}
+            onChange={(role) => window.SubstrateAPI.setSessionRole(session.session_id, role).catch((err) => console.error('set role failed', err))}
             disabled={!session.session_id}
-          >
-            <option value="">clear</option>
-            <option value="planner">planner</option>
-            <option value="builder">builder</option>
-            <option value="researcher">researcher</option>
-            <option value="ui-tester">ui-tester</option>
-            <option value="general">general</option>
-          </select>
+          />
         </label>
       </div>
     </div>

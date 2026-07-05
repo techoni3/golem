@@ -1059,6 +1059,29 @@
   justify-content: space-between;
   gap: 10px;
 }
+.role-editor-actions, .role-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.role-meta-row input {
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-1);
+  background: var(--bg-1);
+  color: var(--text-1);
+  padding: 6px 8px;
+}
+.role-meta-row input[type="color"] {
+  width: 42px;
+  min-height: 30px;
+  padding: 2px;
+}
+.orch-btn.danger:hover:not(:disabled) {
+  color: var(--status-blocked);
+  border-color: rgba(248,113,113,.35);
+  background: rgba(248,113,113,.08);
+}
 .role-editor-name {
   font-weight: 700;
   color: var(--text-1);
