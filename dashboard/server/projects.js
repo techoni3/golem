@@ -514,11 +514,13 @@ function gateSlug(text) {
 function gateCommentBody(gate) {
   const kind = gate.kind === 'input' ? 'input' : 'approval';
   const ask = String(gate.ask || gate.body || gate.note || '').trim() || 'Human input is needed to continue.';
+  const requestedBy = gate.requested_by || gate.session_id || gate.raiser_session_id || gate.raised_by || null;
   const lines = [
     `Gate needs you (${kind})`,
     '',
     ask,
   ];
+  if (requestedBy) lines.push('', `Requested by: ${requestedBy}`);
   if (gate.phase_just_completed) lines.push('', `Phase just completed: ${gate.phase_just_completed}`);
   if (gate.next_phase) lines.push(`Next phase: ${gate.next_phase}`);
   if (gate.target_file) lines.push('', `Target file: ${gate.target_file}`);
@@ -559,10 +561,11 @@ async function createGate({ tracker, project, gate = {} } = {}) {
   const spec = resolveSpecTicket(tracker, projectId, gate);
   const now = new Date().toISOString();
   const gateId = gate.gate_id || `${gate.kind === 'input' ? 'input' : 'approval'}-${gateSlug(gate.ask || gate.body)}-${now.slice(0, 10)}-${crypto.randomBytes(3).toString('hex')}`;
+  const requestedBy = gate.requested_by || gate.session_id || gate.raiser_session_id || gate.raised_by || null;
   if (spec) {
     const comment = tracker.addComment(spec.id, {
-      author: 'human',
-      body: gateCommentBody({ ...gate, gate_id: gateId }),
+      author: requestedBy || 'human',
+      body: gateCommentBody({ ...gate, gate_id: gateId, requested_by: requestedBy }),
       tag: 'question',
       status: 'open',
       block_id: `gate:${gateId}`,

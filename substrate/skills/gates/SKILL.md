@@ -11,6 +11,7 @@ the relevant spec ticket with:
 - `tag: question`
 - `status: open`
 - `block_id: gate:<gate_id>`
+- `author` / `requested_by`: your current session id
 - body in plain language: what is blocked, what decision/input is needed, and
   what resumes after the human answers
 
@@ -19,7 +20,7 @@ Use the dashboard helper when available:
 ```bash
 curl -fsS -X POST http://dashboard.golem.localhost:7420/api/projects/<project_id-or-registry-id>/gates \
   -H 'content-type: application/json' \
-  -d '{"kind":"approval","spec_ticket_id":"TKT-...","ask":"Approve moving from specs to build?","next_phase":"build"}'
+  -d '{"kind":"approval","spec_ticket_id":"TKT-...","requested_by":"'"${CLAUDE_CODE_SESSION_ID:-$OPENCODE_SESSION_ID}"'","ask":"Approve moving from specs to build?","next_phase":"build"}'
 ```
 
 If `spec_ticket_id` is omitted, the dashboard uses the project's most recent
@@ -39,7 +40,9 @@ that file directly. Confirm `target_file` is git-ignored before posting the gate
 clearing, verify each `required_keys` entry is present and non-empty — never echo values.
 
 **Clearing:** the human resolves the gate comment (or replies with the verdict
-and then resolves it). Treat resolution text as the verdict:
+and then resolves it). The dashboard notifies the `requested_by` session when the
+comment resolves; do not poll the spec comments as the normal resume path. Treat
+resolution text as the verdict:
 
 - approval approved → resume from `next_phase`
 - input supplied → verify keys present, then resume blocked work

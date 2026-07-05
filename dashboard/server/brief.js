@@ -86,6 +86,10 @@ export async function pushHalt(body, sessionId) {
   return forward('POST', '/halt', body ?? 'halt requested by dashboard', sessionId);
 }
 
+export async function pushGateVerdict(gateId, verdict, body, sessionId) {
+  return forward('POST', `/gates/${encodeURIComponent(gateId)}/${verdict}`, body, sessionId);
+}
+
 export async function channelHealth(sessionId) {
   return forward('GET', '/healthz', null, sessionId);
 }

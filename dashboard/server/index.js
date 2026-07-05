@@ -9,7 +9,7 @@ import websocket from '@fastify/websocket';
 import { CONFIG } from './config.js';
 import { createState } from './state.js';
 import { ROLES } from './roles.js';
-import { pushBrief, pushInterrupt, pushHalt, channelHealth, listChannels } from './brief.js';
+import { pushBrief, pushInterrupt, pushHalt, pushGateVerdict, channelHealth, listChannels } from './brief.js';
 import { createChat } from './chat.js';
 import { readNativeSessionPeek } from './native-session-peek.js';
 import { openTrackerDb } from './tracker-db.js';
@@ -207,6 +207,41 @@ function ideaSpecBody(body) {
     '> [!NOTE]',
     '> No fan-out section here. Child work items render below the spec body automatically.',
   ].join('\n');
+}
+
+function gateIdFromBlock(blockId) {
+  const m = String(blockId || '').match(/^gate:(.+)$/);
+  return m ? m[1] : null;
+}
+
+function gateRaiserFromComment(comment) {
+  const author = String(comment?.author || '').trim();
+  if (author && !['human', 'system'].includes(author)) return author;
+  const m = String(comment?.body || '').match(/^Requested by:\s*(\S+)/mi);
+  return m ? m[1] : null;
+}
+
+function gateVerdictFromText(text) {
+  const raw = String(text || '').toLowerCase();
+  if (/\b(cancel|cancelled|canceled)\b/.test(raw)) return 'cancel';
+  if (/\b(deny|denied|reject|rejected)\b/.test(raw)) return 'deny';
+  if (/\b(approve|approved|yes|proceed|go ahead|supplied|done)\b/.test(raw)) return 'approve';
+  return null;
+}
+
+async function notifyGateResolved(comment, patchBody) {
+  const gateId = gateIdFromBlock(comment?.block_id);
+  if (!gateId || comment?.status !== 'resolved') return null;
+  const sessionId = gateRaiserFromComment(comment);
+  if (!sessionId) return { ok: false, error: 'gate raiser missing', gate_id: gateId };
+  const explicitText = String(patchBody || '').trim();
+  const note = explicitText || `Gate ${gateId} resolved.`;
+  const verdict = explicitText ? gateVerdictFromText(explicitText) : null;
+  const result = verdict
+    ? await pushGateVerdict(gateId, verdict, note, sessionId)
+    : await pushBrief(`Gate ${gateId} resolved.\n\n${note}`, sessionId);
+  if (!result.ok) console.warn(`[gates] resolve notification for ${gateId} to ${sessionId} failed: ${result.error || result.status}`);
+  return { ...result, gate_id: gateId, session_id: sessionId, verdict: verdict || 'brief' };
 }
 
 async function main() {
@@ -761,7 +796,11 @@ async function main() {
       const patch = Object.fromEntries(
         ['body', 'tag', 'status', 'block_id'].filter((k) => k in b).map((k) => [k, b[k]])
       );
+      const before = tracker.getComment(cid);
       const comment = tracker.updateComment(id, cid, patch);
+      if (before?.status !== 'resolved' && comment.status === 'resolved' && gateIdFromBlock(comment.block_id)) {
+        await notifyGateResolved(comment, patch.body || b.resolution || b.verdict || '');
+      }
       broadcastWS({ type: 'ticket-comment-updated', ticket_id: id, comment });
       const ticket = tracker.getTicket(id);
       if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
