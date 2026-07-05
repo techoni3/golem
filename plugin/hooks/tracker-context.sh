@@ -97,21 +97,17 @@ fi
 if [ -n "$SESSION_ID" ] && command -v jq >/dev/null 2>&1; then
   SESSIONS_JSON="$GOLEM_HOME_DIR/sessions.json"
   ROLE="$(jq -r --arg sid "$SESSION_ID" '(.sessions // [])[] | select(.session_id == $sid) | .role // empty' "$SESSIONS_JSON" 2>/dev/null | head -n 1 || true)"
-  case "$ROLE" in
-    planner|builder|researcher|ui-tester)
-      CARD="$SCRIPT_DIR/../roles/$ROLE.md"
-      if [ -f "$CARD" ]; then
-        NAME="$(jq -r --arg sid "$SESSION_ID" '(.sessions // [])[] | select(.session_id == $sid) | .name // .session_id // $sid' "$SESSIONS_JSON" 2>/dev/null | head -n 1 || true)"
-        ROSTER="Roster: ${NAME:-$SESSION_ID} is assigned role $ROLE."
-        ROLE_ESC="$( { printf '\n\n'; cat "$CARD"; printf '\n\n%s' "$ROSTER"; } | jq -Rs . 2>/dev/null || true)"
-        if [ -n "$ROLE_ESC" ]; then
-          ROLE_ESC="${ROLE_ESC#\"}"
-          ROLE_ESC="${ROLE_ESC%\"}"
-          ctx="$ctx$ROLE_ESC"
-        fi
-      fi
-      ;;
-  esac
+  CARD="$SCRIPT_DIR/../roles/$ROLE.md"
+  if [ -n "$ROLE" ] && [ -f "$CARD" ]; then
+    NAME="$(jq -r --arg sid "$SESSION_ID" '(.sessions // [])[] | select(.session_id == $sid) | .name // .session_id // $sid' "$SESSIONS_JSON" 2>/dev/null | head -n 1 || true)"
+    ROSTER="Roster: ${NAME:-$SESSION_ID} is assigned role $ROLE."
+    ROLE_ESC="$( { printf '\n\n'; cat "$CARD"; printf '\n\n%s' "$ROSTER"; } | jq -Rs . 2>/dev/null || true)"
+    if [ -n "$ROLE_ESC" ]; then
+      ROLE_ESC="${ROLE_ESC#\"}"
+      ROLE_ESC="${ROLE_ESC%\"}"
+      ctx="$ctx$ROLE_ESC"
+    fi
+  fi
 fi
 
 printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$ctx" 2>/dev/null || true
