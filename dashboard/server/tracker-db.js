@@ -280,8 +280,6 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
       );
       CREATE INDEX IF NOT EXISTS idx_events_ticket  ON events(ticket_id);
       CREATE INDEX IF NOT EXISTS idx_events_project ON events(project_id);
-      CREATE INDEX IF NOT EXISTS idx_events_topic ON events(topic, id);
-      CREATE INDEX IF NOT EXISTS idx_events_class ON events(class, id);
 
       CREATE TABLE IF NOT EXISTS subscriptions (
         id             TEXT PRIMARY KEY,
