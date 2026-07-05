@@ -60,7 +60,22 @@ function rootFrom(dir) {
   const homeDir = process.env.HOME || '';
   for (let i = 0; i < 64; i++) {
     if (cur === homeDir) break;
-    if (fs.existsSync(path.join(cur, '.git')) || fs.existsSync(path.join(cur, 'CLAUDE.md'))) return cur;
+    const gitPath = path.join(cur, '.git');
+    // Worktree remap: if .git is a file, parse gitdir to find the main repo root.
+    if (fs.existsSync(gitPath)) {
+      try {
+        const st = fs.statSync(gitPath);
+        if (st.isFile()) {
+          const content = fs.readFileSync(gitPath, 'utf8');
+          const m = content.match(/^gitdir:\s*(.+)$/m);
+          if (m) {
+            const mainRoot = m[1].trim().replace(/\/\.git\/worktrees\/[^/]+$/, '');
+            if (fs.existsSync(mainRoot)) return mainRoot;
+          }
+        }
+      } catch (_) { /* fall through */ }
+    }
+    if (fs.existsSync(gitPath) || fs.existsSync(path.join(cur, 'CLAUDE.md'))) return cur;
     const parent = path.dirname(cur);
     if (parent === cur) break;
     cur = parent;
@@ -104,7 +119,22 @@ function rootFrom(dir) {
   const homeDir = process.env.HOME || '';
   for (let i = 0; i < 64; i++) {
     if (cur === homeDir) break;
-    if (fs.existsSync(path.join(cur, '.git')) || fs.existsSync(path.join(cur, 'CLAUDE.md'))) return cur;
+    const gitPath = path.join(cur, '.git');
+    // Worktree remap: if .git is a file, parse gitdir to find the main repo root.
+    if (fs.existsSync(gitPath)) {
+      try {
+        const st = fs.statSync(gitPath);
+        if (st.isFile()) {
+          const content = fs.readFileSync(gitPath, 'utf8');
+          const m = content.match(/^gitdir:\s*(.+)$/m);
+          if (m) {
+            const mainRoot = m[1].trim().replace(/\/\.git\/worktrees\/[^/]+$/, '');
+            if (fs.existsSync(mainRoot)) return mainRoot;
+          }
+        }
+      } catch (_) { /* fall through */ }
+    }
+    if (fs.existsSync(gitPath) || fs.existsSync(path.join(cur, 'CLAUDE.md'))) return cur;
     const parent = path.dirname(cur);
     if (parent === cur) break;
     cur = parent;

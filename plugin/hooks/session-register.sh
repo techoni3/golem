@@ -73,6 +73,20 @@ fi
 project_root() {
   local dir="$CWD"
   while [ "$dir" != "/" ] && [ "$dir" != "${HOME:-/nonexistent}" ] && [ -n "$dir" ]; do
+    # Worktree remap: if .git is a file, parse gitdir to find the main repo root.
+    # A git worktree's .git file contains "gitdir: <main>/.git/worktrees/<name>".
+    # This must win over the CLAUDE.md stop (a worktree checks out CLAUDE.md too).
+    if [ -f "$dir/.git" ]; then
+      local gitdir
+      gitdir="$(sed -n 's/^gitdir:[[:space:]]*//p' "$dir/.git" 2>/dev/null || true)"
+      if [ -n "$gitdir" ]; then
+        local main_root="${gitdir%/.git/worktrees/*}"
+        if [ -d "$main_root" ]; then
+          printf '%s\n' "$main_root"
+          return 0
+        fi
+      fi
+    fi
     if [ -f "$dir/CLAUDE.md" ] || [ -d "$dir/.git" ]; then
       printf '%s\n' "$dir"
       return 0
