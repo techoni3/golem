@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-07-04 @ 7111dcc — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-05 @ c29dba9 — maintained via golem:docs-maintenance.
 
 ## Directory structure
 - `substrate/` — plugin source of truth: agents, skills, roles, hooks, MCP.
@@ -15,7 +15,7 @@
 
 ## Key modules & entry points
 ### `dashboard/server/index.js`
-- Registers REST routes and `/ws`; tracker mutations rebroadcast through `broadcastWS`.
+- Registers REST routes and `/ws`; tracker mutations and hook bus ingest rebroadcast through `broadcastWS`.
 - Invariant: agents use HTTP/MCP, never direct DB writes.
 ### `dashboard/server/native-sessions.js`
 - Merges hook-written `~/.golem/sessions.json` with Claude/opencode registries.
@@ -28,7 +28,7 @@
 - Exposes channel replies, consults, gates, and tracker tools per live session.
 
 ## Data flow
-Hooks/shims write sessions, channels, and journals under `~/.golem/`; dashboard polls sessions, owns `tracker.db`, drains dispatches, and broadcasts WS state. Tracker MCP tools call REST; dispatch pushes briefs to the target channel.
+Hooks/shims write sessions, channels, and journals under `~/.golem/`; `journal-route.sh` also fire-and-forget forwards hook events to `/api/bus/ingest` with local spool fallback. Dashboard polls sessions, owns `tracker.db`, drains dispatches/subscription digests, exposes project team rosters, and broadcasts WS state. Tracker MCP tools call REST; dispatch pushes briefs to the target channel.
 
 ## Constraints & gotchas
 - Runtime state is in `~/.golem/`; `~/.config/golem` is only a compatibility symlink.
