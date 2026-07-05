@@ -155,8 +155,12 @@ function liveSessionLines(sessions) {
 
 async function cmdRole(args) {
   const roleArg = args[0];
+  if (roleArg === 'list' || roleArg === '--list') {
+    log(SESSION_ROLES.join('\n'));
+    return;
+  }
   if (!roleArg || roleArg === '-h' || roleArg === '--help') {
-    log(`Usage: golem role <${SESSION_ROLES.join('|')}|clear> [--session <id-or-name>]`);
+    log(`Usage: golem role <${SESSION_ROLES.join('|')}|clear> [--session <id-or-name>]\n       golem role list`);
     return;
   }
   const role = roleArg === 'clear' ? null : roleArg;
