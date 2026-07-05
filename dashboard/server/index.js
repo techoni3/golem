@@ -1092,6 +1092,16 @@ async function main() {
     return assignee && assignee !== 'human' ? assignee : null;
   }
 
+  function commentDispatchCoveredBySubscription(ticket, sessionId) {
+    if (!ticket || !sessionId) return false;
+    const topic = `ticket/${ticket.display_id || ticket.id}`;
+    return tracker.listSubscriptions({ session_id: sessionId }).some((sub) => {
+      if (sub.status !== 'active' || sub.topic !== topic) return false;
+      const classes = Array.isArray(sub.classes_filter) ? sub.classes_filter : [];
+      return classes.includes('tracker');
+    });
+  }
+
   function commentBrief(ticket, comments, { batchId = null } = {}) {
     const list = Array.isArray(comments) ? comments : [comments];
     const label = ticket?.display_id || ticket?.id;
@@ -1156,6 +1166,9 @@ async function main() {
       const sessionId = commentDispatchTarget(ticket, b);
       if (!sessionId) return reply.code(400).send({ error: 'session_id is required when the spec has no session assignee' });
       const dispatch = tracker.enqueueCommentDispatch(comment, sessionId);
+      if (commentDispatchCoveredBySubscription(ticket, sessionId)) {
+        return { ok: true, dispatch, delivery: 'subscription', ticket: tracker.getTicket(ticket.id) };
+      }
       const delivered = await deliverCommentDispatch(ticket, comment, sessionId);
       return { ok: true, dispatch, ...delivered };
     } catch (err) {
@@ -1181,6 +1194,9 @@ async function main() {
       const comments = tracker.listUndispatchedCommentsForSpec(id);
       if (comments.length === 0) return { ok: true, batch_id: null, dispatches: [], ticket };
       const batch = tracker.enqueueCommentDispatchBatch(id, sessionId);
+      if (commentDispatchCoveredBySubscription(ticket, sessionId)) {
+        return { ok: true, ...batch, delivery: 'subscription', ticket: tracker.getTicket(ticket.id) };
+      }
       const delivered = await deliverCommentDispatch(ticket, comments, sessionId, { batchId: batch.batch_id });
       return { ok: true, ...batch, ...delivered };
     } catch (err) {
@@ -1567,12 +1583,14 @@ async function main() {
     const channelBySession = new Map();
     for (const c of channels) if (c.session_id) channelBySession.set(c.session_id, c);
     const pendingBySession = tracker.countPendingDispatchesBySession();
+    const teamBySession = new Map(buildTeamRows(wanted, { channels, aliveOnly: true }).map((row) => [row.session_id, row]));
 
     const out = [];
     for (const s of state.nativeSessions()) {
       if (!s.alive) continue;
       if (wanted != null && s.project_id !== wanted) continue;
       const ch = channelBySession.get(s.session_id);
+      const team = teamBySession.get(s.session_id);
       // TKT-0369: an alive session whose channel MCP died must NOT silently
       // vanish from the picker — it stays listed with reachable:false so the UI
       // can offer durable when-idle queueing (delivered when the channel
@@ -1594,6 +1612,13 @@ async function main() {
         // TKT-0245: count of pending queued dispatches for this session, so the
         // picker can show "working · 1 queued".
         pending_count: pendingBySession.get(s.session_id) ?? 0,
+        role_meta: team?.role_meta ?? null,
+        in_progress_tickets: team?.in_progress_tickets ?? [],
+        workload: team?.workload ?? {
+          in_progress_tickets: [],
+          pending_count: pendingBySession.get(s.session_id) ?? 0,
+          last_active: s.updated_at ?? s.started_at ?? null,
+        },
       });
     }
     return out;
