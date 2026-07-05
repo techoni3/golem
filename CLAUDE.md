@@ -2,6 +2,8 @@
 
 This directory is the golem root: the source repo for the **golem v4 Claude Code plugin**, the **dashboard + tracker**, and the thin **`golem` CLI**. It is also a local plugin marketplace (`.claude-plugin/marketplace.json`).
 
+**Codebase map:** [REPO-MAP.md](REPO-MAP.md) — read it before exploring.
+
 ## Layout
 
 | What | Where |

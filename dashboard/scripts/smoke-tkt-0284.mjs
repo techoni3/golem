@@ -2,7 +2,7 @@
 // search, spec→work-item children. Journey smoke: REST-creates a scratch spec
 // (with a unique body token) + two work-items parented to it + one plain work-
 // item, then drives the UI headlessly to verify:
-//   1. separation — scratch spec on /tracker?view=specs Draft, NOT on /tracker
+//   1. separation — scratch spec on /specs Draft, NOT on /tracker
 //      (work-items); plain work-item on /tracker, NOT on the specs view.
 //   2. column relabel — PATCH spec → in_progress → card under "Refining".
 //   3. content search — token → flat list with <mark> snippet; click → drawer;
@@ -81,14 +81,14 @@ try {
   assert.ok(specId && childA && childB && plain, 'created scratch spec + 2 children + 1 plain');
 
   // ── 1. Separation: spec on /specs Draft, not on /tracker; plain on /tracker ──
-  await page.goto(`${ORIGIN}/tracker?view=specs`, { waitUntil: 'networkidle' });
+  await page.goto(`${ORIGIN}/specs`, { waitUntil: 'networkidle' });
   await wait(600);
   let sep = await page.evaluate((id) => {
     const draftCard = document.querySelector(`.kanban-col[data-col="todo"] .ticket[data-ticket-id="${id}"]`);
     const draftHeader = document.querySelector('.kanban-col[data-col="todo"] .kanban-col-title')?.textContent || '';
     return { onSpecsDraft: !!draftCard, draftHeader };
   }, specId);
-  assert.ok(sep.onSpecsDraft, 'scratch spec renders on /tracker?view=specs in the Draft column');
+  assert.ok(sep.onSpecsDraft, 'scratch spec renders on /specs in the Draft column');
   assert.match(sep.draftHeader, /Draft/, `Draft column header labeled "Draft" (got "${sep.draftHeader}")`);
 
   await page.goto(`${ORIGIN}/tracker`, { waitUntil: 'networkidle' });
@@ -102,7 +102,7 @@ try {
 
   // ── 2. Column relabel: PATCH spec → in_progress → "Refining" ───────────────
   await patch(`/tickets/${encodeURIComponent(specId)}`, { state: 'in_progress', actor: 'smoke' });
-  await page.goto(`${ORIGIN}/tracker?view=specs`, { waitUntil: 'networkidle' });
+  await page.goto(`${ORIGIN}/specs`, { waitUntil: 'networkidle' });
   await wait(600);
   let relabel = await page.evaluate((id) => ({
     inRefining: !!document.querySelector(`.kanban-col[data-col="in_progress"] .ticket[data-ticket-id="${id}"]`),
@@ -114,7 +114,7 @@ try {
   assert.ok(!relabel.stillDraft, 'spec no longer in the Draft column');
 
   // ── 3. Content search ─────────────────────────────────────────────────────
-  await page.goto(`${ORIGIN}/tracker?view=specs`, { waitUntil: 'networkidle' });
+  await page.goto(`${ORIGIN}/specs`, { waitUntil: 'networkidle' });
   await wait(400);
   await page.fill('.tracker-search', TOKEN);
   await wait(750); // 250ms debounce + fetch + render
@@ -198,7 +198,7 @@ try {
   assert.equal(childDrawer.id, childARes.display_id || childA, `child drawer shows child A (got ${childDrawer.id})`);
 
   // ── 5. + New spec → composer with Kind=spec ──────────────────────────────
-  await page.goto(`${ORIGIN}/tracker?view=specs`, { waitUntil: 'networkidle' });
+  await page.goto(`${ORIGIN}/specs`, { waitUntil: 'networkidle' });
   await wait(400);
   await page.evaluate(() => {
     const btn = Array.from(document.querySelectorAll('.specs-board .orch-btn.primary'))
