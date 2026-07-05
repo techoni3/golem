@@ -250,6 +250,7 @@
     // is a .md file at ~/.config/golem/ideas/ with frontmatter + body.
     listIdeas: () => getJSON('/api/ideas'),
     createIdea: (body) => postJSON('/api/ideas', { body }),
+    promoteIdea: (id, body) => postJSON(`/api/ideas/${encodeURIComponent(id)}/promote`, body || {}),
     popIdea: (id) => postJSON(`/api/ideas/${encodeURIComponent(id)}/pop`, {}),
     substrateStatus: (project) => getJSON(`/api/substrate/status${qs({ project })}`),
     substrateConfig: () => getJSON('/api/substrate/config'),

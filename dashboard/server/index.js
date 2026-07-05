@@ -15,7 +15,7 @@ import { readNativeSessionPeek } from './native-session-peek.js';
 import { openTrackerDb } from './tracker-db.js';
 import { readChannels } from './channels.js';
 import { applyGateVerdict, createGate } from './projects.js';
-import { listIdeas, createIdea, popIdea } from './ideas.js';
+import { listIdeas, createIdea, popIdea, readIdea } from './ideas.js';
 import { initDispatchDrainer } from './dispatch-queue.js';
 import { registerSubstrateRoutes } from './substrate.js';
 import { golemHome, dashboardJsonPath, journalDirFor } from '../../lib/golem-home.js';
@@ -167,6 +167,46 @@ function handleSpecClosed(tracker, existing, ticket, actor = 'system') {
     block_id: 'retro',
   });
   return { ticket: tracker.getTicket(fresh.id), comment, milestone: JSON.parse(line) };
+}
+
+function ideaSpecBody(body) {
+  return [
+    '# Spec: Promoted idea',
+    '',
+    '## 1. Intent (raw thoughts, preserved)',
+    '',
+    String(body || '').trim() || '(empty idea)',
+    '',
+    '## 2. Behaviour',
+    '',
+    'Describe the promised user/system behaviour, then list checkable acceptance criteria that child work items can inherit.',
+    '',
+    '- [ ] <observable behaviour or outcome>',
+    '- [ ] <observable behaviour or outcome>',
+    '',
+    '## 3. Decisions',
+    '',
+    'Record choices made while shaping the spec; include why and the road not taken.',
+    '',
+    '| Choice | Why | Road not taken |',
+    '|--------|-----|----------------|',
+    '| <decision> | <reason> | <rejected alternative> |',
+    '',
+    '## 4. Non-goals',
+    '',
+    'State what this spec explicitly will not do so fan-out does not grow hidden scope.',
+    '',
+    '- <out of scope>',
+    '',
+    '## 5. Open questions',
+    '',
+    'Track unresolved questions for the human/planner; answer or defer each before finalisation.',
+    '',
+    '- [ ] <question>',
+    '',
+    '> [!NOTE]',
+    '> No fan-out section here. Child work items render below the spec body automatically.',
+  ].join('\n');
 }
 
 async function main() {
@@ -1145,6 +1185,30 @@ async function main() {
     } catch (err) {
       if (err && err.status) return reply.code(err.status).send({ error: err.message });
       throw err;
+    }
+  });
+
+  fastify.post('/api/ideas/:id/promote', async (req, reply) => {
+    try {
+      const idea = await readIdea(req.params.id);
+      const b = req.body ?? {};
+      const projectId = resolveProjectId(b.project_id || b.project || 'golem-1eba80');
+      const title = String(b.title || idea.body.split('\n')[0] || 'Promoted idea').trim().slice(0, 120) || 'Promoted idea';
+      const ticket = tracker.createTicket({
+        project_id: projectId,
+        kind: 'spec',
+        title,
+        body: ideaSpecBody(idea.body),
+        state: 'todo',
+        source_ref: `ideas/${idea.id}`,
+        created_by: b.created_by || 'human:ideas',
+      });
+      await popIdea(idea.id);
+      broadcastWS({ type: 'ticket-created', ticket });
+      return reply.code(201).send({ idea_id: idea.id, ticket });
+    } catch (err) {
+      if (err && err.status) return reply.code(err.status).send({ error: err.message });
+      return reply.code(400).send({ error: String(err?.message ?? err) });
     }
   });
 

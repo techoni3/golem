@@ -20,6 +20,7 @@ function IdeasDrawer({ open, onClose }) {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [popping, setPopping] = React.useState(null);
+  const [promoting, setPromoting] = React.useState(null);
   const taRef = React.useRef(null);
   const listRef = React.useRef(null);
 
@@ -77,15 +78,31 @@ function IdeasDrawer({ open, onClose }) {
   };
 
   const pop = async (id) => {
-    if (busy || popping) return;
+    if (busy || popping || promoting) return;
     setPopping(id);
     try {
       await window.SubstrateAPI.popIdea(id);
       window.dispatchEvent(new CustomEvent('ideas:changed'));
     } catch (err) {
-      setError(err?.payload?.error || err?.message || 'Failed to pop idea');
+      setError(err?.payload?.error || err?.message || 'Failed to discard idea');
     } finally {
       setPopping(null);
+    }
+  };
+
+  const promote = async (id) => {
+    if (busy || popping || promoting) return;
+    setPromoting(id);
+    setError(null);
+    try {
+      const result = await window.SubstrateAPI.promoteIdea(id);
+      window.dispatchEvent(new CustomEvent('ideas:changed'));
+      const ticketId = result?.ticket?.display_id || result?.ticket?.id;
+      if (ticketId) window.Router.openTicket(ticketId);
+    } catch (err) {
+      setError(err?.payload?.error || err?.message || 'Failed to promote idea');
+    } finally {
+      setPromoting(null);
     }
   };
 
@@ -106,7 +123,7 @@ function IdeasDrawer({ open, onClose }) {
             <button className="drawer-close" onClick={onClose} title="Close (Esc)"><Icon.Close/></button>
           </div>
           <div className="ideas-help">
-            Drop a thought, pop one to take it forward. Oldest first.
+            Drop a thought, promote one to a spec, or discard it. Oldest first.
           </div>
         </div>
         <div className="ideas-composer">
@@ -147,11 +164,19 @@ function IdeasDrawer({ open, onClose }) {
                     </span>
                     <button
                       className="orch-btn primary small"
-                      onClick={() => pop(idea.id)}
-                      disabled={busy || popping === idea.id}
-                      title="Take this idea forward (removes it from the queue)"
+                      onClick={() => promote(idea.id)}
+                      disabled={busy || popping === idea.id || promoting === idea.id}
+                      title="Create a spec ticket from this idea"
                     >
-                      {popping === idea.id ? '…' : 'Pop'}
+                      {promoting === idea.id ? '...' : 'Promote to spec'}
+                    </button>
+                    <button
+                      className="orch-btn ghost small"
+                      onClick={() => pop(idea.id)}
+                      disabled={busy || popping === idea.id || promoting === idea.id}
+                      title="Discard this idea without creating a spec"
+                    >
+                      {popping === idea.id ? '...' : 'Discard'}
                     </button>
                   </div>
                 </li>

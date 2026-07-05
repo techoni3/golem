@@ -121,3 +121,10 @@ export async function popIdea(id) {
   }
   throw Object.assign(new Error(`idea not found: ${id}`), { status: 404 });
 }
+
+export async function readIdea(id) {
+  if (!id) throw Object.assign(new Error('id is required'), { status: 400 });
+  const idea = await readIdeaFile(path.join(IDEAS_DIR, `${id}.md`));
+  if (!idea) throw Object.assign(new Error(`idea not found: ${id}`), { status: 404 });
+  return idea;
+}
