@@ -13,7 +13,7 @@
 //   help         Show this message.
 
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, readlinkSync, renameSync, symlinkSync, readFileSync } from 'node:fs';
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readlinkSync, renameSync, symlinkSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, resolve, join, relative } from 'node:path';
@@ -31,8 +31,19 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const GOLEM_ROOT = resolve(__dirname, '..');
 const DASHBOARD_DIR = resolve(GOLEM_ROOT, 'dashboard');
-const DASHBOARD_URL = 'http://dashboard.golem.localhost:7420';
-const HEALTH_URL = `${DASHBOARD_URL}/api/health`;
+const DEFAULT_DASHBOARD_PORT = 7420;
+
+function dashboardUrl() {
+  if (process.env.GOLEM_DASHBOARD_URL) return process.env.GOLEM_DASHBOARD_URL.replace(/\/$/, '');
+  const port = process.env.PORT || String(DEFAULT_DASHBOARD_PORT);
+  return port === String(DEFAULT_DASHBOARD_PORT)
+    ? 'http://dashboard.golem.localhost:7420'
+    : `http://127.0.0.1:${port}`;
+}
+
+function healthUrl() {
+  return `${dashboardUrl()}/api/health`;
+}
 
 const removed = new Set([
   'install',
@@ -85,7 +96,7 @@ async function httpGetJson(url, timeoutMs = 1500) {
 
 async function probeDashboard() {
   try {
-    return { ok: true, data: await httpGetJson(HEALTH_URL) };
+    return { ok: true, data: await httpGetJson(healthUrl()) };
   } catch (e) {
     return { ok: false, error: e.message };
   }
@@ -106,7 +117,7 @@ async function cmdStatus(args) {
 
   if (wantJson) {
     log(JSON.stringify({
-      dashboard_url: probe.ok ? DASHBOARD_URL : null,
+      dashboard_url: probe.ok ? dashboardUrl() : null,
       dashboard_healthy: probe.ok,
       dashboard: probe.data ?? null,
       error: probe.ok ? null : probe.error,
@@ -118,7 +129,7 @@ async function cmdStatus(args) {
   log('Dashboard');
   if (probe.ok) {
     const pc = probe.data?.project_count ?? '?';
-    log(`  OK running on ${DASHBOARD_URL} (${pc} projects)`);
+    log(`  OK running on ${dashboardUrl()} (${pc} projects)`);
   } else {
     log(`  not reachable (${probe.error})`);
     log(`  start it with: golem dashboard`);
@@ -243,6 +254,22 @@ function isProcessAlive(pid) {
   }
 }
 
+function dashboardLogPath() {
+  const dir = join(golemHome(), 'logs');
+  mkdirSync(dir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  return join(dir, `dashboard-${stamp}.log`);
+}
+
+function tailFile(file, maxLines = 20) {
+  try {
+    const lines = readFileSync(file, 'utf8').trimEnd().split('\n');
+    return lines.slice(-maxLines).join('\n');
+  } catch {
+    return '';
+  }
+}
+
 /** Best-effort pid of the currently-running dashboard, from its self-registered dashboard.json. */
 async function readDashboardPid() {
   try {
@@ -281,20 +308,33 @@ async function startDashboardDetached(args = []) {
   const passthru = args.filter((a) => a !== '--public');
   const env = { ...process.env };
   if (publicFlag) env.HOST = '0.0.0.0';
+  const logFile = dashboardLogPath();
+  const outFd = openSync(logFile, 'a');
+  const errFd = openSync(logFile, 'a');
+  let exitInfo = null;
   const child = spawn(process.execPath, [serverEntry, ...passthru], {
     cwd: GOLEM_ROOT,
-    stdio: 'ignore',
+    stdio: ['ignore', outFd, errFd],
     detached: true,
     env,
   });
+  child.on('exit', (code, signal) => {
+    exitInfo = { code, signal };
+  });
+  child.on('error', (e) => {
+    exitInfo = { error: e.message };
+  });
   child.unref();
-  const deadline = Date.now() + 8000;
+  closeSync(outFd);
+  closeSync(errFd);
+  const deadline = Date.now() + Number(process.env.GOLEM_DASHBOARD_STARTUP_TIMEOUT_MS || 20000);
   while (Date.now() < deadline) {
     const probe = await probeDashboard();
-    if (probe.ok) return true;
+    if (probe.ok) return { ok: true, logFile, pid: child.pid };
+    if (exitInfo) break;
     await sleep(300);
   }
-  return false;
+  return { ok: false, logFile, pid: child.pid, exit: exitInfo, tail: tailFile(logFile) };
 }
 
 async function cmdDashboardRestart(args) {
@@ -310,8 +350,17 @@ async function cmdDashboardRestart(args) {
   log(stopped ? '  OK dashboard stopped' : '  dashboard was not running');
   log('  starting dashboard detached...');
   const started = await startDashboardDetached(args);
-  if (!started) fatal(1, '  FAIL dashboard did not come back up within 8s — start it manually: golem dashboard');
-  log(`  OK dashboard responding on ${DASHBOARD_URL}`);
+  log(`  log: ${started.logFile}`);
+  if (!started.ok) {
+    const exit = started.exit
+      ? started.exit.error
+        ? `; child error: ${started.exit.error}`
+        : `; child exit code=${started.exit.code ?? 'null'} signal=${started.exit.signal ?? 'null'}`
+      : '';
+    const tail = started.tail ? `\n\nLast log lines:\n${started.tail}` : '';
+    fatal(1, `  FAIL dashboard did not come back up within startup window${exit}. Log: ${started.logFile}${tail}`);
+  }
+  log(`  OK dashboard responding on ${dashboardUrl()} (pid=${started.pid})`);
 }
 
 async function cmdMigrateHome(args) {
@@ -369,10 +418,17 @@ async function cmdMigrateHome(args) {
   // 5. Restart the dashboard.
   log('  restarting dashboard...');
   const up = await startDashboardDetached();
-  if (up) {
+  log(`  log: ${up.logFile}`);
+  if (up.ok) {
     log('  OK dashboard responding');
   } else {
-    err('  FAIL dashboard did not come back up within 8s — start it manually: golem dashboard');
+    const exit = up.exit
+      ? up.exit.error
+        ? `; child error: ${up.exit.error}`
+        : `; child exit code=${up.exit.code ?? 'null'} signal=${up.exit.signal ?? 'null'}`
+      : '';
+    err(`  FAIL dashboard did not come back up within startup window${exit}. Log: ${up.logFile}`);
+    if (up.tail) err(`\nLast log lines:\n${up.tail}`);
   }
 
   log('');
@@ -914,7 +970,7 @@ async function cmdDoctor() {
   const probe = await probeDashboard();
   if (probe.ok) {
     const pc = probe.data?.project_count ?? '?';
-    ok(`dashboard responding on ${DASHBOARD_URL} (${pc} projects)`);
+    ok(`dashboard responding on ${dashboardUrl()} (${pc} projects)`);
   } else {
     skip(`dashboard not reachable (${probe.error}) — run \`golem dashboard\` to start`);
   }
@@ -937,7 +993,7 @@ Usage:
 
 Run:
   dashboard [--public] [npm-start-args…]
-                       Start the admin dashboard on ${DASHBOARD_URL}.
+                       Start the admin dashboard on ${dashboardUrl()}.
                        --public binds 0.0.0.0 (LAN-reachable, no auth).
   dashboard:restart [--public] [npm-start-args…]
                        Stop the running dashboard and restart it detached.
