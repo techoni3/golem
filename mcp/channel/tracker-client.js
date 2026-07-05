@@ -84,7 +84,51 @@ export function currentSessionId() {
     const j = JSON.parse(fs.readFileSync(f, 'utf8'));
     if (j && typeof j.sessionId === 'string' && j.sessionId) return j.sessionId;
   } catch { /* missing / unreadable — fall through */ }
+  // opencode sessions export NONE of the CC-shaped signals above (no launcher
+  // env, no ~/.claude session file), so without this the tracker tools ran with
+  // no identity: ticket_comment threw "no current session id", and ticket_
+  // create/update recorded author/actor as null → the dashboard attributed
+  // events to "human" (TKT-0777). The opencode runtime shim
+  // (shims/opencode/index.js) already registers a bridge in opencode-bridges.json
+  // keyed by opencode_pid = THIS MCP child's parent pid; resolve our session id
+  // from it. MIRRORS index.js deriveSessionId()/readOpencodeBridgeForParent —
+  // keep the selection (ppid match · pid-alive · newest updated_at) in lockstep.
+  // Read fresh each call so a bridge that registers after MCP boot self-heals.
+  const ocSid = opencodeSessionIdForParent();
+  if (ocSid) return ocSid;
   return process.env.CLAUDE_CODE_SESSION_ID || null;
+}
+
+/** True if a process with this pid exists (EPERM ⇒ alive but not ours). */
+function pidAlive(pid) {
+  if (!pid || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return !!(err && err.code === 'EPERM');
+  }
+}
+
+/**
+ * Resolve THIS session's id from the opencode bridge registry when running as a
+ * golem-MCP child of an opencode server. Filters bridges to the one whose
+ * opencode_pid is our parent pid (and whose owning pid is alive), newest first.
+ * Returns null off opencode / when no live bridge matches.
+ * @returns {string|null}
+ */
+function opencodeSessionIdForParent() {
+  try {
+    const file = path.join(golemHome(), 'opencode-bridges.json');
+    const json = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const bridges = Array.isArray(json?.bridges) ? json.bridges : [];
+    const match = bridges
+      .filter((b) => b && b.session_id && Number(b.opencode_pid) === Number(process.ppid) && (!b.pid || pidAlive(Number(b.pid))))
+      .sort((a, b) => Date.parse(b.updated_at || b.started_at || 0) - Date.parse(a.updated_at || a.started_at || 0))[0];
+    return match ? match.session_id : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -274,4 +318,16 @@ export function listDispatchable(project) {
   return request('GET', '/api/sessions/dispatchable', {
     params: project ? { project } : {},
   });
+}
+
+/**
+ * POST /api/brief {session_id,text} — push a channel brief to ONE live session.
+ * Pure notification: the dashboard routes it to the target's channel; there are
+ * no ticket state/assignment side effects. Returns the dashboard's delivery
+ * result ({ok,status,body,target}); throws on a non-2xx (e.g. 502 = the target
+ * channel could not be reached).
+ */
+export function postBrief(sessionId, text) {
+  if (!sessionId) throw new Error('postBrief: sessionId is required');
+  return request('POST', '/api/brief', { body: { session_id: sessionId, text } });
 }

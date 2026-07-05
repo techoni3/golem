@@ -30,7 +30,6 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import * as tracker from './tracker-client.js';
 import { SESSION_ROLES, pushRoleBriefDirect, setSessionRole } from '../../lib/session-role.js';
-import { generateRepoMap } from '../../lib/repomap.js';
 
 const VERSION = '0.1.0';
 // Port selection (multi-CEO safe by default):
@@ -455,23 +454,6 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ['text'],
       },
     },
-    {
-      name: 'repo_map',
-      description:
-        'Generate or read the golem repo map for a project using the pinned aider-backed engine. Returns path, metadata, and optionally content. Focused maps are generated without replacing the cached full map.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          path: { type: 'string', description: 'Project path. Defaults to the MCP process cwd.' },
-          force: { type: 'boolean', description: 'Regenerate even if a clean cached map exists.' },
-          budget: { type: 'number', description: 'Token budget for the map.' },
-          focus_files: { type: 'array', items: { type: 'string' }, description: 'Files to focus the map around.' },
-          focus_symbols: { type: 'array', items: { type: 'string' }, description: 'Symbols/identifiers to focus the map around.' },
-          include_content: { type: 'boolean', description: 'Include markdown content in the response.' },
-        },
-      },
-    },
-
     // --- Golem tracker tools (thin HTTP clients of the dashboard REST API) ---
     // The tracker is the cross-project source of truth for work — it REPLACES
     // PLAN.md. The dashboard owns the SQLite DB (single writer); these tools speak
@@ -501,7 +483,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'Ticket id.' },
+          id: { type: 'string', description: 'Display ticket id, e.g. GOL-244. Legacy TKT refs still resolve.' },
         },
         required: ['id'],
       },
@@ -519,7 +501,8 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           priority: { type: 'string', description: 'Optional priority label.' },
           state: { type: 'string', description: 'todo|in_progress|blocked|review|done (default todo).' },
           stream_id: { type: 'string', description: 'Optional stream to group this ticket under.' },
-          parent_id: { type: 'string', description: 'Optional parent ticket id (sub-ticket).' },
+          parent_id: { type: 'string', description: 'Optional parent display ticket id (sub-ticket).' },
+          wave: { anyOf: [{ type: 'integer' }, { type: 'null' }], description: 'Optional positive dependency wave number; null/omitted means not wave-managed.' },
           assignee: { type: 'string', description: 'session_id | "human" | null. Use "human" for questions.' },
           project: { type: 'string', description: 'Contract project_id. Defaults to your current project.' },
         },
@@ -533,7 +516,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'Ticket id.' },
+          id: { type: 'string', description: 'Display ticket id, e.g. GOL-244. Legacy TKT refs still resolve.' },
           state: { type: 'string', description: 'todo|in_progress|blocked|review|done|archived' },
           title: { type: 'string' },
           body: { type: 'string', description: 'Markdown body replacement (+ fenced ```mermaid; GitHub-style admonitions).' },
@@ -542,6 +525,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           labels: { type: 'array', items: { type: 'string' }, description: 'Full replacement label set.' },
           stream_id: { type: 'string' },
           parent_id: { type: 'string' },
+          wave: { anyOf: [{ type: 'integer' }, { type: 'null' }], description: 'Optional positive dependency wave number; pass null to clear.' },
           assignee: { type: 'string', description: 'session_id | "human" | null.' },
         },
         required: ['id'],
@@ -554,7 +538,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'Ticket id.' },
+          id: { type: 'string', description: 'Display ticket id, e.g. GOL-244. Legacy TKT refs still resolve.' },
           body: { type: 'string', description: 'Markdown comment text (fenced ```mermaid ok for diagrams).' },
           quote: { type: 'string', description: 'Optional: exact selected text being commented on.' },
           prefix: { type: 'string', description: 'Optional: text immediately before quote, for anchoring.' },
@@ -575,7 +559,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'Ticket id.' },
+          id: { type: 'string', description: 'Display ticket id, e.g. GOL-244. Legacy TKT refs still resolve.' },
           comment_id: { type: 'string', description: 'Comment id to update.' },
           body: { type: 'string', description: 'Replacement comment text.' },
           tag: { type: 'string', description: 'confirmed|partial|disputed|fix|risk|question|note' },
@@ -591,7 +575,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'Ticket id.' },
+          id: { type: 'string', description: 'Display ticket id, e.g. GOL-244. Legacy TKT refs still resolve.' },
           comment_id: { type: 'string', description: 'Parent comment id.' },
           body: { type: 'string', description: 'Reply text.' },
         },
@@ -616,7 +600,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'Ticket id to dispatch.' },
+          id: { type: 'string', description: 'Display ticket id to dispatch, e.g. GOL-244. Legacy TKT refs still resolve.' },
           session_id: { type: 'string', description: 'Live session id to dispatch to (from sessions_dispatchable).' },
           note: { type: 'string', description: 'Optional note to include with the dispatch.' },
           when_idle: { type: 'boolean', description: 'Queue the dispatch until the target session is idle instead of pushing immediately. Use when the target is busy/waiting so the brief is delivered when it can be acted on.' },
@@ -659,6 +643,22 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {
           project: { type: 'string', description: 'Contract project_id. Defaults to your current project.' },
         },
+      },
+    },
+
+    // --- Session-to-session notification -----------------------------------
+    {
+      name: 'session_notify',
+      description:
+        'Push a short progress/notification brief to ANOTHER live session, delivered as a channel event via the dashboard. Use it for milestone / review-ready / blocked pings to a coordinating session (e.g. a builder notifying its planner). This is NOT a ticket comment — the tracker stays the audit trail, so still comment there; NOT delegation — it makes no ticket assignment or state change; and NOT a consult — use consult_request for a second opinion. Target by session_id or by label (e.g. "golem:fable:planner"); resolves against the same live-session surface as sessions_dispatchable.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          to: { type: 'string', description: 'Target session: its label/name (e.g. "golem:fable:planner") or an exact session_id. Must be a live, reachable session (see sessions_dispatchable).' },
+          text: { type: 'string', description: 'The notification text — keep it short (a status line, not a full report).' },
+          ticket: { type: 'string', description: 'Optional ticket id (e.g. "GOL-267") prefixed to the message for context.' },
+        },
+        required: ['to', 'text'],
       },
     },
 
@@ -738,25 +738,6 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     return { content: [{ type: 'text', text: 'response broadcast' }] };
   }
 
-  if (name === 'repo_map') {
-    try {
-      const focus = (args.focus_files?.length || args.focus_symbols?.length)
-        ? { files: args.focus_files || [], symbols: args.focus_symbols || [] }
-        : null;
-      const result = await generateRepoMap(args.path || process.cwd(), {
-        force: args.force === true,
-        budget: args.budget,
-        focus,
-        version: VERSION,
-      });
-      const payload = { ...result.meta, path: result.path };
-      if (args.include_content === true) payload.content = result.content;
-      return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
-    } catch (err) {
-      return { isError: true, content: [{ type: 'text', text: String(err?.message ?? err) }] };
-    }
-  }
-
   if (name === 'session_role') {
     const role = args.role === 'clear' ? null : args.role;
     if (role != null && !SESSION_ROLES.includes(role)) {
@@ -823,12 +804,86 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     return { content: [{ type: 'text', text: JSON.stringify({ ok: true, pinged: target.name, consult_id: args.consult_id || null }, null, 2) }] };
   }
 
+  // --- Session-to-session notification --------------------------------------
+  // Resolve `to` (session_id or label) against the dispatchable surface, then
+  // deliver via the dashboard's POST /api/brief. No ticket side effects.
+  if (name === 'session_notify') {
+    const to = typeof args.to === 'string' ? args.to.trim() : '';
+    const text = typeof args.text === 'string' ? args.text.trim() : '';
+    if (!to) return { isError: true, content: [{ type: 'text', text: 'session_notify: `to` (session_id or label) is required.' }] };
+    if (!text) return { isError: true, content: [{ type: 'text', text: 'session_notify: `text` is required.' }] };
+
+    let sessions;
+    try {
+      sessions = await tracker.listDispatchable(); // no project ⇒ all live sessions
+    } catch (err) {
+      return { isError: true, content: [{ type: 'text', text: `session_notify: could not list live sessions — ${err instanceof Error ? err.message : String(err)}` }] };
+    }
+    sessions = Array.isArray(sessions) ? sessions : [];
+
+    let target = sessions.find((s) => s && s.session_id === to);
+    if (!target) {
+      const matches = sessions.filter((s) => s && (s.label === to || s.name === to));
+      if (matches.length === 0) {
+        return { isError: true, content: [{ type: 'text', text: `session_notify: no live dispatchable session matches "${to}". Call sessions_dispatchable to see valid targets (session_id or label).` }] };
+      }
+      if (matches.length > 1) {
+        const ids = matches.map((s) => `${s.label || s.name} (${s.session_id})`).join(', ');
+        return { isError: true, content: [{ type: 'text', text: `session_notify: "${to}" is ambiguous across ${matches.length} sessions — pass an exact session_id. Candidates: ${ids}` }] };
+      }
+      target = matches[0];
+    }
+    if (target.reachable === false) {
+      return { isError: true, content: [{ type: 'text', text: `session_notify: target "${target.label || target.session_id}" has no live channel (unreachable) — it cannot receive a push right now.` }] };
+    }
+
+    const message = args.ticket ? `${args.ticket}: ${text}` : text;
+    try {
+      const delivery = await tracker.postBrief(target.session_id, message);
+      return { content: [{ type: 'text', text: JSON.stringify({ ok: true, to: target.label || target.name || target.session_id, session_id: target.session_id, delivery }, null, 2) }] };
+    } catch (err) {
+      return { isError: true, content: [{ type: 'text', text: `session_notify: delivery failed — ${err instanceof Error ? err.message : String(err)}` }] };
+    }
+  }
+
   // --- Golem tracker tools ---------------------------------------------------
   // Each delegates to the HTTP client and returns compact JSON the agent can act
   // on. Identity defaults are injected here so the agent rarely passes ids.
   if (name.startsWith('ticket_') || name.startsWith('stream_') || name === 'sessions_dispatchable') {
-    const jsonResult = (value) => ({
-      content: [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+    const displayCache = new Map();
+    const displayForRef = async (ref) => {
+      if (typeof ref !== 'string' || !/^TKT-/.test(ref)) return ref;
+      if (displayCache.has(ref)) return displayCache.get(ref);
+      try {
+        const ticket = await tracker.getTicket(ref);
+        const display = ticket?.display_id || null;
+        displayCache.set(ref, display);
+        return display;
+      } catch {
+        return null;
+      }
+    };
+    const publicTicketIds = async (value, ticketDisplayId = null) => {
+      if (Array.isArray(value)) return Promise.all(value.map((v) => publicTicketIds(v)));
+      if (!value || typeof value !== 'object') return value;
+      const out = { ...value };
+      const display = out.display_id || ticketDisplayId;
+      const canonical = typeof out.id === 'string' && /^TKT-/.test(out.id) ? out.id : null;
+      if (display && canonical) {
+        out.id = display;
+      }
+      if (display && typeof out.ticket_id === 'string' && /^TKT-/.test(out.ticket_id)) out.ticket_id = display;
+      for (const key of ['parent_id', 'from_ticket', 'to_ticket', 'current_in_progress_ticket']) {
+        if (typeof out[key] === 'string') out[key] = await displayForRef(out[key]);
+      }
+      for (const key of ['comments', 'children', 'links', 'events', 'active_unacked_dispatches']) {
+        if (Array.isArray(out[key])) out[key] = await Promise.all(out[key].map((v) => publicTicketIds(v, display)));
+      }
+      if (out.ticket && typeof out.ticket === 'object') out.ticket = await publicTicketIds(out.ticket);
+      return out;
+    };
+    const jsonResult = async (value) => ({
+      content: [{ type: 'text', text: JSON.stringify(await publicTicketIds(value), null, 2) }],
     });
     try {
       const sessionId = tracker.currentSessionId();
@@ -855,12 +910,12 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         }
         if (args.state != null) params.state = args.state;
         if (args.kind != null) params.kind = args.kind;
-        return jsonResult(await tracker.listTickets(params));
+        return await jsonResult(await tracker.listTickets(params));
       }
 
       if (name === 'ticket_get') {
         if (!args.id) throw new Error('ticket_get: id is required');
-        return jsonResult(await tracker.getTicket(args.id));
+        return await jsonResult(await tracker.getTicket(args.id));
       }
 
       if (name === 'ticket_create') {
@@ -876,19 +931,20 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           labels: args.labels,
           stream_id: args.stream_id,
           parent_id: args.parent_id,
+          wave: args.wave,
           assignee: args.assignee,
           created_by: sessionId ?? undefined,
         };
-        return jsonResult(await tracker.createTicket(body));
+        return await jsonResult(await tracker.createTicket(body));
       }
 
       if (name === 'ticket_update') {
         if (!args.id) throw new Error('ticket_update: id is required');
         const patch = { actor: sessionId ?? undefined };
-        for (const k of ['state', 'title', 'body', 'kind', 'priority', 'labels', 'stream_id', 'parent_id', 'assignee']) {
+        for (const k of ['state', 'title', 'body', 'kind', 'priority', 'labels', 'stream_id', 'parent_id', 'wave', 'assignee']) {
           if (args[k] !== undefined) patch[k] = args[k];
         }
-        return jsonResult(await tracker.updateTicket(args.id, patch));
+        return await jsonResult(await tracker.updateTicket(args.id, patch));
       }
 
       if (name === 'ticket_comment') {
@@ -906,7 +962,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           status: args.status,
           parent_id: args.parent_id,
         };
-        return jsonResult(await tracker.addComment(args.id, comment));
+        return await jsonResult(await tracker.addComment(args.id, comment));
       }
 
       if (name === 'ticket_comment_update') {
@@ -916,14 +972,14 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         for (const k of ['body', 'tag', 'status']) {
           if (args[k] !== undefined) patch[k] = args[k];
         }
-        return jsonResult(await tracker.updateComment(args.id, args.comment_id, patch));
+        return await jsonResult(await tracker.updateComment(args.id, args.comment_id, patch));
       }
 
       if (name === 'ticket_comment_reply') {
         if (!args.id) throw new Error('ticket_comment_reply: id is required');
         if (!args.comment_id) throw new Error('ticket_comment_reply: comment_id is required');
         if (!sessionId) throw new Error('ticket_comment_reply: no current session id to record as author');
-        return jsonResult(await tracker.replyComment(args.id, args.comment_id, {
+        return await jsonResult(await tracker.replyComment(args.id, args.comment_id, {
           author: sessionId,
           body: args.body,
         }));
@@ -932,7 +988,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       if (name === 'ticket_dispatch') {
         if (!args.id) throw new Error('ticket_dispatch: id is required');
         if (!args.session_id) throw new Error('ticket_dispatch: session_id is required');
-        return jsonResult(await tracker.dispatchTicket(args.id, {
+        return await jsonResult(await tracker.dispatchTicket(args.id, {
           session_id: args.session_id,
           note: args.note,
           when_idle: args.when_idle === true,
@@ -942,7 +998,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       if (name === 'stream_create') {
         const project_id = args.project || defaultProject;
         if (!project_id) throw new Error('stream_create: could not resolve a project — pass project:"<contract-id>"');
-        return jsonResult(await tracker.createStream({
+        return await jsonResult(await tracker.createStream({
           project_id,
           name: args.name,
           mode: args.mode,
@@ -952,12 +1008,12 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 
       if (name === 'stream_list') {
         const proj = args.project || defaultProject || undefined;
-        return jsonResult(await tracker.listStreams(proj));
+        return await jsonResult(await tracker.listStreams(proj));
       }
 
       if (name === 'sessions_dispatchable') {
         const proj = args.project || defaultProject || undefined;
-        return jsonResult(await tracker.listDispatchable(proj));
+        return await jsonResult(await tracker.listDispatchable(proj));
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

@@ -21,8 +21,8 @@
 //   tool.execute.after                → journal tool-post  (tool "task" → agent-return)
 //   session.idle                      → journal stop
 //   session.compacted                 → journal pre-compact
-//   session.deleted (parentID null)   → journal session-end  (does not fire on
-//                                        normal exit — best-effort, degrades)
+//   session.deleted (parentID null)   → journal session-end + mark session ended
+//   server.instance.disposed          → mark this shim's sessions ended
 //   experimental.chat.system.transform→ append tracker-context.sh text to system[]
 //
 // RESILIENCE (non-negotiable, ADR-7): this must NEVER stall or crash an
@@ -60,7 +60,9 @@ const BRIDGES_REGISTRY = join(golemHome(), "opencode-bridges.json");
 const BRIDGES_LOCK = `${BRIDGES_REGISTRY}.lock`;
 const SESSIONS_REGISTRY = join(golemHome(), "sessions.json");
 const SESSIONS_LOCK = `${SESSIONS_REGISTRY}.lock`;
-const SESSION_HEARTBEAT_MS = 30_000;
+const RESUME_FALLBACK_MAX_AGE_MS = 5 * 60 * 1000;
+const ENDED_SESSION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_SESSION_REGISTRY_ROWS = 500;
 let currentSessionID = "";
 
 function opencodeStateDir() {
@@ -192,6 +194,7 @@ function updateBridge({ sessionID, cwd, status, port, name, model, insert = true
     });
     if (!found) {
       if (!insert) return; // child/unknown session — never create a phantom endpoint
+      reg.bridges = reg.bridges.filter((b) => b.session_id !== sessionID);
       reg.bridges.push({
         session_id: sessionID,
         opencode_pid: process.pid,
@@ -225,7 +228,33 @@ function unregisterBridges() {
   }
 }
 
-function updateSessionRegistry({ sessionID, cwd, status, name, model, insert = true }) {
+function unregisterBridge(sessionID) {
+  if (!sessionID) return;
+  try {
+    withFileLock(BRIDGES_LOCK, () => {
+      const reg = readJson(BRIDGES_REGISTRY, "bridges");
+      const before = reg.bridges.length;
+      reg.bridges = reg.bridges.filter((b) => !(b.opencode_pid === process.pid && b.session_id === sessionID));
+      if (reg.bridges.length !== before) writeJson(BRIDGES_REGISTRY, reg);
+    });
+  } catch (e) {
+    logErr("bridge unregister session", e);
+  }
+}
+
+function pruneSessionRows(rows, nowMs = Date.now()) {
+  const retained = rows.filter((s) => {
+    const endedAt = Date.parse(s.ended_at || "");
+    return !Number.isFinite(endedAt) || nowMs - endedAt < ENDED_SESSION_RETENTION_MS;
+  });
+  if (retained.length <= MAX_SESSION_REGISTRY_ROWS) return retained;
+  return retained
+    .slice()
+    .sort((a, b) => Date.parse(b.last_seen_at || b.boot_time || b.ended_at || 0) - Date.parse(a.last_seen_at || a.boot_time || a.ended_at || 0))
+    .slice(0, MAX_SESSION_REGISTRY_ROWS);
+}
+
+function updateSessionRegistry({ sessionID, cwd, status, name, model, insert = true, touchLastSeen = true }) {
   if (!sessionID) return;
   try {
     const now = new Date().toISOString();
@@ -242,7 +271,8 @@ function updateSessionRegistry({ sessionID, cwd, status, name, model, insert = t
           status: status || s.status || null,
           name: name || s.name || null,
           model: model || s.model || null,
-          last_seen_at: now,
+          ended_at: null,
+          last_seen_at: touchLastSeen ? now : s.last_seen_at,
         };
       });
       if (!found) {
@@ -257,12 +287,48 @@ function updateSessionRegistry({ sessionID, cwd, status, name, model, insert = t
           model: model || null,
           boot_time: now,
           last_seen_at: now,
+          ended_at: null,
         });
       }
+      reg.sessions = pruneSessionRows(reg.sessions);
       writeJson(SESSIONS_REGISTRY, reg);
     });
   } catch (e) {
     logErr("session registry update", e);
+  }
+}
+
+function markSessionRegistryEnded(sessionIDs) {
+  const ids = new Set((Array.isArray(sessionIDs) ? sessionIDs : [sessionIDs]).filter(Boolean));
+  if (!ids.size) return;
+  try {
+    const now = new Date().toISOString();
+    withFileLock(SESSIONS_LOCK, () => {
+      const reg = readJson(SESSIONS_REGISTRY, "sessions");
+      let changed = false;
+      reg.sessions = reg.sessions.map((s) => {
+        if (!ids.has(s.session_id)) return s;
+        changed = true;
+        return { ...s, harness: "opencode", status: "dead", ended_at: now };
+      });
+      reg.sessions = pruneSessionRows(reg.sessions);
+      if (changed) writeJson(SESSIONS_REGISTRY, reg);
+    });
+  } catch (e) {
+    logErr("session registry end", e);
+  }
+}
+
+function markOwnedSessionRegistryEndedSync() {
+  try {
+    let ids = [];
+    withFileLock(BRIDGES_LOCK, () => {
+      const reg = readJson(BRIDGES_REGISTRY, "bridges");
+      ids = reg.bridges.filter((b) => b.opencode_pid === process.pid).map((b) => b.session_id).filter(Boolean);
+    });
+    markSessionRegistryEnded(ids);
+  } catch (e) {
+    logErr("session registry owned end", e);
   }
 }
 
@@ -337,7 +403,10 @@ function startBridge({ client, dirFor, logErr }) {
     port = typeof addr === "object" && addr ? addr.port : null;
   });
   server.unref();
-  process.once("exit", unregisterBridges);
+  process.once("exit", () => {
+    markOwnedSessionRegistryEndedSync();
+    unregisterBridges();
+  });
   return { port: () => port };
 }
 
@@ -405,13 +474,13 @@ export default async (input) => {
   // ids also flow through chat.message/tool.* hooks) can only UPDATE existing
   // rows, never create phantom sessions or dispatch endpoints. Only the
   // parentID-guarded session.created/session.updated paths insert.
-  const publishBridge = (sessionID, status = null, name = null, { insert = false } = {}) => {
+  const publishBridge = (sessionID, status = null, name = null, { insert = false, touchLastSeen = true } = {}) => {
     const port = bridge.port();
     if (!sessionID || !port) return;
     const st = statusString(status);
     const model = readOpencodeModel();
     updateBridge({ sessionID, cwd: dirFor(sessionID), status: st, port, name, model, insert });
-    updateSessionRegistry({ sessionID, cwd: dirFor(sessionID), status: st, name, model, insert });
+    updateSessionRegistry({ sessionID, cwd: dirFor(sessionID), status: st, name, model, insert, touchLastSeen });
   };
   const registerWhenBridgeReady = (fn, attempt = 0) => {
     if (fn()) return;
@@ -441,9 +510,14 @@ export default async (input) => {
       const activeIds = new Set(Object.keys(statusById));
       const candidates = sessions
         .filter(topLevelSession)
-        .filter((s) => activeIds.size === 0 || activeIds.has(s.id))
+        .filter((s) => activeIds.has(s.id))
         .sort((a, b) => sessionUpdatedAt(b) - sessionUpdatedAt(a));
-      const seeded = candidates.length ? candidates : sessions.filter(topLevelSession).sort((a, b) => sessionUpdatedAt(b) - sessionUpdatedAt(a)).slice(0, 1);
+      const fallback = sessions
+        .filter(topLevelSession)
+        .sort((a, b) => sessionUpdatedAt(b) - sessionUpdatedAt(a))
+        .slice(0, 1)
+        .filter((s) => Date.now() - sessionUpdatedAt(s) <= RESUME_FALLBACK_MAX_AGE_MS);
+      const seeded = activeIds.size > 0 ? candidates : fallback;
       const register = () => {
         if (!bridge.port()) return false;
         for (const info of seeded) rememberSession(info, statusById[info.id] || "idle");
@@ -455,15 +529,15 @@ export default async (input) => {
     }
   };
   seedResumedSessions();
-  const heartbeat = setInterval(() => {
-    try {
-      for (const sid of knownSessionIDs) publishBridge(sid);
-      if (knownSessionIDs.size === 0 && currentSessionID) publishBridge(currentSessionID);
-    } catch (e) {
-      logErr("session heartbeat", e);
-    }
-  }, SESSION_HEARTBEAT_MS);
-  heartbeat.unref?.();
+
+  const endSession = (sessionID, cwd) => {
+    if (!sessionID) return;
+    knownSessionIDs.delete(sessionID);
+    if (currentSessionID === sessionID) currentSessionID = "";
+    markSessionRegistryEnded(sessionID);
+    unregisterBridge(sessionID);
+    runHook("journal-route.sh", ["session-end"], base(sessionID, cwd || dirFor(sessionID)));
+  };
 
   return {
     event: async ({ event }) => {
@@ -500,7 +574,8 @@ export default async (input) => {
           // no info object; statusString (in publishBridge) collapses the shape.
           const sid = p.sessionID || currentSessionID;
           currentSessionID = sid || currentSessionID;
-          publishBridge(sid, p.status);
+          const st = statusString(p.status);
+          publishBridge(sid, p.status, null, { touchLastSeen: st === "busy" });
         } else if (t === "session.updated") {
           // Carries the full Session — the ONLY place the real title shows up
           // (auto-generated after the first message, and on any rename). Keep
@@ -510,12 +585,18 @@ export default async (input) => {
           if (info.directory) sessionDir.set(info.id, info.directory);
           knownSessionIDs.add(info.id);
           currentSessionID = info.id || currentSessionID;
-          publishBridge(info.id, null, info.title || null, { insert: true });
+          publishBridge(info.id, null, info.title || null, { insert: true, touchLastSeen: false });
         } else if (t === "session.compacted") {
           runHook("journal-route.sh", ["pre-compact"], base(p.sessionID, dirFor(p.sessionID)));
         } else if (t === "session.deleted") {
           const info = p.info || {};
-          if (!info.parentID) runHook("journal-route.sh", ["session-end"], base(info.id, info.directory || dirFor(info.id)));
+          if (!info.parentID) endSession(info.id, info.directory || dirFor(info.id));
+        } else if (t === "server.instance.disposed") {
+          const ended = [...knownSessionIDs];
+          markSessionRegistryEnded(ended);
+          unregisterBridges();
+          knownSessionIDs.clear();
+          currentSessionID = "";
         }
       } catch (e) {
         logErr("event", e);
