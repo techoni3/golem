@@ -18,7 +18,7 @@ import { applyGateVerdict, createGate } from './projects.js';
 import { listIdeas, createIdea, popIdea } from './ideas.js';
 import { initDispatchDrainer } from './dispatch-queue.js';
 import { registerSubstrateRoutes } from './substrate.js';
-import { golemHome, dashboardJsonPath } from '../../lib/golem-home.js';
+import { golemHome, dashboardJsonPath, journalDirFor } from '../../lib/golem-home.js';
 import { SESSION_ROLES, listRoleCards, roleChangeBrief, setSessionRole, writeRoleCard } from '../../lib/session-role.js';
 import { generateRepoMap } from '../../lib/repomap.js';
 
@@ -111,6 +111,62 @@ function buildDispatchBrief(ticket, note) {
     `Load it with the golem tracker tools (ticket_get ${id}) to read the full body, acceptance criteria, and comment thread, then pick it up: move it to in_progress, do the work, comment progress, and move it to review/done when complete. ` +
     `If you have blocking questions, create a question-kind ticket in this project assigned to 'human'.`
   );
+}
+
+
+function firstClosingBriefLine(comment) {
+  const text = String(comment?.body || '').replace(/<[^>]+>/g, ' ').trim();
+  const section = text.split(/\n###\s+/).find((s) => /^What was done\b/i.test(s)) || text;
+  const line = section.split('\n').map((l) => l.replace(/^[-*]\s+/, '').trim()).find((l) => l && !/^What was done\b/i.test(l));
+  return line || 'Closing brief posted.';
+}
+
+function specRetroBody(tracker, spec) {
+  const children = (spec.children || []).filter((child) => child.kind !== 'spec');
+  const shipped = children.map((child) => {
+    const full = tracker.getTicket(child.id);
+    const closing = (full?.comments || []).reverse().find((c) => /closing brief/i.test(c.body || ''));
+    return `- ${child.display_id || child.id}: ${child.title} - ${closing ? firstClosingBriefLine(closing) : 'No closing brief found.'}`;
+  });
+  return [
+    '## What shipped',
+    shipped.length ? shipped.join('\n') : '- No child work items found.',
+    '',
+    '## Lessons',
+    '- ',
+    '',
+    '## Proposed doc deltas',
+    '- CLAUDE.md: ',
+    '- AGENTS.md: ',
+    '- REPO-MAP.md: ',
+  ].join('\n');
+}
+
+function handleSpecClosed(tracker, existing, ticket, actor = 'system') {
+  if (!existing || !ticket || existing.kind !== 'spec' || ticket.kind !== 'spec' || existing.state === 'done' || ticket.state !== 'done') return null;
+  const fresh = tracker.getTicket(ticket.id);
+  if ((fresh.comments || []).some((c) => c.block_id === 'retro')) return null;
+
+  const text = `Spec ${fresh.display_id || fresh.id} closed: ${fresh.title}`;
+  const journalDir = journalDirFor(fresh.project_id);
+  fs.mkdirSync(journalDir, { recursive: true });
+  const line = JSON.stringify({
+    ts: new Date().toISOString(),
+    event: 'milestone',
+    session_id: actor,
+    project_id: fresh.project_id,
+    text,
+  });
+  fs.appendFileSync(path.join(journalDir, 'hook.jsonl'), `${line}\n`, 'utf8');
+
+  const comment = tracker.addComment(fresh.id, {
+    author: 'system:spec-close',
+    body: specRetroBody(tracker, fresh),
+    tag: 'note',
+    status: 'open',
+    block_id: 'retro',
+  });
+  return { ticket: tracker.getTicket(fresh.id), comment, milestone: JSON.parse(line) };
 }
 
 async function main() {
@@ -516,9 +572,16 @@ async function main() {
   // PATCH /api/tickets/:id — partial update. 404 if missing, 400 on invalid.
   fastify.patch('/api/tickets/:id', async (req, reply) => {
     const id = req.params.id;
-    if (!tracker.getTicket(id)) return reply.code(404).send({ error: 'not_found' });
+    const existing = tracker.getTicket(id);
+    if (!existing) return reply.code(404).send({ error: 'not_found' });
     try {
       const ticket = tracker.updateTicket(id, req.body ?? {});
+      const closeResult = handleSpecClosed(tracker, existing, ticket, req.body?.actor || 'human');
+      if (closeResult) {
+        broadcastWS({ type: 'ticket-comment', ticket_id: closeResult.ticket.id, comment: closeResult.comment });
+        broadcastWS({ type: 'ticket-updated', ticket: closeResult.ticket });
+        return closeResult.ticket;
+      }
       broadcastWS({ type: 'ticket-updated', ticket });
       return ticket;
     } catch (err) {
@@ -534,9 +597,16 @@ async function main() {
   // PATCH; follow-up ticket will switch it to /move).
   fastify.post('/api/tickets/:id/move', async (req, reply) => {
     const id = req.params.id;
-    if (!tracker.getTicket(id)) return reply.code(404).send({ error: 'not_found' });
+    const existing = tracker.getTicket(id);
+    if (!existing) return reply.code(404).send({ error: 'not_found' });
     try {
       const ticket = tracker.moveTicket(id, req.body ?? {});
+      const closeResult = handleSpecClosed(tracker, existing, ticket, req.body?.actor || 'human');
+      if (closeResult) {
+        broadcastWS({ type: 'ticket-comment', ticket_id: closeResult.ticket.id, comment: closeResult.comment });
+        broadcastWS({ type: 'ticket-updated', ticket: closeResult.ticket });
+        return closeResult.ticket;
+      }
       broadcastWS({ type: 'ticket-updated', ticket });
       return ticket;
     } catch (err) {
