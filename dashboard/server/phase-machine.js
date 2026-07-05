@@ -95,6 +95,10 @@ export function machineForKind(kind) {
   return PHASE_MACHINES[kind] || PHASE_MACHINES['work-item'];
 }
 
+export function isKnownPhase(kind, phase) {
+  return machineForKind(kind).phases.includes(phase);
+}
+
 export function canonicalStateForPhase(kind, phase) {
   return machineForKind(kind).canonical[phase] || 'todo';
 }

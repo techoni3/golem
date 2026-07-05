@@ -18,8 +18,9 @@ import TurndownService from 'turndown';
 import { gfm as turndownGfm } from 'turndown-plugin-gfm';
 import { trackerDbPath } from '../../lib/golem-home.js';
 import { createCommentDispatchService, defaultDispatchStateForComment } from './comment-dispatch.js';
+import { canonicalStateForPhase, initialPhaseForKind, isKnownPhase, phaseFromLegacyState } from './phase-machine.js';
 
-const SCHEMA_VERSION = 10;
+const SCHEMA_VERSION = 11;
 
 const KINDS = new Set(['work-item', 'decision', 'spec', 'question', 'fix']);
 const STATES = new Set(['todo', 'in_progress', 'blocked', 'review', 'done', 'archived']);
@@ -208,6 +209,7 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
         title         TEXT NOT NULL,
         body          TEXT NOT NULL DEFAULT '',
         state         TEXT NOT NULL DEFAULT 'todo',
+        phase         TEXT,
         priority      TEXT,
         labels        TEXT NOT NULL DEFAULT '[]',
         stream_id     TEXT,
@@ -594,10 +596,27 @@ WHERE state_changed_at IS NULL`).run();
       WHERE topic IS NULL OR class IS NULL OR actor_kind IS NULL OR actor_label IS NULL
     `).run();
 
-    // Schema migration v9 -> v10 (GOL-313): external hook ingest is
+    // Schema migration v9 -> v10 (GOL-314): phase machines. Phase is the
+    // workflow source of truth; state remains a derived board-column cache.
+    const ticketCols10 = db.prepare('PRAGMA table_info(tickets)').all().map((c) => c.name);
+    if (!ticketCols10.includes('phase')) db.exec('ALTER TABLE tickets ADD COLUMN phase TEXT');
+    if (schemaVersion && Number(schemaVersion) < 10) {
+      const setPhase = db.prepare('UPDATE tickets SET phase = ?, state = ? WHERE id = ?');
+      for (const row of db.prepare("SELECT id, kind, state FROM tickets WHERE phase IS NULL OR phase = ''").all()) {
+        const phase = phaseFromLegacyState(row.kind, row.state);
+        const state = row.state === 'archived' ? 'archived' : canonicalStateForPhase(row.kind, phase);
+        setPhase.run(phase, state, row.id);
+      }
+    }
+    const setDefaultPhase = db.prepare('UPDATE tickets SET phase = ? WHERE id = ?');
+    for (const row of db.prepare("SELECT id, kind FROM tickets WHERE phase IS NULL OR phase = ''").all()) {
+      setDefaultPhase.run(initialPhaseForKind(row.kind), row.id);
+    }
+
+    // Schema migration v10 -> v11 (GOL-313): external hook ingest is
     // idempotent by source event UUID. Existing tracker events remain null.
-    const eventCols10 = db.prepare('PRAGMA table_info(events)').all().map((c) => c.name);
-    if (!eventCols10.includes('event_uuid')) db.exec('ALTER TABLE events ADD COLUMN event_uuid TEXT');
+    const eventCols11 = db.prepare('PRAGMA table_info(events)').all().map((c) => c.name);
+    if (!eventCols11.includes('event_uuid')) db.exec('ALTER TABLE events ADD COLUMN event_uuid TEXT');
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_events_uuid ON events(event_uuid) WHERE event_uuid IS NOT NULL');
 
     // Indexes that depend on lifecycle columns. Idempotent: no-op on fresh
@@ -618,11 +637,11 @@ WHERE state_changed_at IS NULL`).run();
         INSERT INTO tickets
           (id, seq, project_id, kind, title, body, state, priority, labels,
            stream_id, parent_id, wave, assignee, created_by, dispatched_to,
-           dispatched_at, source_ref, created_at, updated_at, pseq, display_id)
+           dispatched_at, source_ref, created_at, updated_at, pseq, display_id, phase)
         VALUES
           (@id, @seq, @project_id, @kind, @title, @body, @state, @priority, @labels,
            @stream_id, @parent_id, @wave, @assignee, @created_by, @dispatched_to,
-           @dispatched_at, @source_ref, @created_at, @updated_at, @pseq, @display_id)
+           @dispatched_at, @source_ref, @created_at, @updated_at, @pseq, @display_id, @phase)
       `),
       getTicket: db.prepare('SELECT * FROM tickets WHERE id = ?'),
       getComments: db.prepare('SELECT * FROM comments WHERE ticket_id = ? ORDER BY created_at ASC, id ASC'),
@@ -1284,6 +1303,12 @@ WHERE state_changed_at IS NULL`).run();
       return stmts.getSessionLabel.get(session_id) ?? null;
     },
 
+    normalizePhase(kind, phase, context = 'ticket') {
+      const nextPhase = phase ?? initialPhaseForKind(kind);
+      if (!isKnownPhase(kind, nextPhase)) throw new Error(`${context}: invalid phase '${nextPhase}' for kind '${kind}'`);
+      return nextPhase;
+    },
+
     createTicket(input = {}) {
       const {
         project_id,
@@ -1291,6 +1316,7 @@ WHERE state_changed_at IS NULL`).run();
         title,
         body = '',
         state = 'todo',
+        phase = null,
         priority = null,
         labels = [],
         stream_id = null,
@@ -1306,6 +1332,8 @@ WHERE state_changed_at IS NULL`).run();
       if (!KINDS.has(kind)) throw new Error(`createTicket: invalid kind '${kind}'`);
       if (!STATES.has(state)) throw new Error(`createTicket: invalid state '${state}'`);
       const normalizedWave = normalizeWave(wave, 'createTicket');
+      const nextPhase = api.normalizePhase(kind, phase ?? phaseFromLegacyState(kind, state), 'createTicket');
+      const nextState = state === 'archived' ? 'archived' : canonicalStateForPhase(kind, nextPhase);
 
       const ts = now();
       const bodyMd = toMarkdownBody(body);
@@ -1318,7 +1346,8 @@ WHERE state_changed_at IS NULL`).run();
           kind,
           title,
           body: bodyMd,
-          state,
+          state: nextState,
+          phase: nextPhase,
           priority,
           labels: serializeLabels(labels),
           stream_id,
@@ -1340,7 +1369,7 @@ WHERE state_changed_at IS NULL`).run();
           project_id,
           type: 'created',
           actor: created_by,
-          data: { kind, state, title },
+          data: { kind, state: nextState, phase: nextPhase, title },
         });
         const topic = ticketTopic(row);
         autoSubscribe(created_by, topic, 'ticket_creator');
@@ -1369,7 +1398,7 @@ WHERE state_changed_at IS NULL`).run();
       // but populating children is cheap and any ticket can have them. Ordered
       // by created_at so the spec's work items appear in creation order.
       const children = db.prepare(
-        "SELECT id, display_id, title, body, kind, state, assignee, wave FROM tickets WHERE parent_id = ? ORDER BY created_at ASC, id ASC"
+        "SELECT id, display_id, title, body, kind, state, phase, assignee, wave FROM tickets WHERE parent_id = ? ORDER BY created_at ASC, id ASC"
       ).all(id).map((c) => ({
         ...c,
         assignee_label: resolveAssigneeLabel(c.assignee),
@@ -1517,7 +1546,7 @@ WHERE state_changed_at IS NULL`).run();
       }
       where.push("(title LIKE @q ESCAPE '\\' OR body LIKE @q ESCAPE '\\' OR display_id LIKE @q ESCAPE '\\')");
       const sql =
-        'SELECT id, title, kind, state, body, updated_at, display_id FROM tickets ' +
+        'SELECT id, title, kind, state, phase, body, updated_at, display_id FROM tickets ' +
         'WHERE ' + where.join(' AND ') + ' ' +
         'ORDER BY updated_at DESC LIMIT @limit';
       const rows = db.prepare(sql).all(params);
@@ -1546,6 +1575,7 @@ WHERE state_changed_at IS NULL`).run();
           title,
           kind: r.kind,
           state: r.state,
+          phase: r.phase,
           updated_at: r.updated_at,
           snippet,
           title_match: titleMatch,
@@ -1560,7 +1590,7 @@ WHERE state_changed_at IS NULL`).run();
       if (!existing) throw new Error(`updateTicket: ticket '${id}' not found`);
 
       const actor = patch.actor ?? 'human';
-      const ALLOWED = ['title', 'body', 'kind', 'state', 'priority', 'labels', 'stream_id', 'parent_id', 'wave', 'assignee'];
+      const ALLOWED = ['title', 'body', 'kind', 'state', 'phase', 'priority', 'labels', 'stream_id', 'parent_id', 'wave', 'assignee'];
       const updates = {};
       for (const key of ALLOWED) {
         if (Object.prototype.hasOwnProperty.call(patch, key)) {
@@ -1581,6 +1611,18 @@ WHERE state_changed_at IS NULL`).run();
       }
       if ('wave' in updates) {
         updates.wave = normalizeWave(updates.wave, 'updateTicket');
+      }
+      if ('kind' in updates || 'state' in updates || 'phase' in updates) {
+        const nextKind = updates.kind ?? existing.kind;
+        const nextPhase = api.normalizePhase(
+          nextKind,
+          updates.phase ?? phaseFromLegacyState(nextKind, updates.state ?? existing.state),
+          'updateTicket'
+        );
+        updates.phase = nextPhase;
+        updates.state = (updates.state ?? existing.state) === 'archived'
+          ? 'archived'
+          : canonicalStateForPhase(nextKind, nextPhase);
       }
 
       const ts = now();
@@ -1649,6 +1691,8 @@ WHERE state_changed_at IS NULL`).run();
       const existing = stmts.getTicket.get(id);
       if (!existing) throw new Error(`moveTicket: ticket '${id}' not found`);
       if (!STATES.has(state)) throw new Error(`moveTicket: invalid state '${state}'`);
+      const nextPhase = api.normalizePhase(existing.kind, phaseFromLegacyState(existing.kind, state), 'moveTicket');
+      const nextState = state === 'archived' ? 'archived' : canonicalStateForPhase(existing.kind, nextPhase);
       const ts = now();
       const txn = db.transaction(() => {
         // Compute new rank based on neighbours within the target state.
@@ -1671,7 +1715,7 @@ WHERE state_changed_at IS NULL`).run();
           // Append to end of target state.
           const maxRow = db.prepare(
             "SELECT MAX(rank) AS m FROM tickets WHERE state = ? AND id != ?"
-          ).get(state, id);
+          ).get(nextState, id);
           newRank = (maxRow?.m ?? 0) + 1000;
         }
         // Build the SET clause: state + rank + lifecycle stamps.
@@ -1679,21 +1723,22 @@ WHERE state_changed_at IS NULL`).run();
         const setArchivedAt = state === 'archived' ? ', archived_at = @ts' : '';
         db.prepare(`UPDATE tickets SET
           state = @state,
+          phase = @phase,
           rank = @rank,
           state_changed_at = @ts,
           updated_at = @ts
           ${setDoneAt}
           ${setArchivedAt}
-        WHERE id = @id`).run({ state, rank: newRank, ts, id });
+        WHERE id = @id`).run({ state: nextState, phase: nextPhase, rank: newRank, ts, id });
         // Audit event for the state change. Rank-only moves within the
         // same state still record an event for traceability.
-        if (state !== existing.state) {
+        if (nextState !== existing.state || nextPhase !== existing.phase) {
           recordEvent({
             ticket_id: id,
             project_id: existing.project_id,
             type: 'state_change',
             actor,
-            data: { from: existing.state, to: state, before_id, after_id, new_rank: newRank },
+            data: { from: existing.state, to: nextState, from_phase: existing.phase, to_phase: nextPhase, before_id, after_id, new_rank: newRank },
           });
           commentDispatch.markAddressedForTicketActivity(id, actor);
         } else {
