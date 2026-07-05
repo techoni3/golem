@@ -529,6 +529,43 @@ async function main() {
     }));
   }
 
+  function slimTicket(ticket) {
+    if (!ticket) return null;
+    return {
+      id: ticket.id,
+      display_id: ticket.display_id ?? null,
+      title: ticket.title,
+      kind: ticket.kind,
+      state: ticket.state,
+    };
+  }
+
+  function buildTeamRows(projectId, { channels = state.channels(), aliveOnly = false } = {}) {
+    const wanted = resolveProjectId(projectId);
+    const roles = roleMetaMap();
+    return enrichSessionRows(state.nativeSessions(), channels)
+      .filter((s) => (!aliveOnly || s.alive) && (!wanted || s.project_id === wanted))
+      .map((s) => {
+        const inProgress = tracker
+          .listTickets({ project_id: wanted, assignee: s.session_id, state: 'in_progress' })
+          .map(slimTicket)
+          .filter(Boolean);
+        const lastActive = s.updated_at ?? s.started_at ?? null;
+        const roleMeta = s.role ? roles[s.role] ?? null : null;
+        return {
+          ...s,
+          label: s.name || `session ${String(s.session_id ?? '').slice(0, 8)}`,
+          role_meta: roleMeta,
+          in_progress_tickets: inProgress,
+          workload: {
+            in_progress_tickets: inProgress,
+            pending_count: s.pending_count ?? 0,
+            last_active: lastActive,
+          },
+        };
+      });
+  }
+
   await fastify.register(websocket);
   await registerSubstrateRoutes(fastify);
   await fastify.register(fastifyStatic, {
@@ -1560,6 +1597,16 @@ async function main() {
       });
     }
     return out;
+  });
+
+  fastify.get('/api/projects/:id/team', async (req, reply) => {
+    try {
+      const projectId = resolveProjectId(req.params.id);
+      const rows = buildTeamRows(projectId);
+      return { project_id: projectId, team: rows };
+    } catch (err) {
+      return reply.code(400).send({ error: String(err?.message ?? err) });
+    }
   });
 
   fastify.get('/api/roles', async () => listRoleCards());

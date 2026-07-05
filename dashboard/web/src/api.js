@@ -253,6 +253,8 @@
       postJSON(`/api/tickets/${encodeURIComponent(id)}/unacked/${encodeURIComponent(deliveryEventId)}/dismiss`, { actor: 'human:dashboard' }),
     listDispatchable: (projectId) =>
       getJSON(`/api/sessions/dispatchable${qs({ project: projectId })}`),
+    projectTeam: (projectId) =>
+      getJSON(`/api/projects/${encodeURIComponent(projectId)}/team`),
     // TKT-0245: cancel a queued dispatch (DELETE /api/dispatch-queue/:qid).
     cancelDispatchQueue: (qid) =>
       delJSON(`/api/dispatch-queue/${encodeURIComponent(qid)}`),

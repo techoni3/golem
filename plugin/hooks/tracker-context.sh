@@ -94,6 +94,55 @@ NODE
   fi
 fi
 
+if command -v node >/dev/null 2>&1; then
+  TEAM_BLOCK="$(node - "$GOLEM_HOME_DIR" "$START_DIR" "$SESSION_ID" <<'NODE' 2>/dev/null || true
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const [home, start, selfId] = process.argv.slice(2);
+function rootFrom(dir) {
+  let cur = path.resolve(dir);
+  const homeDir = process.env.HOME || '';
+  for (let i = 0; i < 64; i++) {
+    if (cur === homeDir) break;
+    if (fs.existsSync(path.join(cur, '.git')) || fs.existsSync(path.join(cur, 'CLAUDE.md'))) return cur;
+    const parent = path.dirname(cur);
+    if (parent === cur) break;
+    cur = parent;
+  }
+  return path.resolve(dir);
+}
+function projectId(root) {
+  const slug = path.basename(root).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'project';
+  return `${slug}-${crypto.createHash('sha256').update(path.resolve(root)).digest('hex').slice(0, 6)}`;
+}
+const root = rootFrom(start);
+const id = projectId(root);
+let sessions = [];
+try { sessions = JSON.parse(fs.readFileSync(path.join(home, 'sessions.json'), 'utf8')).sessions || []; } catch {}
+const peers = sessions
+  .filter((s) => s && s.project_id === id && s.session_id !== selfId)
+  .sort((a, b) => String(b.last_seen_at || '').localeCompare(String(a.last_seen_at || '')))
+  .slice(0, 8)
+  .map((s) => {
+    const name = s.name || (s.session_id ? `session ${String(s.session_id).slice(0, 8)}` : 'session');
+    const role = s.role || 'unassigned';
+    const status = s.status || (s.ended_at ? 'ended' : 'unknown');
+    return `${name} (${role}, ${status})`;
+  });
+if (peers.length) process.stdout.write(`Team on ${id}: ${peers.join('; ')}`);
+NODE
+)"
+  if [ -n "$TEAM_BLOCK" ] && command -v jq >/dev/null 2>&1; then
+    TEAM_ESC="$(printf '%s' "\n\n$TEAM_BLOCK" | jq -Rs . 2>/dev/null || true)"
+    if [ -n "$TEAM_ESC" ]; then
+      TEAM_ESC="${TEAM_ESC#\"}"
+      TEAM_ESC="${TEAM_ESC%\"}"
+      ctx="$ctx$TEAM_ESC"
+    fi
+  fi
+fi
+
 if [ -n "$SESSION_ID" ] && command -v jq >/dev/null 2>&1; then
   SESSIONS_JSON="$GOLEM_HOME_DIR/sessions.json"
   ROLE="$(jq -r --arg sid "$SESSION_ID" '(.sessions // [])[] | select(.session_id == $sid) | .role // empty' "$SESSIONS_JSON" 2>/dev/null | head -n 1 || true)"
