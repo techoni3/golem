@@ -30,7 +30,7 @@ const drainer = initDispatchDrainer({
 
 try {
   const schema = tracker.raw().prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value;
-  assert.equal(schema, '10', 'schema v10 is active');
+  assert.equal(schema, '11', 'schema v11 is active');
 
   const spec = tracker.createTicket({ project_id: PROJECT, kind: 'spec', title: 'SMOKE GOL-311 spec', created_by: SESSION });
   const child = tracker.createTicket({ project_id: PROJECT, kind: 'work-item', title: 'SMOKE GOL-311 child', parent_id: spec.id, created_by: SESSION, assignee: SESSION });

@@ -20,7 +20,7 @@ const tracker = openTrackerDb(':memory:').init();
 
 try {
   const schema = tracker.raw().prepare("SELECT value FROM meta WHERE key = 'schema_version'").get().value;
-  assert.equal(schema, '10', 'schema v10 is active');
+  assert.equal(schema, '11', 'schema v11 is active');
 
   const sub = tracker.subscribe({ session_id: SESSION, topic: `ticket/SMOKE-GOL-313`, cursor_seq: 0 });
   const end = tracker.ingestBusEvents({ uuid: 'smoke-gol-313-end', event: 'session-end', session_id: SESSION, project_id: PROJECT });
