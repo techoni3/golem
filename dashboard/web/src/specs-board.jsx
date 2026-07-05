@@ -196,7 +196,7 @@ function SpecSearchResults({ results, qLower, searching }) {
         >
           <div className="spec-result-head">
             <span className="spec-result-id mono">{r.display_id || r.id}</span>
-            <span className={`pill ${SPEC_STATE_PILL[r.state] || 'idle'}`}>{r.state}</span>
+            <span className={`pill ${SPEC_STATE_PILL[r.state] || 'idle'}`}>{window.PhaseMachine?.phaseFor?.(r) || r.phase || r.state}</span>
             <span className="spec-result-ago">{specAgo(r.updated_at)}</span>
           </div>
           <div className="spec-result-title">{markFirst(r.title, qLower)}</div>

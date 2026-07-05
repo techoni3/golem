@@ -236,6 +236,7 @@
     createTicket: (body) => postJSON('/api/tickets', body),
     getTicket: (id) => getJSON(`/api/tickets/${encodeURIComponent(id)}`),
     updateTicket: (id, patch) => patchJSON(`/api/tickets/${encodeURIComponent(id)}`, patch),
+    transitionTicket: (id, body) => postJSON(`/api/tickets/${encodeURIComponent(id)}/transition`, body),
     validateFinalisation: (id) => postJSON(`/api/tickets/${encodeURIComponent(id)}/validate-finalisation`, {}),
     addComment: (id, body) => postJSON(`/api/tickets/${encodeURIComponent(id)}/comments`, body),
     dispatchComment: (commentId, body) => postJSON(`/api/comments/${encodeURIComponent(commentId)}/dispatch`, body),

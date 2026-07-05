@@ -102,6 +102,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
   const [commentDispatchNote, setCommentDispatchNote] = React.useState(null);
   const [finalising, setFinalising] = React.useState(false);
   const [finaliseNote, setFinaliseNote] = React.useState(null);
+  const [transitionNote, setTransitionNote] = React.useState(null);
 
   // The live ticket from the store (kept fresh by ticket-updated deltas).
   const ticket = ticketId ? (window.Store.getState().trackerTickets.get(ticketId) ?? null) : null;
@@ -147,6 +148,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
     setCommentDispatchSession('');
     setCommentDispatchNote(null);
     setFinaliseNote(null);
+    setTransitionNote(null);
     setLoadError(null);
     setLoading(true);
     let cancelled = false;
@@ -546,6 +548,25 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
     commitField({ state: 'done' });
   }, [ticketId, onAddComment, commitField]);
 
+  const currentPhase = ticket ? (window.PhaseMachine?.phaseFor?.(ticket) || ticket.phase || ticket.state) : '';
+  const phaseBacked = !!ticket?.phase;
+  const nextPhases = ticket ? (window.PhaseMachine?.next?.(ticket) || []) : [];
+  const phaseEvents = React.useMemo(() => {
+    const rows = Array.isArray(ticket?.events) ? ticket.events : [];
+    return rows.filter((e) => e.type === 'phase_change' || e.type === 'state_change').slice(-8).reverse();
+  }, [ticket?.events]);
+
+  const onTransitionPhase = React.useCallback((phase) => {
+    if (!ticketId || !phase) return;
+    setTransitionNote(null);
+    window.SubstrateAPI.transitionTicket(ticketId, { to_phase: phase, actor: 'human:dashboard' })
+      .then((updated) => {
+        if (updated?.id) window.Store.upsertTrackerTicket(updated);
+        setTransitionNote(`moved to ${phase}`);
+      })
+      .catch((err) => setTransitionNote(err?.payload?.error || err.message || 'transition failed'));
+  }, [ticketId]);
+
   const close = () => onClose && onClose();
 
   const statePill = ticket ? (TD_STATE_PILL[ticket.state] || 'idle') : 'idle';
@@ -615,6 +636,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                   </span>
                 )}
                 <span className={`pill ${statePill}`}>{ticket.state}</span>
+                {currentPhase && <span className="pill tracker-phase-pill" data-phase={currentPhase}>phase: {currentPhase}</span>}
                 {activelyWorked && <Icon.Gear size={12} className="gear gear-working" title="assignee is actively working"/>}
                 {isQuestion && (
                   <span
@@ -693,6 +715,20 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                     options={TD_STATES.map((s) => ({ value: s, label: s, dot: PS_STATE_DOT[s] }))}
                     onChange={(v) => commitField({ state: v })}
                   />
+                </div>
+                <div className="td-prop td-prop-full td-phase-panel">
+                  <span className="td-prop-label">Phase</span>
+                  <div className="td-phase-current">
+                    <span className="pill tracker-phase-pill" data-phase={currentPhase}>{currentPhase || '—'}</span>
+                    <span className="td-phase-state">canonical: {ticket.state}</span>
+                  </div>
+                  <div className="td-phase-actions">
+                    {nextPhases.length ? nextPhases.map((p) => (
+                      <button key={p} type="button" className="orch-btn small ghost" disabled={!phaseBacked} onClick={() => onTransitionPhase(p)}>{p}</button>
+                    )) : <span className="td-prop-value-muted">no legal next phase</span>}
+                  </div>
+                  {!phaseBacked && <div className="td-prop-value-muted">phase migration pending; actions enable after server v11 lands</div>}
+                  {transitionNote && <div className={`td-dispatch-note${/fail|invalid|missing|requires|not found/i.test(transitionNote) ? ' error' : ''}`}>{transitionNote}</div>}
                 </div>
                 <div className="td-prop">
                   <span className="td-prop-label">Assignee</span>
@@ -852,6 +888,17 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                         <span className="td-meta-key">Updated</span>
                         <span className="td-meta-value">{tdAgo(ticket.updated_at)}</span>
                       </div>
+                      {phaseEvents.length > 0 && (
+                        <div className="td-meta-row td-phase-history">
+                          <span className="td-meta-key">Phase history</span>
+                          <span className="td-meta-value">
+                            {phaseEvents.map((e) => {
+                              const data = typeof e.data === 'string' ? (() => { try { return JSON.parse(e.data); } catch { return {}; } })() : (e.data || {});
+                              return `${data.from_phase || data.from || '?'}→${data.to_phase || data.to || '?'} (${e.actor_label || e.actor || 'system'})`;
+                            }).join(' · ')}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

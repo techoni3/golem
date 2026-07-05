@@ -990,6 +990,29 @@
   font-size: 11px;
   padding: 2px 7px;
 }
+.tracker-phase-pill {
+  color: var(--status-review);
+  background: color-mix(in oklab, var(--status-review) 12%, var(--bg-2));
+  border-color: color-mix(in oklab, var(--status-review) 36%, transparent);
+  font-family: var(--font-mono);
+}
+.td-phase-panel {
+  align-items: stretch;
+}
+.td-phase-current, .td-phase-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.td-phase-state {
+  color: var(--text-3);
+  font-size: 11px;
+}
+.td-phase-history .td-meta-value {
+  white-space: normal;
+  line-height: 1.35;
+}
 .native-session-current, .cc-session-current, .nsd-current-ticket {
   display: block;
   color: var(--accent);
