@@ -306,7 +306,8 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
       );
       CREATE INDEX IF NOT EXISTS idx_events_ticket  ON events(ticket_id);
       CREATE INDEX IF NOT EXISTS idx_events_project ON events(project_id);
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_events_uuid ON events(event_uuid) WHERE event_uuid IS NOT NULL;
+      -- idx_events_uuid depends on the v11 event_uuid column. It is created in
+      -- the migration block after the ALTER TABLE for existing DBs.
 
       CREATE TABLE IF NOT EXISTS subscriptions (
         id             TEXT PRIMARY KEY,
