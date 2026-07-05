@@ -480,6 +480,15 @@ async function main() {
     return ticket.id;
   }
 
+  function enforceAttribution(reply, body, field, context) {
+    if (String(body?.[field] || '').trim()) return null;
+    const message = `${context}: explicit ${field} is required for attribution`;
+    if (CONFIG.attributionMode === 'reject') return reply.code(400).send({ error: message, attribution_mode: 'reject' });
+    fastify.log.warn({ context, field, attribution_mode: CONFIG.attributionMode }, message);
+    reply.header('X-Golem-Attribution-Warning', message);
+    return null;
+  }
+
   function deadSessionRevival(ticket, opts = {}) {
     const minAgeMinutes = Math.max(0, Number(opts.minAgeMinutes ?? 5) || 5);
     const pending = tracker.getPendingDispatchForTicket(ticket.id);
@@ -843,6 +852,8 @@ async function main() {
   // POST /api/tickets — create. 400 on validation error.
   fastify.post('/api/tickets', async (req, reply) => {
     const b = req.body ?? {};
+    const attribution = enforceAttribution(reply, b, 'created_by', 'createTicket');
+    if (attribution) return attribution;
     try {
       const ticket = tracker.createTicket({
         project_id: b.project_id,
@@ -878,6 +889,8 @@ async function main() {
     if (!existing) return reply.code(404).send({ error: 'not_found' });
     try {
       const patch = { ...(req.body ?? {}) };
+      const attribution = enforceAttribution(reply, patch, 'actor', 'updateTicket');
+      if (attribution) return attribution;
       if (Object.prototype.hasOwnProperty.call(patch, 'parent_id')) patch.parent_id = resolveTicketIdField(patch.parent_id);
       const ticket = tracker.updateTicket(existing.id, patch);
       const closeResult = handleSpecClosed(tracker, existing, ticket, patch.actor || 'human');
@@ -906,6 +919,8 @@ async function main() {
     if (!existing) return reply.code(404).send({ error: 'not_found' });
     try {
       const patch = { ...(req.body ?? {}) };
+      const attribution = enforceAttribution(reply, patch, 'actor', 'transitionTicket');
+      if (attribution) return attribution;
       const ticket = tracker.transitionTicket(existing.id, patch);
       const closeResult = handleSpecClosed(tracker, existing, ticket, patch.actor || 'human');
       if (closeResult) {
@@ -931,6 +946,8 @@ async function main() {
     if (!existing) return reply.code(404).send({ error: 'not_found' });
     try {
       const patch = { ...(req.body ?? {}) };
+      const attribution = enforceAttribution(reply, patch, 'actor', 'moveTicket');
+      if (attribution) return attribution;
       if (Object.prototype.hasOwnProperty.call(patch, 'before_id')) patch.before_id = resolveTicketIdField(patch.before_id);
       if (Object.prototype.hasOwnProperty.call(patch, 'after_id')) patch.after_id = resolveTicketIdField(patch.after_id);
       const ticket = tracker.moveTicket(existing.id, patch);
@@ -1018,6 +1035,8 @@ async function main() {
     if (!ticketRef) return reply.code(404).send({ error: 'not_found' });
     const id = ticketRef.id;
     const b = req.body ?? {};
+    const attribution = enforceAttribution(reply, b, 'author', 'addComment');
+    if (attribution) return attribution;
     try {
       const comment = tracker.addComment(id, {
         author: b.author,
@@ -1085,6 +1104,8 @@ async function main() {
     if (!ticketRef) return reply.code(404).send({ error: 'not_found' });
     const id = ticketRef.id;
     const b = req.body ?? {};
+    const attribution = enforceAttribution(reply, b, 'author', 'replyComment');
+    if (attribution) return attribution;
     try {
       const comment = tracker.addComment(id, {
         author: b.author,

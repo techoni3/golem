@@ -43,6 +43,9 @@ export const CONFIG = {
   assetAllowedMime: ['image/png', 'image/jpeg', 'image/gif', 'image/webp'],
   // Cap on retained CEO chat messages (user briefs + CEO acks/responses).
   chatCap: parseInt(process.env.GOLEM_CHAT_CAP ?? '200', 10),
+  // GOL-314: strict attribution rollout. Default is warn; reject is smoke-tested
+  // but intentionally not enabled unless explicitly requested.
+  attributionMode: (process.env.GOLEM_ATTRIBUTION_MODE ?? 'warn').toLowerCase(),
   // How often the SSE consumer retries when the channel server is unreachable.
   chatReconnectMs: parseInt(process.env.GOLEM_CHAT_RECONNECT_MS ?? '3000', 10),
   // Number of days since last project activity before it is considered stale.
