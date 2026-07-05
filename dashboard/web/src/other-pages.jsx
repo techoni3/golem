@@ -437,6 +437,13 @@ function ProjectsPage({ setRoute }) {
 
 const REVIEW_INBOX_LAST_VISIT = 'golem.reviewInbox.lastVisit';
 
+function readReviewInboxLastVisit() {
+  const raw = window.localStorage?.getItem(REVIEW_INBOX_LAST_VISIT);
+  if (raw == null) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
 function ticketRef(t) {
   return t?.display_id || t?.id || '';
 }
@@ -515,7 +522,7 @@ function ReviewInboxEntry({ item, lastVisitMs, onRefresh }) {
   const [busy, setBusy] = React.useState(null);
   const [error, setError] = React.useState('');
   const changed = ticketChangedMs(ticket);
-  const fresh = lastVisitMs && changed > lastVisitMs;
+  const fresh = lastVisitMs != null && changed > lastVisitMs;
   const owningSession = ticket.assignee || ticket.dispatched_to || null;
 
   const accept = async () => {
@@ -672,7 +679,7 @@ function ReviewInbox({ projectFilter, setProjectFilter, lastVisitMs }) {
             <div style={{ display: 'grid', gap: 12 }}>
               {g.items.map((item) => {
                 const changed = ticketChangedMs(item.ticket);
-                const showMarker = lastVisitMs && !markerShown && changed <= lastVisitMs;
+                const showMarker = lastVisitMs != null && !markerShown && changed <= lastVisitMs;
                 if (showMarker) markerShown = true;
                 return (
                   <React.Fragment key={item.ticket.id}>
@@ -721,7 +728,7 @@ function LogsPage() {
   useStore();
   const [tab, setTab] = React.useState('review');
   const [projectFilter, setProjectFilter] = React.useState('');
-  const [lastVisitMs] = React.useState(() => Number(window.localStorage?.getItem(REVIEW_INBOX_LAST_VISIT) || 0) || 0);
+  const [lastVisitMs] = React.useState(readReviewInboxLastVisit);
 
   React.useEffect(() => {
     if (tab !== 'review') return;
