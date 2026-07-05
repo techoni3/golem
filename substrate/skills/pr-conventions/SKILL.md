@@ -15,6 +15,9 @@ How to know branching is allowed: the ticket body or dispatch brief names a
 branch with `branch: <name>` or an equivalent explicit instruction, or Lavee
 asks for a branch in chat. Absence of that directive means stay put.
 
+A worktree directive in the dispatch is an explicit branching instruction. Follow
+`golem:worktrees` for the branch/worktree lifecycle and hand-off contract.
+
 When branching is explicitly allowed, use `<type>/<kebab-slug>` — type ∈
 `feat | fix | refactor | infra | docs | spike`. One branch per tracker ticket,
 e.g. `feat/stripe-webhook-handler`.

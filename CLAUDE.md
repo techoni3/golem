@@ -8,7 +8,7 @@ This directory is the golem root: the source repo for the **golem v4 Claude Code
 
 | What | Where |
 |------|-------|
-| v4 plugin source | `plugin/` — agents (`worker`/`reviewer`/`researcher`), 9 `golem:*` skills, hooks, channel MCP |
+| v4 plugin source | `plugin/` — agents (`worker`/`reviewer`/`researcher`), 10 `golem:*` skills, hooks, channel MCP |
 | Dashboard + tracker (SQLite, REST, web UI) | `dashboard/` — start with `golem dashboard` |
 | `golem` CLI | `cli/golem.js` (`npm link` surfaces it; verbs: `dashboard`, `migrate-home`, `doctor`, `status`, `help`) |
 | Project namespaces | `golem-projects/<name>/` (independent repos, gitignored) |
@@ -83,3 +83,10 @@ tracker, and long waits should use bus subscriptions (`ticket/<display_id>` or
 `spec/<display_id>/tree`) instead of polling. Via-manager verification is manual:
 the team API suggests a least-loaded explorer, but the manager dispatches and
 records the transition evidence.
+
+## Parallel Work = Worktrees
+
+When a dispatch brief explicitly names `workspace: worktree`, follow
+`golem:worktrees`: one ticket branch in `.worktrees/<ticket>/`, self-contained
+checks only, `branch:` in the closing brief, and manager/planner reconciliation
+on main. Ad-hoc worktrees remain prohibited without an explicit directive.
