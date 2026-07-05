@@ -13,10 +13,10 @@
 //   help         Show this message.
 
 import { spawn, spawnSync } from 'node:child_process';
-import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readlinkSync, renameSync, symlinkSync } from 'node:fs';
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync, renameSync, statSync, symlinkSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, resolve, join, relative } from 'node:path';
+import { basename, dirname, resolve, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { golemHome, legacyConfigDir, migratedHomeDir, trackerDbPath, renderDirFor, projectsJsonPath, sessionsJsonPath } from '../lib/golem-home.js';
 import { projectIdFor } from '../lib/project-id.js';
@@ -963,6 +963,59 @@ async function cmdDoctor() {
     }
   } catch (e) {
     skip(`could not record LSP capability — ${e.message}`);
+  }
+
+  log('');
+  log('Worktrees');
+  try {
+    const projects = knownProjects();
+    let worktreeProjects = 0;
+    let staleCount = 0;
+    for (const p of projects) {
+      const wtDir = resolve(p.path, '.worktrees');
+      if (!existsSync(wtDir)) continue;
+      worktreeProjects++;
+      let entries;
+      try { entries = readdirSync(wtDir, { withFileTypes: true }); } catch { continue; }
+      for (const e of entries) {
+        if (!e.isDirectory()) continue;
+        const wtPath = resolve(wtDir, e.name);
+        const gitFile = resolve(wtPath, '.git');
+        if (!existsSync(gitFile)) continue;
+        // Check staleness: >7 days old
+        let stale = false;
+        let reason = '';
+        try {
+          const st = statSync(wtPath);
+          const ageDays = (Date.now() - st.mtimeMs) / (1000 * 60 * 60 * 24);
+          if (ageDays > 7) { stale = true; reason = `idle ${Math.round(ageDays)}d`; }
+        } catch { /* can't stat */ }
+        // Check if branch is fully merged into main
+        if (!stale) {
+          try {
+            const gitdirContent = readFileSync(gitFile, 'utf8');
+            const m = gitdirContent.match(/^gitdir:\s*(.+)$/m);
+            if (m) {
+              const branchPath = m[1].trim();
+              const branchName = basename(branchPath);
+              const r = spawnSync('git', ['branch', '--list', '--merged', 'main', branchName], { cwd: p.path, encoding: 'utf8', timeout: 3000 });
+              if (r.status === 0 && r.stdout.trim()) { stale = true; reason = 'merged into main'; }
+            }
+          } catch { /* can't check merge status */ }
+        }
+        if (stale) {
+          staleCount++;
+          log(`  ⚠ ${p.name || p.id}: .worktrees/${e.name} — ${reason}`);
+        }
+      }
+    }
+    if (staleCount === 0) {
+      worktreeProjects > 0 ? ok(`no stale worktrees (${worktreeProjects} project(s) with .worktrees/)`) : skip('no .worktrees/ dirs found');
+    } else {
+      skip(`${staleCount} stale worktree(s) found — review and \`git worktree remove\` when done`);
+    }
+  } catch (e) {
+    skip(`could not check worktrees — ${e.message}`);
   }
 
   log('');

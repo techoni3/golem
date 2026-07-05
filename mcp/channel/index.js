@@ -604,6 +604,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           session_id: { type: 'string', description: 'Live session id to dispatch to (from sessions_dispatchable).' },
           note: { type: 'string', description: 'Optional note to include with the dispatch.' },
           when_idle: { type: 'boolean', description: 'Queue the dispatch until the target session is idle instead of pushing immediately. Use when the target is busy/waiting so the brief is delivered when it can be acted on.' },
+          workspace: { type: 'string', description: "Optional workspace directive. Pass 'worktree' to instruct the builder to use a git worktree (branch + dir derived from ticket id/title). Only valid when the project has worktrees enabled." },
         },
         required: ['id', 'session_id'],
       },
@@ -1041,6 +1042,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           session_id: args.session_id,
           note: args.note,
           when_idle: args.when_idle === true,
+          workspace: args.workspace || undefined,
         }));
       }
 

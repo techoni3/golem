@@ -20,7 +20,7 @@ import { trackerDbPath } from '../../lib/golem-home.js';
 import { createCommentDispatchService, defaultDispatchStateForComment } from './comment-dispatch.js';
 import { canonicalStateForPhase, initialPhaseForKind, isKnownPhase, legalNextPhases, phaseFromLegacyState, requirementsForPhase } from './phase-machine.js';
 
-const SCHEMA_VERSION = 11;
+const SCHEMA_VERSION = 12;
 
 const KINDS = new Set(['work-item', 'decision', 'spec', 'question', 'fix']);
 const STATES = new Set(['todo', 'in_progress', 'blocked', 'review', 'done', 'archived']);
@@ -620,6 +620,11 @@ WHERE state_changed_at IS NULL`).run();
     if (!eventCols11.includes('event_uuid')) db.exec('ALTER TABLE events ADD COLUMN event_uuid TEXT');
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_events_uuid ON events(event_uuid) WHERE event_uuid IS NOT NULL');
 
+    // Schema migration v11 -> v12 (GOL-319): workspace directive on queued
+    // dispatches so the drainer can reconstruct the workspace block.
+    const dqCols12 = db.prepare('PRAGMA table_info(dispatch_queue)').all().map((c) => c.name);
+    if (!dqCols12.includes('workspace')) db.exec('ALTER TABLE dispatch_queue ADD COLUMN workspace TEXT');
+
     // Indexes that depend on lifecycle columns. Idempotent: no-op on fresh
     // DBs (CREATE TABLE above already created them), first-time-create on
     // existing DBs (where the ALTER TABLE above just added the columns).
@@ -702,8 +707,8 @@ WHERE state_changed_at IS NULL`).run();
       setMeta: db.prepare('INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'),
       // TKT-0245: dispatch_queue prepared statements.
       insertDispatchQueue: db.prepare(`
-        INSERT INTO dispatch_queue (id, ticket_id, project_id, session_id, note, status, created_at)
-        VALUES (@id, @ticket_id, @project_id, @session_id, @note, 'pending', @created_at)
+        INSERT INTO dispatch_queue (id, ticket_id, project_id, session_id, note, workspace, status, created_at)
+        VALUES (@id, @ticket_id, @project_id, @session_id, @note, @workspace, 'pending', @created_at)
       `),
       cancelPendingForTicket: db.prepare(
         "UPDATE dispatch_queue SET status = 'cancelled', resolved_at = @resolved_at WHERE ticket_id = @ticket_id AND status = 'pending'"
@@ -1882,7 +1887,7 @@ WHERE state_changed_at IS NULL`).run();
     // dispatched_at — those land when the drainer actually delivers the brief
     // on idle. Re-queue = replace (the unique partial index enforces one
     // pending row per ticket).
-    queueDispatch(ticketId, { session_id, note = null, actor = 'human' } = {}) {
+    queueDispatch(ticketId, { session_id, note = null, workspace = null, actor = 'human' } = {}) {
       const existing = stmts.getTicket.get(ticketId);
       if (!existing) throw new Error(`queueDispatch: ticket '${ticketId}' not found`);
       if (!session_id) throw new Error('queueDispatch: session_id is required');
@@ -1901,6 +1906,7 @@ WHERE state_changed_at IS NULL`).run();
           project_id: existing.project_id,
           session_id,
           note: note ?? null,
+          workspace: workspace ?? null,
           created_at: ts,
         });
         recordEvent({

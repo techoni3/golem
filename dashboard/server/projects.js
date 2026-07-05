@@ -422,6 +422,7 @@ async function discoverFromRegistry({ alreadyDiscoveredPaths, tracker = null, na
       project_id: contractId,
       registered_by: entry.registered_by ?? null,
       auto: entry.kind === 'auto',
+      worktrees: entry.worktrees === true,
       kind,
       name: title,
       glyph: glyphFor(title),

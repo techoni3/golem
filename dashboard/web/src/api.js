@@ -245,8 +245,8 @@
       patchJSON(`/api/tickets/${encodeURIComponent(id)}/comments/${encodeURIComponent(commentId)}`, patch),
     replyComment: (id, commentId, body) =>
       postJSON(`/api/tickets/${encodeURIComponent(id)}/comments/${encodeURIComponent(commentId)}/reply`, body),
-    dispatchTicket: (id, { session_id, note, mode }) =>
-      postJSON(`/api/tickets/${encodeURIComponent(id)}/dispatch`, { session_id, note, mode }),
+    dispatchTicket: (id, { session_id, note, mode, workspace }) =>
+      postJSON(`/api/tickets/${encodeURIComponent(id)}/dispatch`, { session_id, note, mode, workspace }),
     revivalInfo: (id, params) => getJSON(`/api/tickets/${encodeURIComponent(id)}/revival${qs(params)}`),
     redispatchRevival: (id, body) => postJSON(`/api/tickets/${encodeURIComponent(id)}/revival/redispatch`, body),
     dismissUnackedDispatch: (id, deliveryEventId) =>

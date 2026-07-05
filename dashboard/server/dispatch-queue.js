@@ -244,7 +244,7 @@ export function initDispatchDrainer({
         if (assigned.revoked_session_id) {
           try { await pushBrief(`Dispatch revoked for ${assigned.display_id || assigned.id}: ${assigned.title || ''}\n\nReason: queued dispatch delivered to another session. Stand down unless you receive a new dispatch.`, assigned.revoked_session_id); } catch { /* best-effort */ }
         }
-        const briefString = buildDispatchBrief(ticket, row.note);
+        const briefString = buildDispatchBrief(ticket, row.note, row.workspace || undefined);
 
         let pushResult;
         try {

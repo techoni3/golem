@@ -86,6 +86,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
   // status (idle→Now, busy/waiting→When idle); the user can override via the
   // segmented toggle. `cancelling` gates the Cancel button on a pending row.
   const [dispatchMode, setDispatchMode] = React.useState('now');
+  const [workspaceMode, setWorkspaceMode] = React.useState(false); // worktree toggle
   const [cancelling, setCancelling] = React.useState(false);
 
   // WS6: question return state. `returnSession` is the live session the answered
@@ -345,7 +346,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
     if (!ticketId || !dispatchSession || dispatching) return;
     setDispatching(true);
     setDispatchNote(null);
-    window.SubstrateAPI.dispatchTicket(ticketId, { session_id: dispatchSession, mode: dispatchMode })
+    window.SubstrateAPI.dispatchTicket(ticketId, { session_id: dispatchSession, mode: dispatchMode, workspace: workspaceMode ? 'worktree' : undefined })
       .then((res) => {
         if (res?.ticket?.id) window.Store.upsertTrackerTicket(res.ticket);
         // Re-fetch dispatchable so pending_count hints refresh in the picker.
@@ -852,6 +853,12 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                         <button type="button" className={`td-dispatch-mode-btn${dispatchMode === 'when_idle' ? ' active' : ''}`}
                           onClick={() => setDispatchMode('when_idle')} aria-pressed={dispatchMode === 'when_idle'} title="Queue the brief until the target session is idle">When idle</button>
                       </div>
+                      {project?.worktrees === true && (
+                        <label className="td-dispatch-workspace" title="Dispatch with a git worktree — builder gets branch + dir + setup instructions">
+                          <input type="checkbox" checked={workspaceMode} onChange={(e) => setWorkspaceMode(e.target.checked)} />
+                          <span>Worktree</span>
+                        </label>
+                      )}
                       <button className="orch-btn small td-dispatch-go"
                         onClick={onDispatch}
                         disabled={dispatching || !dispatchSession || dispatchable.length === 0}

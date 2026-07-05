@@ -18,6 +18,7 @@ import { applyGateVerdict, createGate } from './projects.js';
 import { listIdeas, createIdea, popIdea, readIdea } from './ideas.js';
 import { initDispatchDrainer } from './dispatch-queue.js';
 import { registerSubstrateRoutes } from './substrate.js';
+import { teamAssists } from './team-assist.js';
 import { golemHome, dashboardJsonPath, journalDirFor, sessionsJsonPath } from '../../lib/golem-home.js';
 import { createRole, deleteRole, getRole, listRoleCards, roleChangeBrief, setSessionRole, updateRoleMeta, writeRoleCard } from '../../lib/session-role.js';
 
@@ -102,18 +103,61 @@ function getProcessComm(pid) {
 // construction in the dispatch handler so the drainer (dispatch-queue.js)
 // produces byte-identical briefs — no format drift between the two delivery
 // paths. `note` is an already-trimmed string or null.
-function buildDispatchBrief(ticket, note) {
-  if (ticket?.kind === 'spec') return buildSpecBrief(ticket, note);
+// `workspace` is an optional directive ('worktree' | undefined) that appends
+// a workspace setup block to the brief (GOL-316 §2.7).
+
+function ticketSlug(title) {
+  return String(title || 'ticket')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+}
+
+function workspaceBlock(ticket) {
   const id = ticket.display_id || ticket.id;
-  return (
+  const kind = ticket.kind === 'fix' ? 'fix' : 'feat';
+  const slug = ticketSlug(ticket.title);
+  const branch = `${kind}/${id.toLowerCase()}-${slug}`;
+  const dir = `.worktrees/${id}-${slug}/`;
+  return [
+    '',
+    '## Workspace: worktree',
+    `Branch: \`${branch}\``,
+    `Worktree dir: \`${dir}\``,
+    '',
+    '### Setup',
+    '```bash',
+    `git worktree add ${dir} -b ${branch} main`,
+    `cp -Rc node_modules ${dir}node_modules`,
+    `cp -Rc mcp/channel/node_modules ${dir}mcp/channel/node_modules`,
+    '```',
+    '',
+    '### Rules',
+    '- Build inside the worktree; commit conventional commits on the branch.',
+    '- Rebase on main before handing off for review.',
+    '- **Prohibited inside the worktree:** `golem sync`, restarting the dashboard, editing the main checkout, claiming shared runtimes (port 7420, docker stacks).',
+    '- Self-contained checks only: unit tests, `node --check`, temp-DB scripts.',
+    '',
+    '### Hand-off',
+    `- Closing brief MUST include \`branch: ${branch}\` line.`,
+    '- Ticket → review when done; the orchestrator reconciles via `git merge --no-ff` on main.',
+  ].join('\n');
+}
+
+function buildDispatchBrief(ticket, note, workspace) {
+  if (ticket?.kind === 'spec') return buildSpecBrief(ticket, note, workspace);
+  const id = ticket.display_id || ticket.id;
+  let brief =
     `You've been assigned tracker ticket ${id}: "${ticket.title}" (project ${ticket.project_id}, kind ${ticket.kind}).\n\n` +
     `${note ? note + '\n\n' : ''}` +
     `Load it with the golem tracker tools (ticket_get ${id}) to read the full body, acceptance criteria, and comment thread, then pick it up: move it to in_progress, do the work, comment progress, and move it to review/done when complete. ` +
-    `If you have blocking questions, create a question-kind ticket in this project assigned to 'human'.`
-  );
+    `If you have blocking questions, create a question-kind ticket in this project assigned to 'human'.`;
+  if (workspace === 'worktree') brief += workspaceBlock(ticket);
+  return brief;
 }
 
-function buildSpecBrief(ticket, note) {
+function buildSpecBrief(ticket, note, workspace) {
   const id = ticket.display_id || ticket.id;
   const comments = (ticket.comments || []).filter((c) => c.dispatch_state === 'undispatched' || c.dispatch_state === 'dispatched');
   const children = ticket.children || [];
@@ -130,7 +174,7 @@ function buildSpecBrief(ticket, note) {
   const childSection = children.length
     ? children.map((c) => `- ${c.display_id || c.id}: ${c.title} — ${c.state}${c.wave ? ` — W${c.wave}` : ''}`).join('\n')
     : 'No child work items.';
-  return [
+  const lines = [
     `You've been assigned spec ticket ${id}: "${ticket.title}" (project ${ticket.project_id}).`,
     '',
     note || null,
@@ -150,7 +194,9 @@ function buildSpecBrief(ticket, note) {
     '',
     `Load it with the golem tracker tools (ticket_get ${id}) to read the full body, comment thread, and links, then pick it up: move it to in_progress, do the work, comment progress, and move it to review/done when complete.`,
     `If you have blocking questions, create a question-kind ticket in this project assigned to 'human'.`,
-  ].filter((line) => line != null).join('\n');
+  ];
+  if (workspace === 'worktree') lines.push(workspaceBlock(ticket));
+  return lines.filter((line) => line != null).join('\n');
 }
 
 function statusForHookEvent(type) {
@@ -1393,6 +1439,7 @@ async function main() {
     const sessionId = typeof b.session_id === 'string' && b.session_id.trim() ? b.session_id.trim() : null;
     const note = typeof b.note === 'string' && b.note.trim() ? b.note.trim() : null;
     const mode = typeof b.mode === 'string' ? b.mode : 'now';
+    const workspace = typeof b.workspace === 'string' && b.workspace.trim() ? b.workspace.trim() : undefined;
     if (mode !== 'now' && mode !== 'when_idle') {
       return reply.code(400).send({ error: `mode must be 'now' or 'when_idle' (got '${mode}')` });
     }
@@ -1412,7 +1459,7 @@ async function main() {
       try { hasChannel = (await listChannels()).some((c) => c.session_id === sessionId); } catch { /* treat as unreachable */ }
       const isIdle = !!target && target.alive && target.status === 'idle' && hasChannel;
       if (!isIdle) {
-        const queueRow = tracker.queueDispatch(id, { session_id: sessionId, note, actor: 'human' });
+        const queueRow = tracker.queueDispatch(id, { session_id: sessionId, note, workspace, actor: 'human' });
         chat.record('system', 'info',
           `queued ${queueRow.id.slice(0, 8)} for ${sessionId} — will deliver when idle`);
         const ticket = tracker.getTicket(id);
@@ -1434,7 +1481,7 @@ async function main() {
     //    tools (ticket_get, etc.) land in WS3 — naming them now is intentional.
     //    (TKT-0245: extracted to buildDispatchBrief so the drainer produces
     //    byte-identical briefs.)
-    const briefString = buildDispatchBrief(existing, note);
+    const briefString = buildDispatchBrief(existing, note, workspace);
 
     // 3) Best-effort channel push — never fail the request on a push miss.
     let channelResult = null;
@@ -1663,14 +1710,15 @@ async function main() {
         },
       });
     }
-    return out;
+    const assists = teamAssists(out);
+    return out.map((row) => ({ ...row, suggested: row.session_id === assists.suggested_manager?.session_id ? 'manager' : null }));
   });
 
   fastify.get('/api/projects/:id/team', async (req, reply) => {
     try {
       const projectId = resolveProjectId(req.params.id);
       const rows = buildTeamRows(projectId);
-      return { project_id: projectId, team: rows };
+      return { project_id: projectId, team: rows, assists: teamAssists(rows) };
     } catch (err) {
       return reply.code(400).send({ error: String(err?.message ?? err) });
     }

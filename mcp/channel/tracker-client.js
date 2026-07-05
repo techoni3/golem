@@ -296,10 +296,10 @@ export function replyComment(id, commentId, body) {
 }
 
 /** POST /api/tickets/:id/dispatch {session_id,note?,mode?} — when_idle:true maps to mode 'when_idle'. */
-export function dispatchTicket(id, { session_id, note, when_idle } = {}) {
+export function dispatchTicket(id, { session_id, note, when_idle, workspace } = {}) {
   if (!id) throw new Error('dispatchTicket: id is required');
   return request('POST', `/api/tickets/${encodeURIComponent(id)}/dispatch`, {
-    body: { session_id, note, mode: when_idle ? 'when_idle' : 'now' },
+    body: { session_id, note, mode: when_idle ? 'when_idle' : 'now', workspace: workspace || undefined },
   });
 }
 
