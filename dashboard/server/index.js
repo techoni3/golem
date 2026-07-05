@@ -18,7 +18,7 @@ import { applyGateVerdict, createGate } from './projects.js';
 import { listIdeas, createIdea, popIdea, readIdea } from './ideas.js';
 import { initDispatchDrainer } from './dispatch-queue.js';
 import { registerSubstrateRoutes } from './substrate.js';
-import { golemHome, dashboardJsonPath, journalDirFor } from '../../lib/golem-home.js';
+import { golemHome, dashboardJsonPath, journalDirFor, sessionsJsonPath } from '../../lib/golem-home.js';
 import { createRole, deleteRole, getRole, listRoleCards, roleChangeBrief, setSessionRole, updateRoleMeta, writeRoleCard } from '../../lib/session-role.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
@@ -151,6 +151,58 @@ function buildSpecBrief(ticket, note) {
     `Load it with the golem tracker tools (ticket_get ${id}) to read the full body, comment thread, and links, then pick it up: move it to in_progress, do the work, comment progress, and move it to review/done when complete.`,
     `If you have blocking questions, create a question-kind ticket in this project assigned to 'human'.`,
   ].filter((line) => line != null).join('\n');
+}
+
+function statusForHookEvent(type) {
+  switch (type) {
+    case 'session-start': return 'idle';
+    case 'user-prompt': return 'busy';
+    case 'stop': return 'idle';
+    case 'session-end': return 'ended';
+    default: return null;
+  }
+}
+
+function updateSessionMaterializedStatusFromIngest(result) {
+  const rows = Array.isArray(result?.events) ? result.events : [];
+  if (!rows.length) return { updated: 0 };
+  let doc;
+  const target = sessionsJsonPath();
+  try {
+    doc = JSON.parse(fs.readFileSync(target, 'utf8'));
+  } catch {
+    return { updated: 0 };
+  }
+  if (!Array.isArray(doc.sessions)) doc.sessions = [];
+  let changed = 0;
+  for (const row of rows) {
+    if (row?.duplicate || row?.class !== 'lifecycle') continue;
+    const data = row.data || {};
+    const hookEvent = data.hook_event || String(row.type || '').replace(/^hook_/, '').replace(/_/g, '-');
+    const status = statusForHookEvent(hookEvent);
+    const sessionId = data.session_id;
+    if (!status || !sessionId) continue;
+    const idx = doc.sessions.findIndex((s) => s?.session_id === sessionId);
+    if (idx < 0) continue;
+    const prev = doc.sessions[idx] || {};
+    doc.sessions[idx] = {
+      ...prev,
+      status,
+      status_updated_at: row.created_at,
+      last_seen_at: row.created_at,
+      ended_at: status === 'ended' ? row.created_at : (status === 'idle' || status === 'busy' ? null : prev.ended_at),
+    };
+    changed += 1;
+  }
+  if (!changed) return { updated: 0 };
+  try {
+    const tmp = `${target}.tmp.${process.pid}`;
+    fs.writeFileSync(tmp, JSON.stringify(doc, null, 2));
+    fs.renameSync(tmp, target);
+  } catch (err) {
+    return { updated: 0, error: String(err?.message ?? err) };
+  }
+  return { updated: changed };
 }
 
 function shellQuote(s) {
@@ -1394,6 +1446,21 @@ async function main() {
   });
 
   fastify.get('/api/bus/stats', async () => tracker.busStats());
+
+  fastify.post('/api/bus/ingest', async (req, reply) => {
+    try {
+      const result = tracker.ingestBusEvents(req.body ?? {});
+      const session_status = updateSessionMaterializedStatusFromIngest(result);
+      if (session_status.updated && typeof state.refreshNativeSessions === 'function') await state.refreshNativeSessions();
+      broadcastWS({ type: 'bus-ingested', result: { ...result, events: undefined }, session_status });
+      if (session_status.updated) {
+        broadcastWS({ type: 'native-sessions-update', native_sessions: enrichSessionRows(state.nativeSessions(), state.channels()), channels: state.channels() });
+      }
+      return reply.code(202).send({ ...result, session_status });
+    } catch (err) {
+      return reply.code(400).send({ error: String(err?.message ?? err) });
+    }
+  });
 
   fastify.post('/api/bus/prune', async (req, reply) => {
     try {

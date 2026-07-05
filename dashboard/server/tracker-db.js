@@ -19,7 +19,7 @@ import { gfm as turndownGfm } from 'turndown-plugin-gfm';
 import { trackerDbPath } from '../../lib/golem-home.js';
 import { createCommentDispatchService, defaultDispatchStateForComment } from './comment-dispatch.js';
 
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 
 const KINDS = new Set(['work-item', 'decision', 'spec', 'question', 'fix']);
 const STATES = new Set(['todo', 'in_progress', 'blocked', 'review', 'done', 'archived']);
@@ -29,6 +29,8 @@ const COMMENT_TAGS = new Set(['confirmed', 'partial', 'disputed', 'fix', 'risk',
 const EVENT_CLASSES = new Set(['tracker', 'lifecycle', 'activity', 'custom']);
 const DEFAULT_SUBSCRIPTION_CLASSES = ['tracker', 'lifecycle', 'custom'];
 const SUBSCRIPTION_BACKLOG_CAP = 500;
+const LIFECYCLE_EVENTS = new Set(['session-start', 'session-end', 'user-prompt', 'stop', 'subagent-stop', 'pre-compact', 'notification']);
+const ACTIVITY_EVENTS = new Set(['tool-pre', 'tool-post', 'agent-spawn', 'agent-return', 'send-message', 'send-message-post']);
 
 /** Default DB path: <golem home>/tracker.db, overridable by GOLEM_TRACKER_DB. */
 export function defaultDbPath() {
@@ -71,6 +73,27 @@ function normalizeEventClass(value) {
   const cls = String(value || 'tracker').trim() || 'tracker';
   if (!EVENT_CLASSES.has(cls)) throw new Error(`event class must be one of ${[...EVENT_CLASSES].join(', ')}`);
   return cls;
+}
+
+function normalizeHookType(value) {
+  return String(value || 'unknown').trim() || 'unknown';
+}
+
+function classForHookType(value) {
+  const event = normalizeHookType(value);
+  if (LIFECYCLE_EVENTS.has(event)) return 'lifecycle';
+  if (ACTIVITY_EVENTS.has(event)) return 'activity';
+  return 'custom';
+}
+
+function busTypeForHookType(value) {
+  return `hook_${normalizeHookType(value).replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'unknown'}`;
+}
+
+function eventUuid(input) {
+  const raw = input?.uuid ?? input?.event_uuid ?? input?.id ?? input?.event_id ?? null;
+  const s = raw == null ? '' : String(raw).trim();
+  return s || null;
 }
 
 function normalizeClassFilter(value) {
@@ -267,6 +290,7 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
 
       CREATE TABLE IF NOT EXISTS events (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_uuid TEXT,
         ticket_id  TEXT,
         project_id TEXT,
         topic      TEXT,
@@ -280,6 +304,7 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
       );
       CREATE INDEX IF NOT EXISTS idx_events_ticket  ON events(ticket_id);
       CREATE INDEX IF NOT EXISTS idx_events_project ON events(project_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_events_uuid ON events(event_uuid) WHERE event_uuid IS NOT NULL;
 
       CREATE TABLE IF NOT EXISTS subscriptions (
         id             TEXT PRIMARY KEY,
@@ -569,6 +594,12 @@ WHERE state_changed_at IS NULL`).run();
       WHERE topic IS NULL OR class IS NULL OR actor_kind IS NULL OR actor_label IS NULL
     `).run();
 
+    // Schema migration v9 -> v10 (GOL-313): external hook ingest is
+    // idempotent by source event UUID. Existing tracker events remain null.
+    const eventCols10 = db.prepare('PRAGMA table_info(events)').all().map((c) => c.name);
+    if (!eventCols10.includes('event_uuid')) db.exec('ALTER TABLE events ADD COLUMN event_uuid TEXT');
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_events_uuid ON events(event_uuid) WHERE event_uuid IS NOT NULL');
+
     // Indexes that depend on lifecycle columns. Idempotent: no-op on fresh
     // DBs (CREATE TABLE above already created them), first-time-create on
     // existing DBs (where the ALTER TABLE above just added the columns).
@@ -614,9 +645,10 @@ WHERE state_changed_at IS NULL`).run();
       deleteLink: db.prepare('DELETE FROM links WHERE from_ticket = ? AND to_ticket = ? AND type = ?'),
       listLinks: db.prepare('SELECT * FROM links WHERE from_ticket = ? OR to_ticket = ? ORDER BY type ASC'),
       insertEvent: db.prepare(`
-        INSERT INTO events (ticket_id, project_id, topic, class, type, actor, actor_kind, actor_label, data, created_at)
-        VALUES (@ticket_id, @project_id, @topic, @class, @type, @actor, @actor_kind, @actor_label, @data, @created_at)
+        INSERT INTO events (event_uuid, ticket_id, project_id, topic, class, type, actor, actor_kind, actor_label, data, created_at)
+        VALUES (@event_uuid, @ticket_id, @project_id, @topic, @class, @type, @actor, @actor_kind, @actor_label, @data, @created_at)
       `),
+      getEventByUuid: db.prepare('SELECT * FROM events WHERE event_uuid = ?'),
       upsertSubscription: db.prepare(`
         INSERT INTO subscriptions (id, session_id, topic, classes_filter, status, cursor_seq, created_at, expires_at, reason)
         VALUES (@id, @session_id, @topic, @classes_filter, 'active', @cursor_seq, @created_at, @expires_at, @reason)
@@ -631,6 +663,17 @@ WHERE state_changed_at IS NULL`).run();
         SET status = 'suspended', reason = @reason
         WHERE session_id = @session_id AND topic = @topic AND status = 'active'
       `),
+      suspendSubscriptionsForSession: db.prepare(`
+        UPDATE subscriptions
+        SET status = 'suspended', reason = @reason
+        WHERE session_id = @session_id AND status = 'active'
+      `),
+      reactivateSubscriptionsForSession: db.prepare(`
+        UPDATE subscriptions
+        SET status = 'active', reason = @reason
+        WHERE session_id = @session_id AND status = 'suspended'
+      `),
+      deleteSubscriptionsForSession: db.prepare('DELETE FROM subscriptions WHERE session_id = ?'),
       getSubscriptionById: db.prepare('SELECT * FROM subscriptions WHERE id = ?'),
       listSubscriptions: db.prepare('SELECT * FROM subscriptions WHERE (@session_id IS NULL OR session_id = @session_id) ORDER BY created_at ASC, id ASC'),
       listActiveSubscriptions: db.prepare("SELECT * FROM subscriptions WHERE status = 'active' ORDER BY created_at ASC, id ASC"),
@@ -717,13 +760,48 @@ WHERE state_changed_at IS NULL`).run();
   // bus row; `data` is JSON-serialized. Ticket-scoped tracker events default to
   // `ticket/<display_id>` and child tickets mirror onto `spec/<parent>/tree` so
   // managers/planners can subscribe to a whole spec tree without joins.
-  function recordEvent({ ticket_id = null, project_id = null, topic = null, class: eventClass = 'tracker', type, actor = null, actor_kind = null, actor_label = null, data = {} } = {}) {
+  function hydrateEvent(row) {
+    return row ? { ...row, data: safeParse(row.data) } : null;
+  }
+
+  function applySubscriptionLifecycle({ session_id, type, actor = 'system:lifecycle' } = {}) {
+    if (!session_id || !type) return { suspended: 0, reactivated: 0, purged: 0 };
+    if (type === 'hook_session_end' || type === 'session_end') {
+      const info = stmts.suspendSubscriptionsForSession.run({ session_id, reason: 'session_end' });
+      return { suspended: info.changes, reactivated: 0, purged: 0 };
+    }
+    if (type === 'hook_session_start' || type === 'session_start' || type === 'session_resume') {
+      const info = stmts.reactivateSubscriptionsForSession.run({ session_id, reason: 'session_active' });
+      return { suspended: 0, reactivated: info.changes, purged: 0 };
+    }
+    if (type === 'session_purged') {
+      const info = stmts.deleteSubscriptionsForSession.run(session_id);
+      recordEvent({
+        project_id: null,
+        topic: `session/${session_id}`,
+        class: 'lifecycle',
+        type: 'session_subscriptions_purged',
+        actor,
+        data: { session_id, purged: info.changes },
+      });
+      return { suspended: 0, reactivated: 0, purged: info.changes };
+    }
+    return { suspended: 0, reactivated: 0, purged: 0 };
+  }
+
+  function recordEvent({ event_uuid = null, ticket_id = null, project_id = null, topic = null, class: eventClass = 'tracker', type, actor = null, actor_kind = null, actor_label = null, data = {}, created_at = null } = {}) {
     if (!type) throw new Error('recordEvent: type is required');
+    const uuid = event_uuid == null ? null : String(event_uuid).trim() || null;
+    if (uuid) {
+      const existing = stmts.getEventByUuid.get(uuid);
+      if (existing) return { ...hydrateEvent(existing), duplicate: true };
+    }
     const cls = normalizeEventClass(eventClass);
     const ticket = ticket_id ? stmts.getTicket.get(ticket_id) : null;
     const derivedTopic = topic || ticketTopic(ticket);
     const kind = actor_kind || actorKind(actor);
     const row = {
+      event_uuid: uuid,
       ticket_id,
       project_id: project_id ?? ticket?.project_id ?? null,
       topic: derivedTopic,
@@ -733,7 +811,7 @@ WHERE state_changed_at IS NULL`).run();
       actor_kind: kind,
       actor_label: actor_label ?? actorLabel(actor, kind),
       data: typeof data === 'string' ? data : JSON.stringify(data ?? {}),
-      created_at: now(),
+      created_at: created_at ?? now(),
     };
     const info = stmts.insertEvent.run(row);
     const out = { id: Number(info.lastInsertRowid), ...row, data: safeParse(row.data) };
@@ -744,9 +822,76 @@ WHERE state_changed_at IS NULL`).run();
         topic: mirrorTopic,
         data: JSON.stringify({ ...safeParse(row.data), mirrored_from_seq: out.id, mirrored_from_topic: derivedTopic }),
       };
-      stmts.insertEvent.run(mirror);
+      stmts.insertEvent.run({ ...mirror, event_uuid: null });
+    }
+    if (cls === 'lifecycle') {
+      out.subscription_lifecycle = applySubscriptionLifecycle({ session_id: safeParse(row.data).session_id, type, actor });
     }
     return out;
+  }
+
+  function normalizeIngestEvent(input = {}) {
+    const hookEvent = normalizeHookType(input.event ?? input.hook_event ?? input.kind ?? input.type);
+    const data = input.data && typeof input.data === 'object'
+      ? { ...input.data }
+      : { ...(input.payload && typeof input.payload === 'object' ? input.payload : {}) };
+    const sessionId = String(input.session_id ?? data.session_id ?? '').trim() || null;
+    const projectId = String(input.project_id ?? data.project_id ?? '').trim() || null;
+    const projectPath = input.project_path ?? data.project_path ?? null;
+    const eventClass = input.class ?? input.event_class ?? classForHookType(hookEvent);
+    const ts = input.ts ?? input.created_at ?? now();
+    return {
+      event_uuid: eventUuid(input),
+      ticket_id: input.ticket_id ?? data.ticket_id ?? null,
+      project_id: projectId,
+      topic: input.topic ?? (sessionId ? `session/${sessionId}` : (projectId ? `project/${projectId}/events` : 'hooks/unknown')),
+      class: eventClass,
+      type: input.bus_type ?? busTypeForHookType(hookEvent),
+      actor: input.actor ?? (sessionId || 'system:hook'),
+      actor_kind: input.actor_kind ?? (sessionId ? 'session' : 'system'),
+      actor_label: input.actor_label ?? input.session_name ?? data.session_name ?? data.name ?? null,
+      created_at: ts,
+      data: {
+        ...data,
+        hook_event: hookEvent,
+        session_id: sessionId,
+        project_id: projectId,
+        project_path: projectPath,
+        cwd: input.cwd ?? data.cwd ?? null,
+        payload: input.payload ?? data.payload ?? null,
+      },
+    };
+  }
+
+  function ingestBusEvents(input) {
+    const events = Array.isArray(input) ? input : (Array.isArray(input?.events) ? input.events : [input]);
+    const txn = db.transaction(() => {
+      const rows = [];
+      let inserted = 0;
+      let duplicates = 0;
+      let roster_inserted = 0;
+      for (const raw of events) {
+        const event = normalizeIngestEvent(raw || {});
+        const row = recordEvent(event);
+        if (row.duplicate) duplicates += 1;
+        else inserted += 1;
+        rows.push(row);
+        const data = row.data || event.data || {};
+        if (event.class === 'lifecycle' && data.project_id && data.session_id && ['hook_session_start', 'hook_session_end'].includes(event.type)) {
+          const roster = recordEvent({
+            ...event,
+            event_uuid: event.event_uuid ? `${event.event_uuid}:roster` : null,
+            topic: `project/${data.project_id}/roster`,
+            type: event.type === 'hook_session_start' ? 'roster_session_active' : 'roster_session_ended',
+            data: { ...data, source_event_seq: row.id, source_topic: row.topic },
+          });
+          if (!roster.duplicate) roster_inserted += 1;
+          rows.push(roster);
+        }
+      }
+      return { ok: true, accepted: events.length, inserted, duplicates, roster_inserted, events: rows };
+    });
+    return txn();
   }
 
   function safeParse(s) {
@@ -1021,6 +1166,8 @@ WHERE state_changed_at IS NULL`).run();
 
     recordEvent,
 
+    ingestBusEvents,
+
     subscribe({ session_id, topic, classes = null, cursor_seq = null, expires_at = null, reason = null } = {}) {
       return subscribeSession({ session_id, topic, classes, cursor_seq, expires_at, reason });
     },
@@ -1030,6 +1177,24 @@ WHERE state_changed_at IS NULL`).run();
       if (!topic) throw new Error('unsubscribe: topic is required');
       const info = stmts.suspendSubscription.run({ session_id, topic, reason });
       return { ok: true, removed: info.changes, session_id, topic };
+    },
+
+    suspendSubscriptionsForSession(session_id, reason = 'session_end') {
+      if (!session_id) throw new Error('suspendSubscriptionsForSession: session_id is required');
+      const info = stmts.suspendSubscriptionsForSession.run({ session_id, reason });
+      return { ok: true, suspended: info.changes, session_id };
+    },
+
+    reactivateSubscriptionsForSession(session_id, reason = 'session_active') {
+      if (!session_id) throw new Error('reactivateSubscriptionsForSession: session_id is required');
+      const info = stmts.reactivateSubscriptionsForSession.run({ session_id, reason });
+      return { ok: true, reactivated: info.changes, session_id };
+    },
+
+    purgeSubscriptionsForSession(session_id) {
+      if (!session_id) throw new Error('purgeSubscriptionsForSession: session_id is required');
+      const info = stmts.deleteSubscriptionsForSession.run(session_id);
+      return { ok: true, purged: info.changes, session_id };
     },
 
     listSubscriptions({ session_id = null } = {}) {

@@ -97,6 +97,15 @@ sha6() {
     printf '%s' "$1" | cksum 2>/dev/null | awk '{printf "%06x", $1}' | cut -c1-6
   fi
 }
+sha256() {
+  if command -v shasum >/dev/null 2>&1; then
+    printf '%s' "$1" | shasum -a 256 2>/dev/null | cut -d' ' -f1
+  elif command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$1" | sha256sum 2>/dev/null | cut -d' ' -f1
+  else
+    printf '%s' "$1" | cksum 2>/dev/null | awk '{print $1}'
+  fi
+}
 SLUG="$(slug "$DIRNAME")"; [ -z "$SLUG" ] && SLUG="project"
 PROJECT_ID="${SLUG}-$(sha6 "$ROOT")"
 
@@ -221,5 +230,62 @@ fi
 printf '%s\n' "$ENTRY" >> "$JOURNAL_FILE" 2>/dev/null || {
   echo "journal-route: could not write to $JOURNAL_FILE" >&2
 }
+
+# --- additive bus forwarder ------------------------------------------------
+# Best-effort only: the journal write above remains the source of local truth.
+# If dashboard is down, lines accumulate under ~/.golem/spool/<session_id>.jsonl
+# and are retried by later hooks. Lifecycle events flush immediately; activity
+# events batch until ~20 lines or an existing spool is older than ~5s.
+bus_event_class() {
+  case "$EVENT_TYPE" in
+    session-start|session-end|user-prompt|stop|subagent-stop|pre-compact|notification) printf '%s\n' lifecycle ;;
+    tool-pre|tool-post|agent-spawn|agent-return|send-message|send-message-post) printf '%s\n' activity ;;
+    *) printf '%s\n' custom ;;
+  esac
+}
+
+spool_age_seconds() {
+  local file="$1"
+  [ -f "$file" ] || { printf '%s\n' 0; return 0; }
+  local mod now_s
+  mod="$(stat -f %m "$file" 2>/dev/null || stat -c %Y "$file" 2>/dev/null || echo 0)"
+  now_s="$(date +%s)"
+  printf '%s\n' "$((now_s - mod))"
+}
+
+forward_bus_spool() {
+  command -v jq >/dev/null 2>&1 || return 0
+  command -v curl >/dev/null 2>&1 || return 0
+  [ -n "$SESSION_ID" ] || return 0
+  local spool_dir spool_file lock tmp body url cls lines age
+  spool_dir="$CONFIG_DIR/spool"
+  mkdir -p "$spool_dir" 2>/dev/null || return 0
+  spool_file="$spool_dir/$SESSION_ID.jsonl"
+  lock="$spool_file.lock"
+  cls="$(bus_event_class)"
+  local event_uuid
+  event_uuid="$(sha256 "$PROJECT_ID|$SESSION_ID|$TS|$EVENT_TYPE|$ENTRY")"
+  jq -cn --arg uuid "$event_uuid" --arg cls "$cls" --argjson entry "$ENTRY" '$entry + {uuid: $uuid, class: $cls}' >> "$spool_file" 2>/dev/null || return 0
+
+  lines="$(wc -l < "$spool_file" 2>/dev/null | tr -d ' ' || echo 0)"
+  age="$(spool_age_seconds "$spool_file")"
+  if [ "$cls" = "activity" ] && [ "${lines:-0}" -lt 20 ] && [ "${age:-0}" -lt 5 ]; then
+    return 0
+  fi
+  if ! mkdir "$lock" 2>/dev/null; then
+    return 0
+  fi
+  tmp="$spool_file.sending.$$"
+  cp "$spool_file" "$tmp" 2>/dev/null || { rmdir "$lock" 2>/dev/null || true; return 0; }
+  body="$(jq -cs '{events: .}' "$tmp" 2>/dev/null || true)"
+  url="${GOLEM_DASHBOARD_URL:-http://127.0.0.1:7420}/api/bus/ingest"
+  if [ -n "$body" ] && curl -fsS --max-time 1 -H 'content-type: application/json' -d "$body" "$url" >/dev/null 2>&1; then
+    : > "$spool_file" 2>/dev/null || true
+  fi
+  rm -f "$tmp" 2>/dev/null || true
+  rmdir "$lock" 2>/dev/null || true
+}
+
+forward_bus_spool &
 
 exit 0
