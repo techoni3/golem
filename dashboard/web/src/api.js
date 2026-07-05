@@ -215,6 +215,7 @@
     // These are SEPARATE from the legacy markdown `tickets(projectId)` above.
     // Tickets are filtered/posted by the CONTRACT `project_id` (`<slug>-<6hex>`).
     listTickets: (params) => getJSON(`/api/tickets${qs(params)}`),
+    listReviewTickets: () => getJSON('/api/tickets?state=review'),
     // TKT-0284: content search across ticket title + body (specs page search
     // mode). Server returns { id, title, kind, state, updated_at, snippet,
     // title_match, match_start, match_len }[] — snippet carries the first body

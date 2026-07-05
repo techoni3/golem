@@ -43,7 +43,7 @@ function Sidebar({ route, setRoute }) {
     // (Work items | Specs toggle) + as a project-view sub-board. No sidebar entry.
     { id: 'projects', label: 'Projects', icon: Icon.Projects, count: buckets.active.length },
     { id: 'agents', label: 'Agents', icon: Icon.Agents, count: activeCount },
-    { id: 'logs', label: 'Journals & Logs', icon: Icon.Logs },
+    { id: 'logs', label: 'Review Inbox', icon: Icon.Logs },
     { id: 'settings', label: 'Settings', icon: Icon.Gear },
   ];
 
@@ -170,7 +170,7 @@ function Topbar({ route, setRoute }) {
   if (route.kind === 'tracker') crumbs.push({ label: 'Tracker', current: true });
   if (route.kind === 'projects') crumbs.push({ label: 'Projects', current: true });
   if (route.kind === 'agents') crumbs.push({ label: 'Agents', current: true });
-  if (route.kind === 'logs') crumbs.push({ label: 'Journals & Logs', current: true });
+  if (route.kind === 'logs') crumbs.push({ label: 'Review Inbox', current: true });
   if (route.kind === 'settings') crumbs.push({ label: 'Settings', current: true });
   if (route.kind === 'project') {
     crumbs.push({ label: 'Projects', href: window.Router.buildHref({ kind: 'projects' }), onClick: () => setRoute({ kind: 'projects' }) });
