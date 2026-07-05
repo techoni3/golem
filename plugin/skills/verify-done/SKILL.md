@@ -41,6 +41,14 @@ git log --oneline -5
 git diff --stat HEAD~1
 ```
 
+For a worktree hand-off, also verify branch-aware evidence before accepting the
+ticket as built/review-ready:
+
+- Commits are on the ticket branch named by the closing brief's `branch:` line.
+- The branch has been rebased on current `main`.
+- `git worktree list` shows the claimed worktree path attached to that branch.
+- The closing brief names the worktree path and includes the `branch:` line.
+
 For a claimed PR, verify with `gh pr view <n> --json state,mergeable,statusCheckRollup` and require an open/merged PR plus successful checks.
 
 If a command cannot be run, record why and keep the ticket in progress/blocked unless the ticket explicitly allows a documented skip reason.
