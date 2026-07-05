@@ -164,6 +164,7 @@ function AgentCard({ session, name, queueCount = 0, setRoute, showControls = fal
   const currentTicket = s.current_in_progress_ticket;
   const pendingCount = Number(s.pending_count || queueCount || 0);
   const unackedWarnings = s.active_unacked_dispatches || [];
+  const needsRevival = pendingCount > 0 && (statusKind === 'dead' || !hasChannel);
   const projectLabel = project?.name || s.project_id || 'unregistered project';
   const fallbackProject = project || { glyph: '?', color: 'var(--text-3)' };
 
@@ -211,6 +212,7 @@ function AgentCard({ session, name, queueCount = 0, setRoute, showControls = fal
         {s.role && <span className="native-session-role-chip">{s.role}</span>}
         <ModelPill model={s.model}/>
         {pendingCount > 0 && <span className="native-session-queue-chip" title={`${pendingCount} queued dispatch${pendingCount === 1 ? '' : 'es'}`}>queued {pendingCount}</span>}
+        {needsRevival && <span className="native-session-queue-chip" title="queued dispatches are held for an offline or channel-less session">revival needed</span>}
         {!registered && <span className="native-session-badge">unregistered</span>}
         {unackedWarnings.map((w) => window.UnackedDispatchBadge ? <window.UnackedDispatchBadge key={w.delivery_event_id || w.warning_event_id} warning={w} compact/> : null)}
       </div>

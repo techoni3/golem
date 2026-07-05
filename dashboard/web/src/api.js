@@ -231,6 +231,8 @@
       postJSON(`/api/tickets/${encodeURIComponent(id)}/comments/${encodeURIComponent(commentId)}/reply`, body),
     dispatchTicket: (id, { session_id, note, mode }) =>
       postJSON(`/api/tickets/${encodeURIComponent(id)}/dispatch`, { session_id, note, mode }),
+    revivalInfo: (id, params) => getJSON(`/api/tickets/${encodeURIComponent(id)}/revival${qs(params)}`),
+    redispatchRevival: (id, body) => postJSON(`/api/tickets/${encodeURIComponent(id)}/revival/redispatch`, body),
     dismissUnackedDispatch: (id, deliveryEventId) =>
       postJSON(`/api/tickets/${encodeURIComponent(id)}/unacked/${encodeURIComponent(deliveryEventId)}/dismiss`, { actor: 'human:dashboard' }),
     listDispatchable: (projectId) =>

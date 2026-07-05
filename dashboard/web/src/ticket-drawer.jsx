@@ -93,6 +93,10 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
   const [returnSession, setReturnSession] = React.useState('');
   const [returnNote, setReturnNote] = React.useState(null);
   const [returning, setReturning] = React.useState(false);
+  const [revival, setRevival] = React.useState(null);
+  const [revivalSession, setRevivalSession] = React.useState('');
+  const [revivalNote, setRevivalNote] = React.useState(null);
+  const [revivalBusy, setRevivalBusy] = React.useState(false);
 
   // The live ticket from the store (kept fresh by ticket-updated deltas).
   const ticket = ticketId ? (window.Store.getState().trackerTickets.get(ticketId) ?? null) : null;
@@ -132,6 +136,9 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
     setDispatchNote(null);
     setReturnSession('');
     setReturnNote(null);
+    setRevival(null);
+    setRevivalSession('');
+    setRevivalNote(null);
     setLoadError(null);
     setLoading(true);
     let cancelled = false;
@@ -238,6 +245,15 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
       || window.Store.getNativeSessionById?.(pendingDispatch.session_id)?.name
       || `session ${String(pendingDispatch.session_id).slice(0, 8)}`)
     : null;
+
+  React.useEffect(() => {
+    if (!ticketId || ticket?.kind !== 'spec' || !pendingDispatch) { setRevival(null); return; }
+    let cancelled = false;
+    window.SubstrateAPI.revivalInfo(ticketId)
+      .then((info) => { if (!cancelled) setRevival(info?.eligible ? info : null); })
+      .catch(() => { if (!cancelled) setRevival(null); });
+    return () => { cancelled = true; };
+  }, [ticketId, ticket?.kind, pendingDispatch?.id]);
 
   // WS6: this ticket is a question FOR the user (question-kind, assignee=human,
   // not done/archived) — drives the "Answer & return" affordance.
@@ -352,6 +368,31 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
         setCancelling(false);
       });
   }, [ticket, cancelling, projectId]);
+
+  const onCopyRevive = React.useCallback(() => {
+    if (!revival?.revive_command) return;
+    navigator.clipboard?.writeText(revival.revive_command).then(
+      () => setRevivalNote('revive command copied'),
+      () => setRevivalNote(revival.revive_command),
+    );
+  }, [revival]);
+
+  const onRevivalRedispatch = React.useCallback(() => {
+    if (!ticketId || !revivalSession || revivalBusy) return;
+    setRevivalBusy(true);
+    setRevivalNote(null);
+    window.SubstrateAPI.redispatchRevival(ticketId, {
+      session_id: revivalSession,
+      note: 'Revival re-dispatch from dead-session warning.',
+    })
+      .then((res) => {
+        if (res?.ticket?.id) window.Store.upsertTrackerTicket(res.ticket);
+        setRevival(null);
+        setRevivalNote(res?.channel?.ok === false ? 'reassigned; channel push failed' : 're-dispatched');
+      })
+      .catch((err) => setRevivalNote(err?.payload?.error || err?.message || 'Re-dispatch failed'))
+      .finally(() => setRevivalBusy(false));
+  }, [ticketId, revivalSession, revivalBusy]);
 
   // Add a plain or inline-anchored comment. `input` can be a string (legacy)
   // or an object with { body, quote?, prefix?, suffix?, section?, section_id?, tag? }.
@@ -623,21 +664,41 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                     + Dispatch/Queue button. Disabled/empty-picker behavior from
                     TKT-0233 is preserved verbatim. */}
                 {pendingDispatch ? (
-                  <div className="td-prop-dispatch td-dispatch-pending">
-                    <span className="td-prop-label">Dispatch</span>
-                    <span className="td-dispatch-pending-line">
-                      <span className="td-dispatch-pending-icon">⏳</span>
-                      Queued for {pendingLabel} · {tdAgo(pendingDispatch.created_at)} · waiting for idle
-                      {pendingTargetOffline && <span className="td-dispatch-pending-offline"> · session offline</span>}
-                      {pendingTargetUnreachable && <span className="td-dispatch-pending-offline"> · channel down (mcp disconnected — /reload-plugins in that session restores it)</span>}
-                    </span>
-                    <button className="orch-btn small ghost td-dispatch-cancel"
-                      onClick={onCancelDispatch}
-                      disabled={cancelling}
-                      title="Cancel this queued dispatch">
-                      {cancelling ? '…' : 'Cancel'}
-                    </button>
-                  </div>
+                  <>
+                    <div className="td-prop-dispatch td-dispatch-pending">
+                      <span className="td-prop-label">Dispatch</span>
+                      <span className="td-dispatch-pending-line">
+                        <span className="td-dispatch-pending-icon">⏳</span>
+                        Queued for {pendingLabel} · {tdAgo(pendingDispatch.created_at)} · waiting for idle
+                        {pendingTargetOffline && <span className="td-dispatch-pending-offline"> · session offline</span>}
+                        {pendingTargetUnreachable && <span className="td-dispatch-pending-offline"> · channel down (mcp disconnected — /reload-plugins in that session restores it)</span>}
+                      </span>
+                      <button className="orch-btn small ghost td-dispatch-cancel"
+                        onClick={onCancelDispatch}
+                        disabled={cancelling}
+                        title="Cancel this queued dispatch">
+                        {cancelling ? '…' : 'Cancel'}
+                      </button>
+                    </div>
+                    {revival && (
+                      <div className="td-prop-dispatch td-dispatch-pending" style={{ borderColor: 'color-mix(in oklab, var(--warning) 45%, var(--line))', background: 'color-mix(in oklab, var(--warning) 8%, transparent)' }}>
+                        <span className="td-prop-label">Revival</span>
+                        <div style={{ display: 'grid', gap: 8, minWidth: 0, flex: 1 }}>
+                          <div className="td-dispatch-pending-line">Assigned session is offline or unreachable; revive it or re-dispatch full spec context.</div>
+                          <pre className="mono" style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{revival.revive_command}</pre>
+                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                            <button className="orch-btn small ghost" onClick={onCopyRevive}>Copy command</button>
+                            <select className="td-select" value={revivalSession} onChange={(e) => setRevivalSession(e.target.value)} disabled={revivalBusy || dispatchable.length === 0}>
+                              <option value="">Re-dispatch to…</option>
+                              {dispatchable.filter((s) => s.session_id !== pendingDispatch.session_id).map((s) => <option key={s.session_id} value={s.session_id}>{s.label}</option>)}
+                            </select>
+                            <button className="orch-btn small" disabled={revivalBusy || !revivalSession} onClick={onRevivalRedispatch}>{revivalBusy ? 'Sending…' : 'Re-dispatch'}</button>
+                          </div>
+                          {revivalNote && <div className="td-dispatch-note">{revivalNote}</div>}
+                        </div>
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <div className="td-prop-dispatch">
                     <span className="td-prop-label">Dispatch to</span>

@@ -104,6 +104,7 @@ function getProcessComm(pid) {
 // produces byte-identical briefs — no format drift between the two delivery
 // paths. `note` is an already-trimmed string or null.
 function buildDispatchBrief(ticket, note) {
+  if (ticket?.kind === 'spec') return buildSpecBrief(ticket, note);
   const id = ticket.id;
   return (
     `You've been assigned tracker ticket ${id}: "${ticket.title}" (project ${ticket.project_id}, kind ${ticket.kind}).\n\n` +
@@ -111,6 +112,59 @@ function buildDispatchBrief(ticket, note) {
     `Load it with the golem tracker tools (ticket_get ${id}) to read the full body, acceptance criteria, and comment thread, then pick it up: move it to in_progress, do the work, comment progress, and move it to review/done when complete. ` +
     `If you have blocking questions, create a question-kind ticket in this project assigned to 'human'.`
   );
+}
+
+function buildSpecBrief(ticket, note) {
+  const id = ticket.display_id || ticket.id;
+  const comments = (ticket.comments || []).filter((c) => c.dispatch_state === 'undispatched' || c.dispatch_state === 'dispatched');
+  const children = ticket.children || [];
+  const commentSection = comments.length
+    ? comments.map((c, idx) => [
+      `### Comment ${idx + 1}: ${c.id}`,
+      `Author: ${c.author || 'unknown'} · state: ${c.dispatch_state}`,
+      c.block_id ? `Block: ${c.block_id}` : null,
+      c.quote ? `Quote: ${c.quote}` : null,
+      '',
+      c.body || '',
+    ].filter((line) => line != null).join('\n')).join('\n\n')
+    : 'No undispatched/dispatched comments.';
+  const childSection = children.length
+    ? children.map((c) => `- ${c.display_id || c.id}: ${c.title} — ${c.state}${c.wave ? ` — W${c.wave}` : ''}`).join('\n')
+    : 'No child work items.';
+  return [
+    `You've been assigned spec ticket ${id}: "${ticket.title}" (project ${ticket.project_id}).`,
+    '',
+    note || null,
+    'This is a full-context spec dispatch. Re-read the spec, the active comment feedback, and child work-item summaries before proceeding.',
+    '',
+    `Spec: ${id}`,
+    `State: ${ticket.state}`,
+    '',
+    '## Spec Body',
+    ticket.body || '(empty)',
+    '',
+    '## Active Comments',
+    commentSection,
+    '',
+    '## Child Work Items',
+    childSection,
+    '',
+    `Load it with the golem tracker tools (ticket_get ${id}) to read the full body, comment thread, and links, then pick it up: move it to in_progress, do the work, comment progress, and move it to review/done when complete.`,
+    `If you have blocking questions, create a question-kind ticket in this project assigned to 'human'.`,
+  ].filter((line) => line != null).join('\n');
+}
+
+function shellQuote(s) {
+  return `'${String(s || '').replace(/'/g, `'\\''`)}'`;
+}
+
+function reviveCommandFor(session) {
+  const cwd = session?.project_root || session?.cwd || REPO_ROOT;
+  const name = session?.name || session?.session_id || '';
+  return [
+    `cd ${shellQuote(cwd)} && golemc`,
+    name ? `# then run: /rename ${name}` : null,
+  ].filter(Boolean).join('\n');
 }
 
 
@@ -285,6 +339,33 @@ async function main() {
   // read the table directly rather than iterating the projects list).
   function listAllStreams() {
     return tracker.raw().prepare('SELECT * FROM streams ORDER BY created_at ASC, id ASC').all();
+  }
+
+  function deadSessionRevival(ticket, opts = {}) {
+    const minAgeMinutes = Math.max(0, Number(opts.minAgeMinutes ?? 5) || 5);
+    const pending = tracker.getPendingDispatchForTicket(ticket.id);
+    if (!ticket || ticket.kind !== 'spec' || !pending) return { eligible: false, reason: 'not_applicable' };
+    const ageMs = Date.now() - (Date.parse(pending.created_at || '') || Date.now());
+    if (ageMs < minAgeMinutes * 60_000) {
+      return { eligible: false, reason: 'too_new', min_age_minutes: minAgeMinutes, pending_dispatch: pending };
+    }
+    const sessionId = pending.session_id || ticket.assignee;
+    const native = state.nativeSessions().find((s) => s.session_id === sessionId) || null;
+    const channel = state.channels().find((c) => c.session_id === sessionId) || null;
+    const offline = !native || native.alive === false || !channel;
+    if (!offline) return { eligible: false, reason: 'session_live', min_age_minutes: minAgeMinutes, pending_dispatch: pending };
+    const label = native?.name || pending.session_label || ticket.assignee_label || `session ${String(sessionId || '').slice(0, 8)}`;
+    const project = state.project(ticket.project_id);
+    const fallbackSession = { name: label, session_id: sessionId, project_root: project?.path || REPO_ROOT, cwd: project?.path || REPO_ROOT };
+    return {
+      eligible: true,
+      reason: !native || native.alive === false ? 'session_offline' : 'channel_unreachable',
+      min_age_minutes: minAgeMinutes,
+      age_ms: ageMs,
+      pending_dispatch: pending,
+      session: native ? { ...native, label } : { ...fallbackSession, label, project_id: ticket.project_id },
+      revive_command: reviveCommandFor(native || fallbackSession),
+    };
   }
 
   function enrichSessionRows(rows, channels = []) {
@@ -879,6 +960,53 @@ async function main() {
       return result;
     } catch (err) {
       return reply.code(400).send({ error: String(err?.message ?? err) });
+    }
+  });
+
+  fastify.get('/api/tickets/:id/revival', async (req, reply) => {
+    const id = req.params.id;
+    let ticket = tracker.getTicket(id);
+    if (!ticket) ticket = tracker.getTicketByDisplayId(id);
+    if (!ticket) return reply.code(404).send({ error: 'not_found' });
+    const minutes = req.query?.min_age_minutes ?? req.query?.minAgeMinutes;
+    return deadSessionRevival(ticket, { minAgeMinutes: minutes });
+  });
+
+  fastify.post('/api/tickets/:id/revival/redispatch', async (req, reply) => {
+    const id = req.params.id;
+    let ticketRef = tracker.getTicket(id);
+    if (!ticketRef) ticketRef = tracker.getTicketByDisplayId(id);
+    if (!ticketRef) return reply.code(404).send({ error: 'not_found' });
+    const b = req.body ?? {};
+    const sessionId = typeof b.session_id === 'string' && b.session_id.trim() ? b.session_id.trim() : null;
+    if (!sessionId) return reply.code(400).send({ error: 'session_id is required' });
+    const revival = deadSessionRevival(ticketRef, { minAgeMinutes: b.min_age_minutes ?? b.minAgeMinutes });
+    if (!revival.eligible) return reply.code(409).send({ error: `revival_not_eligible:${revival.reason}`, revival });
+    const live = state.nativeSessions().find((s) => s.session_id === sessionId);
+    const hasChannel = state.channels().some((c) => c.session_id === sessionId);
+    if (!live || !live.alive || !hasChannel) return reply.code(400).send({ error: 'target session is not live/reachable' });
+    try {
+      if (revival.pending_dispatch?.id) tracker.cancelQueuedDispatch(revival.pending_dispatch.id, { actor: 'human:revival' });
+      tracker.setDispatched(ticketRef.id, { session_id: sessionId, actor: 'human:revival' });
+      const updated = tracker.getTicket(ticketRef.id);
+      const note = typeof b.note === 'string' && b.note.trim() ? b.note.trim() : 'Revival re-dispatch from dead-session warning.';
+      const briefString = buildDispatchBrief(updated, note);
+      let channelResult = null;
+      try {
+        channelResult = await pushBrief(briefString, sessionId);
+      } catch (err) {
+        channelResult = { ok: false, error: String(err?.message ?? err) };
+      }
+      if (channelResult?.ok) chat.record('user', 'brief', briefString, { session_id: sessionId });
+      tracker.markDispatchDeliveryAttempted(ticketRef.id, { session_id: sessionId, actor: 'human:revival', error: channelResult?.ok ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`) });
+      const ticket = tracker.getTicket(ticketRef.id);
+      broadcastWS({ type: 'ticket-updated', ticket });
+      broadcastWS({ type: 'dispatch-queue-updated' });
+      return { ok: true, ticket, channel: channelResult };
+    } catch (err) {
+      const msg = String(err?.message ?? err);
+      const code = /not found/i.test(msg) ? 404 : 400;
+      return reply.code(code).send({ error: msg });
     }
   });
 
