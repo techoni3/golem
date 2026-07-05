@@ -18,7 +18,7 @@ const TRACKER_COLUMNS = [
 ];
 const TRACKER_ARCHIVED_COL = { id: 'archived', label: 'Archived', color: 'var(--status-done)' };
 
-// TKT-0284: specs live on their own /specs page — excluded from the tracker
+// TKT-0284/GOL-166: specs live on their own Specs surface — excluded from the tracker
 // (filter.exclude_kind below) and dropped from this kind dropdown.
 const TRACKER_KINDS = ['work-item', 'decision', 'question', 'fix'];
 
@@ -79,10 +79,6 @@ function stalenessInfo(updated_at) {
 
 function TrackerBoard({ view }) {
   useStore();
-  // TKT-0339: the Tracker serves both work items and specs — a URL-driven
-  // Work items | Specs toggle (view='specs' → SpecsBoardView below). Specs are
-  // spec-kind tickets (project-scoped, same as work items); no dedicated page.
-  const specsMode = view === 'specs';
   const projects = window.Store.getProjects();
 
   const [projectFilter, setProjectFilter] = React.useState('');   // '' = all, else project_id
@@ -189,73 +185,52 @@ function TrackerBoard({ view }) {
         <div>
           <h1 className="page-title">Tracker</h1>
           <div className="page-subtitle">
-            {specsMode
-              ? 'Specs'
-              : `${visibleTickets.length} ticket${visibleTickets.length === 1 ? '' : 's'}${searchQuery && tickets.length !== visibleTickets.length ? ` (of ${tickets.length})` : ''}${allProjects ? ' across all projects' : ''}`}
+            {`${visibleTickets.length} ticket${visibleTickets.length === 1 ? '' : 's'}${searchQuery && tickets.length !== visibleTickets.length ? ` (of ${tickets.length})` : ''}${allProjects ? ' across all projects' : ''}`}
           </div>
         </div>
         <div className="tracker-toolbar">
-          {/* TKT-0339: Work items | Specs toggle — URL-driven (view=specs). The
-              toggle is always present; the work-items filters below render only
-              in work-items mode (specs mode uses SpecsBoardView's own toolbar). */}
-          <div className="tracker-view-toggle" role="group" aria-label="Tracker view">
-            <button type="button" className={`tracker-view-btn${!specsMode ? ' active' : ''}`}
-              onClick={() => window.Router.go({ kind: 'tracker' })} aria-pressed={!specsMode} title="Work items board">Work items</button>
-            <button type="button" className={`tracker-view-btn${specsMode ? ' active' : ''}`}
-              onClick={() => window.Router.go({ kind: 'tracker', view: 'specs' })} aria-pressed={specsMode} title="Specs board">Specs</button>
-          </div>
-          {!specsMode && (
-            <>
-              {/* TKT-0104: client-side search across id/title/kind/priority/assignee/project */}
-              <input
-                type="search"
-                className="tracker-search"
-                placeholder="Search id / title / kind / assignee / project"
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                aria-label="Search tickets"
-              />
-              <select className="tracker-select" value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} title="Project">
-                <option value="">All projects</option>
-                {projects.filter((p) => p.project_id).map((p) => (
-                  <option key={p.project_id} value={p.project_id}>{p.name}</option>
-                ))}
-              </select>
-              <select className="tracker-select" value={kindFilter} onChange={(e) => setKindFilter(e.target.value)} title="Kind">
-                <option value="">All kinds</option>
-                {TRACKER_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
-              </select>
-              <select className="tracker-select" value={assigneeFilter} onChange={(e) => setAssigneeFilter(e.target.value)} title="Assignee" disabled={needsAnswer}>
-                <option value="">All assignees</option>
-                <option value="human">Human</option>
-                <option value="__unassigned__">Unassigned</option>
-              </select>
-              <label className={`tracker-toggle tracker-needs-answer ${needsAnswer ? 'on' : ''}`} title="Show only questions assigned to you that need an answer">
-                <input type="checkbox" checked={needsAnswer} onChange={(e) => setNeedsAnswer(e.target.checked)}/>
-                ❓ Needs my answer
-              </label>
-              <label className="tracker-toggle">
-                <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} disabled={needsAnswer}/>
-                Show archived
-              </label>
-              <button className="orch-btn primary" onClick={onNewTicket}>+ New ticket</button>
-            </>
-          )}
+          {/* TKT-0104: client-side search across id/title/kind/priority/assignee/project */}
+          <input
+            type="search"
+            className="tracker-search"
+            placeholder="Search id / title / kind / assignee / project"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            aria-label="Search tickets"
+          />
+          <select className="tracker-select" value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} title="Project">
+            <option value="">All projects</option>
+            {projects.filter((p) => p.project_id).map((p) => (
+              <option key={p.project_id} value={p.project_id}>{p.name}</option>
+            ))}
+          </select>
+          <select className="tracker-select" value={kindFilter} onChange={(e) => setKindFilter(e.target.value)} title="Kind">
+            <option value="">All kinds</option>
+            {TRACKER_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
+          </select>
+          <select className="tracker-select" value={assigneeFilter} onChange={(e) => setAssigneeFilter(e.target.value)} title="Assignee" disabled={needsAnswer}>
+            <option value="">All assignees</option>
+            <option value="human">Human</option>
+            <option value="__unassigned__">Unassigned</option>
+          </select>
+          <label className={`tracker-toggle tracker-needs-answer ${needsAnswer ? 'on' : ''}`} title="Show only questions assigned to you that need an answer">
+            <input type="checkbox" checked={needsAnswer} onChange={(e) => setNeedsAnswer(e.target.checked)}/>
+            ❓ Needs my answer
+          </label>
+          <label className="tracker-toggle">
+            <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} disabled={needsAnswer}/>
+            Show archived
+          </label>
+          <button className="orch-btn primary" onClick={onNewTicket}>+ New ticket</button>
         </div>
       </div>
 
-      {specsMode ? (
-        // specs-board.jsx loads after tracker-board.jsx, so reference it via
-        // window at render time (it's defined by then).
-        window.SpecsBoardView ? React.createElement(window.SpecsBoardView) : null
-      ) : (
-        <TicketColumns
-          cols={cols}
-          tickets={visibleTickets}
-          projectByContract={allProjects ? projectByContract : null}
-          resolveAssignee={resolveAssignee}
-        />
-      )}
+      <TicketColumns
+        cols={cols}
+        tickets={visibleTickets}
+        projectByContract={allProjects ? projectByContract : null}
+        resolveAssignee={resolveAssignee}
+      />
     </div>
   );
 }

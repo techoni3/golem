@@ -37,7 +37,7 @@ const CT_PRIORITIES = [
 const TYPE_TEMPLATE = {
   'work-item': 'feature',
   'fix': 'bug',
-  'spec': 'design-doc',
+  'spec': 'spec',
   'decision': 'decision',
 };
 

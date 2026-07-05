@@ -59,9 +59,7 @@
     const p = normalizePath(path);
     if (p === '/' || p === '/dashboard') return { kind: 'dashboard' };
     if (p === '/tracker') return { kind: 'tracker', view: query.view || null };
-    // TKT-0339: the /specs page is gone — redirect old links/muscle memory to
-    // the tracker's specs view (not a 404).
-    if (p === '/specs') return { kind: 'tracker', view: 'specs' };
+    if (p === '/specs') return { kind: 'specs' };
     if (p === '/projects') return { kind: 'projects' };
     if (p === '/agents') return { kind: 'agents' };
     if (p === '/logs') return { kind: 'logs' };
@@ -111,12 +109,6 @@
   // Read the current location into a route descriptor + overlay map.
   const parseLocation = () => {
     const path = window.location.pathname;
-    // TKT-0339: /specs is gone — redirect to the tracker specs view.
-    // replaceState updates the URL without an extra history entry, then re-parse.
-    if (path === '/specs') {
-      window.history.replaceState({}, '', '/tracker?view=specs');
-      return parseLocation();
-    }
     const query = parseQuery(window.location.search);
     const route = parseRoute(path, query);
     route.overlays = {

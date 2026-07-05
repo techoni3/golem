@@ -1,7 +1,7 @@
 // Project view (v4) — the per-project command center.
 //
-// The hero leads, then six sections (Plan, Repo map, Tickets, Specs,
-// Milestones, Sessions) — each a collapsible, re-orderable PVSection (TKT-0518).
+// The hero leads, then five sections (Plan, Tickets, Specs, Milestones,
+// Sessions) — each a collapsible, re-orderable PVSection (TKT-0518).
 // Layout (order + collapsed) is PAGE-scoped (one layout for every project's
 // detail page), persisted to localStorage. The v3 journal-synthesized agents
 // panel, markdown tracker kanban, hook-event stream, and gate panels were
@@ -13,7 +13,7 @@ const { useState: usePVState } = React;
 // PAGE-scoped, not project-scoped: one layout for the project-detail page no
 // matter which project is open (explicit product decision on the ticket).
 const PV_LAYOUT_KEY = 'golem.pv.layout.v1';
-const PV_SECTION_IDS = ['plan', 'repomap', 'tickets', 'specs', 'milestones', 'sessions', 'streams'];
+const PV_SECTION_IDS = ['plan', 'tickets', 'specs', 'milestones', 'sessions', 'streams'];
 const PV_DEFAULT_COLLAPSED = { specs: true }; // today's defaults: specs closed, rest open
 
 function pvLoadLayout() {
@@ -112,7 +112,6 @@ function ProjectView({ projectId, tab, setRoute }) {
   const renderSection = (id, shell) => {
     switch (id) {
       case 'plan':       return <ProjectPlanSection key={id} plan={plan} color={project.color} {...shell}/>;
-      case 'repomap':    return <ProjectRepoMapSection key={id} project={project} {...shell}/>;
       case 'tickets':    return <ProjectTrackerBoard key={id} contractId={cid} {...shell}/>;
       // TKT-0339: spec-kind tickets as a project sub-board (SpecsBoardView pinned).
       case 'specs':      return <ProjectSpecsBoard key={id} contractId={cid} {...shell}/>;
@@ -191,56 +190,6 @@ function ProjectPlanSection({ plan, color, ...shell }) {
           </li>
         ))}
       </ul>
-    </PVSection>
-  );
-}
-
-function ProjectRepoMapSection({ project, ...shell }) {
-  const [busy, setBusy] = usePVState(false);
-  const [force, setForce] = usePVState(false);
-  const [budget, setBudget] = usePVState('8000');
-  const [result, setResult] = usePVState(null);
-  const [error, setError] = usePVState(null);
-  const projectKey = project.project_id || project.id;
-  const run = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const next = await window.SubstrateAPI.generateRepoMap(projectKey, { force, budget: Number(budget) || undefined });
-      setResult(next);
-    } catch (err) {
-      setError(err?.payload?.error || err.message || String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-  const tools = (
-    <div className="pv-tracker-tools">
-      <label className="tracker-toggle">
-        <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} disabled={busy}/>
-        Force
-      </label>
-      <input className="repo-map-budget" value={budget} onChange={(e) => setBudget(e.target.value)} disabled={busy} inputMode="numeric" aria-label="Repo map budget"/>
-      <button className="orch-btn primary" onClick={run} disabled={busy}>{busy ? 'Generating…' : 'Generate map'}</button>
-    </div>
-  );
-  return (
-    <PVSection title="Repo map" {...shell} tools={tools}>
-      {!result && !error && <div className="pv-quiet-line">Generate an aider-backed orientation map cached under <span className="mono">~/.golem/repomap/</span>.</div>}
-      {error && <div className="pv-quiet-line danger">{error}</div>}
-      {result && (
-        <div className="repo-map-result">
-          <div><span className="muted">path</span> <span className="mono">{result.path || '(focused map not cached)'}</span></div>
-          <div><span className="muted">commit</span> <span className="mono">{String(result.commit || '').slice(0, 7)}{result.dirty ? ' dirty' : ''}</span></div>
-          <div><span className="muted">backend</span> <span className="mono">{result.backend || 'cache'}{result.runner ? ` via ${result.runner}` : ''}</span></div>
-          {!!result.topFiles?.length && (
-            <div className="repo-map-top">
-              <span className="muted">top files</span>
-              {result.topFiles.slice(0, 8).map((f) => <span key={f} className="native-session-badge mono">{f}</span>)}
-            </div>
-          )}
-        </div>
-      )}
     </PVSection>
   );
 }
@@ -365,7 +314,7 @@ function ProjectSessions({ sessions, setRoute, projectId, ...shell }) {
           no live <span className="mono">claude</span> session in this project. Run <span className="mono">cd</span> into it and start one — it appears here automatically.
         </div>
       ) : (
-        <div className="cc-session-list">
+        <div className="native-sessions project-native-sessions">
           {sessions.map((s) => <AgentCard key={s.session_id || s.pid} session={s} setRoute={setRoute}/>)}
         </div>
       )}

@@ -97,6 +97,11 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
   const [revivalSession, setRevivalSession] = React.useState('');
   const [revivalNote, setRevivalNote] = React.useState(null);
   const [revivalBusy, setRevivalBusy] = React.useState(false);
+  const [commentDispatchSession, setCommentDispatchSession] = React.useState('');
+  const [commentDispatching, setCommentDispatching] = React.useState(false);
+  const [commentDispatchNote, setCommentDispatchNote] = React.useState(null);
+  const [finalising, setFinalising] = React.useState(false);
+  const [finaliseNote, setFinaliseNote] = React.useState(null);
 
   // The live ticket from the store (kept fresh by ticket-updated deltas).
   const ticket = ticketId ? (window.Store.getState().trackerTickets.get(ticketId) ?? null) : null;
@@ -139,6 +144,9 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
     setRevival(null);
     setRevivalSession('');
     setRevivalNote(null);
+    setCommentDispatchSession('');
+    setCommentDispatchNote(null);
+    setFinaliseNote(null);
     setLoadError(null);
     setLoading(true);
     let cancelled = false;
@@ -186,6 +194,19 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
     for (const s of dispatchable) if (s.session_id) m.set(s.session_id, s.label);
     return m;
   }, [dispatchable]);
+
+  const defaultCommentDispatchSession = ticket?.assignee && ticket.assignee !== 'human' ? ticket.assignee : '';
+  const selectedCommentDispatchSession = commentDispatchSession || defaultCommentDispatchSession;
+  const undispatchedComments = React.useMemo(
+    () => flatComments.filter((c) => c.dispatch_state === 'undispatched'),
+    [flatComments]
+  );
+  const undispatchedCount = undispatchedComments.length;
+  const needsCommentDispatchTarget = ticket?.kind === 'spec' && !defaultCommentDispatchSession;
+
+  React.useEffect(() => {
+    if (defaultCommentDispatchSession) setCommentDispatchSession('');
+  }, [defaultCommentDispatchSession]);
 
   // TKT-0245: decorate dispatch picker options with live status dots + hints.
   // Join the dispatchable list with the store's nativeSessions (updated every
@@ -402,6 +423,68 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
     return window.SubstrateAPI.addComment(ticketId, payload);
   }, [ticketId]);
 
+  const onAddCommentAndDispatch = React.useCallback(async (input) => {
+    if (!ticketId) return null;
+    const target = selectedCommentDispatchSession;
+    if (!target) throw new Error('Pick a session before dispatching comments');
+    const comment = await onAddComment(input);
+    if (!comment?.id) return comment;
+    const res = await window.SubstrateAPI.dispatchComment(comment.id, { session_id: target });
+    if (res?.ticket?.id) window.Store.upsertTrackerTicket(res.ticket);
+    if (res?.ticket?.comments) window.Store.seedTicketComments(res.ticket.id, res.ticket.comments);
+    return res;
+  }, [ticketId, onAddComment, selectedCommentDispatchSession]);
+
+  const onBatchDispatchComments = React.useCallback(async () => {
+    if (!ticketId || commentDispatching) return;
+    const target = selectedCommentDispatchSession;
+    if (!target) { setCommentDispatchNote('Pick a session before batch-dispatching comments'); return; }
+    setCommentDispatching(true);
+    setCommentDispatchNote(null);
+    try {
+      const res = await window.SubstrateAPI.batchDispatchComments(ticketId, { session_id: target });
+      if (res?.ticket?.id) window.Store.upsertTrackerTicket(res.ticket);
+      if (res?.ticket?.comments) window.Store.seedTicketComments(res.ticket.id, res.ticket.comments);
+      const n = Array.isArray(res?.dispatches) ? res.dispatches.length : 0;
+      setCommentDispatchNote(n ? `batch dispatched ${n} comment${n === 1 ? '' : 's'}` : 'no undispatched comments');
+    } catch (err) {
+      console.error('batch comment dispatch failed', err);
+      setCommentDispatchNote(err?.payload?.error || err?.message || 'Batch dispatch failed');
+    } finally {
+      setCommentDispatching(false);
+    }
+  }, [ticketId, commentDispatching, selectedCommentDispatchSession]);
+
+  const onFinaliseSpec = React.useCallback(async () => {
+    if (!ticketId || finalising) return;
+    setFinalising(true);
+    setFinaliseNote(null);
+    try {
+      const res = await window.SubstrateAPI.validateFinalisation(ticketId);
+      const notes = Array.isArray(res?.notes) ? res.notes : [];
+      if (res?.result === 'pass') {
+        const updated = await window.SubstrateAPI.updateTicket(ticketId, { state: 'review', actor: 'human' });
+        if (updated?.id) window.Store.upsertTrackerTicket(updated);
+        setFinaliseNote('finalised — moved to review');
+      } else {
+        const body = [
+          `Finalisation ${res?.result || 'failed'}`,
+          '',
+          ...notes.map((n) => `- ${n}`),
+        ].join('\n');
+        await onAddComment({ author: 'human', body, tag: 'risk' });
+        setFinaliseNote(res?.result === 'concerns' ? 'concerns posted as a risk comment' : 'failed — notes posted as a risk comment');
+      }
+    } catch (err) {
+      console.error('finalise failed', err);
+      const msg = err?.payload?.error || err?.message || 'Finalisation failed';
+      try { await onAddComment({ author: 'human', body: `Finalisation failed\n\n- ${msg}`, tag: 'risk' }); } catch {}
+      setFinaliseNote(msg);
+    } finally {
+      setFinalising(false);
+    }
+  }, [ticketId, finalising, onAddComment]);
+
   const onUpdateComment = React.useCallback((commentId, patch) => {
     if (!ticketId) return Promise.resolve();
     return window.SubstrateAPI.updateComment(ticketId, commentId, patch);
@@ -539,6 +622,11 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                     title="This is a question-kind ticket assigned to you. The asker (usually a Claude session) is blocked until you post an answer in the composer below. You can post just the answer, or post + re-dispatch the question back to a live session."
                   >
                     ❓ needs answer
+                  </span>
+                )}
+                {ticket.kind === 'spec' && undispatchedCount > 0 && (
+                  <span className="pill td-comment-dispatch-badge" title="Human comments that have not been dispatched to the assigned planner session">
+                    undispatched: {undispatchedCount}
                   </span>
                 )}
                 {isPage ? null : (
@@ -769,6 +857,59 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                 </div>
 
                 {dispatchNote && !pendingDispatch && <div className="td-dispatch-note">{dispatchNote}</div>}
+                {ticket.kind === 'spec' && (
+                  <div className="td-comment-dispatch-panel">
+                    <div className="td-comment-dispatch-line">
+                      <span className="td-comment-dispatch-label">Comment dispatch</span>
+                      <span className="td-comment-dispatch-count">{undispatchedCount} undispatched</span>
+                    </div>
+                    {undispatchedCount > 0 && (
+                      <div className="td-comment-dispatch-hint">
+                        Your move is with the planner once dispatched.
+                      </div>
+                    )}
+                    {needsCommentDispatchTarget && (
+                      <select
+                        className="td-select td-comment-dispatch-select"
+                        value={commentDispatchSession}
+                        onChange={(e) => setCommentDispatchSession(e.target.value)}
+                        disabled={commentDispatching || dispatchable.length === 0}
+                        title="Pick a session for comment dispatch"
+                      >
+                        <option value="">{dispatchable.length ? 'Dispatch comments to…' : 'No session'}</option>
+                        {dispatchable.map((s) => (
+                          <option key={s.session_id} value={s.session_id}>{s.label}</option>
+                        ))}
+                      </select>
+                    )}
+                    <button
+                      className="orch-btn small ghost td-comment-batch-dispatch"
+                      onClick={onBatchDispatchComments}
+                      disabled={commentDispatching || undispatchedCount === 0 || !selectedCommentDispatchSession}
+                      title="Dispatch all undispatched comments in one brief"
+                    >
+                      {commentDispatching ? 'Dispatching…' : 'Save & batch-dispatch'}
+                    </button>
+                    {commentDispatchNote && <div className="td-dispatch-note">{commentDispatchNote}</div>}
+                  </div>
+                )}
+                {ticket.kind === 'spec' && ticket.state === 'in_progress' && (
+                  <div className="td-finalise-panel">
+                    <div className="td-comment-dispatch-line">
+                      <span className="td-comment-dispatch-label">Finalise spec</span>
+                      <span className="td-comment-dispatch-count">readiness gate</span>
+                    </div>
+                    <button
+                      className="orch-btn small primary td-finalise-btn"
+                      onClick={onFinaliseSpec}
+                      disabled={finalising}
+                      title="Validate finalisation readiness; pass moves this spec to review"
+                    >
+                      {finalising ? 'Finalising…' : 'Finalise'}
+                    </button>
+                    {finaliseNote && <div className="td-dispatch-note">{finaliseNote}</div>}
+                  </div>
+                )}
               </div>
               </aside>
 
@@ -830,8 +971,10 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                     comments={comments}
                     currentAuthor="you"
                     onCreate={onAddComment}
+                    onCreateAndDispatch={ticket.kind === 'spec' ? onAddCommentAndDispatch : null}
                     onUpdate={onUpdateComment}
                     onReply={onReplyComment}
+                    canDispatchComments={ticket.kind === 'spec' && !!selectedCommentDispatchSession}
                     containerSelector={containerSelector}
                   />
                 ) : (

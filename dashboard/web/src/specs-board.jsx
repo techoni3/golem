@@ -1,9 +1,8 @@
 // TKT-0284 / TKT-0339: Specs board — spec-kind tickets (separation by view,
 // not entity). A spec IS a ticket with kind='spec'.
 //
-// TKT-0339: the standalone /specs page is gone; this is now a REUSABLE view
-// mounted in two places: (a) the Tracker's Specs mode (projectId=null → renders
-// its own project filter), and (b) the project view's Specs sub-board
+// GOL-166: the standalone /specs page is the only top-level specs tracker.
+// This view is also mounted in the project view's explicit Specs sub-board
 // (projectId=<id> → pinned, no project filter). One component, two mounts — no
 // divergent copies. The parent provides the title/context; this renders only a
 // toolbar + the board/search.
@@ -213,3 +212,19 @@ function SpecSearchResults({ results, qLower, searching }) {
 window.SpecsBoardView = SpecsBoardView;
 window.SPEC_COLUMNS = SPEC_COLUMNS;
 window.SPEC_ARCHIVED_COL = SPEC_ARCHIVED_COL;
+
+function SpecsPage() {
+  return (
+    <div className="page specs-page">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Specs</h1>
+          <div className="page-subtitle">Spec tracker</div>
+        </div>
+      </div>
+      <SpecsBoardView />
+    </div>
+  );
+}
+
+window.SpecsPage = SpecsPage;

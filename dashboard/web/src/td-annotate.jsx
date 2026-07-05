@@ -348,7 +348,7 @@ function nearestSection(range) {
 // annotation pill portals into. The ticket drawer passes `.drawer-ticket`
 // (position:fixed); the standalone ticket page passes `.ticket-page`. Defaults
 // to `.drawer-ticket` for backward compatibility.
-function TdAnnotate({ body, comments, currentAuthor = 'you', onCreate, onUpdate, onReply, containerSelector = '.drawer-ticket' }) {
+function TdAnnotate({ body, comments, currentAuthor = 'you', onCreate, onCreateAndDispatch, onUpdate, onReply, canDispatchComments = false, containerSelector = '.drawer-ticket' }) {
   const rootRef = React.useRef(null);
   const railRef = React.useRef(null);
   const [annotations, setAnnotations] = React.useState(comments || []);
@@ -606,6 +606,14 @@ React.useEffect(() => {
     return ann;
   }, [onCreate, flashSaved]);
 
+  const createCommentAndDispatch = React.useCallback((input) => {
+    const ann = { id: uid(), ...input, status: input.status || 'open', replies: input.replies || [], created_at: nowISO(), updated_at: nowISO() };
+    setAnnotations((prev) => [ann, ...prev]);
+    flashSaved();
+    if (onCreateAndDispatch) onCreateAndDispatch(ann);
+    return ann;
+  }, [onCreateAndDispatch, flashSaved]);
+
   const updateComment = React.useCallback((id, patch) => {
     setAnnotations((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch, updated_at: nowISO() } : a)));
     flashSaved();
@@ -847,7 +855,9 @@ React.useEffect(() => {
           {plainComposer && (
             <AnnoComposer
               currentAuthor={currentAuthor}
+              canDispatch={canDispatchComments && !!onCreateAndDispatch}
               onSend={(text, author, tag) => { createComment({ author, body: text, tag }); setPlainComposer(false); }}
+              onSendAndDispatch={(text, author, tag) => { createCommentAndDispatch({ author, body: text, tag }); setPlainComposer(false); }}
               onCancel={() => setPlainComposer(false)}
             />
           )}
@@ -855,8 +865,22 @@ React.useEffect(() => {
             <AnnoComposer
               quote={pendingComposer.quote}
               currentAuthor={currentAuthor}
+              canDispatch={canDispatchComments && !!onCreateAndDispatch}
               onSend={(text, author, tag) => {
                 createComment({
+                  author, body: text,
+                  block_id: pendingComposer.blockId || null,
+                  quote: pendingComposer.quote,
+                  prefix: pendingComposer.prefix || '',
+                  suffix: pendingComposer.suffix || '',
+                  section: (pendingComposer.section && pendingComposer.section.title) || '',
+                  section_id: (pendingComposer.section && pendingComposer.section.id) || '',
+                  tag,
+                });
+                setPendingComposer(null);
+              }}
+              onSendAndDispatch={(text, author, tag) => {
+                createCommentAndDispatch({
                   author, body: text,
                   block_id: pendingComposer.blockId || null,
                   quote: pendingComposer.quote,
@@ -980,6 +1004,9 @@ function CommentCard({ ann, active, currentAuthor, onFocus, onResolve, onDelete,
           <span className="ti">{tm.icon}</span>{tm.label}
         </span>
         <span className="anno-chip" style={{ '--_ac': c.color, '--_ac-soft': hexA(c.color, 0.1), '--_ac-bd': hexA(c.color, 0.5) }}>{esc(c.label)}</span>
+        {ann.dispatch_state && ann.dispatch_state !== 'n/a' && (
+          <span className={`anno-dispatch-chip ${ann.dispatch_state}`}>{ann.dispatch_state}</span>
+        )}
         <span className="when">{shortTime(ann.created_at)}</span>
       </div>
       {showTagPicker && <TagChipRow inline current={ann.tag} onPick={(tag) => { onTagChange(tag); setShowTagPicker(false); }}/>}
@@ -1045,7 +1072,7 @@ function TagChipRow({ inline, current, onPick }) {
   );
 }
 
-function AnnoComposer({ quote, hideTag, currentAuthor, onSend, onCancel }) {
+function AnnoComposer({ quote, hideTag, currentAuthor, onSend, onSendAndDispatch, canDispatch = false, onCancel }) {
   const [text, setText] = React.useState('');
   const [author, setAuthor] = React.useState(currentAuthor);
   const [tag, setTag] = React.useState('note');
@@ -1056,6 +1083,11 @@ function AnnoComposer({ quote, hideTag, currentAuthor, onSend, onCancel }) {
     const t = text.trim();
     if (!t) return;
     onSend(t, author, tag);
+  };
+  const fireDispatch = () => {
+    const t = text.trim();
+    if (!t || !onSendAndDispatch) return;
+    onSendAndDispatch(t, author, tag);
   };
 
   return (
@@ -1070,6 +1102,7 @@ function AnnoComposer({ quote, hideTag, currentAuthor, onSend, onCancel }) {
             {Object.entries(TA_AUTHORS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
           </select>
           <button className="cancel" onClick={onCancel}>esc</button>
+          {canDispatch && <button className="send ghost" onClick={fireDispatch} disabled={!text.trim()}>Save &amp; dispatch</button>}
           <button className="send" onClick={fire} disabled={!text.trim()}>Comment</button>
         </div>
       </div>

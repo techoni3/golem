@@ -125,13 +125,14 @@ function sessionStatusKind(s) {
 function HarnessIcon({ harness }) {
   const h = harness || 'claudecode';
   const cls = h === 'opencode' ? 'opencode' : h === 'claudecode' ? 'claudecode' : 'other';
+  const src = h === 'opencode'
+    ? '/assets/ai-provider-icons/opencode.svg'
+    : h === 'claudecode'
+      ? '/assets/ai-provider-icons/claudecode-color.svg'
+      : null;
   return (
     <span className={`agent-harness-icon ${cls}`} title={`harness: ${h}`} aria-label={`harness ${h}`}>
-      {h === 'opencode' ? (
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h10l3 7-3 7H7l-3-7 3-7Z" fill="none" stroke="currentColor" strokeWidth="2"/><path d="M9 9h6v6H9z" fill="currentColor"/></svg>
-      ) : h === 'claudecode' ? (
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12 10 5h9l-5 7 5 7h-9L5 12Z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/><path d="M10 5 14 19" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>
-      ) : (
+      {src ? <img src={src} alt="" loading="lazy"/> : (
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="2"/><path d="M8 12h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
       )}
     </span>
@@ -143,7 +144,7 @@ function ModelPill({ model }) {
   const provider = window.ModelProviders?.providerForModel?.(model);
   return (
     <span className="agent-model-pill" title={provider ? `${provider.label}: ${model}` : model}>
-      {provider?.icon && <span className="agent-model-icon" dangerouslySetInnerHTML={{ __html: provider.icon }}/>}<span>{model}</span>
+      {provider?.iconSrc ? <span className="agent-model-icon"><img src={provider.iconSrc} alt="" loading="lazy"/></span> : null}<span>{model}</span>
     </span>
   );
 }

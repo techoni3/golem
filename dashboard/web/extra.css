@@ -843,6 +843,9 @@
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
   gap: 10px;
 }
+.project-native-sessions {
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
 .native-session-card {
   border: 1px solid var(--border-2);
   border-radius: var(--radius-2);
@@ -857,6 +860,7 @@
 .agent-card {
   position: relative;
   overflow: hidden;
+  flex: initial;
 }
 .agent-card.status-busy { border-color: var(--accent-border); box-shadow: 0 0 0 1px var(--accent-soft) inset; }
 .agent-card.status-waiting { border-color: color-mix(in oklab, var(--status-review) 40%, var(--border-2)); }
@@ -906,7 +910,17 @@
   place-items: center;
   color: var(--text-2);
 }
-.agent-harness-icon svg, .agent-model-icon svg { width: 100%; height: 100%; display: block; }
+.agent-harness-icon img, .agent-model-icon img,
+.agent-harness-icon svg, .agent-model-icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+.agent-harness-icon.opencode img,
+.agent-model-icon img[src$="openai.svg"] {
+  filter: invert(1) grayscale(1) opacity(.82);
+}
 .agent-harness-icon.claudecode { color: var(--status-review); }
 .agent-harness-icon.opencode { color: var(--status-active); }
 .agent-card-chips {
@@ -1022,29 +1036,6 @@
   color: var(--status-blocked);
   border: 1px solid color-mix(in oklab, var(--status-blocked) 35%, transparent);
   white-space: nowrap;
-}
-
-.repo-map-budget {
-  width: 6.5rem;
-  padding: .45rem .55rem;
-  border-radius: .65rem;
-  border: 1px solid var(--border);
-  background: var(--bg-2);
-  color: var(--text-1);
-  font: inherit;
-}
-
-.repo-map-result {
-  display: grid;
-  gap: .45rem;
-  color: var(--text-2);
-}
-
-.repo-map-top {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: .35rem;
 }
 
 .roles-panel { margin-bottom: 18px; }
@@ -2446,6 +2437,40 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
   text-transform: none;
   letter-spacing: 0.01em;
 }
+.td-comment-dispatch-badge {
+  font-size: 9px;
+  padding: 2px 7px;
+  color: var(--status-running);
+  border-color: color-mix(in oklab, var(--status-running) 38%, transparent);
+  background: color-mix(in oklab, var(--status-running) 12%, transparent);
+  text-transform: none;
+  letter-spacing: 0.01em;
+}
+.td-comment-dispatch-panel {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--border-1);
+  margin-top: 4px;
+  padding-top: 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.td-comment-dispatch-line { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.td-comment-dispatch-label { font-size: 11px; color: var(--text-2); font-weight: 650; }
+.td-comment-dispatch-count { font-size: 10.5px; color: var(--text-3); font-family: var(--font-mono); }
+.td-comment-dispatch-hint { font-size: 11px; color: var(--text-3); line-height: 1.45; }
+.td-comment-dispatch-select { width: 100%; }
+.td-comment-batch-dispatch { align-self: flex-start; }
+.td-finalise-panel {
+  grid-column: 1 / -1;
+  border-top: 1px solid color-mix(in oklab, var(--status-active) 28%, var(--border-1));
+  margin-top: 4px;
+  padding-top: 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.td-finalise-btn { align-self: flex-start; }
 
 /* Board toolbar "Needs my answer" toggle */
 .tracker-needs-answer { white-space: nowrap; }
@@ -2752,9 +2777,16 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
    (.drawer-ticket). The drawer is `position: fixed`, so its descendants
    positioned `absolute` use the drawer as their containing block — `right:
    0` therefore means drawer's right edge (not the viewport edge), so the
-   rail tracks the drawer's 30/50/90% width. The pill's coords are JS-set
+   rail tracks the drawer/page container width. The pill's coords are JS-set
    in drawer-relative space (viewport rect minus drawer origin); clamp
    inside the drawer's content area so it never escapes. */
+.drawer-ticket,
+.ticket-page {
+  container-type: inline-size;
+  --anno-rail-w: min(max(30cqw, 500px), 100cqw);
+  --anno-rail-gutter: 30px;
+  --anno-fab-w: 52px;
+}
 #anno-pill {
   position: absolute; z-index: 70; transform: translate(-50%, -100%);
   display: none; align-items: center; gap: 6px;
@@ -2767,7 +2799,7 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
 #anno-pill svg { width: 13px; height: 13px; }
 
 #anno-rail {
-  position: absolute; top: 0; right: 0; height: 100%; width: 360px; z-index: 65;
+  position: absolute; top: 0; right: 0; height: 100%; width: var(--anno-rail-w); z-index: 65;
   background: linear-gradient(180deg, rgba(14,18,28,.98), rgba(10,13,20,.99));
   border-left: 1px solid #243049;
   display: flex; flex-direction: column;
@@ -2822,6 +2854,27 @@ mark.anno.anno-tail::after {
   padding: 2px 8px; border-radius: 20px; white-space: nowrap;
   color: var(--_ac, #f5a623); border: 1px solid var(--_ac-bd, rgba(245,166,35,.45));
   background: var(--_ac-soft, rgba(245,166,35,.08));
+}
+.anno-dispatch-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, var(--status-running) 32%, transparent);
+  background: color-mix(in oklab, var(--status-running) 10%, transparent);
+  color: var(--status-running);
+  font-size: 9px;
+  line-height: 1;
+  padding: 3px 6px;
+}
+.anno-dispatch-chip.addressed {
+  border-color: color-mix(in oklab, var(--status-active) 32%, transparent);
+  background: color-mix(in oklab, var(--status-active) 10%, transparent);
+  color: var(--status-active);
+}
+.anno-dispatch-chip.undispatched {
+  border-color: color-mix(in oklab, var(--text-3) 34%, transparent);
+  background: color-mix(in oklab, var(--text-3) 8%, transparent);
+  color: var(--text-3);
 }
 .anno-card .when { font-family: "JetBrains Mono", monospace; font-size: 9px; color: #6f7890; margin-left: auto; }
 .anno-tag {
@@ -2904,6 +2957,11 @@ mark.anno.anno-tail::after {
   font-family: "JetBrains Mono", monospace; font-size: 10px; letter-spacing: .5px; text-transform: uppercase;
   color: #0a0d14; background: #b394ff; border: none; border-radius: 6px; padding: 6px 12px; cursor: pointer;
 }
+.anno-composer .send.ghost {
+  color: var(--status-running);
+  background: color-mix(in oklab, var(--status-running) 12%, transparent);
+  border-color: color-mix(in oklab, var(--status-running) 32%, transparent);
+}
 .anno-composer .send:hover { filter: brightness(1.08); }
 .anno-composer .cancel {
   font-family: "JetBrains Mono", monospace; font-size: 9.5px; color: #6f7890;
@@ -2923,7 +2981,7 @@ mark.anno.anno-tail::after {
 #anno-fab:hover { border-color: #b394ff; transform: translateY(-1px); }
 #anno-fab .n { color: #b394ff; font-weight: 700; }
 #anno-fab svg { width: 14px; height: 14px; }
-#anno-rail.open ~ #anno-fab { right: 376px; }
+#anno-rail.open ~ #anno-fab { right: min(calc(var(--anno-rail-w) + 16px), calc(100cqw - var(--anno-fab-w))); }
 
 /* save indicator */
 #anno-save {
@@ -2981,10 +3039,13 @@ mark.anno.anno-tail::after {
   border-right: 1px solid var(--border-1);
 }
 .td-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
-/* The annotation rail (360px + 30px gutter) overlays the drawer/page shell's
+/* The annotation rail overlays the drawer/page shell's
    right edge; reserve its footprint on .td-main so the title + prose slide
    left of the rail together (unchanged behaviour, new home — was .td-read-col). */
-.td-main:has(.td-annotate-wrap.rail-open) { padding-right: 390px; }
+.td-main:has(.td-annotate-wrap.rail-open) {
+  box-sizing: border-box;
+  padding-right: min(calc(var(--anno-rail-w) + var(--anno-rail-gutter)), 100cqw);
+}
 
 /* Sidebar field shape: single column, label above a full-width control (kills
    the 1200px centering + 2-col grid of the top-panel era in sidebar context). */

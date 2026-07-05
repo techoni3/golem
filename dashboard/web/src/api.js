@@ -176,8 +176,6 @@
     meta: () => getJSON('/api/meta'),
     projects: () => getJSON('/api/projects'),
     workspaces: () => getJSON('/api/workspaces'),
-    generateRepoMap: (projectId, body) =>
-      postJSON(`/api/projects/${encodeURIComponent(projectId)}/repo-map`, body),
     // v4 (fix round 2): peek payload for one native session — recent central-
     // journal events + milestones + best-effort transcript path.
     nativeSessionPeek: (sessionId) =>
@@ -224,7 +222,10 @@
     createTicket: (body) => postJSON('/api/tickets', body),
     getTicket: (id) => getJSON(`/api/tickets/${encodeURIComponent(id)}`),
     updateTicket: (id, patch) => patchJSON(`/api/tickets/${encodeURIComponent(id)}`, patch),
+    validateFinalisation: (id) => postJSON(`/api/tickets/${encodeURIComponent(id)}/validate-finalisation`, {}),
     addComment: (id, body) => postJSON(`/api/tickets/${encodeURIComponent(id)}/comments`, body),
+    dispatchComment: (commentId, body) => postJSON(`/api/comments/${encodeURIComponent(commentId)}/dispatch`, body),
+    batchDispatchComments: (id, body) => postJSON(`/api/tickets/${encodeURIComponent(id)}/comments/batch-dispatch`, body),
     updateComment: (id, commentId, patch) =>
       patchJSON(`/api/tickets/${encodeURIComponent(id)}/comments/${encodeURIComponent(commentId)}`, patch),
     replyComment: (id, commentId, body) =>

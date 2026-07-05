@@ -39,8 +39,7 @@ function Sidebar({ route, setRoute }) {
   const items = [
     { id: 'dashboard', label: 'Dashboard', icon: Icon.Dashboard },
     { id: 'tracker', label: 'Tracker', icon: Icon.Tracker },
-    // TKT-0339: the dedicated Specs page is gone — specs live on the Tracker
-    // (Work items | Specs toggle) + as a project-view sub-board. No sidebar entry.
+    { id: 'specs', label: 'Specs', icon: Icon.Spec },
     { id: 'projects', label: 'Projects', icon: Icon.Projects, count: buckets.active.length },
     { id: 'agents', label: 'Agents', icon: Icon.Agents, count: activeCount },
     { id: 'logs', label: 'Review Inbox', icon: Icon.Logs },
