@@ -271,7 +271,7 @@ function ProjectTrackerBoard({ contractId, ...shell }) {
     return labelBySession.get(a) || `session ${String(a).slice(0, 8)}`;
   }, [labelBySession]);
 
-  const tickets = window.Store.getTrackerTickets({ project_id: contractId, includeArchived: showArchived });
+  const tickets = window.Store.getTrackerTickets({ project_id: contractId, includeArchived: showArchived, exclude_kind: 'spec' });
   const base = window.TRACKER_COLUMNS || [];
   const cols = showArchived && window.TRACKER_ARCHIVED_COL ? [...base, window.TRACKER_ARCHIVED_COL] : base;
 
