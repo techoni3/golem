@@ -2,13 +2,12 @@
 //   1. SESSIONS RAIL  — every native Claude Code session: status, what it's
 //      stuck on, and per-session controls (brief composer + interrupt/halt
 //      when a live channel exists for that session).
-//   2. WORK ZONE      — project cards reworked around PLAN.md progress, the
-//      latest milestone, and a pending-gate count badge.
-//   3. CONTROL & FEED — pending gates (approve/deny/cancel) across projects,
-//      plus a cross-project milestone feed (the primary progress signal).
+//   2. WORK ZONE      — project cards reworked around PLAN.md progress and the
+//      latest milestone.
+//   3. CONTROL & FEED — cross-project milestone feed (the primary progress signal).
 //
 // The home renders entirely from the snapshot (native_sessions, channels,
-// projects[].plan/.milestones, orchestrator.gates, recent_milestones) — NO
+// projects[].plan/.milestones, recent_milestones) — NO
 // per-project fetches.
 
 const { useState: useDState, useCallback: useDCallback } = React;

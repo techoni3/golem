@@ -72,13 +72,10 @@ export function createState() {
       plan: plan ? { title: plan.title, total: plan.total, done: plan.done, items: plan.items } : null,
       // v4: project-level milestone feed (primary progress signal).
       milestones,
-      // TKT-0194: human gates awaiting human verdict. Surfaces approval and
-      // input gates (see plugin/skills/gates/SKILL.md) so the user can find
-      // them and act via the project view. The full per-gate body + frontmatter
-      // is included so the project view can render the gate's request inline.
+      // Legacy gate-file read path retained for API/debug compatibility. New
+      // gates are spec question comments; the dashboard no longer renders gates.
       gates: p.gates ?? [],
-      // TKT-0194: also surface the gatesDir / gatesCentral so the project view
-      // can show where the gates live on disk (debug + audit affordance).
+      // Keep the gate dir metadata for audit/debug callers.
       gatesDir: p.gatesDir ?? null,
       gatesCentral: !!p.gatesCentral,
     };

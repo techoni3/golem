@@ -409,6 +409,7 @@ async function main() {
     const p = state.project(req.params.id);
     if (!p) return reply.code(404).send({ error: 'project_not_found' });
     try {
+      console.warn(`[gates] deprecated gate-write API hit for project ${p.project_id || p.id}; routing to spec comment gate`);
       const result = await createGate({ tracker, project: p, gate: req.body ?? {} });
       if (result.mode === 'comment') {
         broadcastWS({ type: 'ticket-comment', ticket_id: result.ticket.id, comment: result.comment });

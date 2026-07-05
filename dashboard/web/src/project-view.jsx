@@ -1,6 +1,6 @@
 // Project view (v4) — the per-project command center.
 //
-// The hero leads, then six sections (Plan, Pending gates, Tickets, Specs,
+// The hero leads, then six sections (Plan, Repo map, Tickets, Specs,
 // Milestones, Sessions) — each a collapsible, re-orderable PVSection (TKT-0518).
 // Layout (order + collapsed) is PAGE-scoped (one layout for every project's
 // detail page), persisted to localStorage. The v3 journal-synthesized agents
@@ -13,7 +13,7 @@ const { useState: usePVState } = React;
 // PAGE-scoped, not project-scoped: one layout for the project-detail page no
 // matter which project is open (explicit product decision on the ticket).
 const PV_LAYOUT_KEY = 'golem.pv.layout.v1';
-const PV_SECTION_IDS = ['plan', 'repomap', 'gates', 'tickets', 'specs', 'milestones', 'sessions'];
+const PV_SECTION_IDS = ['plan', 'repomap', 'tickets', 'specs', 'milestones', 'sessions'];
 const PV_DEFAULT_COLLAPSED = { specs: true }; // today's defaults: specs closed, rest open
 
 function pvLoadLayout() {
@@ -57,7 +57,7 @@ function usePvLayout() {
 // row is an easy click target; tools and move buttons are SIBLINGS of it, not
 // children — nested interactive elements inside a <button> are invalid HTML
 // and would break click handling. counts/badges stay in the head (visible when
-// collapsed) so e.g. a collapsed Gates section still shows its "N awaiting" pulse.
+// collapsed) so important section status remains visible.
 function PVSection({ title, count, badge, extra, tools, open, onToggle, onMoveUp, onMoveDown, canUp, canDown, className, children }) {
   return (
     <section className={`pv-section pv-sec ${open ? 'open' : 'closed'}${className ? ' ' + className : ''}`}>
@@ -113,11 +113,6 @@ function ProjectView({ projectId, tab, setRoute }) {
     switch (id) {
       case 'plan':       return <ProjectPlanSection key={id} plan={plan} color={project.color} {...shell}/>;
       case 'repomap':    return <ProjectRepoMapSection key={id} project={project} {...shell}/>;
-      // TKT-0194: human-in-the-loop approval / input gates. The anchor agent (or
-      // any v4 agent) writes a gate file to ~/.config/golem/gates/<project_id>/
-      // <gate_id>.md when a phase needs a human verdict; the dashboard exposes
-      // the awaiting ones here with Approve / Deny / Cancel buttons.
-      case 'gates':      return <ProjectGatesSection key={id} project={project} {...shell}/>;
       case 'tickets':    return <ProjectTrackerBoard key={id} contractId={cid} {...shell}/>;
       // TKT-0339: spec-kind tickets as a project sub-board (SpecsBoardView pinned).
       case 'specs':      return <ProjectSpecsBoard key={id} contractId={cid} {...shell}/>;
@@ -375,166 +370,6 @@ function ProjectSessions({ sessions, setRoute, projectId, ...shell }) {
       )}
     </PVSection>
   );
-}
-
-// TKT-0194: pending human gates. The server returns the project's gate list
-// on /api/projects (via the snapshot). Each gate carries frontmatter (kind,
-// status, phase_just_completed, next_phase) + body. We render awaiting
-// gates inline with Approve / Deny / Cancel buttons that POST to
-// /api/projects/:id/gates/:gateId/:decision. After a verdict we refresh
-// the projects list so the gate moves to the resolved list (or disappears
-// if cancelled). For input gates, the body describes the missing secret.
-function ProjectGatesSection({ project, ...shell }) {
-  const allGates = (project && Array.isArray(project.gates)) ? project.gates : [];
-  const awaiting = allGates.filter((g) => g.status === 'awaiting');
-  const resolved = allGates.filter((g) => g.status !== 'awaiting');
-  const [busyGateId, setBusyGateId] = usePVState(null);
-  const [error, setError] = usePVState(null);
-  // The "N awaiting" pulse badge stays visible when the section is collapsed
-  // (it's in the head) — a collapsed Gates section must still scream.
-  const badge = awaiting.length > 0 ? <span className="pv-section-title-badge pulse">{awaiting.length} awaiting</span> : null;
-
-  if (allGates.length === 0) {
-    return (
-      <PVSection {...shell} title="Pending gates" count={0} badge={badge}>
-        <div className="pv-quiet-line">
-          no <span className="mono">~/.config/golem/gates/</span> files for this project. Agents write a gate here when a phase needs a human verdict (see <span className="mono">plugin/skills/gates/SKILL.md</span>).
-        </div>
-      </PVSection>
-    );
-  }
-
-  const onVerdict = async (gateId, decision) => {
-    setBusyGateId(gateId);
-    setError(null);
-    try {
-      await window.SubstrateAPI.gateVerdict(project.project_id || project.id, gateId, decision);
-      await window.Store.refreshProjects();
-    } catch (err) {
-      console.error('gate verdict failed', err);
-      setError(err?.message || String(err));
-    } finally {
-      setBusyGateId(null);
-    }
-  };
-
-  return (
-    <PVSection {...shell} title="Pending gates" count={allGates.length} badge={badge}>
-      {error && <div className="pv-section-error">verdict failed: {error}</div>}
-      {awaiting.length > 0 && (
-        <div className="pv-gates-awaiting">
-          {awaiting.map((g) => (
-            <div key={g.gateId} className="pv-gate pv-gate-awaiting">
-              <div className="pv-gate-head">
-                <span className="pv-gate-kind">{g.kind || 'approval'}</span>
-                <span className="pv-gate-id mono">{g.gateId}</span>
-                {g.phaseJustCompleted && (
-                  <span className="pv-gate-phase">after <span className="mono">{g.phaseJustCompleted}</span></span>
-                )}
-                {g.nextPhase && (
-                  <span className="pv-gate-phase">→ <span className="mono">{g.nextPhase}</span></span>
-                )}
-                {g.createdAt && (
-                  <span className="pv-gate-ts mono">{g.createdAt.slice(0, 10)}</span>
-                )}
-              </div>
-              {g.body && <div className="pv-gate-body">{renderGateBody(g.body)}</div>}
-              <div className="pv-gate-actions">
-                <button
-                  className="orch-btn primary"
-                  disabled={busyGateId === g.gateId}
-                  onClick={() => onVerdict(g.gateId, 'approved')}
-                >
-                  {busyGateId === g.gateId ? '…' : 'Approve'}
-                </button>
-                <button
-                  className="orch-btn ghost"
-                  disabled={busyGateId === g.gateId}
-                  onClick={() => onVerdict(g.gateId, 'denied')}
-                >
-                  Deny
-                </button>
-                <button
-                  className="orch-btn ghost"
-                  disabled={busyGateId === g.gateId}
-                  onClick={() => onVerdict(g.gateId, 'cancelled')}
-                >
-                  Cancel
-                </button>
-                {g.path && (
-                  <span className="pv-gate-path mono" title={g.path}>{g.path.replace(/^.*\/gates\//, 'gates/')}</span>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-      {resolved.length > 0 && (
-        <details className="pv-gates-resolved">
-          <summary>
-            <span>Resolved ({resolved.length})</span>
-          </summary>
-          <ul className="pv-gates-resolved-list">
-            {resolved.map((g) => (
-              <li key={g.gateId}>
-                <span className={`pv-gate-status pv-gate-status-${g.status}`}>{g.status}</span>
-                <span className="mono">{g.gateId}</span>
-                {g.frontmatter && g.frontmatter.acted_at && (
-                  <span className="pv-gate-ts mono">{String(g.frontmatter.acted_at).slice(0, 16).replace('T', ' ')}</span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
-    </PVSection>
-  );
-}
-
-// Render the gate body as a short list (gate files use ## headings + bullets).
-// Plain JSX construction — never mutate .props.children, just build a new tree.
-function renderGateBody(body) {
-  const lines = body.split('\n');
-  const out = [];
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    const trimmed = line.trim();
-    if (!trimmed) { i++; continue; }
-    if (trimmed.startsWith('# ')) {
-      out.push(<div key={out.length} className="pv-gate-body-h1">{trimmed.slice(2)}</div>);
-      i++;
-      continue;
-    }
-    if (trimmed.startsWith('## ')) {
-      out.push(<div key={out.length} className="pv-gate-body-h2">{trimmed.slice(3)}</div>);
-      i++;
-      continue;
-    }
-    if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
-      const items = [];
-      while (i < lines.length) {
-        const t = lines[i].trim();
-        if (!t || (!t.startsWith('- ') && !t.startsWith('* '))) break;
-        items.push(<li key={items.length}>{t.slice(2)}</li>);
-        i++;
-      }
-      out.push(<ul key={out.length} className="pv-gate-body-ul">{items}</ul>);
-      continue;
-    }
-    // Paragraph: collect consecutive non-blank, non-heading, non-bullet lines.
-    const paraLines = [];
-    while (i < lines.length) {
-      const t = lines[i].trim();
-      if (!t || t.startsWith('# ') || t.startsWith('## ') || t.startsWith('- ') || t.startsWith('* ')) break;
-      paraLines.push(t);
-      i++;
-    }
-    if (paraLines.length) {
-      out.push(<p key={out.length} className="pv-gate-body-p">{paraLines.join(' ')}</p>);
-    }
-  }
-  return <div className="pv-gate-body-rendered">{out}</div>;
 }
 
 // v4: milestones are the primary progress signal.

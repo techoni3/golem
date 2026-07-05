@@ -336,30 +336,6 @@
 }
 .orch-milestone-ts { color: var(--text-3); font-size: 10.5px; flex-shrink: 0; }
 
-.orch-gates {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 10px;
-  border: 1px solid var(--border-2);
-  border-radius: var(--radius-1);
-  background: var(--bg-2);
-  cursor: default;
-}
-.orch-gates-count {
-  display: flex; flex-direction: column; align-items: center; line-height: 1;
-}
-.orch-gates-count .big {
-  font-size: 18px; font-weight: 600; color: var(--text-1); font-family: var(--font-mono);
-}
-.orch-gates-count .small {
-  font-size: 9px; color: var(--text-3); margin-top: 3px;
-  text-transform: uppercase; letter-spacing: 0.1em;
-}
-.orch-gates-count.has-awaiting .big { color: var(--status-review); }
-.orch-gates-secondary {
-  font-size: 10.5px; color: var(--text-3); font-family: var(--font-mono);
-  padding-left: 8px; border-left: 1px solid var(--border-2);
-}
-
 .orch-actions { display: flex; gap: 6px; }
 .orch-btn {
   font-size: 12px;
@@ -409,36 +385,6 @@
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
 }
-
-.orch-gates-list {
-  background: var(--bg-1);
-  border-bottom: 1px solid var(--border-2);
-  padding: 6px 22px 10px;
-}
-.orch-gate-row {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 6px 0;
-  font-size: 12px;
-  border-bottom: 1px dashed var(--border-2);
-}
-.orch-gate-row:last-child { border-bottom: none; }
-.orch-gate-row.more { justify-content: center; font-style: italic; padding: 6px 0; }
-.orch-gate-meta { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
-.orch-gate-badge {
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  padding: 2px 6px;
-  background: rgba(245,158,11,0.12);
-  color: var(--status-review);
-  border: 1px solid rgba(245,158,11,0.3);
-  border-radius: 3px;
-}
-.orch-gate-id { color: var(--text-1); }
-.orch-gate-flow { color: var(--text-2); }
-.orch-gate-ws { color: var(--text-3); font-size: 11px; }
-.orch-gate-actions { display: flex; gap: 5px; }
 
 /* Modal-textarea (shared by the create-ticket drawer body, ticket-drawer edit
    buffer, and streams-panel description). The center-screen modal shell that
@@ -495,42 +441,6 @@
 .drawer-meta-val {
   font-size: 11.5px;
   color: var(--text-1);
-}
-
-/* Gate strip just below the header */
-.ceo-gates {
-  flex: 0 0 auto;
-  padding: 8px 22px 10px;
-  border-bottom: 1px solid var(--border-2);
-  background: var(--bg-1);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.ceo-gate-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  font-size: 12px;
-}
-.ceo-gate-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  flex-wrap: wrap;
-}
-.ceo-gate-actions {
-  display: flex;
-  gap: 4px;
-  flex: 0 0 auto;
-}
-.ceo-gate-more {
-  font-size: 11px;
-  color: var(--text-3);
-  font-style: italic;
-  text-align: center;
 }
 
 /* Chat lane — flex-grow so the composer pins at the bottom */
@@ -1681,14 +1591,6 @@
 .cc-work-name { font-weight: 600; font-size: 13.5px; color: var(--text-0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cc-work-id { font-size: 10px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cc-work-badges { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
-.cc-gate-badge {
-  display: inline-flex; align-items: center; gap: 4px;
-  font-size: 11px; font-weight: 600;
-  color: var(--status-review);
-  background: color-mix(in oklab, var(--status-review) 15%, var(--bg-2));
-  border: 1px solid color-mix(in oklab, var(--status-review) 32%, transparent);
-  border-radius: 999px; padding: 2px 8px;
-}
 .cc-work-live { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--status-active); font-variant-numeric: tabular-nums; }
 .cc-work-tag {
   font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em;
@@ -1716,22 +1618,6 @@
 }
 .cc-panel .cc-zone-head { margin-bottom: 12px; }
 .cc-panel-empty { font-size: 11.5px; color: var(--text-3); line-height: 1.5; }
-.cc-gate-list { display: flex; flex-direction: column; gap: 9px; }
-.cc-gate-row {
-  border: 1px solid var(--border-2); border-radius: var(--radius-2);
-  background: var(--bg-2); padding: 9px 10px;
-  display: flex; flex-direction: column; gap: 6px; position: relative;
-}
-.cc-gate-row-top { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
-.cc-gate-kind {
-  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.05em;
-  color: var(--text-2); background: var(--bg-3); border-radius: 4px; padding: 1px 6px;
-}
-.cc-gate-flow { font-size: 11.5px; color: var(--text-1); }
-.cc-gate-arrow { color: var(--text-4); margin: 0 3px; }
-.cc-gate-id { font-size: 10px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cc-gate-actions { display: flex; gap: 5px; margin-top: 2px; }
-
 .cc-feed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 11px; max-height: 560px; overflow-y: auto; }
 .cc-feed-item { display: flex; gap: 9px; }
 .cc-feed-dot { width: 7px; height: 7px; border-radius: 999px; background: var(--accent); flex-shrink: 0; margin-top: 4px; }
@@ -1872,157 +1758,6 @@
 .pv-timeline-body { flex: 1; min-width: 0; padding-bottom: 16px; }
 .pv-timeline-text { font-size: 13px; color: var(--text-0); line-height: 1.45; }
 .pv-timeline-ts { font-size: 10.5px; color: var(--text-3); margin-top: 3px; }
-
-/* ── Gate history (collapsed) ── */
-.pv-gate-history { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
-.pv-gate-history-row { display: flex; align-items: center; gap: 10px; font-size: 11.5px; }
-.pv-gate-status {
-  text-transform: uppercase;
-  font-size: 9.5px;
-  letter-spacing: 0.05em;
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: var(--bg-3);
-  color: var(--text-2);
-  flex-shrink: 0;
-}
-.pv-gate-status.status-approved { background: color-mix(in oklab, var(--status-active) 16%, var(--bg-2)); color: var(--status-active); }
-.pv-gate-status.status-denied { background: color-mix(in oklab, var(--status-blocked) 16%, var(--bg-2)); color: var(--status-blocked); }
-.pv-gate-status.status-cancelled { background: var(--bg-3); color: var(--text-3); }
-.pv-gate-history-flow { color: var(--text-1); }
-.pv-gate-history-id { color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-/* ── TKT-0194: pending gates section (v4 human-gate surface) ── */
-.pv-section-title-badge {
-  display: inline-flex;
-  align-items: center;
-  margin-left: 10px;
-  padding: 2px 9px;
-  border-radius: 999px;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  background: color-mix(in oklab, var(--status-review) 18%, var(--bg-2));
-  color: var(--status-review);
-  border: 1px solid color-mix(in oklab, var(--status-review) 35%, transparent);
-}
-.pv-section-title-badge.pulse { animation: pv-badge-pulse 1.6s ease-in-out infinite; }
-@keyframes pv-badge-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--status-review) 40%, transparent); }
-  50%      { box-shadow: 0 0 0 5px color-mix(in oklab, var(--status-review) 0%, transparent); }
-}
-.pv-section-error {
-  background: color-mix(in oklab, var(--status-blocked) 12%, var(--bg-2));
-  border: 1px solid color-mix(in oklab, var(--status-blocked) 30%, transparent);
-  color: var(--status-blocked);
-  border-radius: var(--radius-1);
-  padding: 8px 12px;
-  font-size: 12px;
-  font-family: var(--font-mono);
-  margin-bottom: 10px;
-}
-.pv-gates-awaiting { display: flex; flex-direction: column; gap: 12px; }
-.pv-gate {
-  background: var(--bg-2);
-  border: 1px solid var(--border-2);
-  border-radius: var(--radius-1);
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-}
-.pv-gate-awaiting { border-left: 3px solid var(--status-review); }
-.pv-gate-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  font-size: 11.5px;
-  color: var(--text-2);
-}
-.pv-gate-kind {
-  text-transform: uppercase;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  letter-spacing: 0.05em;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: color-mix(in oklab, var(--status-review) 16%, var(--bg-2));
-  color: var(--status-review);
-}
-.pv-gate-id { color: var(--text-1); font-weight: 600; }
-.pv-gate-phase { color: var(--text-2); }
-.pv-gate-phase .mono { color: var(--text-0); margin: 0 2px; }
-.pv-gate-ts { color: var(--text-3); margin-left: auto; }
-.pv-gate-body {
-  color: var(--text-1);
-  font-size: 12.5px;
-  line-height: 1.5;
-  border-left: 2px solid var(--border-2);
-  padding: 4px 0 4px 12px;
-  margin: 2px 0;
-  max-height: 220px;
-  overflow: auto;
-}
-.pv-gate-body-h1 { font-size: 14px; font-weight: 600; color: var(--text-0); margin: 4px 0 6px; }
-.pv-gate-body-h2 { font-size: 12.5px; font-weight: 600; color: var(--text-0); margin: 6px 0 4px; text-transform: none; letter-spacing: 0; font-family: var(--font-sans); }
-.pv-gate-body-ul { margin: 4px 0 4px 18px; padding: 0; }
-.pv-gate-body-p { margin: 0 0 6px; }
-.pv-gate-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.pv-gate-actions button { font-size: 12px; }
-.pv-gate-path {
-  margin-left: auto;
-  color: var(--text-3);
-  font-size: 10.5px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 60%;
-}
-.pv-gates-resolved { margin-top: 12px; }
-.pv-gates-resolved > summary {
-  cursor: pointer;
-  color: var(--text-2);
-  font-size: 11.5px;
-  font-family: var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 6px 0;
-  list-style: none;
-}
-.pv-gates-resolved > summary::-webkit-details-marker { display: none; }
-.pv-gates-resolved > summary::before {
-  content: '▸';
-  display: inline-block;
-  margin-right: 8px;
-  transition: transform .15s;
-}
-.pv-gates-resolved[open] > summary::before { content: '▾'; }
-.pv-gates-resolved-list {
-  list-style: none;
-  margin: 4px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.pv-gates-resolved-list li {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 11.5px;
-  color: var(--text-2);
-  padding: 4px 8px;
-  background: var(--bg-1);
-  border-radius: 3px;
-}
-.pv-gates-resolved-list li .mono { color: var(--text-1); }
 
 /* ── Legacy (v3) container + collapsible sections ── */
 .pv-legacy {

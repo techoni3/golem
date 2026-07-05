@@ -341,8 +341,7 @@ async function discoverFromRoot(root, kind, { requireSubstrate, tracker = null, 
       trackerDir: path.join(workspaceDir, 'tracker'),
       gatesDir: gd.gatesDir,
       gatesCentral: gd.gatesCentral,
-      // TKT-0194: surface the actual gate files (frontmatter + body) so
-      // the project view can show awaiting gates and offer verdict actions.
+      // Legacy gate-file read path: retained for API/debug compatibility.
       gates: await readGatesForProject(gd.gatesDir),
       agentNotesDir: path.join(workspaceDir, 'docs', 'agent-notes'),
       hasJournal: hasJournal || jp.journalCentral,
