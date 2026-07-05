@@ -14,7 +14,7 @@ import { createChat } from './chat.js';
 import { readNativeSessionPeek } from './native-session-peek.js';
 import { openTrackerDb } from './tracker-db.js';
 import { readChannels } from './channels.js';
-import { applyGateVerdict } from './projects.js';
+import { applyGateVerdict, createGate } from './projects.js';
 import { listIdeas, createIdea, popIdea } from './ideas.js';
 import { initDispatchDrainer } from './dispatch-queue.js';
 import { registerSubstrateRoutes } from './substrate.js';
@@ -400,6 +400,25 @@ async function main() {
     } catch (err) {
       if (err && err.status) return reply.code(err.status).send({ error: err.message });
       throw err;
+    }
+  });
+
+  // GOL-171: new gates fold into spec comments when a spec is identifiable.
+  // Legacy gate-file verdicts remain readable/applicable for files already on disk.
+  fastify.post('/api/projects/:id/gates', async (req, reply) => {
+    const p = state.project(req.params.id);
+    if (!p) return reply.code(404).send({ error: 'project_not_found' });
+    try {
+      const result = await createGate({ tracker, project: p, gate: req.body ?? {} });
+      if (result.mode === 'comment') {
+        broadcastWS({ type: 'ticket-comment', ticket_id: result.ticket.id, comment: result.comment });
+        broadcastWS({ type: 'ticket-updated', ticket: result.ticket });
+        return reply.code(201).send(result);
+      }
+      return reply.code(201).send(result);
+    } catch (err) {
+      if (err && err.status) return reply.code(err.status).send({ error: err.message });
+      return reply.code(400).send({ error: String(err?.message ?? err) });
     }
   });
 

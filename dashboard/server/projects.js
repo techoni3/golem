@@ -8,6 +8,7 @@
 
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import crypto from 'node:crypto';
 import { CONFIG } from './config.js';
 import { colorFor, glyphFor } from './util.js';
 import {
@@ -502,6 +503,78 @@ async function applyGateVerdict(gatesDir, gateId, decision) {
   return { gateId, path: abs, status: decision };
 }
 
+function gateSlug(text) {
+  const s = String(text || 'gate')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 36);
+  return s || 'gate';
+}
+
+function gateCommentBody(gate) {
+  const kind = gate.kind === 'input' ? 'input' : 'approval';
+  const ask = String(gate.ask || gate.body || gate.note || '').trim() || 'Human input is needed to continue.';
+  const lines = [
+    `Gate needs you (${kind})`,
+    '',
+    ask,
+  ];
+  if (gate.phase_just_completed) lines.push('', `Phase just completed: ${gate.phase_just_completed}`);
+  if (gate.next_phase) lines.push(`Next phase: ${gate.next_phase}`);
+  if (gate.target_file) lines.push('', `Target file: ${gate.target_file}`);
+  if (Array.isArray(gate.required_keys) && gate.required_keys.length) {
+    lines.push('', 'Required keys:', ...gate.required_keys.map((k) => `- ${k}`));
+  }
+  lines.push('', 'Resolve this comment when the gate is approved, denied, cancelled, or the requested input has been supplied. Include the verdict in the resolving reply/comment text.');
+  return lines.join('\n');
+}
+
+function resolveSpecTicket(tracker, projectId, gate) {
+  const ref = gate.spec_ticket_id || gate.ticket_id || gate.spec_id || null;
+  if (ref && tracker) {
+    const t = tracker.getTicket(ref) || tracker.getTicketByDisplayId?.(ref);
+    if (t?.kind === 'spec') return t;
+  }
+  if (!tracker || !projectId) return null;
+  const specs = tracker.listTickets({ project_id: projectId, kind: 'spec', state: 'in_progress' });
+  return specs.sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))[0] || null;
+}
+
+async function writeLegacyGateFile(gatesDir, gate) {
+  if (!gatesDir) throw Object.assign(new Error('gatesDir not set'), { status: 500 });
+  await fs.mkdir(gatesDir, { recursive: true });
+  const now = new Date().toISOString();
+  const gateId = gate.gate_id || `${gate.kind === 'input' ? 'input' : 'approval'}-${gateSlug(gate.ask || gate.body)}-${now.slice(0, 10)}-${crypto.randomBytes(3).toString('hex')}`;
+  const required = Array.isArray(gate.required_keys) && gate.required_keys.length
+    ? `required_keys:\n${gate.required_keys.map((k) => `  - ${k}`).join('\n')}\n`
+    : '';
+  const raw = `---\ngate_id: ${gateId}\nkind: ${gate.kind === 'input' ? 'input' : 'approval'}\nstatus: awaiting\ncreated_at: ${now}\n${gate.phase_just_completed ? `phase_just_completed: ${gate.phase_just_completed}\n` : ''}${gate.next_phase ? `next_phase: ${gate.next_phase}\n` : ''}${gate.target_file ? `target_file: ${gate.target_file}\n` : ''}${required}---\n\n${String(gate.ask || gate.body || '').trim() || 'Human input is needed to continue.'}`;
+  const abs = path.join(gatesDir, `${gateId}.md`);
+  await atomicWrite(abs, raw);
+  return { gateId, path: abs, status: 'awaiting' };
+}
+
+async function createGate({ tracker, project, gate = {} } = {}) {
+  const projectId = project?.project_id || null;
+  const spec = resolveSpecTicket(tracker, projectId, gate);
+  const now = new Date().toISOString();
+  const gateId = gate.gate_id || `${gate.kind === 'input' ? 'input' : 'approval'}-${gateSlug(gate.ask || gate.body)}-${now.slice(0, 10)}-${crypto.randomBytes(3).toString('hex')}`;
+  if (spec) {
+    const comment = tracker.addComment(spec.id, {
+      author: 'human',
+      body: gateCommentBody({ ...gate, gate_id: gateId }),
+      tag: 'question',
+      status: 'open',
+      block_id: `gate:${gateId}`,
+    });
+    return { mode: 'comment', gateId, ticket: tracker.getTicket(spec.id), comment };
+  }
+  const legacy = await writeLegacyGateFile(project?.gatesDir, { ...gate, gate_id: gateId });
+  console.warn(`[gates] no in-progress spec for project ${projectId}; wrote legacy gate file ${legacy.path}`);
+  return { mode: 'legacy_file', ...legacy };
+}
+
 async function atomicWrite(absPath, content) {
   const tmp = `${absPath}.tmp.${process.pid}.${Date.now()}`;
   await fs.writeFile(tmp, content, 'utf8');
@@ -546,4 +619,4 @@ export async function discoverProjects({ tracker = null, nativeSessions = [] } =
 }
 
 // TKT-0194: re-export gate helpers so index.js can mount the verdict endpoint.
-export { readGatesForProject, applyGateVerdict };
+export { readGatesForProject, applyGateVerdict, createGate };
