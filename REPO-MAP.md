@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-07-05 @ c29dba9 — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-05 @ e457461 — maintained via golem:docs-maintenance.
 
 ## Directory structure
 - `substrate/` — plugin source of truth: agents, skills, roles, hooks, MCP.
@@ -11,17 +11,17 @@
 - `mcp/channel/` — per-session server for briefs, gates, consults, tracker.
 - `shims/opencode/` — maps opencode events into hook/session registries.
 - `golem-projects/` — independent checkouts; not this repo's source tree.
-- `project_management/` — historical planning only.
 
 ## Key modules & entry points
 ### `dashboard/server/index.js`
 - Registers REST routes and `/ws`; tracker mutations and hook bus ingest rebroadcast through `broadcastWS`.
 - Invariant: agents use HTTP/MCP, never direct DB writes.
+### `dashboard/server/tracker-db.js` + `phase-machine.js`
+- Tracker phase is the workflow source of truth; `state` is the derived board-column cache.
+- Schema ordering invariant: phases are v10, hook ingest UUIDs are v11.
 ### `dashboard/server/native-sessions.js`
 - Merges hook-written `~/.golem/sessions.json` with Claude/opencode registries.
 - Invariant: hooks/shims write registration; dashboard only reads/enriches.
-### `lib/session-role.js`
-- Defines `SESSION_ROLES`, runtime role-card overlays, assignment, and role brief push.
 ### `substrate/hooks/*.sh`
 - SessionStart registers, journals, then injects tracker working-model and LSP hints.
 ### `mcp/channel/index.js`
@@ -31,11 +31,8 @@
 Hooks/shims write sessions, channels, and journals under `~/.golem/`; `journal-route.sh` also fire-and-forget forwards hook events to `/api/bus/ingest` with local spool fallback. Dashboard polls sessions, owns `tracker.db`, drains dispatches/subscription digests, exposes project team rosters, and broadcasts WS state. Tracker MCP tools call REST; dispatch pushes briefs to the target channel.
 
 ## Constraints & gotchas
-- Runtime state is in `~/.golem/`; `~/.config/golem` is only a compatibility symlink.
 - Claude Code loads `~/.golem/renders/cc-plugin`; sync + update + `/reload-plugins` after substrate edits.
 - Dashboard `.jsx` files are globals; duplicate top-level names shadow by load order.
-- esm.sh imports must share one React instance via the import map.
-- Smoke/probe scripts must use `dashboard/scripts/_chrome.mjs`, never the user's Chrome on 9222.
 - `plugin/` is a render target, not the source of truth; hand edits there are overwritten.
 
 ## Common tasks
