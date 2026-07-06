@@ -8,7 +8,7 @@ This directory is the golem root: the source repo for the **golem v4 Claude Code
 
 | What | Where |
 |------|-------|
-| v4 plugin source | `plugin/` — agents (`worker`/`reviewer`/`researcher`), 9 `golem:*` skills, hooks, channel MCP |
+| v4 plugin source | `plugin/` — agents (`worker`/`reviewer`/`researcher`), skills, hooks, channel MCP |
 | Dashboard + tracker (SQLite, REST, web UI) | `dashboard/` — start with `golem dashboard` |
 | `golem` CLI | `cli/golem.js` (`npm link` surfaces it; verbs: `dashboard`, `migrate-home`, `doctor`, `status`, `help`) |
 | Project namespaces | `golem-projects/<name>/` (independent repos, gitignored) |
@@ -17,7 +17,7 @@ This directory is the golem root: the source repo for the **golem v4 Claude Code
 
 ## Journaling
 
-The plugin hooks journal every tool call + lifecycle event to **central** `~/.golem/journals/<project_id>/hook.jsonl` — zero repo footprint. Project root is resolved by walking up from `$PWD` to the nearest `AGENTS.md` or `.git`, so this file also acts as the root-workspace marker; sub-agents inherit routing via the same `$PWD`-walk.
+The plugin hooks journal every tool call + lifecycle event to **central** `~/.golem/journals/<project_id>/hook.jsonl` — zero repo footprint. Project root is resolved by walking up from `$PWD` to the nearest `CLAUDE.md` or `.git`; sub-agents inherit routing via the same `$PWD`-walk.
 
 ## Installing the plugin
 
@@ -60,3 +60,9 @@ tracker, and long waits should use bus subscriptions (`ticket/<display_id>` or
 the team API suggests a least-loaded explorer, but the manager dispatches and
 records the transition evidence.
 
+## Parallel Work = Worktrees
+
+When a dispatch brief explicitly names `workspace: worktree`, follow the
+worktree directive: one ticket branch in `.worktrees/<ticket>/`, self-contained
+checks only, `branch:` in the closing brief, and manager/planner reconciliation
+on main. Ad-hoc worktrees remain prohibited without an explicit directive.
