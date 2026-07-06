@@ -1727,11 +1727,11 @@ async function main() {
     }
     try {
       const row = setSessionRole(id, role, { by: 'human:dashboard' });
-      const text = `session role ${role ?? 'cleared'} for ${row.name || id}`;
-      chat.record('system', 'session_role', text, { session_id: id });
+      const text = `session role ${role ?? 'cleared'} for ${row.name || row.session_id || id}`;
+      chat.record('system', 'session_role', text, { session_id: row.session_id || id });
       if (role) {
         const brief = roleChangeBrief(role, row);
-        if (brief) pushBrief(brief, id).catch(() => {});
+        if (brief) pushBrief(brief, row.session_id || id).catch(() => {});
       }
       if (typeof state.refreshNativeSessions === 'function') await state.refreshNativeSessions();
       broadcastWS({ type: 'native-sessions-update', native_sessions: enrichSessionRows(state.nativeSessions(), state.channels()), channels: state.channels() });

@@ -161,6 +161,7 @@ function ModelPill({ model }) {
 
 function AgentCard({ session, name, queueCount = 0, setRoute, showControls = false, compact = false }) {
   const s = session || {};
+  const [roleToast, setRoleToast] = React.useState(null);
   const project = window.Store.getProjectByContractId(s.project_id);
   const channel = window.Store.getChannelForSession(s.session_id);
   const hasChannel = !!channel;
@@ -186,6 +187,12 @@ function AgentCard({ session, name, queueCount = 0, setRoute, showControls = fal
     e.preventDefault();
     e.stopPropagation();
     if (project && setRoute) setRoute({ kind: 'project', id: project.id, tab: 'agents' });
+  };
+  const flashRoleError = (err) => {
+    const msg = err?.payload?.error || err?.message || 'Role assignment failed';
+    console.error('set role failed', err);
+    setRoleToast({ msg: `Role assignment failed: ${msg}`, id: Math.random() });
+    setTimeout(() => setRoleToast(null), 3000);
   };
 
   return (
@@ -250,11 +257,12 @@ function AgentCard({ session, name, queueCount = 0, setRoute, showControls = fal
           Role{' '}
           <RoleSelect
             value={s.role || ''}
-            onChange={(role) => window.SubstrateAPI.setSessionRole(s.session_id, role).catch((err) => console.error('set role failed', err))}
+            onChange={(role) => window.SubstrateAPI.setSessionRole(s.session_id, role).catch(flashRoleError)}
             disabled={!s.session_id}
           />
         </label>
         {s.updated_at && <span className="agent-card-seen mono" title="last updated">seen {window.SubstrateFmt?.fmtTimeAgo?.(s.updated_at) || ''}</span>}
+        {roleToast && <div className="orch-toast err cc-toast" key={roleToast.id}>{roleToast.msg}</div>}
       </div>
 
       {!showControls && s.reachable === false && s.alive && (

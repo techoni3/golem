@@ -218,7 +218,15 @@ upsert_sessions() {
     --arg now "$NOW" \
     '
     (.version // 1) as $v
-    | (.sessions // [] | map(select(.session_id != $raw_sid or $raw_sid == "" or $raw_sid == $sid))) as $ss
+    | ($pid | tonumber? // null) as $pidn
+    | (.sessions // []) as $orig
+    | ($orig | map(
+        if (.session_id != $sid and $pidn != null and (.hook_ppid // null) == $pidn)
+        then . + {session_id: $sid, resume_rekeyed_from: .session_id}
+        else . end
+      )) as $rekeyed
+    | ($rekeyed | map(select(.session_id != $raw_sid or $raw_sid == "" or $raw_sid == $sid))) as $filtered
+    | (reduce $filtered[] as $s ([]; if $s.session_id == $sid then (map(select(.session_id != $sid)) + [$s]) else . + [$s] end)) as $ss
     | ([ $ss[] | select(.session_id == $sid) ] | length > 0) as $exists
     | {
         version: $v,

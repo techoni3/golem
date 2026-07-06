@@ -288,6 +288,7 @@ function RoleEditor({ role }) {
 }
 
 function LegacyNativeCardUnused({ session, name, queueCount = 0 }) {
+  const [roleToast, setRoleToast] = React.useState(null);
   const working = session.status === 'busy' || session.status === 'waiting';
   const registered = session.registered || !!window.Store.getProjectByContractId(session.project_id);
   const pendingCount = Number(session.pending_count || queueCount || 0);
@@ -296,6 +297,12 @@ function LegacyNativeCardUnused({ session, name, queueCount = 0 }) {
   const pathLabel = compactPath(session.cwd);
   const openPeek = () => {
     if (session.session_id) window.openNativeSessionDrawer(session.session_id);
+  };
+  const flashRoleError = (err) => {
+    const msg = err?.payload?.error || err?.message || 'Role assignment failed';
+    console.error('set role failed', err);
+    setRoleToast({ msg: `Role assignment failed: ${msg}`, id: Math.random() });
+    setTimeout(() => setRoleToast(null), 3000);
   };
   return (
     <div
@@ -359,10 +366,11 @@ function LegacyNativeCardUnused({ session, name, queueCount = 0 }) {
           Role{' '}
           <RoleSelect
             value={session.role || ''}
-            onChange={(role) => window.SubstrateAPI.setSessionRole(session.session_id, role).catch((err) => console.error('set role failed', err))}
+            onChange={(role) => window.SubstrateAPI.setSessionRole(session.session_id, role).catch(flashRoleError)}
             disabled={!session.session_id}
           />
         </label>
+        {roleToast && <div className="orch-toast err cc-toast" key={roleToast.id}>{roleToast.msg}</div>}
       </div>
     </div>
   );
