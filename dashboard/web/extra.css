@@ -2507,17 +2507,6 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
 .td-comment-dispatch-hint { font-size: 11px; color: var(--text-3); line-height: 1.45; }
 .td-comment-dispatch-select { width: 100%; }
 .td-comment-batch-dispatch { align-self: flex-start; }
-.td-finalise-panel {
-  grid-column: 1 / -1;
-  border-top: 1px solid color-mix(in oklab, var(--status-active) 28%, var(--border-1));
-  margin-top: 4px;
-  padding-top: 9px;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
-.td-finalise-btn { align-self: flex-start; }
-
 /* Board toolbar "Needs my answer" toggle */
 .tracker-needs-answer { white-space: nowrap; }
 .tracker-needs-answer.on {

@@ -101,8 +101,6 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
   const [commentDispatchSession, setCommentDispatchSession] = React.useState('');
   const [commentDispatching, setCommentDispatching] = React.useState(false);
   const [commentDispatchNote, setCommentDispatchNote] = React.useState(null);
-  const [finalising, setFinalising] = React.useState(false);
-  const [finaliseNote, setFinaliseNote] = React.useState(null);
   const [transitionNote, setTransitionNote] = React.useState(null);
 
   // The live ticket from the store (kept fresh by ticket-updated deltas).
@@ -148,7 +146,6 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
     setRevivalNote(null);
     setCommentDispatchSession('');
     setCommentDispatchNote(null);
-    setFinaliseNote(null);
     setTransitionNote(null);
     setLoadError(null);
     setLoading(true);
@@ -457,36 +454,6 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
       setCommentDispatching(false);
     }
   }, [ticketId, commentDispatching, selectedCommentDispatchSession]);
-
-  const onFinaliseSpec = React.useCallback(async () => {
-    if (!ticketId || finalising) return;
-    setFinalising(true);
-    setFinaliseNote(null);
-    try {
-      const res = await window.SubstrateAPI.validateFinalisation(ticketId);
-      const notes = Array.isArray(res?.notes) ? res.notes : [];
-      if (res?.result === 'pass') {
-        const updated = await window.SubstrateAPI.updateTicket(ticketId, { state: 'review', actor: 'human' });
-        if (updated?.id) window.Store.upsertTrackerTicket(updated);
-        setFinaliseNote('finalised — moved to review');
-      } else {
-        const body = [
-          `Finalisation ${res?.result || 'failed'}`,
-          '',
-          ...notes.map((n) => `- ${n}`),
-        ].join('\n');
-        await onAddComment({ author: 'human', body, tag: 'risk' });
-        setFinaliseNote(res?.result === 'concerns' ? 'concerns posted as a risk comment' : 'failed — notes posted as a risk comment');
-      }
-    } catch (err) {
-      console.error('finalise failed', err);
-      const msg = err?.payload?.error || err?.message || 'Finalisation failed';
-      try { await onAddComment({ author: 'human', body: `Finalisation failed\n\n- ${msg}`, tag: 'risk' }); } catch {}
-      setFinaliseNote(msg);
-    } finally {
-      setFinalising(false);
-    }
-  }, [ticketId, finalising, onAddComment]);
 
   const onUpdateComment = React.useCallback((commentId, patch) => {
     if (!ticketId) return Promise.resolve();
@@ -945,23 +912,6 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                       {commentDispatching ? 'Dispatching…' : 'Save & batch-dispatch'}
                     </button>
                     {commentDispatchNote && <div className="td-dispatch-note">{commentDispatchNote}</div>}
-                  </div>
-                )}
-                {ticket.kind === 'spec' && ticket.state === 'in_progress' && (
-                  <div className="td-finalise-panel">
-                    <div className="td-comment-dispatch-line">
-                      <span className="td-comment-dispatch-label">Finalise spec</span>
-                      <span className="td-comment-dispatch-count">readiness gate</span>
-                    </div>
-                    <button
-                      className="orch-btn small primary td-finalise-btn"
-                      onClick={onFinaliseSpec}
-                      disabled={finalising}
-                      title="Validate finalisation readiness; pass moves this spec to review"
-                    >
-                      {finalising ? 'Finalising…' : 'Finalise'}
-                    </button>
-                    {finaliseNote && <div className="td-dispatch-note">{finaliseNote}</div>}
                   </div>
                 )}
               </div>

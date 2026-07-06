@@ -264,78 +264,6 @@ function reviveCommandFor(session) {
   ].filter(Boolean).join('\n');
 }
 
-function slugWords(text) {
-  return String(text || '')
-    .toLowerCase()
-    .replace(/`[^`]*`/g, ' ')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-    .split(/\s+/)
-    .filter((w) => w.length >= 4)
-    .slice(0, 8);
-}
-
-function sectionBetween(body, startRe, endRe) {
-  const text = String(body || '');
-  const start = text.search(startRe);
-  if (start < 0) return '';
-  const after = text.slice(start);
-  const next = after.slice(1).search(endRe);
-  return next < 0 ? after : after.slice(0, next + 1);
-}
-
-function extractBehaviourItems(body) {
-  const section = sectionBetween(body, /^##\s+2\.\s*Behaviour\b/im, /^##\s+\d+\.\s+/m);
-  if (!section) return [];
-  const items = [];
-  for (const line of section.split('\n')) {
-    const h = line.match(/^###\s+(.+?)\s*$/);
-    if (h) { items.push(h[1].trim()); continue; }
-    const bullet = line.match(/^\s*[-*]\s+(.+?)\s*$/);
-    if (bullet && !/^\[[ xX]\]/.test(bullet[1])) items.push(bullet[1].trim());
-  }
-  return [...new Set(items.filter(Boolean))];
-}
-
-function extractOpenQuestions(body) {
-  const section = sectionBetween(body, /^##\s+5\.\s*Open questions\b/im, /^##\s+\d+\.\s+/m);
-  if (!section) return [];
-  const out = [];
-  for (const line of section.split('\n')) {
-    const bullet = line.match(/^\s*(?:[-*]|\d+\.)\s+(.+?)\s*$/);
-    if (bullet) out.push(bullet[1].trim());
-  }
-  return out.filter(Boolean);
-}
-
-function validateSpecFinalisation(ticket) {
-  if (!ticket) return { result: 'fail', notes: ['Ticket not found.'] };
-  if (ticket.kind !== 'spec') return { result: 'fail', notes: ['Finalisation validation only applies to spec tickets.'] };
-  const notes = [];
-  const behaviourItems = extractBehaviourItems(ticket.body);
-  const children = ticket.children || [];
-  if (behaviourItems.length === 0) {
-    notes.push('No `## 2. Behaviour` H3 headings or major bullets found.');
-  }
-  for (const item of behaviourItems) {
-    const words = slugWords(item);
-    const phrase = words.join(' ');
-    const matched = words.length > 0 && children.some((child) => {
-      const haystack = `${child.title || ''}\n${child.body || ''}`
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, ' ');
-      return haystack.includes(phrase) || words.every((word) => haystack.includes(word));
-    });
-    if (!matched) notes.push(`Behaviour item has no matching child work item: ${item}`);
-  }
-  const openQuestions = extractOpenQuestions(ticket.body);
-  for (const q of openQuestions) {
-    if (!/deferred|answered|decision/i.test(q)) notes.push(`Open question is not answered or deferred: ${q}`);
-  }
-  if (notes.some((n) => /^No `## 2\. Behaviour`/.test(n))) return { result: 'fail', notes };
-  return { result: notes.length ? 'concerns' : 'pass', notes };
-}
-
 function firstClosingBriefLine(comment) {
   const text = String(comment?.body || '').replace(/<[^>]+>/g, ' ').trim();
   const section = text.split(/\n###\s+/).find((s) => /^What was done\b/i.test(s)) || text;
@@ -950,12 +878,6 @@ async function main() {
     } catch (err) {
       return reply.code(400).send({ error: String(err?.message ?? err) });
     }
-  });
-
-  fastify.post('/api/tickets/:id/validate-finalisation', async (req, reply) => {
-    const ticket = resolveTicketRef(req.params.id);
-    if (!ticket) return reply.code(404).send({ error: 'not_found' });
-    return validateSpecFinalisation(ticket);
   });
 
   // GOL-314: explicit phase-machine transition endpoint. State is derived by

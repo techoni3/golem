@@ -70,13 +70,9 @@ emit a queue update signal, and are skipped before offline-expiry logic so they
 do not expire as unreachable while an earlier wave is still open. Non-wave rows
 behind a held row can still deliver normally.
 
-Spec finalisation uses `POST /api/tickets/:id/validate-finalisation`, which is
-spec-kind only and returns `{result:'pass'|'concerns'|'fail', notes:[]}`. The
-lean readiness heuristic checks `## 2. Behaviour` H3 headings / major bullets
-against child work item title/body text, and checks `## 5. Open questions`
-entries for an explicit answered/decision/deferred marker. The spec drawer shows
-a Finalise button only for spec tickets in `in_progress`; pass moves the spec to
-`review`, while concerns/failures post a `risk` comment and leave state unchanged.
+Spec progression is phase-machine driven. The legacy spec drawer Finalise button
+and readiness endpoint were removed in GOL-310; use the explicit phase transition
+endpoint for designed→planning and the server-enforced phase artifacts instead.
 
 ## Phase Machine And Event Bus
 

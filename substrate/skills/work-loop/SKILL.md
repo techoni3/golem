@@ -48,7 +48,7 @@ Own intake, grounding, distribution, verification routing, and closure.
 Own design and fan-out. Avoid repo write ownership when a builder is available. If acting as the orchestrator for worktree-based parallel work, you may reconcile finished branches on main; builders still never do.
 
 - Shape the spec body as the contract: Intent, Behaviour, Decisions, Non-goals, Open questions.
-- Before finalising, run a readiness gate: every Behaviour item maps to work, every Open Question is answered/deferred, and the verdict is `PASS`, `CONCERNS`, or `FAIL`.
+- Before `designed -> planning`, confirm the phase-machine requirements are satisfied: behaviour maps to planned work, open questions are answered/deferred, and required design artifacts are present.
 - Move `grounded -> designing -> designed` only when the design comment exists and concerns are addressed.
 - Human or explicit agent go-ahead is required for `designed -> planning`; do not infer sign-off from silence.
 - Fan out one child ticket per work item, grouped in a stream. Set `wave` so wave N+1 waits for wave N terminal.
