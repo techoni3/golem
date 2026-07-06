@@ -175,8 +175,22 @@ fi
 if [ -n "$SESSION_ID" ] && command -v jq >/dev/null 2>&1; then
   SESSIONS_JSON="$GOLEM_HOME_DIR/sessions.json"
   ROLE="$(jq -r --arg sid "$SESSION_ID" '(.sessions // [])[] | select(.session_id == $sid) | .role // empty' "$SESSIONS_JSON" 2>/dev/null | head -n 1 || true)"
-  CARD="$SCRIPT_DIR/../roles/$ROLE.md"
-  if [ -n "$ROLE" ] && [ -f "$CARD" ]; then
+  # Resolve the role card with the same precedence as lib/session-role.js#readRoleCard:
+  #   1. overlay  -> $GOLEM_HOME_DIR/roles/<role>.md   (per-user override, single source of truth)
+  #   2. custom   -> $GOLEM_ROLES_DIR/<role>.md         (env override; preserves the lib's contract)
+  #   3. default  -> $SCRIPT_DIR/../roles/<role>.md     (packaged substrate card)
+  # Fail-open: if nothing resolves we just skip the card and the session still
+  # gets the base tracker context.
+  CARD=""
+  if [ -n "$ROLE" ]; then
+    for candidate in "$GOLEM_HOME_DIR/roles/$ROLE.md" "${GOLEM_ROLES_DIR:+$GOLEM_ROLES_DIR/$ROLE.md}" "$SCRIPT_DIR/../roles/$ROLE.md"; do
+      if [ -n "$candidate" ] && [ -f "$candidate" ]; then
+        CARD="$candidate"
+        break
+      fi
+    done
+  fi
+  if [ -n "$ROLE" ] && [ -n "$CARD" ]; then
     NAME="$(jq -r --arg sid "$SESSION_ID" '(.sessions // [])[] | select(.session_id == $sid) | .name // .session_id // $sid' "$SESSIONS_JSON" 2>/dev/null | head -n 1 || true)"
     ROSTER="Roster: ${NAME:-$SESSION_ID} is assigned role $ROLE."
     ROLE_ESC="$( { printf '\n\n'; cat "$CARD"; printf '\n\n%s' "$ROSTER"; } | jq -Rs . 2>/dev/null || true)"
