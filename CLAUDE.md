@@ -87,6 +87,7 @@ records the transition evidence.
 ## Parallel Work = Worktrees
 
 When a dispatch brief explicitly names `workspace: worktree`, follow
-`golem:worktrees`: one ticket branch in `.worktrees/<ticket>/`, self-contained
-checks only, `branch:` in the closing brief, and manager/planner reconciliation
-on main. Ad-hoc worktrees remain prohibited without an explicit directive.
+`golem:git-conventions` (Worktree Lifecycle): one ticket branch in
+`.worktrees/<ticket>/`, self-contained checks only, `branch:` in the closing
+brief, and manager/planner reconciliation on main. Ad-hoc worktrees remain
+prohibited without an explicit directive.
