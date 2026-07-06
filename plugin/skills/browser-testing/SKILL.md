@@ -1,6 +1,6 @@
 ---
 name: browser-testing
-description: How agents run Chrome for UI testing and browser automation — the shared persistent profile at ~/.golem/chrome-profile (user logins ride along), headless-only rules, and the one-instance lock. Read before any browser/CDP/devtools work, UI smoke test, or when a task needs an authenticated site.
+description: Read before any browser/CDP/devtools work, a UI smoke test, or an authenticated site. Covers the headless-only rule, the shared persistent Chrome profile at `~/.golem/chrome-profile`, and the per-process port lock — one agent must never share the non-headless Chrome on 9222.
 ---
 <!-- GENERATED: skills/browser-testing/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 
