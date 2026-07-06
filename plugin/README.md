@@ -23,6 +23,10 @@ sub-agents, and the golem channel MCP.
   no-ops; drift launches a detached render into the project's harness-local dirs;
   failures log to `~/.golem/logs/sync-on-register.log` and never block session
   start.
+- **Global instruction blocks** → `substrate/instructions/AGENTS.md` renders as a
+  marker-delimited `golem:instructions` block in `~/.claude/CLAUDE.md` and
+  `~/.config/opencode/AGENTS.md`. Sync preserves text outside the markers and
+  refuses hand-edited or mangled managed blocks unless `--force` is used.
 - **Notification** → pushes the message to your ntfy topic so you get a phone
   ping on needs-input / idle. No-op when no topic is configured.
 - **Agents** → `worker`, `reviewer`, `researcher` (all `model: opus`).
@@ -171,6 +175,7 @@ plugin/
   .claude-plugin/plugin.json   # manifest: name "golem", version 4.1.0
   hooks/hooks.json             # event wiring (refs scripts via ${CLAUDE_PLUGIN_ROOT})
   hooks/session-register.sh    # SessionStart: registry upsert + session title
+  instructions/AGENTS.md       # source for global managed instruction blocks
   hooks/journal-route.sh       # all events → central journal (+ legacy guard)
   hooks/notify.sh              # Notification → ntfy push (backgrounded)
   agents/worker.md             # implements one tracker ticket, reports evidence
