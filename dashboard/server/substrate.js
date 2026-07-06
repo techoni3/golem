@@ -27,7 +27,7 @@ const CAPABILITY_WARNINGS = {
   ],
 };
 
-const GLOBAL_ARTIFACTS = ['skills', 'agents', 'commands', 'hooks', 'mcp', 'config-fragment'];
+const GLOBAL_ARTIFACTS = ['skills', 'agents', 'commands', 'hooks', 'mcp', 'config-fragment', 'instructions'];
 
 const MANAGED_ELSEWHERE = {
   opencode: {
@@ -206,7 +206,14 @@ function globalCells(cfg) {
   const ccEnabled = cfg.harnesses?.claudecode?.enabled !== false;
   const ccItems = ccAdapter.buildPlan({ substrateRoot: root, repoRoot: REPO_ROOT, packageVersion: packageVersion() });
   const ccGroups = splitItems(ccItems, artifactTypeForCc);
+  const ccInstructionItems = ccAdapter.buildInstructionPlan({ substrateRoot: root });
   for (const artifact of GLOBAL_ARTIFACTS) {
+    if (artifact === 'instructions') {
+      rows.push(ccInstructionItems.length
+        ? cell({ harness: 'claudecode', scope: 'global', artifact, target: 'cc-instructions', outDir: ccAdapter.instructionOutDir(), items: ccInstructionItems, enabled: ccEnabled })
+        : neutralCell({ harness: 'claudecode', artifact, target: 'cc-instructions', enabled: ccEnabled, status: 'empty', label: 'empty', details: { clean: true, drifted_count: 0, orphaned_count: 0 } }));
+      continue;
+    }
     const items = ccGroups.get(artifact) ?? [];
     rows.push(items.length
       ? cell({ harness: 'claudecode', scope: 'global', artifact, target: 'cc', outDir: renderDirFor('cc'), items, enabled: ccEnabled })
@@ -216,9 +223,11 @@ function globalCells(cfg) {
   const ocEnabled = !!cfg.harnesses?.opencode?.enabled;
   const ocAgentItems = ocAdapter.buildAgentPlan({ substrateRoot: root });
   const ocSkillItems = ocAdapter.buildSkillPlan({ substrateRoot: root });
+  const ocInstructionItems = ocAdapter.buildInstructionPlan({ substrateRoot: root });
   const ocRows = new Map([
     ['agents', cell({ harness: 'opencode', scope: 'global', artifact: 'agents', target: 'opencode', outDir: ocAdapter.agentOutDir(), items: ocAgentItems, enabled: ocEnabled, config: { testedVersion: cfg.harnesses?.opencode?.testedVersion ?? null, currentVersion: opencodeVersion() } })],
     ['skills', cell({ harness: 'opencode', scope: 'global', artifact: 'skills', target: 'opencode', outDir: ocAdapter.skillsOutDir(), items: ocSkillItems, enabled: ocEnabled })],
+    ['instructions', cell({ harness: 'opencode', scope: 'global', artifact: 'instructions', target: 'opencode-instructions', outDir: ocAdapter.instructionOutDir(), items: ocInstructionItems, enabled: ocEnabled })],
     ['config-fragment', opencodeConfigCell(cfg, ocEnabled)],
   ]);
   for (const artifact of GLOBAL_ARTIFACTS) {
@@ -323,6 +332,9 @@ function syncTarget({ harness, project = null, force = false }) {
       const res = compiler.render({ target: 'cc', outDir, items, packageVersion: pkg, force });
       ccAdapter.syncMcpChannelDeps({ repoRoot: REPO_ROOT, outDir });
       results.push({ artifact: 'global', out_dir: outDir, ...renderSummary(res) });
+      const instructionItems = ccAdapter.buildInstructionPlan({ substrateRoot: root });
+      const instructionOutDir = ccAdapter.instructionOutDir();
+      results.push({ artifact: 'instructions', out_dir: instructionOutDir, ...renderSummary(compiler.render({ target: 'cc-instructions', outDir: instructionOutDir, items: instructionItems, packageVersion: pkg, force })) });
     }
   }
 
@@ -336,8 +348,10 @@ function syncTarget({ harness, project = null, force = false }) {
     } else {
       const agentItems = ocAdapter.buildAgentPlan({ substrateRoot: root });
       const skillItems = ocAdapter.buildSkillPlan({ substrateRoot: root });
+      const instructionItems = ocAdapter.buildInstructionPlan({ substrateRoot: root });
       results.push({ artifact: 'agents', out_dir: ocAdapter.agentOutDir(), ...renderSummary(compiler.render({ target: 'opencode', outDir: ocAdapter.agentOutDir(), items: agentItems, packageVersion: pkg, force })) });
       results.push({ artifact: 'skills', out_dir: ocAdapter.skillsOutDir(), ...renderSummary(compiler.render({ target: 'opencode', outDir: ocAdapter.skillsOutDir(), items: skillItems, packageVersion: pkg, force })) });
+      results.push({ artifact: 'instructions', out_dir: ocAdapter.instructionOutDir(), ...renderSummary(compiler.render({ target: 'opencode-instructions', outDir: ocAdapter.instructionOutDir(), items: instructionItems, packageVersion: pkg, force })) });
       const bin = resolveOpencodeBin();
       const merge = ocAdapter.buildConfigMerge({ repoRoot: REPO_ROOT });
       const configRes = ocAdapter.applyConfigMerge({ configPath: ocAdapter.opencodeConfigPath(), merge, validate: () => validateOpencodeConfig(bin) });

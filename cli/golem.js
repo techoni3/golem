@@ -521,6 +521,17 @@ function printDrift({ clean, drifted, orphaned }) {
   }
 }
 
+function printTamper({ tampered, forceHint = '--force' }) {
+  if (!tampered.length) return;
+  log('');
+  err(`  TAMPER — refused to overwrite; re-run with ${forceHint} to replace the managed region:`);
+  for (const t of tampered) {
+    const region = t.block ? ' (golem:instructions block)' : '';
+    const why = t.reason ? ` — ${t.reason}` : '';
+    err(`    ${t.outputRelPath}${region}${why}`);
+  }
+}
+
 function warnVisibleGeneratedFiles({ projectRoot, outDir, items, result }) {
   const byKey = new Map(items.map((item) => [item.key, item.outputRelPath]));
   const relPaths = [];
@@ -568,27 +579,38 @@ async function cmdSync(args) {
     return cmdSyncOpencode({ checkOnly, force });
   }
 
-  const outDir = optionValue(args, '--out') ? resolve(optionValue(args, '--out')) : renderDirFor(target);
+  const customOut = optionValue(args, '--out');
+  const outDir = customOut ? resolve(customOut) : renderDirFor(target);
 
   const items = planForTarget(target);
+  const instructionItems = target === 'cc' && !customOut ? ccAdapter.buildInstructionPlan({ substrateRoot: substrateRoot() }) : [];
+  const instructionOutDir = ccAdapter.instructionOutDir();
 
   if (checkOnly) {
-    const { clean, drifted, orphaned } = compiler.checkDrift({ target, outDir, items });
+    const main = compiler.checkDrift({ target, outDir, items });
+    const instr = instructionItems.length
+      ? compiler.checkDrift({ target: 'cc-instructions', outDir: instructionOutDir, items: instructionItems })
+      : { clean: true, drifted: [], orphaned: [] };
+    const clean = main.clean && instr.clean;
     log('');
     log(`golem sync --check --target ${target}`);
     log(`  out: ${outDir}`);
-    printDrift({ clean, drifted, orphaned });
+    if (instructionItems.length) log(`  instructions out: ${instructionOutDir}`);
+    printDrift({ clean, drifted: [...main.drifted, ...instr.drifted], orphaned: [...main.orphaned, ...instr.orphaned] });
     if (!clean) process.exit(1);
     return;
   }
 
-  const { written, unchanged, tampered, pruned } = compiler.render({
+  const main = compiler.render({
     target,
     outDir,
     items,
     packageVersion: readPackageVersion(),
     force,
   });
+  const instr = instructionItems.length
+    ? compiler.render({ target: 'cc-instructions', outDir: instructionOutDir, items: instructionItems, packageVersion: readPackageVersion(), force })
+    : { written: [], unchanged: [], tampered: [], pruned: [] };
   if (target === 'cc') {
     ccAdapter.syncMcpChannelDeps({ repoRoot: GOLEM_ROOT, outDir });
   }
@@ -599,11 +621,14 @@ async function cmdSync(args) {
   log('');
   log(`golem sync --target ${target}`);
   log(`  out: ${outDir}`);
+  if (instructionItems.length) log(`  instructions out: ${instructionOutDir}`);
+  const written = [...main.written, ...instr.written];
+  const unchanged = [...main.unchanged, ...instr.unchanged];
+  const tampered = [...main.tampered, ...instr.tampered];
+  const pruned = [...main.pruned, ...instr.pruned];
   log(`  written: ${written.length}, unchanged: ${unchanged.length}, pruned: ${pruned.length}, tampered: ${tampered.length}`);
   if (tampered.length) {
-    log('');
-    err('  TAMPER — refused to overwrite (hand-edited outside sync); re-run with --force to overwrite:');
-    for (const t of tampered) err(`    ${t.outputRelPath}`);
+    printTamper({ tampered });
     process.exit(1);
   }
   if (pruned.length) {
@@ -686,23 +711,28 @@ async function cmdSyncCheckAll() {
 
   const ccOut = renderDirFor('cc');
   const cc = compiler.checkDrift({ target: 'cc', outDir: ccOut, items: planForTarget('cc') });
+  const ccInstrOut = ccAdapter.instructionOutDir();
+  const ccInstr = compiler.checkDrift({ target: 'cc-instructions', outDir: ccInstrOut, items: ccAdapter.buildInstructionPlan({ substrateRoot: substrateRoot() }) });
   log('');
   log(`global cc: ${ccOut}`);
-  printDrift(cc);
-  drift = drift || !cc.clean;
+  log(`  instructions out: ${ccInstrOut}`);
+  printDrift({ clean: cc.clean && ccInstr.clean, drifted: [...cc.drifted, ...ccInstr.drifted], orphaned: [...cc.orphaned, ...ccInstr.orphaned] });
+  drift = drift || !cc.clean || !ccInstr.clean;
 
   if (isHarnessEnabled('opencode')) {
     const root = substrateRoot();
     const a = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.agentOutDir(), items: ocAdapter.buildAgentPlan({ substrateRoot: root }) });
     const s = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.skillsOutDir(), items: ocAdapter.buildSkillPlan({ substrateRoot: root }) });
     const r = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.rolesOutDir(), items: ocAdapter.buildRolePlan({ substrateRoot: root }) });
-    const clean = a.clean && s.clean && r.clean;
+    const i = compiler.checkDrift({ target: 'opencode-instructions', outDir: ocAdapter.instructionOutDir(), items: ocAdapter.buildInstructionPlan({ substrateRoot: root }) });
+    const clean = a.clean && s.clean && r.clean && i.clean;
     log('');
     log('global opencode:');
     log(`  agents out: ${ocAdapter.agentOutDir()}`);
     log(`  skills out: ${ocAdapter.skillsOutDir()}`);
     log(`  roles out: ${ocAdapter.rolesOutDir()}`);
-    printDrift({ clean, drifted: [...a.drifted, ...s.drifted, ...r.drifted], orphaned: [...a.orphaned, ...s.orphaned, ...r.orphaned] });
+    log(`  instructions out: ${ocAdapter.instructionOutDir()}`);
+    printDrift({ clean, drifted: [...a.drifted, ...s.drifted, ...r.drifted, ...i.drifted], orphaned: [...a.orphaned, ...s.orphaned, ...r.orphaned, ...i.orphaned] });
     drift = drift || !clean;
   }
 
@@ -749,20 +779,24 @@ async function cmdSyncOpencode({ checkOnly, force }) {
   const agentItems = ocAdapter.buildAgentPlan({ substrateRoot: root });
   const skillItems = ocAdapter.buildSkillPlan({ substrateRoot: root });
   const roleItems = ocAdapter.buildRolePlan({ substrateRoot: root });
+  const instructionItems = ocAdapter.buildInstructionPlan({ substrateRoot: root });
   const agentDir = ocAdapter.agentOutDir();
   const skillsDir = ocAdapter.skillsOutDir();
   const rolesDir = ocAdapter.rolesOutDir();
+  const instructionDir = ocAdapter.instructionOutDir();
 
   if (checkOnly) {
     const a = compiler.checkDrift({ target: 'opencode', outDir: agentDir, items: agentItems });
     const s = compiler.checkDrift({ target: 'opencode', outDir: skillsDir, items: skillItems });
     const r = compiler.checkDrift({ target: 'opencode', outDir: rolesDir, items: roleItems });
+    const i = compiler.checkDrift({ target: 'opencode-instructions', outDir: instructionDir, items: instructionItems });
     log(`  agents out: ${agentDir}`);
     log(`  skills out: ${skillsDir}`);
     log(`  roles out: ${rolesDir}`);
-    const drifted = [...a.drifted, ...s.drifted, ...r.drifted];
-    const orphaned = [...a.orphaned, ...s.orphaned, ...r.orphaned];
-    if (a.clean && s.clean && r.clean) {
+    log(`  instructions out: ${instructionDir}`);
+    const drifted = [...a.drifted, ...s.drifted, ...r.drifted, ...i.drifted];
+    const orphaned = [...a.orphaned, ...s.orphaned, ...r.orphaned, ...i.orphaned];
+    if (a.clean && s.clean && r.clean && i.clean) {
       log('  OK clean — no drift');
       return;
     }
@@ -782,18 +816,19 @@ async function cmdSyncOpencode({ checkOnly, force }) {
   const ra = compiler.render({ target: 'opencode', outDir: agentDir, items: agentItems, packageVersion, force });
   const rs = compiler.render({ target: 'opencode', outDir: skillsDir, items: skillItems, packageVersion, force });
   const rr = compiler.render({ target: 'opencode', outDir: rolesDir, items: roleItems, packageVersion, force });
+  const ri = compiler.render({ target: 'opencode-instructions', outDir: instructionDir, items: instructionItems, packageVersion, force });
   log(`  agents out: ${agentDir}`);
   log(`    written: ${ra.written.length}, unchanged: ${ra.unchanged.length}, pruned: ${ra.pruned.length}, tampered: ${ra.tampered.length}`);
   log(`  skills out: ${skillsDir}`);
   log(`    written: ${rs.written.length}, unchanged: ${rs.unchanged.length}, pruned: ${rs.pruned.length}, tampered: ${rs.tampered.length}`);
   log(`  roles out: ${rolesDir}`);
   log(`    written: ${rr.written.length}, unchanged: ${rr.unchanged.length}, pruned: ${rr.pruned.length}, tampered: ${rr.tampered.length}`);
+  log(`  instructions out: ${instructionDir}`);
+  log(`    written: ${ri.written.length}, unchanged: ${ri.unchanged.length}, pruned: ${ri.pruned.length}, tampered: ${ri.tampered.length}`);
 
-  const tampered = [...ra.tampered, ...rs.tampered, ...rr.tampered];
+  const tampered = [...ra.tampered, ...rs.tampered, ...rr.tampered, ...ri.tampered];
   if (tampered.length) {
-    log('');
-    err('  TAMPER — refused to overwrite (hand-edited outside sync); re-run with --force:');
-    for (const t of tampered) err(`    ${t.outputRelPath}`);
+    printTamper({ tampered });
     process.exit(1);
   }
 
