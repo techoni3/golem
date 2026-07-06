@@ -1,6 +1,6 @@
 ---
 name: test-policy
-description: The test budget and what counts for golem features — journey-level integration/e2e, no unit fan-out. Read when writing tests for a feature or telling a worker how to test.
+description: Read when writing tests for a feature, telling a worker how to test, or scoping a CI budget. The golem test policy is journey-level integration/e2e with real DBs and harnesses, no unit fan-out — one end-to-end that exercises the contract beats ten isolated mocks.
 ---
 <!-- GENERATED: skills/test-policy/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 

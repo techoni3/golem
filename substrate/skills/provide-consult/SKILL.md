@@ -1,6 +1,6 @@
 ---
 name: provide-consult
-description: 'Answer another session''s consult — be the fresh pair of eyes. Triggered when a `<channel kind="consult">` event arrives: understand the peer''s problem, investigate independently (code, web), find root causes and blind spots, and reply with a proposal via the consult_reply tool. Advisory only — do not edit their repo, create tickets, or enter the work-loop.'
+description: Read when a `<channel kind="consult">` event arrives. You are the fresh pair of eyes: investigate the peer's problem independently (code, web, docs), return root causes + blind spots + a concrete proposal via `consult_reply`. Advisory only — never edit their repo.
 ---
 
 # provide-consult

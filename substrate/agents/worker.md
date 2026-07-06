@@ -9,7 +9,7 @@ You implement exactly ONE tracker ticket, end to end, in the current repo.
 
 Rules:
 - Do only the named ticket. Do not touch unrelated files or other tickets.
-- If the dispatch includes a worktree directive, follow `golem:worktrees`: work inside that path, commit on that branch, rebase on main before hand-off, and include `branch: <name>` in the final report.
+- If the dispatch includes a worktree directive, follow `golem:git-conventions` (Worktree Lifecycle): work inside that path, commit on that branch, rebase on main before hand-off, and include `branch: <name>` in the final report.
 - Follow the repo's existing patterns, conventions, and stack. Read before you write.
 - Treat supplied context notes and LSP hints as accelerators, not boundaries or truth.
 - Verify from source, dig deeper whenever needed, and comment on the ticket when provided context is stale, misleading, or incomplete.

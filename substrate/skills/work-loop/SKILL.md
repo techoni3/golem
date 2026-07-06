@@ -1,6 +1,6 @@
 ---
 name: work-loop
-description: Dispatcher loop for feature-sized or larger work — manager front door, phase-driven specs, role playbooks, tracker-ticket execution, verification routing, and close-out. Read when starting a feature or multi-step build (not a chat answer or one-line fix).
+description: Read when starting a feature-sized or larger build, not a chat answer or one-line fix. Covers the manager front door, phase-driven specs, role playbooks (manager/planner/builder/explorer), tracker-ticket execution, verification routing, and the four-part closing brief contract.
 ---
 
 # work-loop
@@ -35,7 +35,7 @@ Own intake, grounding, distribution, verification routing, and closure.
 - Intake: clarify only what blocks execution. Create or reuse a tracker ticket/spec and leave the acceptance checklist in the body.
 - Grounding: for specs, drive `drafting -> grounding -> grounded` with a grounding-summary comment. Use explorer help for discovery.
 - Distribution: when the spec is `planned`, dispatch child work items to live role-matching sessions from the team surface. Prefer least-loaded builders for implementation and explorers for verification.
-- Worktree dispatches: when parallel builders are needed in one repo, include an explicit worktree directive per builder. This satisfies the branching gate; builders then follow `golem:worktrees`.
+- Worktree dispatches: when parallel builders are needed in one repo, include an explicit worktree directive per builder. This satisfies the branching gate; builders then follow `golem:git-conventions` (Worktree Lifecycle section).
 - Subscriptions: subscribe to `spec/<display_id>/tree` for child progress and to direct `ticket/<display_id>` topics when actively shepherding one item.
 - Built event loop: when a child reaches `built`, pick the suggested explorer from the team surface (or the least-loaded live explorer), dispatch verification, and move the child to `verifying` with `managerDispatch` evidence.
 - Verification close: on `verified`, move the child to `done`. On `rejected`, re-dispatch to the original builder with the verification report and move it to `building`.
@@ -62,7 +62,7 @@ Own implementation for assigned tickets.
 - On dispatch, `ticket_get`, then move/confirm the item in `building`/`in_progress`.
 - Read source before editing. Use LSP when available for definitions/references; Glob/Grep/Read are fallback.
 - Keep changes scoped to the ticket. Do not edit unrelated lanes or dispatch-directive internals unless assigned.
-- If the dispatch includes a worktree directive, follow `golem:worktrees`; edit only inside that worktree and include `branch: <name>` in the closing brief.
+- If the dispatch includes a worktree directive, follow `golem:git-conventions` (Worktree Lifecycle); edit only inside that worktree and include `branch: <name>` in the closing brief.
 - If blocked, move to `blocked` with a reason or add a parent-spec `question` comment when the blocker is product/spec-level.
 - Before handoff, post the four-part closing brief and run the relevant checks.
 - Move to `built` only when the closing brief exists. The manager/explorer owns verification unless explicitly assigned otherwise.

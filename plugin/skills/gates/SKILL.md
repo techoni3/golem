@@ -1,6 +1,6 @@
 ---
 name: gates
-description: Human-gate primitive — post an approval/input question comment on the active spec when work must pause for the human; legacy gate files remain readable for older gates. Read when intake requested a pause, work blocks on a credential, or scanning for open gates on resume.
+description: Read when a spec must pause for human approval/credentials, when work blocks on a missing secret, or when scanning for open gates on resume. Covers posting a `kind:question` ticket to the human and reading legacy gate files under `~/.golem/gates/`.
 ---
 <!-- GENERATED: skills/gates/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 

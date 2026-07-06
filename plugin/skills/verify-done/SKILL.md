@@ -1,6 +1,6 @@
 ---
 name: verify-done
-description: Evidence commands that prove a work item is actually done before advancing its tracker ticket — run after a worker subagent returns. Use before moving any ticket to review/built/verified/done or accepting a done/PR-open claim.
+description: Read before moving any ticket to `review`, `built`, `verified`, or `done`, or before accepting a worker's "DONE" or "PR open" claim. Run the claimed evidence commands yourself; mechanical outputs (exit codes, test counts, log lines) are the only valid proof of completion.
 ---
 <!-- GENERATED: skills/verify-done/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 

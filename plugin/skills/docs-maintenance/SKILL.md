@@ -1,6 +1,6 @@
 ---
 name: docs-maintenance
-description: Own REPO-MAP.md and architecture-doc hygiene. Read when bootstrapping a repo's map, after any structural change (new/moved module, entry point, invariant, or data-flow change), or to audit docs against reality. Stale docs are defects.
+description: Read when bootstrapping a repo's REPO-MAP.md, after any structural change (new/moved module, entry point, invariant, or data-flow change), or to audit docs against the code. Owns the architecture-doc hygiene contract; stale docs are defects, not nits.
 ---
 <!-- GENERATED: skills/docs-maintenance/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 

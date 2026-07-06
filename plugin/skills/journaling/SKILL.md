@@ -1,6 +1,6 @@
 ---
 name: journaling
-description: Central journal paths and milestone append format for golem projects. Read when appending a milestone line, or reading/locating a project's journal.
+description: Read when appending a milestone to a project journal, locating `~/.golem/journals/<project_id>/hook.jsonl`, or formatting a hook entry. The plugin hooks journal every tool call automatically — agents add milestones, not noise.
 ---
 <!-- GENERATED: skills/journaling/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 

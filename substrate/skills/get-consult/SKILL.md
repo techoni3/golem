@@ -1,6 +1,6 @@
 ---
 name: get-consult
-description: Ask another live golem session for a fresh pair of eyes on a hard problem — a second opinion, not delegation. Use when genuinely stuck (a bug you can't crack, a suspected architectural blind spot, tunnel vision) and your own subagents haven't cracked it. Also when the user says "get consult from <session>". Fully async — you keep working; the reply pushes back later.
+description: Read when genuinely stuck (a bug, a blind spot, or tunnel vision) and your own subagents have not cracked it, or when the user says "get consult from <session>". Fires an async `consult_request`; you keep working, the reply pushes back later.
 ---
 
 # get-consult

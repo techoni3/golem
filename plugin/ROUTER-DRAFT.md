@@ -11,7 +11,7 @@ Skills — read the named skill when:
 - `golem:tracker` — reading/creating/transitioning tracker tickets (the source of truth for work; replaces PLAN.md).
 - `golem:verify-done` — before marking anything done or trusting a "done"/"PR open" claim.
 - `golem:test-policy` — writing or scoping tests for a feature.
-- `golem:pr-conventions` — branching, committing, or opening a PR.
+- `golem:git-conventions` — branching, committing, opening a PR, or following a worktree directive in a dispatch brief.
 - `golem:gates` — the user asked to pause at a milestone, or work is blocked on a secret.
 - `golem:journaling` — appending a milestone, or locating a project's journal.
 
