@@ -1,6 +1,6 @@
 ---
 name: work-loop
-description: Dispatcher loop for feature-sized or larger work — manager front door, phase-driven specs, role playbooks, tracker-ticket execution, verification routing, and close-out. Read when starting a feature or multi-step build (not a chat answer or one-line fix).
+description: Read when starting a feature-sized or larger build, not a chat answer or one-line fix. Covers the manager front door, phase-driven specs, role playbooks (manager/planner/builder/explorer), tracker-ticket execution, verification routing, and the four-part closing brief contract.
 ---
 
 # work-loop

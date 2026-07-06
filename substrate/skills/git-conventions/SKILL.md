@@ -1,6 +1,6 @@
 ---
 name: git-conventions
-description: Branch, commit, and PR shape for golem projects, plus the worktree lifecycle for parallel builder dispatches. Read when opening a branch, committing, opening a PR, or when a ticket or dispatch brief includes an explicit worktree directive.
+description: Read when opening a branch, writing a commit, opening a PR, or when a ticket or dispatch brief includes an explicit worktree directive. Covers the branch + commit + PR contract and the worktree lifecycle that kicks in only under an explicit directive.
 ---
 
 # git-conventions
