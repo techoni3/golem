@@ -22,6 +22,7 @@ import { golemHome, legacyConfigDir, migratedHomeDir, trackerDbPath, renderDirFo
 import { projectIdFor } from '../lib/project-id.js';
 import { SESSION_ROLES, pushRoleBriefDirect, setSessionRole } from '../lib/session-role.js';
 import { updateProjectLsp } from '../lib/lsp.js';
+import { lintSubstrate, formatLintResult } from '../lib/substrate-lint.js';
 import * as compiler from '../lib/compiler/engine.js';
 import * as ccAdapter from '../lib/compiler/adapters/cc.js';
 import * as ocAdapter from '../lib/compiler/adapters/opencode.js';
@@ -561,14 +562,19 @@ function pathRelative(from, to) {
 
 async function cmdSync(args) {
   const checkOnly = args.includes('--check');
+  const all = args.includes('--all');
   const force = args.includes('--force');
   const explicitTarget = optionValue(args, '--target') || optionValue(args, '--harness');
   const target = normalizeTarget(explicitTarget || 'cc');
   const projectArg = optionValue(args, '--project');
 
-  if (checkOnly && !explicitTarget && !projectArg && !optionValue(args, '--out') && args.filter((a) => a !== '--check').length === 0) {
+  if (checkOnly && (all || (!explicitTarget && !projectArg && !optionValue(args, '--out') && args.filter((a) => a !== '--check').length === 0))) {
     return cmdSyncCheckAll();
   }
+
+  const lint = lintSubstrate({ substrateRoot: substrateRoot() });
+  if (lint.warnings.length) err(formatLintResult({ warnings: lint.warnings }));
+  if (!lint.ok) fatal(1, formatLintResult(lint));
 
   if (projectArg) {
     if (target === 'cc-marketplace') fatal(2, '--project is not valid with cc-marketplace');
@@ -704,20 +710,34 @@ async function cmdSyncProject({ target, projectRoot, checkOnly, force }) {
   }
 }
 
-async function cmdSyncCheckAll() {
+async function cmdSyncCheckAll({ quiet = false } = {}) {
   let drift = false;
-  log('');
-  log('golem sync --check');
+  const say = quiet ? () => {} : log;
+  if (!quiet) log('');
+  say('golem sync --check --all');
+
+  const lint = lintSubstrate({ substrateRoot: substrateRoot() });
+  if (!quiet) log('');
+  say('substrate lint:');
+  for (const line of formatLintResult(lint).split('\n')) say(`  ${line}`);
+  drift = drift || !lint.ok;
 
   const ccOut = renderDirFor('cc');
   const cc = compiler.checkDrift({ target: 'cc', outDir: ccOut, items: planForTarget('cc') });
   const ccInstrOut = ccAdapter.instructionOutDir();
   const ccInstr = compiler.checkDrift({ target: 'cc-instructions', outDir: ccInstrOut, items: ccAdapter.buildInstructionPlan({ substrateRoot: substrateRoot() }) });
-  log('');
-  log(`global cc: ${ccOut}`);
-  log(`  instructions out: ${ccInstrOut}`);
-  printDrift({ clean: cc.clean && ccInstr.clean, drifted: [...cc.drifted, ...ccInstr.drifted], orphaned: [...cc.orphaned, ...ccInstr.orphaned] });
+  if (!quiet) log('');
+  say(`global cc: ${ccOut}`);
+  say(`  instructions out: ${ccInstrOut}`);
+  if (!quiet) printDrift({ clean: cc.clean && ccInstr.clean, drifted: [...cc.drifted, ...ccInstr.drifted], orphaned: [...cc.orphaned, ...ccInstr.orphaned] });
   drift = drift || !cc.clean || !ccInstr.clean;
+
+  const marketplaceOut = renderDirFor('cc-marketplace');
+  const marketplace = compiler.checkDrift({ target: 'cc-marketplace', outDir: marketplaceOut, items: planForTarget('cc-marketplace') });
+  if (!quiet) log('');
+  say(`global cc-marketplace: ${marketplaceOut}`);
+  if (!quiet) printDrift(marketplace);
+  drift = drift || !marketplace.clean;
 
   if (isHarnessEnabled('opencode')) {
     const root = substrateRoot();
@@ -725,34 +745,35 @@ async function cmdSyncCheckAll() {
     const s = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.skillsOutDir(), items: ocAdapter.buildSkillPlan({ substrateRoot: root }) });
     const i = compiler.checkDrift({ target: 'opencode-instructions', outDir: ocAdapter.instructionOutDir(), items: ocAdapter.buildInstructionPlan({ substrateRoot: root }) });
     const clean = a.clean && s.clean && i.clean;
-    log('');
-    log('global opencode:');
-    log(`  agents out: ${ocAdapter.agentOutDir()}`);
-    log(`  skills out: ${ocAdapter.skillsOutDir()}`);
-    log(`  instructions out: ${ocAdapter.instructionOutDir()}`);
-    printDrift({ clean, drifted: [...a.drifted, ...s.drifted, ...i.drifted], orphaned: [...a.orphaned, ...s.orphaned, ...i.orphaned] });
+    if (!quiet) log('');
+    say('global opencode:');
+    say(`  agents out: ${ocAdapter.agentOutDir()}`);
+    say(`  skills out: ${ocAdapter.skillsOutDir()}`);
+    say(`  instructions out: ${ocAdapter.instructionOutDir()}`);
+    if (!quiet) printDrift({ clean, drifted: [...a.drifted, ...s.drifted, ...i.drifted], orphaned: [...a.orphaned, ...s.orphaned, ...i.orphaned] });
     drift = drift || !clean;
   }
 
   for (const p of knownProjects()) {
     const projectId = p.id || projectIdFor(p.path);
     const ccProj = compiler.checkDrift({ target: 'cc', outDir: p.path, items: ccAdapter.buildProjectPlan({ substrateRoot: substrateRoot() }), projectId });
-    log('');
-    log(`project cc ${projectId}: ${p.path}`);
-    printDrift(ccProj);
+    if (!quiet) log('');
+    say(`project cc ${projectId}: ${p.path}`);
+    if (!quiet) printDrift(ccProj);
     drift = drift || !ccProj.clean;
     if (isHarnessEnabled('opencode')) {
       const root = substrateRoot();
       const a = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.projectAgentOutDir(p.path), items: ocAdapter.buildProjectAgentPlan({ substrateRoot: root }), projectId });
       const s = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.projectSkillsOutDir(p.path), items: ocAdapter.buildProjectSkillPlan({ substrateRoot: root }), projectId });
       const clean = a.clean && s.clean;
-      log(`project opencode ${projectId}: ${p.path}`);
-      printDrift({ clean, drifted: [...a.drifted, ...s.drifted], orphaned: [...a.orphaned, ...s.orphaned] });
+      say(`project opencode ${projectId}: ${p.path}`);
+      if (!quiet) printDrift({ clean, drifted: [...a.drifted, ...s.drifted], orphaned: [...a.orphaned, ...s.orphaned] });
       drift = drift || !clean;
     }
   }
 
-  if (drift) process.exit(1);
+  if (drift && !quiet) process.exit(1);
+  return !drift;
 }
 
 /**
@@ -908,34 +929,10 @@ async function cmdDoctor() {
   log('');
   log('Substrate sync');
   try {
-    const items = planForTarget('cc');
-    const outDir = renderDirFor('cc');
-    const { clean, drifted, orphaned } = compiler.checkDrift({ target: 'cc', outDir, items });
-    clean ? ok(`cc render clean (${outDir})`) : skip(`cc render drifted (${drifted.length} changed, ${orphaned.length} orphaned) — run \`golem sync --target cc\``);
+    const clean = await cmdSyncCheckAll({ quiet: true });
+    clean ? ok('sync --check --all clean') : fail('sync --check --all drifted or lint failed — run `golem sync --check --all`');
   } catch (e) {
-    skip(`could not check substrate drift — ${e.message}`);
-  }
-
-  try {
-    const projects = knownProjects();
-    const root = substrateRoot();
-    let driftedProjects = 0;
-    for (const p of projects) {
-      const projectId = p.id || projectIdFor(p.path);
-      const cc = compiler.checkDrift({ target: 'cc', outDir: p.path, items: ccAdapter.buildProjectPlan({ substrateRoot: root }), projectId });
-      let clean = cc.clean;
-      if (isHarnessEnabled('opencode')) {
-        const a = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.projectAgentOutDir(p.path), items: ocAdapter.buildProjectAgentPlan({ substrateRoot: root }), projectId });
-        const s = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.projectSkillsOutDir(p.path), items: ocAdapter.buildProjectSkillPlan({ substrateRoot: root }), projectId });
-        clean = clean && a.clean && s.clean;
-      }
-      if (!clean) driftedProjects += 1;
-    }
-    driftedProjects === 0
-      ? ok(`project renders clean (${projects.length} registered projects checked)`)
-      : skip(`project renders drifted in ${driftedProjects}/${projects.length} projects — run \`golem sync --check\` for details`);
-  } catch (e) {
-    skip(`could not check project render drift — ${e.message}`);
+    fail(`could not run sync --check --all — ${e.message}`);
   }
 
   log('');
@@ -1082,7 +1079,7 @@ Run:
                        the old path to the new one, restarts. Explicit only —
                        never runs automatically. Rollback is one command
                        (printed on completion).
-  sync [--check] [--target cc|cc-marketplace|opencode] [--out <dir>] [--force]
+  sync [--check] [--all] [--target cc|cc-marketplace|opencode] [--out <dir>] [--force]
        [--project <root>] [--harness cc|claudecode|opencode]
                         Render substrate/ sources into a harness bundle
                         (default target: cc, default out: ~/.golem/renders/
@@ -1093,7 +1090,7 @@ Run:
                         --project switches to project-scoped artifacts only,
                         rendering into the project root's harness-local dirs and
                         recording the lockfile under projects.<project_id>.
-                        With only --check and no target/project args, reports
+                         With --check --all, or only --check and no target/project args, reports
                         global renders plus all known project render sections.
                        target opencode renders agents into
                        ~/.config/opencode/agent/ + skills into

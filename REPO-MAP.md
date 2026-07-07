@@ -5,11 +5,12 @@
 - `substrate/` — source of truth: agents, skills, roles, hooks, MCP, instructions.
 - `plugin/` — generated Claude Code render; never hand-edit.
 - `cli/` — thin `golem` CLI: dashboard, sync, role, doctor, status.
-- `lib/` — runtime-path, role, compiler, LSP libraries.
+- `lib/` — runtime-path, role, compiler, substrate-lint, LSP libraries.
 - `dashboard/server/` — Fastify REST/WS; sole `tracker.db` owner.
 - `dashboard/web/` — no-bundler React globals.
 - `mcp/channel/` — per-session server for briefs, gates, consults, tracker.
 - `shims/opencode/` — maps opencode events into hook/session registries.
+- `test/` — journey tests for CLI/compiler enforcement paths.
 - `golem-projects/` — independent checkouts; not this repo.
 - `.worktrees/` — gitignored builder checkouts; explicit dispatches only.
 

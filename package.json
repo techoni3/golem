@@ -23,7 +23,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "check": "node --check cli/golem.js",
+    "check": "node --check cli/golem.js && node cli/golem.js sync --check --all",
+    "test": "node test/sync-enforcement.test.mjs",
     "dashboard": "node dashboard/server/index.js",
     "dashboard:dev": "node --watch dashboard/server/index.js",
     "check:dashboard": "dashboard/scripts/check.sh"

@@ -302,6 +302,35 @@ sync_on_register() {
 
 sync_on_register || true
 
+# --- global substrate freshness repair -------------------------------------
+# Entirely detached and fail-open: stale global renders should self-heal, but a
+# broken sync must never block SessionStart.
+global_sync_on_register() {
+  local cli="${GOLEM_CLI:-}"
+  if [ -z "$cli" ]; then
+    cli="$(command -v golem 2>/dev/null || true)"
+  fi
+  [ -z "$cli" ] && return 0
+  local log_dir="$CONFIG_DIR/logs"
+  local log_file="$log_dir/global-sync-on-register.log"
+  mkdir -p "$log_dir" 2>/dev/null || return 0
+  (
+    for target in cc cc-marketplace opencode; do
+      "$cli" sync --check --target "$target" >> "$log_file" 2>&1
+      local rc=$?
+      if [ "$rc" -eq 1 ]; then
+        printf '%s global-sync-on-register: drift detected; rendering %s\n' "$NOW" "$target" >> "$log_file" 2>/dev/null || true
+        "$cli" sync --target "$target" --force >> "$log_file" 2>&1 || true
+      elif [ "$rc" -ne 0 ]; then
+        printf '%s global-sync-on-register: check failed rc=%s for %s; fail-open\n' "$NOW" "$rc" "$target" >> "$log_file" 2>/dev/null || true
+      fi
+    done
+  ) >/dev/null 2>&1 &
+  return 0
+}
+
+global_sync_on_register || true
+
 # --- naming: intentionally NONE --------------------------------------------
 # We deliberately do NOT emit sessionTitle. SessionStart fires on resume/compact
 # too, so auto-titling to the repo dirname clobbered the user's /rename on every
