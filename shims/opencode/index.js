@@ -71,20 +71,41 @@ function opencodeStateDir() {
   return join(os.homedir(), ".local", "state", "opencode");
 }
 
+function opencodeDataDir() {
+  if (process.env.OPENCODE_DATA_DIR) return process.env.OPENCODE_DATA_DIR;
+  if (process.env.XDG_DATA_HOME) return join(process.env.XDG_DATA_HOME, "opencode");
+  return join(os.homedir(), ".local", "share", "opencode");
+}
+
 function normalizeModelId(value) {
   const s = typeof value === "string" ? value.trim() : "";
   return s || null;
 }
 
+function normalizeModelValue(value) {
+  if (!value) return null;
+  if (typeof value === "object") return modelFromObject(value);
+  const s = normalizeModelId(value);
+  if (!s) return null;
+  if (s[0] === "{" || s[0] === "[") {
+    try {
+      const parsed = JSON.parse(s);
+      return modelFromObject(parsed) || normalizeModelId(parsed?.id);
+    }
+    catch { /* not JSON; use the raw string */ }
+  }
+  return s;
+}
+
 function modelFromObject(obj) {
   if (!obj || typeof obj !== "object") return null;
-  return normalizeModelId(
+  return normalizeModelValue(
     obj.modelID || obj.modelId || obj.model_id || obj.model || obj.activeModel ||
     obj.session?.modelID || obj.session?.model || obj.info?.modelID || obj.info?.model,
   );
 }
 
-function readOpencodeModel() {
+function readRecentOpencodeModel() {
   try {
     const parsed = JSON.parse(readFileSync(join(opencodeStateDir(), "model.json"), "utf8"));
     const recent = Array.isArray(parsed?.recent) ? parsed.recent[0] : null;
@@ -92,6 +113,35 @@ function readOpencodeModel() {
   } catch {
     return null;
   }
+}
+
+function sqlString(value) {
+  return `'${String(value ?? "").replace(/'/g, "''")}'`;
+}
+
+function readOpencodeDbValue(sql) {
+  try {
+    const out = execFileSync("sqlite3", [
+      "-readonly",
+      "-cmd", ".timeout 200",
+      join(opencodeDataDir(), "opencode.db"),
+      sql,
+    ], { encoding: "utf8", timeout: 500, stdio: ["ignore", "pipe", "ignore"] });
+    return normalizeModelValue(out.split("\n")[0]);
+  } catch {
+    return null;
+  }
+}
+
+function readOpencodeModel(sessionID = "") {
+  if (sessionID) {
+    const sid = sqlString(sessionID);
+    const messageModel = readOpencodeDbValue(`SELECT json_extract(data, '$.modelID') FROM message WHERE session_id = ${sid} ORDER BY time_created DESC LIMIT 1`);
+    if (messageModel) return messageModel;
+    const sessionModel = readOpencodeDbValue(`SELECT model FROM session WHERE id = ${sid}`);
+    if (sessionModel) return sessionModel;
+  }
+  return readRecentOpencodeModel();
 }
 
 function logErr(context, detail) {
@@ -388,7 +438,7 @@ function startBridge({ client, dirFor, logErr }) {
         path: { id: sessionID },
         body: { parts: [{ type: "text", text }] },
       }).catch((e) => logErr("bridge prompt", e));
-      const model = readOpencodeModel();
+      const model = readOpencodeModel(sessionID);
       updateSessionRegistry({ sessionID, cwd: dirFor(sessionID), status: "busy", model });
       if (port) updateBridge({ sessionID, cwd: dirFor(sessionID), status: "busy", port, model });
       return sendJson(res, 202, { ok: true, kind, session_id: sessionID });
@@ -468,7 +518,7 @@ export default async (input) => {
   };
 
   const dirFor = (sid) => sessionDir.get(sid) || initCwd;
-  const base = (sessionID, cwd, extra = {}) => ({ session_id: sessionID || "", cwd: cwd || initCwd, harness: "opencode", model: readOpencodeModel(), ...extra });
+  const base = (sessionID, cwd, extra = {}) => ({ session_id: sessionID || "", cwd: cwd || initCwd, harness: "opencode", model: readOpencodeModel(sessionID), ...extra });
   const bridge = startBridge({ client: input?.client, dirFor, logErr });
   // insert:false is the default so events from child/subagent sessions (whose
   // ids also flow through chat.message/tool.* hooks) can only UPDATE existing
@@ -478,7 +528,7 @@ export default async (input) => {
     const port = bridge.port();
     if (!sessionID || !port) return;
     const st = statusString(status);
-    const model = readOpencodeModel();
+    const model = readOpencodeModel(sessionID);
     updateBridge({ sessionID, cwd: dirFor(sessionID), status: st, port, name, model, insert });
     updateSessionRegistry({ sessionID, cwd: dirFor(sessionID), status: st, name, model, insert, touchLastSeen });
   };
@@ -559,7 +609,7 @@ export default async (input) => {
           const register = () => {
             const port = bridge.port();
             if (!port) return false;
-            const model = modelFromObject(info) || readOpencodeModel();
+            const model = modelFromObject(info) || readOpencodeModel(info.id);
             registerBridge({ sessionID: info.id, cwd: info.directory || dirFor(info.id), status, port, name, model });
             updateSessionRegistry({ sessionID: info.id, cwd: info.directory || dirFor(info.id), status, name, model });
             return true;
