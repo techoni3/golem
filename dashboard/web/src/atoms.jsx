@@ -135,11 +135,11 @@ function sessionStatusKind(s) {
 function HarnessIcon({ harness }) {
   const h = harness || 'claudecode';
   const cls = h === 'opencode' ? 'opencode' : h === 'claudecode' ? 'claudecode' : 'other';
-  const base = 'https://unpkg.com/@lobehub/icons-static-svg@1.91.0/icons/';
+  const base = window.ModelProviders?.iconBase;
   const src = h === 'opencode'
-    ? `${base}OpenCode.svg`
+    ? base && `${base}opencode.svg`
     : h === 'claudecode'
-      ? `${base}ClaudeCode.svg`
+      ? base && `${base}claudecode-color.svg`
       : null;
   return (
     <span className={`agent-harness-icon ${cls}`} title={`harness: ${h}`} aria-label={`harness ${h}`}>
