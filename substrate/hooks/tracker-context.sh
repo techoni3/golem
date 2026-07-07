@@ -1,13 +1,7 @@
 #!/usr/bin/env bash
-# SessionStart hook — inject the golem tracker working-model into the session so
-# agents register/track their work as tickets BY DEFAULT (skills are opt-in; a
-# fresh session has the ticket_* MCP tools but no standing instruction to use
-# them). Emits a SessionStart `additionalContext` JSON and, when the session has
-# a role in sessions.json, appends that compact role card. Fail-open: on any
-# failure it emits base tracker context rather than breaking session start.
-#
-# The text is single-quoted; `\n` stays literal (valid JSON newline escapes) and
-# there are no double-quotes in the body, so the JSON needs no further escaping.
+# SessionStart hook — assemble tracker context, team hints, and a compact role
+# card. Fail-open: emit the rendered tracker context, or the substrate source if
+# sync is stale, rather than breaking session start.
 
 set -euo pipefail
 
@@ -47,7 +41,36 @@ if command -v jq >/dev/null 2>&1 && [ -n "$PAYLOAD" ]; then
   fi
 fi
 
-ctx='Golem session — the golem cross-project TRACKER is where work lives (not PLAN.md, not an ad-hoc todo). You have MCP tools: ticket_list/get/create/update/comment/dispatch, stream_create/list, sessions_dispatchable. The dashboard owns the DB and must be running (golem dashboard).\n\nWorking model — keep the tracker in sync AS YOU PLAN AND WORK on feature-sized or larger requests; do not wait to be told:\n- On a brief or dispatch: ticket_list(mine:true) or the ticket id named in the brief, then ticket_get it, then ticket_update to in_progress.\n- As you plan: ticket_create one ticket per work-item (decompose with parent_id; group related work with stream_create, mode sequential or parallel).\n- As you work: ticket_comment progress with mechanical evidence (commands + real output), and advance state in_progress -> review -> done (or blocked when stuck).\n- Blocking question for the human: ticket_create with kind:question and assignee:human, then pause that thread until they answer via a comment.\nSkip all of this for trivial questions or one-line fixes. If a ticket tool reports the dashboard is unreachable, note it and proceed without blocking. Full flow: the golem:tracker skill.\n\nState hygiene — never leave a ticket you own in the wrong state:\n- Never end a turn with a ticket in a wrong state: finished work -> review (or done after verify-done), abandoned/parked -> comment WHY + blocked or unassign. A dispatched ticket leaves todo the moment you start it.\n- Before going idle, sweep ticket_list(mine:true): any in_progress you are not actively working must be advanced, commented, or released.\n- Stale tickets are a defect: your own ticket untouched >1 day -> fix its state before starting new work.'
+if command -v node >/dev/null 2>&1; then
+  ctx="$(node - "$SCRIPT_DIR" <<'NODE' 2>/dev/null || true
+const fs = require('fs');
+const path = require('path');
+const scriptDir = process.argv[2];
+const home = process.env.HOME || '';
+const candidates = [
+  path.join(home, '.claude', 'tracker-context.md'),
+  path.join(process.env.XDG_CONFIG_HOME || path.join(home, '.config'), 'opencode', 'tracker-context.md'),
+  path.join(scriptDir, '..', 'instructions', 'tracker-context.md'),
+];
+for (const candidate of candidates) {
+  try {
+    const text = fs.readFileSync(candidate, 'utf8').trimEnd();
+    if (text) {
+      process.stdout.write(JSON.stringify(text).slice(1, -1));
+      process.exit(0);
+    }
+  } catch {}
+}
+NODE
+)"
+else
+  ctx="$(cat "$SCRIPT_DIR/../instructions/tracker-context.md" 2>/dev/null || true)"
+  if [ -n "$ctx" ] && command -v jq >/dev/null 2>&1; then
+    ctx="$(printf '%s' "$ctx" | jq -Rs . 2>/dev/null || true)"
+    ctx="${ctx#\"}"
+    ctx="${ctx%\"}"
+  fi
+fi
 
 if command -v node >/dev/null 2>&1; then
   MAP_BLOCK="$(node - "$GOLEM_HOME_DIR" "$START_DIR" <<'NODE' 2>/dev/null || true
@@ -99,7 +122,7 @@ process.stdout.write(lines.join('\n'));
 NODE
 )"
   if [ -n "$MAP_BLOCK" ] && command -v jq >/dev/null 2>&1; then
-    MAP_ESC="$(printf '%s' "\n\n$MAP_BLOCK" | jq -Rs . 2>/dev/null || true)"
+    MAP_ESC="$(printf '\n\n%s' "$MAP_BLOCK" | jq -Rs . 2>/dev/null || true)"
     if [ -n "$MAP_ESC" ]; then
       MAP_ESC="${MAP_ESC#\"}"
       MAP_ESC="${MAP_ESC%\"}"
@@ -109,11 +132,11 @@ NODE
 fi
 
 if command -v node >/dev/null 2>&1; then
-  TEAM_BLOCK="$(node - "$GOLEM_HOME_DIR" "$START_DIR" "$SESSION_ID" <<'NODE' 2>/dev/null || true
+  TEAM_BLOCK="$(node - "$GOLEM_HOME_DIR" "$START_DIR" "$SESSION_ID" "$SCRIPT_DIR" <<'NODE' 2>/dev/null || true
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const [home, start, selfId] = process.argv.slice(2);
+const [home, start, selfId, scriptDir] = process.argv.slice(2);
 function rootFrom(dir) {
   let cur = path.resolve(dir);
   const homeDir = process.env.HOME || '';
@@ -149,21 +172,48 @@ const root = rootFrom(start);
 const id = projectId(root);
 let sessions = [];
 try { sessions = JSON.parse(fs.readFileSync(path.join(home, 'sessions.json'), 'utf8')).sessions || []; } catch {}
-const peers = sessions
-  .filter((s) => s && s.project_id === id && s.session_id !== selfId)
+function roleMission(role) {
+  if (!role) return '';
+  for (const candidate of [path.join(home, 'roles', `${role}.md`), path.join(scriptDir, '..', 'roles', `${role}.md`)]) {
+    try {
+      const m = fs.readFileSync(candidate, 'utf8').match(/^Mission:\s*(.+)$/m);
+      if (m) return m[1].trim();
+    } catch {}
+  }
+  return '';
+}
+function workload(s) {
+  const inProgress = Array.isArray(s.in_progress_tickets)
+    ? s.in_progress_tickets.length
+    : Array.isArray(s.workload?.in_progress_tickets) ? s.workload.in_progress_tickets.length : 0;
+  const pending = Number(s.pending_count ?? s.workload?.pending_count ?? 0) || 0;
+  return `${inProgress} working, ${pending} queued`;
+}
+const rows = sessions
+  .filter((s) => s && s.project_id === id)
   .sort((a, b) => String(b.last_seen_at || '').localeCompare(String(a.last_seen_at || '')))
+  .slice(0, 9);
+const self = rows.find((s) => s.session_id === selfId);
+const peers = rows
+  .filter((s) => s.session_id !== selfId)
   .slice(0, 8)
   .map((s) => {
     const name = s.name || (s.session_id ? `session ${String(s.session_id).slice(0, 8)}` : 'session');
     const role = s.role || 'unassigned';
     const status = s.status || (s.ended_at ? 'ended' : 'unknown');
-    return `${name} (${role}, ${status})`;
+    const duty = roleMission(s.role);
+    const roleText = duty ? `${role}: ${duty}` : role;
+    return `${name} (${roleText}; ${status}; workload ${workload(s)})`;
   });
-if (peers.length) process.stdout.write(`Team on ${id}: ${peers.join('; ')}`);
+const lines = [];
+if (self) lines.push(`You are ${self.name || self.session_id || selfId}, role ${self.role || 'unassigned'}.`);
+if (peers.length) lines.push(`Team on ${id}: ${peers.join('; ')}`);
+if (lines.length) lines.push('Routing hint: re-query sessions_dispatchable before dispatching; this roster is only a session-start hint.');
+process.stdout.write(lines.join('\n'));
 NODE
 )"
   if [ -n "$TEAM_BLOCK" ] && command -v jq >/dev/null 2>&1; then
-    TEAM_ESC="$(printf '%s' "\n\n$TEAM_BLOCK" | jq -Rs . 2>/dev/null || true)"
+    TEAM_ESC="$(printf '\n\n%s' "$TEAM_BLOCK" | jq -Rs . 2>/dev/null || true)"
     if [ -n "$TEAM_ESC" ]; then
       TEAM_ESC="${TEAM_ESC#\"}"
       TEAM_ESC="${TEAM_ESC%\"}"
@@ -191,9 +241,7 @@ if [ -n "$SESSION_ID" ] && command -v jq >/dev/null 2>&1; then
     done
   fi
   if [ -n "$ROLE" ] && [ -n "$CARD" ]; then
-    NAME="$(jq -r --arg sid "$SESSION_ID" '(.sessions // [])[] | select(.session_id == $sid) | .name // .session_id // $sid' "$SESSIONS_JSON" 2>/dev/null | head -n 1 || true)"
-    ROSTER="Roster: ${NAME:-$SESSION_ID} is assigned role $ROLE."
-    ROLE_ESC="$( { printf '\n\n'; cat "$CARD"; printf '\n\n%s' "$ROSTER"; } | jq -Rs . 2>/dev/null || true)"
+    ROLE_ESC="$( { printf '\n\n'; cat "$CARD"; } | jq -Rs . 2>/dev/null || true)"
     if [ -n "$ROLE_ESC" ]; then
       ROLE_ESC="${ROLE_ESC#\"}"
       ROLE_ESC="${ROLE_ESC%\"}"

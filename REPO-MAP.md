@@ -27,7 +27,7 @@
 ### `substrate/hooks/*.sh`
 - SessionStart registers, journals, then injects tracker working-model and LSP hints.
 ### `substrate/instructions/`
-- Global instructions render as blocks; outside-marker user text must survive sync.
+- Global instructions render as managed blocks or plain hook context files; outside-marker user text must survive sync.
 ### `mcp/channel/index.js`
 - Exposes channel replies, consults, gates, and tracker tools per live session.
 
