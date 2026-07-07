@@ -20,6 +20,22 @@ The golem tracker is the source of truth. Tickets carry both a board `state` and
 7. Verify with mechanical evidence before moving to `review`, `built`, `verified`, `done`, or claiming closure.
 8. If repo structure changed, read `golem:docs-maintenance` and update the map/doc in the same session.
 
+## Handoff Ownership
+
+Canonical pipeline: idea → manager sizes/intakes → manager hands feature-sized design to planner → planner designs + decomposes + sequences → planner hands readiness gate to manager → manager dispatches tickets to builders → builder builds → manager verifies/reconciles → manager closes.
+
+Two invariants:
+- (a) The manager owns ALL build dispatch. The planner never dispatches builds.
+- (b) The manager never authors/decomposes specs. The planner owns design + decomposition, then hands a readiness gate to the manager.
+
+Ownership map:
+- manager — intake / dispatch / verify / reconcile / close
+- planner — design / decompose / sequence / readiness gate
+- builder — implement
+- explorer — recon / verify
+
+"Fan-out" = the planner decomposes into the ticket tree. "Distribution/dispatch" = the manager pushes those tickets to live builders. Reconcile is the manager's, unconditionally.
+
 ## Phase Model
 
 Specs: `drafting -> grounding -> grounded -> designing -> designed -> planning -> planned -> building -> done`, with `parked` as the blocked path.
@@ -32,7 +48,7 @@ Questions: `open -> answered -> closed`. Decisions: `open -> decided -> closed`.
 
 Own intake, grounding, distribution, verification routing, and closure.
 
-- Intake: clarify only what blocks execution. Create or reuse a tracker ticket/spec and leave the acceptance checklist in the body.
+- Intake: size the ask; create or reuse a tracker ticket/spec; leave the acceptance checklist. Do NOT author the design — hand feature-sized work to the planner.
 - Grounding: for specs, drive `drafting -> grounding -> grounded` with a grounding-summary comment. Use explorer help for discovery.
 - Distribution: when the spec is `planned`, dispatch child work items to live role-matching sessions from the team surface. Prefer least-loaded builders for implementation and explorers for verification.
 - Worktree dispatches: when parallel builders are needed in one repo, include an explicit worktree directive per builder. This satisfies the branching gate; builders then follow `golem:git-conventions` (Worktree Lifecycle section).
@@ -45,13 +61,13 @@ Own intake, grounding, distribution, verification routing, and closure.
 
 ## Planner Playbook
 
-Own design and fan-out. Avoid repo write ownership when a builder is available. If acting as the orchestrator for worktree-based parallel work, you may reconcile finished branches on main; builders still never do.
+Own design and fan-out (decompose into the ticket tree; do NOT dispatch — hand the readiness gate to the manager). Avoid repo write ownership when a builder is available.
 
 - Shape the spec body as the contract: Intent, Behaviour, Decisions, Non-goals, Open questions.
 - Before `designed -> planning`, confirm the phase-machine requirements are satisfied: behaviour maps to planned work, open questions are answered/deferred, and required design artifacts are present.
 - Move `grounded -> designing -> designed` only when the design comment exists and concerns are addressed.
 - Human or explicit agent go-ahead is required for `designed -> planning`; do not infer sign-off from silence.
-- Fan out one child ticket per work item, grouped in a stream. Set `wave` so wave N+1 waits for wave N terminal.
+- Fan out = create + sequence child tickets in the tracker (stream + wave); the manager dispatches them to live builders. Set `wave` so wave N+1 waits for wave N terminal.
 - Move the spec to `planned` only after children and waves exist; move to `building` when the first child starts.
 - Preserve each child's acceptance checklist from the parent Behaviour section.
 
