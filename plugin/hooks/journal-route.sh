@@ -40,12 +40,14 @@ CWD="$PWD"
 HARNESS=""
 SESSION_NAME=""
 MODEL=""
+TRANSCRIPT_PATH=""
 if command -v jq >/dev/null 2>&1 && [ -n "$PAYLOAD" ]; then
   SESSION_ID="$(printf '%s' "$PAYLOAD" | jq -r '.session_id // empty' 2>/dev/null || true)"
   _pcwd="$(printf '%s' "$PAYLOAD" | jq -r '.cwd // empty' 2>/dev/null || true)"
   [ -n "$_pcwd" ] && CWD="$_pcwd"
   HARNESS="$(printf '%s' "$PAYLOAD" | jq -r '.harness // empty' 2>/dev/null || true)"
   MODEL="$(printf '%s' "$PAYLOAD" | jq -r '.model // .modelID // .model_id // .session.model // .session.modelID // .info.model // .info.modelID // empty' 2>/dev/null || true)"
+  TRANSCRIPT_PATH="$(printf '%s' "$PAYLOAD" | jq -r '.transcript_path // empty' 2>/dev/null || true)"
 fi
 
 if [ "${HARNESS:-claudecode}" != "opencode" ] && command -v jq >/dev/null 2>&1; then
@@ -138,6 +140,11 @@ refresh_session_registry() {
   [ -z "$SESSION_ID" ] && return 0
   [ ! -f "$SESSIONS_JSON" ] && return 0
   command -v jq >/dev/null 2>&1 || return 0
+  if [ -z "$MODEL" ] && [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ]; then
+    MODEL="$(tail -10 "$TRANSCRIPT_PATH" 2>/dev/null \
+      | jq -r 'select(.type == "assistant") | select(.message.model != "<synthetic>") | .message.model // empty' 2>/dev/null \
+      | tail -1)"
+  fi
   local tmp="$SESSIONS_JSON.tmp.$$"
   jq \
     --arg sid "$SESSION_ID" \
