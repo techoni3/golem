@@ -443,5 +443,17 @@ export async function readNativeSessions(registeredIdLookup) {
     if (a.alive !== b.alive) return a.alive ? -1 : 1;
     return (b.updated_at ?? b.started_at ?? 0) - (a.updated_at ?? a.started_at ?? 0);
   });
-  return out;
+
+  try {
+    const seenNames = new Set();
+    return out.filter((row) => {
+      const name = row.name && row.name.trim();
+      if (!name) return true;
+      if (seenNames.has(name)) return false;
+      seenNames.add(name);
+      return true;
+    });
+  } catch {
+    return out;
+  }
 }
