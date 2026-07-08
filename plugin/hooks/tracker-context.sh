@@ -42,36 +42,7 @@ if command -v jq >/dev/null 2>&1 && [ -n "$PAYLOAD" ]; then
   fi
 fi
 
-if command -v node >/dev/null 2>&1; then
-  ctx="$(node - "$SCRIPT_DIR" <<'NODE' 2>/dev/null || true
-const fs = require('fs');
-const path = require('path');
-const scriptDir = process.argv[2];
-const home = process.env.HOME || '';
-const candidates = [
-  path.join(home, '.claude', 'tracker-context.md'),
-  path.join(process.env.XDG_CONFIG_HOME || path.join(home, '.config'), 'opencode', 'tracker-context.md'),
-  path.join(scriptDir, '..', 'instructions', 'tracker-context.md'),
-];
-for (const candidate of candidates) {
-  try {
-    const text = fs.readFileSync(candidate, 'utf8').trimEnd();
-    if (text) {
-      process.stdout.write(JSON.stringify(text).slice(1, -1));
-      process.exit(0);
-    }
-  } catch {}
-}
-NODE
-)"
-else
-  ctx="$(cat "$SCRIPT_DIR/../instructions/tracker-context.md" 2>/dev/null || true)"
-  if [ -n "$ctx" ] && command -v jq >/dev/null 2>&1; then
-    ctx="$(printf '%s' "$ctx" | jq -Rs . 2>/dev/null || true)"
-    ctx="${ctx#\"}"
-    ctx="${ctx%\"}"
-  fi
-fi
+ctx=""
 
 if command -v node >/dev/null 2>&1; then
   MAP_BLOCK="$(node - "$GOLEM_HOME_DIR" "$START_DIR" <<'NODE' 2>/dev/null || true

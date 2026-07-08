@@ -114,7 +114,7 @@ try {
   write(path.join(repairRoot, 'CLAUDE.md'), '# repair project\n');
   const env = { ...process.env, GOLEM_HOME: repairHome, HOME: repairHome, GOLEM_CLI: cli };
   spawnSync(process.execPath, [cli, 'sync', '--target', 'cc'], { cwd: repo, env, encoding: 'utf8' });
-  const rendered = path.join(repairHome, '.claude', 'tracker-context.md');
+  const rendered = path.join(repairHome, '.claude', 'CLAUDE.md');
   assert.ok(fs.existsSync(rendered), 'global render exists before stale test');
   fs.writeFileSync(rendered, 'stale\n');
   const hook = spawnSync('bash', [path.join(repo, 'substrate', 'hooks', 'session-register.sh')], {

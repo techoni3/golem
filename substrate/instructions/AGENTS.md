@@ -10,6 +10,7 @@ Never guess how a library, API, framework, or configuration works. If you do not
 - Feature-sized+ → read golem:work-loop (spine + your role's playbook).
 - Any tracker action → golem:tracker. Before claiming done/review → golem:verify-done.
 - Situational: branch/commit/PR or a worktree directive → golem:git-conventions · browser/UI → golem:browser-testing · human pause → golem:gates.
+- Tracker rhythm: on brief/dispatch, load the named ticket or mine:true, then mark it in_progress; while planning create one ticket per work item; while working comment evidence and advance state; blocking human questions become kind:question tickets. Skip this for trivial questions or one-line fixes.
 
 ## Done Means Evidence
 
@@ -20,7 +21,7 @@ Trust only mechanical evidence: command output you ran, files changed, tests/che
 - Delegate with foreground, single-shot Task/Agent calls; they run in-process, return one result, and self-clean.
 - Never use named teammates, agent teams, dynamic workflows, or background agents that you do not explicitly shut down and verify gone.
 - Work in the current checkout unless a dispatch explicitly names a worktree; never create or enter a worktree on your own initiative.
-- Keep tracker state current for feature-sized+ work; stale or wrong ticket state is a defect.
+- Keep tracker state current for feature-sized+ work; stale or wrong ticket state is a defect. Never end a turn with a ticket in the wrong state: finished work → review/done, parked work → blocked or unassigned with a comment. Before going idle, sweep your in_progress tickets; fix any of yours untouched for >1 day before starting new work.
 
 ## Delegation Precedence
 

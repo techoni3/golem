@@ -87,6 +87,15 @@ export function readRoleCard(role) {
   try { return fs.readFileSync(p, 'utf8').trimEnd(); } catch { return null; }
 }
 
+export function roleMission(role) {
+  try {
+    const card = readRoleCard(role);
+    return card?.match(/^Mission:\s*(.+)$/m)?.[1]?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeRoleName(name) {
   const value = String(name || '').trim().toLowerCase();
   if (!/^[a-z][a-z0-9-]{1,31}$/.test(value)) throw new Error('role name must be 2-32 chars: a-z, 0-9, hyphen; start with a letter');
