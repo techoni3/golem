@@ -7,7 +7,9 @@
     { id: 'minimax', label: 'MiniMax', pattern: /^minimax/i, iconSrc: `${iconBase}minimax-color.svg` },
     { id: 'z-ai', label: 'Z.ai', pattern: /^glm/i, iconSrc: `${iconBase}zai.svg` },
     { id: 'deepseek', label: 'DeepSeek', pattern: /^deepseek/i, iconSrc: `${iconBase}deepseek-color.svg` },
+    { id: 'gemma', label: 'Gemma', pattern: /^gemma/i, iconSrc: `${iconBase}gemma-color.svg` },
     { id: 'google', label: 'Google', pattern: /^gemini/i, iconSrc: `${iconBase}gemini-color.svg` },
+    { id: 'tencent', label: 'Tencent', pattern: /^hy3/i, iconSrc: `${iconBase}tencent-color.svg` },
   ];
   const fallback = { id: 'fallback', label: 'Unknown', pattern: /.^/, iconSrc: null };
 
