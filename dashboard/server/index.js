@@ -20,7 +20,7 @@ import { initDispatchDrainer } from './dispatch-queue.js';
 import { registerSubstrateRoutes } from './substrate.js';
 import { teamAssists } from './team-assist.js';
 import { golemHome, dashboardJsonPath, journalDirFor, sessionsJsonPath } from '../../lib/golem-home.js';
-import { createRole, deleteRole, getRole, listRoleCards, roleChangeBrief, roleMission, setSessionRole, updateRoleMeta, writeRoleCard } from '../../lib/session-role.js';
+import { createRole, deleteRole, getRole, listRoleCards, pushRoleBriefDirect, roleChangeBrief, roleMission, setSessionRole, updateRoleMeta, writeRoleCard } from '../../lib/session-role.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const WEB_ROOT = path.resolve(__dirname, '..', 'web');
@@ -1729,10 +1729,7 @@ async function main() {
       const row = setSessionRole(id, role, { by: 'human:dashboard' });
       const text = `session role ${role ?? 'cleared'} for ${row.name || row.session_id || id}`;
       chat.record('system', 'session_role', text, { session_id: row.session_id || id });
-      if (role) {
-        const brief = roleChangeBrief(role, row);
-        if (brief) pushBrief(brief, row.session_id || id).catch(() => {});
-      }
+      await pushRoleBriefDirect(id, role, row);
       if (typeof state.refreshNativeSessions === 'function') await state.refreshNativeSessions();
       broadcastWS({ type: 'native-sessions-update', native_sessions: enrichSessionRows(state.nativeSessions(), state.channels()), channels: state.channels() });
       return { ok: true, session: row };
