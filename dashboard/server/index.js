@@ -20,7 +20,7 @@ import { initDispatchDrainer } from './dispatch-queue.js';
 import { registerSubstrateRoutes } from './substrate.js';
 import { teamAssists } from './team-assist.js';
 import { golemHome, dashboardJsonPath, journalDirFor, sessionsJsonPath } from '../../lib/golem-home.js';
-import { createRole, deleteRole, getRole, listRoleCards, roleChangeBrief, setSessionRole, updateRoleMeta, writeRoleCard } from '../../lib/session-role.js';
+import { createRole, deleteRole, getRole, listRoleCards, roleChangeBrief, roleMission, setSessionRole, updateRoleMeta, writeRoleCard } from '../../lib/session-role.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const WEB_ROOT = path.resolve(__dirname, '..', 'web');
@@ -1613,6 +1613,7 @@ async function main() {
         label: s.name || `session ${String(s.session_id ?? '').slice(0, 8)}`,
         status: s.status ?? null,
         role: s.role ?? null,
+        role_mission: s.role ? roleMission(s.role) : null,
         harness: s.harness ?? 'claudecode',
         project_id: s.project_id ?? null,
         reachable: !!ch,
