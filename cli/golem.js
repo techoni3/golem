@@ -13,7 +13,7 @@
 //   help         Show this message.
 
 import { spawn, spawnSync } from 'node:child_process';
-import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync, renameSync, statSync, symlinkSync } from 'node:fs';
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync, renameSync, rmdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, resolve, join, relative } from 'node:path';
@@ -144,6 +144,160 @@ function readSessionsRegistry() {
   } catch {
     return [];
   }
+}
+
+function readSessionsRegistryObject(file = sessionsJsonPath()) {
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8'));
+    return parsed && typeof parsed === 'object' && Array.isArray(parsed.sessions) ? parsed : { version: 1, sessions: [] };
+  } catch {
+    return { version: 1, sessions: [] };
+  }
+}
+
+function writeSessionsRegistryObject(file, reg) {
+  mkdirSync(dirname(file), { recursive: true });
+  const tmp = `${file}.tmp.${process.pid}`;
+  writeFileSync(tmp, JSON.stringify(reg, null, 2));
+  renameSync(tmp, file);
+}
+
+function withFileLock(lockPath, fn) {
+  try { mkdirSync(dirname(lockPath), { recursive: true }); } catch { /* ignore */ }
+  for (let i = 0; i < 50; i++) {
+    try {
+      mkdirSync(lockPath);
+      try { return fn(); }
+      finally { try { rmdirSync(lockPath); } catch { /* ignore */ } }
+    } catch (e) {
+      if (e?.code === 'EEXIST') {
+        try {
+          const st = statSync(lockPath);
+          if (Date.now() - st.mtimeMs > 5000) rmdirSync(lockPath);
+        } catch { /* ignore */ }
+        const wait = Date.now() + 20;
+        while (Date.now() < wait) { /* brief spin */ }
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw new Error(`failed to acquire ${lockPath}`);
+}
+
+function rowTime(row, keys) {
+  for (const key of keys) {
+    const t = Date.parse(row?.[key] || '');
+    if (Number.isFinite(t)) return t;
+  }
+  return 0;
+}
+
+function isLiveSessionRow(row) {
+  return !row?.ended_at;
+}
+
+function rowFreshness(row, alive) {
+  return alive
+    ? rowTime(row, ['updated_at', 'last_seen_at', 'boot_time', 'started_at'])
+    : rowTime(row, ['ended_at', 'updated_at', 'last_seen_at', 'boot_time', 'started_at']);
+}
+
+function sessionLabel(row) {
+  return `${row.session_id || '(no session_id)'}${row.model ? ` (model=${row.model})` : ''}`;
+}
+
+function keptSessionLabel(row, reason) {
+  return `${row.session_id || '(no session_id)'} (${reason}${row.model ? `, model=${row.model}` : ''})`;
+}
+
+function sessionsDedupPlan(sessions) {
+  const groups = new Map();
+  sessions.forEach((row, index) => {
+    const name = typeof row?.name === 'string' ? row.name.trim() : '';
+    if (!name) return;
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name).push({ row, index });
+  });
+
+  const plans = [];
+  for (const [name, rows] of groups) {
+    if (rows.length < 2) continue;
+    const live = rows.filter(({ row }) => isLiveSessionRow(row));
+    const candidates = live.length ? live : rows;
+    const keep = candidates
+      .slice()
+      .sort((a, b) => rowFreshness(b.row, live.length > 0) - rowFreshness(a.row, live.length > 0))[0];
+    const mark = rows.filter((entry) => entry.index !== keep.index && !entry.row.ended_at);
+    plans.push({ name, keep, mark, liveKept: live.length > 0 });
+  }
+  return plans;
+}
+
+function printSessionsDedupPlan(plans, apply) {
+  if (!plans.length) {
+    log(`golem sessions dedup: no named duplicate sessions found (${apply ? 'applied' : 'dry-run'})`);
+    return;
+  }
+  log(`golem sessions dedup ${apply ? '--apply' : '(dry-run; pass --apply to write)'}`);
+  for (const plan of plans) {
+    const reason = plan.liveKept ? 'freshest live' : 'freshest ended';
+    log(`name ${plan.name}: would keep ${keptSessionLabel(plan.keep.row, reason)}`);
+    if (plan.mark.length) {
+      log(`name ${plan.name}: would mark ended: ${plan.mark.map(({ row }) => sessionLabel(row)).join(', ')}`);
+    } else {
+      log(`name ${plan.name}: no un-ended duplicates to mark`);
+    }
+  }
+}
+
+async function cmdSessions(args) {
+  const sub = args[0];
+  if (!sub || sub === '-h' || sub === '--help') {
+    log(`Usage: golem sessions dedup [--apply]
+
+Commands:
+  dedup          Dry-run named-session duplicate cleanup.
+
+Options:
+  --apply        Write the cleanup. Without --apply, prints the plan only.
+  -h, --help     Show help.`);
+    return;
+  }
+  if (sub !== 'dedup') fatal(2, `Unknown sessions command: ${sub}\n\nRun \`golem sessions --help\`.`);
+  const rest = args.slice(1);
+  if (rest.includes('-h') || rest.includes('--help')) {
+    log(`Usage: golem sessions dedup [--apply]
+
+Dry-run by default. Groups rows in ~/.golem/sessions.json by non-empty name,
+keeps the freshest live row for each name, and with --apply marks the other
+un-ended rows ended_at=<now>. Unnamed rows are never touched.`);
+    return;
+  }
+  const unknown = rest.filter((a) => a !== '--apply');
+  if (unknown.length) fatal(2, `unknown sessions dedup option: ${unknown[0]}`);
+
+  const apply = rest.includes('--apply');
+  const file = sessionsJsonPath();
+  const run = () => {
+    const reg = readSessionsRegistryObject(file);
+    const plans = sessionsDedupPlan(reg.sessions);
+    printSessionsDedupPlan(plans, apply);
+    if (!apply) return;
+    const now = new Date().toISOString();
+    let changed = false;
+    for (const plan of plans) {
+      for (const { index } of plan.mark) {
+        if (reg.sessions[index]?.ended_at) continue;
+        reg.sessions[index] = { ...reg.sessions[index], ended_at: now };
+        changed = true;
+      }
+    }
+    if (changed) writeSessionsRegistryObject(file, reg);
+    log(changed ? `applied: marked duplicate sessions ended_at=${now}` : 'applied: no changes');
+  };
+  if (apply) withFileLock(`${file}.lock`, run);
+  else run();
 }
 
 function resolveSessionArg(value, sessions) {
@@ -1073,7 +1227,10 @@ Run:
   dashboard:restart [--public] [npm-start-args…]
                        Stop the running dashboard and restart it detached.
   role <role|clear> [--session <id-or-name>]
-                        Set or clear a session role (${SESSION_ROLES.join(', ')}).
+                         Set or clear a session role (${SESSION_ROLES.join(', ')}).
+  sessions dedup [--apply]
+                         Dry-run named-session duplicate cleanup; --apply marks
+                         stale duplicate rows ended_at under sessions.json.lock.
   migrate-home         One-time move of ~/.config/golem -> ~/.golem (ADR-4).
                        Backs up first, stops the dashboard, moves, symlinks
                        the old path to the new one, restarts. Explicit only —
@@ -1146,6 +1303,9 @@ async function main() {
       break;
     case 'role':
       await cmdRole(rest);
+      break;
+    case 'sessions':
+      await cmdSessions(rest);
       break;
     case 'migrate-home':
       await cmdMigrateHome(rest);
