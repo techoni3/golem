@@ -1688,9 +1688,8 @@ async function main() {
       const hasBody = typeof req.body?.body === 'string';
       updateRoleMeta(name, req.body ?? {});
       const role = hasBody ? writeRoleCard(existing.name, req.body.body) : listRoleCards().find((r) => r.name === existing.name);
-      const push = await pushRoleToLive(role.name);
-      broadcastWS({ type: 'roles-updated', roles: listRoleCards(), meta: roleMetaMap(), push });
-      return { ...role, push };
+      broadcastWS({ type: 'roles-updated', roles: listRoleCards(), meta: roleMetaMap() });
+      return role;
     } catch (err) {
       return reply.code(400).send({ error: String(err?.message ?? err) });
     }
