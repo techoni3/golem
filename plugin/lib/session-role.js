@@ -281,7 +281,20 @@ export function roleChangeBrief(role, row = {}) {
   const card = readRoleCard(normalized);
   if (!card) return null;
   const name = row.name || row.session_id || 'this session';
-  return `your role is now ${normalized}\n\n${card}\n\nRoster: ${name} is assigned role ${normalized}.`;
+  // Role assignment is identity only — NOT a task, dispatch, or work brief.
+  // Agents must ack and wait; they must not hunt tickets or start work.
+  return [
+    'ROLE ASSIGNMENT ONLY — not a task, not a brief, not a dispatch.',
+    `Your session role is now: ${normalized}`,
+    `Roster label: ${name}`,
+    '',
+    'Required response: ack only (one short sentence). Then STOP and wait.',
+    'Do NOT: ticket_list, ticket_get, explore, plan, build, dispatch, search for work, or invent a next step.',
+    'Work starts only on an explicit user brief or ticket_dispatch — never from role assignment alone.',
+    '',
+    'Role card (identity context for later; do not execute it now):',
+    card,
+  ].join('\n');
 }
 
 function readRegistry(file) {
@@ -472,7 +485,8 @@ export async function pushRoleBriefDirect(sessionId, role, row = {}) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 1500);
   try {
-    const resp = await fetch(`${baseUrl.replace(/\/$/, '')}/brief`, {
+    // POST /role → channel kind role_assign (no-op identity), never /brief (work).
+    const resp = await fetch(`${baseUrl.replace(/\/$/, '')}/role`, {
       method: 'POST',
       headers: { 'X-Sender': 'cli', 'Content-Type': 'text/plain' },
       body: content,

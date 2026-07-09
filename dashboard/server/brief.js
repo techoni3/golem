@@ -78,6 +78,11 @@ export async function pushBrief(body, sessionId) {
   return forward('POST', '/brief', body, sessionId);
 }
 
+/** Role identity only — channel kind role_assign, never a work brief. */
+export async function pushRoleAssign(body, sessionId) {
+  return forward('POST', '/role', body, sessionId);
+}
+
 export async function pushInterrupt(body, sessionId) {
   return forward('POST', '/interrupt', body, sessionId);
 }

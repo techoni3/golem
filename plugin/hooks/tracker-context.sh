@@ -82,13 +82,66 @@ function projectId(root) {
   return `${slug}-${crypto.createHash('sha256').update(path.resolve(root)).digest('hex').slice(0, 6)}`;
 }
 const root = rootFrom(start);
-const id = projectId(root);
+const derivedId = projectId(root);
 const lines = [];
+let registryId = derivedId;
 try {
   const projects = JSON.parse(fs.readFileSync(path.join(home, 'projects.json'), 'utf8')).projects || [];
-  const project = projects.find((p) => p && (p.id === id || path.resolve(p.path || '') === root));
+  const project = projects.find((p) => p && (p.id === derivedId || path.resolve(p.path || '') === root));
+  if (project?.id) registryId = project.id;
   const servers = Array.isArray(project?.lsp?.servers) ? project.lsp.servers : [];
   if (project?.lsp?.available && servers.length) lines.push(`LSP: ${servers.join(', ')}`);
+} catch {}
+try {
+  const sessions = JSON.parse(fs.readFileSync(path.join(home, 'sessions.json'), 'utf8')).sessions || [];
+  const channels = JSON.parse(fs.readFileSync(path.join(home, 'channels.json'), 'utf8')).channels || [];
+  const rootResolved = path.resolve(root);
+  function pidAlive(pid) {
+    if (!pid || Number(pid) <= 0) return false;
+    try {
+      process.kill(Number(pid), 0);
+      return true;
+    } catch (err) {
+      return err?.code === 'EPERM';
+    }
+  }
+  const liveChannelIds = new Set(channels.filter((c) => pidAlive(c?.pid)).map((c) => c.session_id));
+  const live = sessions.filter((s) => {
+    if (!s || s.ended_at || s.status === 'ended') return false;
+    // A registry row without a live channel or parent process is stale. The
+    // channel is the dispatchable-session authority; hook_ppid covers the
+    // brief interval before a newly started channel registers.
+    if (!liveChannelIds.has(s.session_id) && !pidAlive(s.hook_ppid)) return false;
+    if (s.project_id && (s.project_id === registryId || s.project_id === derivedId)) return true;
+    if (s.project_path && path.resolve(s.project_path) === rootResolved) return true;
+    return false;
+  });
+  // Prefer freshest rows per session_id
+  const byId = new Map();
+  for (const s of live) {
+    const prev = byId.get(s.session_id);
+    const t = Date.parse(s.last_seen_at || s.status_updated_at || s.boot_time || 0) || 0;
+    const pt = prev ? (Date.parse(prev.last_seen_at || prev.status_updated_at || prev.boot_time || 0) || 0) : -1;
+    if (!prev || t >= pt) byId.set(s.session_id, s);
+  }
+  const rows = [...byId.values()].sort((a, b) => {
+    const ra = String(a.role || '—');
+    const rb = String(b.role || '—');
+    if (ra !== rb) return ra.localeCompare(rb);
+    return String(a.name || a.session_id).localeCompare(String(b.name || b.session_id));
+  });
+  if (rows.length) {
+    const parts = rows.map((s) => {
+      const role = s.role || 'unassigned';
+      const status = s.status || 'unknown';
+      const label = s.name || String(s.session_id || '').slice(0, 12);
+      return `${role}:${status}:${label}`;
+    });
+    lines.push(`Team on ${registryId}: ${parts.join(' · ')}`);
+    lines.push('Team roster is a snapshot — call sessions_dispatchable before dispatch.');
+  } else {
+    lines.push(`Team on ${registryId}: (no live sessions)`);
+  }
 } catch {}
 process.stdout.write(lines.join('\n'));
 NODE

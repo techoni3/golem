@@ -9,7 +9,7 @@ import websocket from '@fastify/websocket';
 import { CONFIG } from './config.js';
 import { createState } from './state.js';
 import { roleMetaMap } from './roles.js';
-import { pushBrief, pushInterrupt, pushHalt, pushGateVerdict, channelHealth, listChannels } from './brief.js';
+import { pushBrief, pushRoleAssign, pushInterrupt, pushHalt, pushGateVerdict, channelHealth, listChannels } from './brief.js';
 import { createChat } from './chat.js';
 import { readNativeSessionPeek } from './native-session-peek.js';
 import { openTrackerDb } from './tracker-db.js';
@@ -1655,7 +1655,7 @@ async function main() {
     const results = [];
     for (const session of targets) {
       const brief = roleChangeBrief(name, session);
-      const result = brief ? await pushBrief(brief, session.session_id) : { ok: false, error: 'no role brief' };
+      const result = brief ? await pushRoleAssign(brief, session.session_id) : { ok: false, error: 'no role assign payload' };
       results.push({
         session_id: session.session_id,
         name: session.name ?? null,

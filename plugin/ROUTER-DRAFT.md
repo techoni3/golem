@@ -3,11 +3,11 @@
 Size every request before acting:
 - **Question** → answer it. No skills, no tickets.
 - **Tiny fix** (one-line / typo / single obvious change) → do it, then `golem:verify-done`.
-- **Feature** (multi-step, new behavior) → `golem:work-loop`.
-- **Big build** (multi-feature, or the user wants pauses) → `golem:work-loop` + `golem:gates`.
+- **Feature** (multi-step, new behavior) → role skill (`golem:managing` / `planning` / `building` / `exploring`) per AGENTS spine.
+- **Big build** (multi-feature, or the user wants pauses) → same + `golem:gates`.
 
 Skills — read the named skill when:
-- `golem:work-loop` — starting a feature or larger build (intake, tracker tickets, dispatch).
+- `golem:managing` / `planning` / `building` / `exploring` — role SOPs for feature-sized work (see AGENTS skill index).
 - `golem:tracker` — reading/creating/transitioning tracker tickets (the source of truth for work; replaces PLAN.md).
 - `golem:verify-done` — before marking anything done or trusting a "done"/"PR open" claim.
 - `golem:test-policy` — writing or scoping tests for a feature.

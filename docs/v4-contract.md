@@ -58,8 +58,9 @@ schemas and install commands against current official docs
   `{ts, event, session_id, cwd, payload}` — plus `project_id` and `project_path`
   fields so readers never re-derive.
 - **Milestones** are journal lines: `{ts, event: "milestone", session_id,
-  project_id, text}`. Appended by the model per `work-loop` skill (single
-  `echo >> ` append). Dashboard renders them in the project chat/timeline.
+  project_id, text}`. Appended by the model per the AGENTS spine and role
+  skills (single `echo >> ` append). Dashboard renders them in the project
+  chat/timeline.
 - **Gates:** `~/.golem/gates/<project_id>/<gate_id>.md` — same YAML
   frontmatter format as v3 golem-gates, new location.
 - **Legacy coexistence rule:** if the resolved project root contains
@@ -83,7 +84,7 @@ Target ≤ 40 lines each.
 
 | skill | contents |
 |---|---|
-| `work-loop` | intake questions + defaults; PLAN.md format; spawn-one-opus-worker-per-item recipe; milestone append one-liner; never two writers in one repo at once |
+| `managing` / `planning` / `building` / `exploring` | role-specific SOPs for intake/routing, design/decomposition, implementation, and evidence-backed verification |
 | `verify-done` | exact evidence commands (test cmd from repo, `gh pr view --json state,mergeable`, CI check) ; "an agent's claim is not evidence" |
 | `test-policy` | budget ~10–20 journey-level integration/e2e tests; what counts; unit-test fan-out banned unless complex pure logic |
 | `gates` | gate file format + central path; how channel/dashboard verdicts clear it; when to gate (user said so at intake, or missing secret) |

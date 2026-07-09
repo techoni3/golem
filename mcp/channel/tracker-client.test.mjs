@@ -18,6 +18,7 @@ import crypto from 'node:crypto';
 import net from 'node:net';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { z } from 'zod';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const DASHBOARD_SERVER = path.resolve(__dirname, '../../dashboard/server/index.js');
@@ -25,6 +26,13 @@ const DASHBOARD_SERVER = path.resolve(__dirname, '../../dashboard/server/index.j
 const HOST = '127.0.0.1';
 const SESSION_ID = 'test-session-aaaa-bbbb-cccc';
 const PROJECT_ID = 'testproj-abc123'; // synthetic contract id; we pass it explicitly
+const ChannelNotificationSchema = z.object({
+  method: z.literal('notifications/claude/channel'),
+  params: z.object({
+    content: z.string(),
+    meta: z.object({ kind: z.string() }).passthrough(),
+  }).passthrough(),
+});
 
 // --- temp sandbox ----------------------------------------------------------
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'golem-tracker-test-'));
@@ -80,6 +88,22 @@ async function waitForDashboard(timeoutMs = 15000) {
     await sleep(200);
   }
   throw new Error('dashboard did not become ready within timeout');
+}
+
+async function waitForChannel(timeoutMs = 15000) {
+  const channelsFile = path.join(tmpGolemHome, 'channels.json');
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const channels = JSON.parse(fs.readFileSync(channelsFile, 'utf8')).channels || [];
+      const channel = channels.find((entry) => entry.session_id === SESSION_ID);
+      if (channel?.host && channel?.port) return `http://${channel.host}:${channel.port}`;
+    } catch {
+      /* channel has not registered yet */
+    }
+    await sleep(50);
+  }
+  throw new Error('channel did not register within timeout');
 }
 
 let child;
@@ -221,7 +245,22 @@ async function main() {
     stderr: 'pipe',
   });
   mcpTransport.stderr?.on('data', (d) => process.stderr.write(`[mcp:err] ${d}`));
+  const channelEvents = [];
+  mcpClient.setNotificationHandler(ChannelNotificationSchema, (notification) => channelEvents.push(notification));
   await mcpClient.connect(mcpTransport);
+
+  const channelUrl = await waitForChannel();
+  const roleResponse = await fetch(`${channelUrl}/role`, {
+    method: 'POST',
+    headers: { 'X-Sender': 'dashboard', 'Content-Type': 'text/plain' },
+    body: 'Role assignment test',
+  });
+  const rolePayload = await roleResponse.json();
+  check('POST /role returns role_assign', roleResponse.status === 202 && rolePayload.kind === 'role_assign', JSON.stringify(rolePayload));
+  await sleep(50);
+  const roleEvent = channelEvents.find((event) => event.params?.meta?.kind === 'role_assign');
+  check('POST /role emits role_assign channel event', roleEvent?.params?.content === 'Role assignment test', JSON.stringify(channelEvents));
+  check('POST /role never emits a brief event', !channelEvents.some((event) => event.params?.meta?.kind === 'brief'), JSON.stringify(channelEvents));
 
   const tools = await mcpClient.listTools();
   const transitionTool = tools.tools.find((tool) => tool.name === 'ticket_transition');

@@ -165,6 +165,40 @@ async function assertNativeSessionDiscovery() {
   }
 }
 
+function assertTrackerContextFiltersStaleRoster() {
+  const fixture = path.join(tmp, 'tracker-context-roster');
+  const home = path.join(fixture, 'home');
+  const project = path.join(fixture, 'project');
+  fs.mkdirSync(project, { recursive: true });
+  write(path.join(project, 'CLAUDE.md'), '# tracker context fixture\n');
+  const liveProcess = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  assert.ok(liveProcess.pid, 'live channel fixture process spawned');
+  try {
+    write(path.join(home, 'projects.json'), JSON.stringify({ projects: [{ id: 'fixture-project', path: project }] }));
+    write(path.join(home, 'sessions.json'), JSON.stringify({
+      sessions: [
+        { session_id: 'stale-session', project_id: 'fixture-project', project_path: project, hook_ppid: 2147483647, status: 'idle', name: 'stale-peer' },
+        { session_id: 'live-session', project_id: 'fixture-project', project_path: project, hook_ppid: 2147483647, status: 'idle', name: 'live-peer' },
+      ],
+    }));
+    write(path.join(home, 'channels.json'), JSON.stringify({
+      channels: [{ session_id: 'live-session', pid: liveProcess.pid }],
+    }));
+    const hook = spawnSync('bash', [path.join(repo, 'substrate', 'hooks', 'tracker-context.sh')], {
+      cwd: project,
+      env: { ...process.env, GOLEM_HOME: home, HOME: home },
+      input: JSON.stringify({ cwd: project }),
+      encoding: 'utf8',
+    });
+    assert.equal(hook.status, 0, `tracker context hook should be fail-open: ${hook.stderr}`);
+    assert.match(hook.stdout, /live-peer/, 'live channel appears in Team roster');
+    assert.doesNotMatch(hook.stdout, /stale-peer/, 'dead registry row is excluded from Team roster');
+    console.log('tracker context roster filters stale sessions');
+  } finally {
+    liveProcess.kill();
+  }
+}
+
 try {
   assertFails('role-parity', (root, home) => {
     write(path.join(home, 'roles', 'index.json'), JSON.stringify({ version: 1, roles: [{ name: 'manager' }, { name: 'planner' }, { name: 'builder' }, { name: 'explorer' }, { name: 'ghost' }] }));
@@ -231,6 +265,7 @@ try {
   assert.notEqual(fs.readFileSync(rendered, 'utf8'), 'stale\n', 'detached global repair restored stale render');
   console.log('global freshness repair: restored stale render');
 
+  assertTrackerContextFiltersStaleRoster();
   await assertNativeSessionDiscovery();
 } finally {
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* detached repair may still be closing files */ }

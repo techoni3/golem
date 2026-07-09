@@ -10,7 +10,7 @@ Journals live OUTSIDE the repo at `~/.golem/journals/<project_id>/`:
 `hook.jsonl` (mechanical) and `summary.jsonl` (semantic). Both append-only JSONL.
 
 **Mechanical journaling is automatic** via plugin hooks — never write `hook.jsonl`
-lines by hand. The model's ONLY write is appending milestone lines (see work-loop).
+lines by hand. The model's ONLY write is appending milestone lines (see AGENTS spine / role skills).
 
 `project_id`: look it up in the registry — the SessionStart hook already registered
 this project, and the registry is authoritative (legacy projects have non-derived ids):

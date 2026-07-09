@@ -386,17 +386,18 @@ const mcp = new Server(
       'Events from this channel arrive as <channel source="golem" kind="..."> tags.',
       'Recognised kinds:',
       '  - brief: a new user brief. Classify it (fresh idea / established idea / continuation / fix / chat) and run the relevant flow.',
+      '  - role_assign: session role identity only (dashboard/CLI role picker). NOT a task. ack once, then STOP and wait. Do not ticket_list, explore, plan, build, or invent work. Work starts only on an explicit brief or ticket_dispatch.',
       '  - interrupt: a course-correction to fold into in-flight work without restarting. Read, integrate, continue.',
       '  - halt: a request to gracefully halt the current journey, write a closing memo, and yield. Do not start new work.',
       '  - gate_approve: a verdict on a pending human gate. The gate_id meta attribute names the gate file under docs/agent-notes/gates/. Update its status to approved and resume per skills/golem-gates.',
       '  - gate_deny: same, but set status to denied (hard stop for that journey).',
       '  - gate_cancel: same, but set status to cancelled.',
-      '  - consult: a peer session asking YOU for a fresh pair of eyes on a hard problem (meta: consult_id, from_session). This is NOT delegation — read the golem:provide-consult skill, investigate the problem independently (their question, the code, web research), and reply with the `consult_reply` tool. Do not enter the work-loop or edit their repo.',
-      '  - consult_reply: a consultant\'s proposal returning for a consult YOU asked (meta: consult_id). Treat it as advice to weigh critically — keep what holds up, discard the rest; you keep the final say. See golem:get-consult.',
+      '  - consult: a peer session asking YOU for a fresh pair of eyes on a hard problem (meta: consult_id, from_session). This is NOT delegation — read golem:consulting, investigate independently, and reply with `consult_reply`. Do not take their tickets or edit their repo.',
+      '  - consult_reply: a consultant\'s proposal returning for a consult YOU asked (meta: consult_id). Treat it as advice to weigh critically — keep what holds up, discard the rest; you keep the final say. See golem:consulting.',
       'You have TWO reply tools — both fire over the same SSE channel and surface in the dashboard chat:',
-      '  • `ack` — fires IMMEDIATELY on receipt of every inbound event, no exceptions. One short sentence describing what the CEO understood and is about to do. Pass the same kind; include gate_id for gate_* events.',
-      '  • `respond` — fires when the CEO has something user-facing to say BACK to the user (chat answers, clarification questions, decision asks, final results of short briefs). Body is the actual reply text. Skip it when the brief just enters the autonomy loop and has nothing immediate to communicate — the dashboard timeline shows progress in that case.',
-      'Order of operations for any inbound channel event: 1) call ack on receipt, 2) do the work, 3) optionally call respond with the user-facing answer, 4) yield.',
+      '  • `ack` — fires IMMEDIATELY on receipt of every inbound event, no exceptions. One short sentence describing what the CEO understood and is about to do. Pass the same kind; include gate_id for gate_* events. For role_assign, ack is the entire job.',
+      '  • `respond` — fires when the CEO has something user-facing to say BACK to the user (chat answers, clarification questions, decision asks, final results of short briefs). Body is the actual reply text. Skip it when the brief just enters the autonomy loop and has nothing immediate to communicate — the dashboard timeline shows progress in that case. Skip respond on role_assign.',
+      'Order of operations for any inbound channel event: 1) call ack on receipt, 2) do the work (role_assign: none), 3) optionally call respond with the user-facing answer, 4) yield.',
       'Peer help (separate from ack/respond): `consult_request` asks another live session for a fresh pair of eyes — you do NOT block, the reply returns later as a consult_reply event; `consult_reply` returns your proposal to an asker; `consult_status` nudges a pending consult.',
     ].join(' '),
   },
@@ -415,7 +416,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           kind: {
             type: 'string',
             description:
-              'The kind of event being acknowledged (brief|interrupt|halt|gate_approve|gate_deny|gate_cancel).',
+              'The kind of event being acknowledged (brief|role_assign|interrupt|halt|gate_approve|gate_deny|gate_cancel|consult|consult_reply).',
           },
           gate_id: {
             type: 'string',
@@ -444,7 +445,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           kind: {
             type: 'string',
             description:
-              'Optional: the kind of inbound event this is responding to (brief|interrupt|halt|gate_*). Defaults to "brief".',
+              'Optional: the kind of inbound event this is responding to (brief|role_assign|interrupt|halt|gate_*|consult). Defaults to "brief". Skip respond for role_assign.',
           },
           gate_id: {
             type: 'string',
@@ -1195,6 +1196,13 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 202, { ok: true, kind: 'brief' });
     }
 
+    // POST /role — identity only (dashboard/CLI role assignment). Never a work brief.
+    if (method === 'POST' && path === '/role') {
+      const body = await readBody(req);
+      await pushEvent('role_assign', extractContent(body));
+      return sendJson(res, 202, { ok: true, kind: 'role_assign' });
+    }
+
     if (method === 'POST' && path === '/interrupt') {
       const body = await readBody(req);
       await pushEvent('interrupt', extractContent(body));
@@ -1229,7 +1237,7 @@ const server = http.createServer(async (req, res) => {
         : [
             `CONSULT REQUEST from session "${fromName}" (consult_id ${consult_id}).`,
             '',
-            'A peer session is stuck and wants a FRESH PAIR OF EYES — this is NOT delegation. Read the golem:provide-consult skill, investigate INDEPENDENTLY (their problem, the code, web research), look for root causes and blind spots they may be tunnel-visioned past, and reply with a proposal. Do NOT edit their repo, create tickets, or enter the work-loop.',
+            'A peer session is stuck and wants a FRESH PAIR OF EYES — this is NOT delegation. Read golem:consulting, investigate INDEPENDENTLY (their problem, the code, web research), look for root causes and blind spots they may be tunnel-visioned past, and reply with a proposal. Do NOT edit their repo, create tickets, or take over their work.',
             '',
             'PROBLEM:',
             question,

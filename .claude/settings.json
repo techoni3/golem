@@ -130,7 +130,11 @@
       "Bash(golem:*)",
       "Bash(bash:*)",
 
-      "Skill(golem:work-loop)",
+      "Skill(golem:managing)",
+      "Skill(golem:planning)",
+      "Skill(golem:exploring)",
+      "Skill(golem:building)",
+      "Skill(golem:consulting)",
       "Skill(golem:tracker)",
       "Skill(golem:verify-done)",
       "Skill(golem:test-policy)",
