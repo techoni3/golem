@@ -29,10 +29,13 @@
 // opencode session. Every shell-out is fire-and-forget (spawned, stdin written,
 // not awaited); every failure is caught and logged to
 // ~/.golem/logs/opencode-shim.log; no hook throws back into the harness.
+// Log triage: no [init] means the shim never loaded; [init] without
+// [session.created] means no session was created; [session.created] without
+// [registered] means registration failed and the adjacent error is actionable.
 
 import { spawn, execFileSync } from "node:child_process";
 import { createServer } from "node:http";
-import { appendFileSync, mkdirSync, existsSync, readFileSync, writeFileSync, renameSync, rmdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, existsSync, readFileSync, writeFileSync, renameSync, rmdirSync, rmSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import os from "node:os";
@@ -63,6 +66,7 @@ const SESSIONS_LOCK = `${SESSIONS_REGISTRY}.lock`;
 const RESUME_FALLBACK_MAX_AGE_MS = 5 * 60 * 1000;
 const ENDED_SESSION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_SESSION_REGISTRY_ROWS = 500;
+const MAX_LOG_BYTES = 5 * 1024 * 1024;
 let currentSessionID = "";
 
 function opencodeStateDir() {
@@ -144,14 +148,25 @@ function readOpencodeModel(sessionID = "") {
   return readRecentOpencodeModel();
 }
 
-function logErr(context, detail) {
+function logLine(context, detail) {
+  try { mkdirSync(LOG_DIR, { recursive: true }); } catch { return; }
+  if (context === "init") {
+    try {
+      if (existsSync(LOG_FILE) && statSync(LOG_FILE).size > MAX_LOG_BYTES) {
+        rmSync(`${LOG_FILE}.1`, { force: true });
+        renameSync(LOG_FILE, `${LOG_FILE}.1`);
+      }
+    } catch { /* rotation must not suppress the marker */ }
+  }
   try {
-    mkdirSync(LOG_DIR, { recursive: true });
-    const msg = detail && detail.stack ? detail.stack : String(detail);
-    appendFileSync(LOG_FILE, `${new Date().toISOString()} [${context}] ${msg}\n`);
+    appendFileSync(LOG_FILE, `${new Date().toISOString()} [${context}] ${String(detail)}\n`);
   } catch {
     // last resort: swallow — the shim must never throw.
   }
+}
+
+function logErr(context, detail) {
+  logLine(context, detail && detail.stack ? detail.stack : String(detail));
 }
 
 function withFileLock(lockPath, fn) {
@@ -189,28 +204,35 @@ function writeJson(file, obj) {
 }
 
 function registerBridge({ sessionID, cwd, status, port, name, model }) {
-  if (!sessionID || !port) return;
-  const now = new Date().toISOString();
-  withFileLock(BRIDGES_LOCK, () => {
-    const reg = readJson(BRIDGES_REGISTRY, "bridges");
-    reg.bridges = reg.bridges.filter((b) => b.opencode_pid !== process.pid && b.session_id !== sessionID);
-    reg.bridges.push({
-      session_id: sessionID,
-      opencode_pid: process.pid,
-      pid: process.pid,
-      host: HOST,
-      port,
-      version: VERSION,
-      harness: "opencode",
-      cwd: cwd || null,
-      name: name || null,
-      status: status || null,
-      model: model || null,
-      started_at: now,
-      updated_at: now,
+  if (!sessionID || !port) return false;
+  try {
+    const now = new Date().toISOString();
+    withFileLock(BRIDGES_LOCK, () => {
+      const reg = readJson(BRIDGES_REGISTRY, "bridges");
+      reg.bridges = reg.bridges.filter((b) => b.session_id !== sessionID);
+      reg.bridges.push({
+        session_id: sessionID,
+        opencode_pid: process.pid,
+        pid: process.pid,
+        host: HOST,
+        port,
+        version: VERSION,
+        harness: "opencode",
+        cwd: cwd || null,
+        name: name || null,
+        status: status || null,
+        model: model || null,
+        started_at: now,
+        updated_at: now,
+      });
+      writeJson(BRIDGES_REGISTRY, reg);
     });
-    writeJson(BRIDGES_REGISTRY, reg);
-  });
+    logLine("registered", `${sessionID} port=${port}`);
+    return true;
+  } catch (e) {
+    logErr("bridge register", e);
+    return false;
+  }
 }
 
 // opencode's SessionStatus is an OBJECT ({type:"idle"|"retry"|"busy"}), but the
@@ -232,37 +254,43 @@ function topLevelSession(info) {
 }
 
 function updateBridge({ sessionID, cwd, status, port, name, model, insert = true }) {
-  if (!sessionID || !port) return;
-  const now = new Date().toISOString();
-  withFileLock(BRIDGES_LOCK, () => {
-    const reg = readJson(BRIDGES_REGISTRY, "bridges");
-    let found = false;
-    reg.bridges = reg.bridges.map((b) => {
-      if (b.opencode_pid !== process.pid || b.session_id !== sessionID) return b;
-      found = true;
-      return { ...b, cwd: cwd || b.cwd || null, name: name || b.name || null, status: status || b.status || null, model: model || b.model || null, updated_at: now };
-    });
-    if (!found) {
-      if (!insert) return; // child/unknown session — never create a phantom endpoint
-      reg.bridges = reg.bridges.filter((b) => b.session_id !== sessionID);
-      reg.bridges.push({
-        session_id: sessionID,
-        opencode_pid: process.pid,
-        pid: process.pid,
-        host: HOST,
-        port,
-        version: VERSION,
-        harness: "opencode",
-        cwd: cwd || null,
-        name: name || null,
-        status: status || null,
-        model: model || null,
-        started_at: now,
-        updated_at: now,
+  if (!sessionID || !port) return false;
+  try {
+    const now = new Date().toISOString();
+    withFileLock(BRIDGES_LOCK, () => {
+      const reg = readJson(BRIDGES_REGISTRY, "bridges");
+      let found = false;
+      reg.bridges = reg.bridges.map((b) => {
+        if (b.opencode_pid !== process.pid || b.session_id !== sessionID) return b;
+        found = true;
+        return { ...b, cwd: cwd || b.cwd || null, name: name || b.name || null, status: status || b.status || null, model: model || b.model || null, updated_at: now };
       });
-    }
-    writeJson(BRIDGES_REGISTRY, reg);
-  });
+      if (!found) {
+        if (!insert) return; // child/unknown session — never create a phantom endpoint
+        reg.bridges = reg.bridges.filter((b) => b.session_id !== sessionID);
+        reg.bridges.push({
+          session_id: sessionID,
+          opencode_pid: process.pid,
+          pid: process.pid,
+          host: HOST,
+          port,
+          version: VERSION,
+          harness: "opencode",
+          cwd: cwd || null,
+          name: name || null,
+          status: status || null,
+          model: model || null,
+          started_at: now,
+          updated_at: now,
+        });
+      }
+      writeJson(BRIDGES_REGISTRY, reg);
+    });
+    return true;
+  } catch (e) {
+    logErr("bridge update", e);
+    return false;
+  }
 }
 
 function unregisterBridges() {
@@ -305,7 +333,7 @@ function pruneSessionRows(rows, nowMs = Date.now()) {
 }
 
 function updateSessionRegistry({ sessionID, cwd, status, name, model, insert = true, touchLastSeen = true }) {
-  if (!sessionID) return;
+  if (!sessionID) return false;
   try {
     const now = new Date().toISOString();
     withFileLock(SESSIONS_LOCK, () => {
@@ -343,8 +371,10 @@ function updateSessionRegistry({ sessionID, cwd, status, name, model, insert = t
       reg.sessions = pruneSessionRows(reg.sessions);
       writeJson(SESSIONS_REGISTRY, reg);
     });
+    return true;
   } catch (e) {
     logErr("session registry update", e);
+    return false;
   }
 }
 
@@ -505,11 +535,14 @@ let initialCwdForContext = process.cwd();
 function initCwdFallback() { return initialCwdForContext; }
 
 export default async (input) => {
+  logLine("init", `pid=${process.pid} dir=${input?.directory || process.cwd()} hooks=${HOOKS_DIR} v=${VERSION}`);
   const initCwd = input?.directory || process.cwd();
   initialCwdForContext = initCwd;
   const sessionDir = new Map(); // sessionID → directory (tool events carry no dir)
   const knownSessionIDs = new Set();
+  const cancelledSessionIDs = new Set();
   const trackerContextCache = new Map();
+  let disposed = false;
 
   const trackerContextFor = (sessionID, cwd) => {
     const key = sessionID || "__base__";
@@ -520,30 +553,39 @@ export default async (input) => {
   const dirFor = (sid) => sessionDir.get(sid) || initCwd;
   const base = (sessionID, cwd, extra = {}) => ({ session_id: sessionID || "", cwd: cwd || initCwd, harness: "opencode", model: readOpencodeModel(sessionID), ...extra });
   const bridge = startBridge({ client: input?.client, dirFor, logErr });
-  // insert:false is the default so events from child/subagent sessions (whose
-  // ids also flow through chat.message/tool.* hooks) can only UPDATE existing
-  // rows, never create phantom sessions or dispatch endpoints. Only the
-  // parentID-guarded session.created/session.updated paths insert.
+  // Child/subagent ids never enter knownSessionIDs, so recurring events can
+  // self-heal owned top-level rows without fabricating phantom endpoints.
   const publishBridge = (sessionID, status = null, name = null, { insert = false, touchLastSeen = true } = {}) => {
     const port = bridge.port();
-    if (!sessionID || !port) return;
+    if (!sessionID || !port) return false;
     const st = statusString(status);
     const model = readOpencodeModel(sessionID);
-    updateBridge({ sessionID, cwd: dirFor(sessionID), status: st, port, name, model, insert });
-    updateSessionRegistry({ sessionID, cwd: dirFor(sessionID), status: st, name, model, insert, touchLastSeen });
+    const canInsert = insert || knownSessionIDs.has(sessionID);
+    const bridgeUpdated = updateBridge({ sessionID, cwd: dirFor(sessionID), status: st, port, name, model, insert: canInsert });
+    const sessionUpdated = updateSessionRegistry({ sessionID, cwd: dirFor(sessionID), status: st, name, model, insert: canInsert, touchLastSeen });
+    return bridgeUpdated && sessionUpdated;
   };
-  const registerWhenBridgeReady = (fn, attempt = 0) => {
-    if (fn()) return;
-    if (attempt >= 20) return;
-    setTimeout(() => registerWhenBridgeReady(fn, attempt + 1), 100).unref?.();
+  const registerWhenBridgeReady = (fn, label, attempt = 0) => {
+    let registered = false;
+    try {
+      registered = fn() === true;
+    } catch (e) {
+      logErr(`bridge ready ${label}`, e);
+    }
+    if (registered) return;
+    if (attempt >= 20) {
+      logErr("bridge ready", `gave up ${label} after ${attempt + 1} attempts`);
+      return;
+    }
+    setTimeout(() => registerWhenBridgeReady(fn, label, attempt + 1), 100).unref?.();
   };
   const rememberSession = (info, status = null) => {
     if (!topLevelSession(info)) return false;
+    if (cancelledSessionIDs.has(info.id)) return true;
     if (info.directory) sessionDir.set(info.id, info.directory);
     knownSessionIDs.add(info.id);
     currentSessionID = info.id || currentSessionID;
-    publishBridge(info.id, status || info.status || "idle", info.title || info.name || null, { insert: true });
-    return true;
+    return publishBridge(info.id, status || info.status || "idle", info.title || info.name || null, { insert: true });
   };
   const seedResumedSessions = async () => {
     try {
@@ -569,11 +611,11 @@ export default async (input) => {
         .filter((s) => Date.now() - sessionUpdatedAt(s) <= RESUME_FALLBACK_MAX_AGE_MS);
       const seeded = activeIds.size > 0 ? candidates : fallback;
       const register = () => {
+        if (disposed) return true;
         if (!bridge.port()) return false;
-        for (const info of seeded) rememberSession(info, statusById[info.id] || "idle");
-        return true;
+        return seeded.every((info) => rememberSession(info, statusById[info.id] || "idle"));
       };
-      registerWhenBridgeReady(register);
+      registerWhenBridgeReady(register, "resume seed");
     } catch (e) {
       logErr("resume seed", e);
     }
@@ -582,6 +624,7 @@ export default async (input) => {
 
   const endSession = (sessionID, cwd) => {
     if (!sessionID) return;
+    cancelledSessionIDs.add(sessionID);
     knownSessionIDs.delete(sessionID);
     if (currentSessionID === sessionID) currentSessionID = "";
     markSessionRegistryEnded(sessionID);
@@ -597,6 +640,8 @@ export default async (input) => {
         if (t === "session.created") {
           const info = p.info || {};
           if (info.parentID) return; // child/subagent session — journaled via the task tool, not as a top-level start
+          cancelledSessionIDs.delete(info.id);
+          logLine("session.created", `session=${info.id || ""}`);
           if (info.directory) sessionDir.set(info.id, info.directory);
           knownSessionIDs.add(info.id);
           currentSessionID = info.id || currentSessionID;
@@ -607,14 +652,15 @@ export default async (input) => {
           const status = info.status || "idle";
           const name = info.title || info.name || null;
           const register = () => {
+            if (disposed || !knownSessionIDs.has(info.id)) return true;
             const port = bridge.port();
             if (!port) return false;
             const model = modelFromObject(info) || readOpencodeModel(info.id);
-            registerBridge({ sessionID: info.id, cwd: info.directory || dirFor(info.id), status, port, name, model });
-            updateSessionRegistry({ sessionID: info.id, cwd: info.directory || dirFor(info.id), status, name, model });
-            return true;
+            const registered = registerBridge({ sessionID: info.id, cwd: info.directory || dirFor(info.id), status, port, name, model });
+            const sessionRegistered = updateSessionRegistry({ sessionID: info.id, cwd: info.directory || dirFor(info.id), status, name, model });
+            return registered && sessionRegistered;
           };
-          registerWhenBridgeReady(register);
+          registerWhenBridgeReady(register, `session ${info.id || "unknown"}`);
         } else if (t === "session.idle") {
           currentSessionID = p.sessionID || currentSessionID;
           publishBridge(p.sessionID, "idle");
@@ -642,6 +688,7 @@ export default async (input) => {
           const info = p.info || {};
           if (!info.parentID) endSession(info.id, info.directory || dirFor(info.id));
         } else if (t === "server.instance.disposed") {
+          disposed = true;
           const ended = [...knownSessionIDs];
           markSessionRegistryEnded(ended);
           unregisterBridges();

@@ -43,7 +43,7 @@ const child = {
   time: { created: Date.now(), updated: Date.now() },
 };
 
-await opencodeShim({
+const hooks = await opencodeShim({
   directory: projectDir,
   client: {
     session: {
@@ -99,6 +99,92 @@ assert.equal(live.alive, true);
 assert.equal(live.harness, 'opencode');
 assert.equal(live.status, 'idle');
 
+const siblingA = {
+  id: 'ses_sibling_a',
+  directory: projectDir,
+  title: 'Sibling A',
+  time: { created: Date.now(), updated: Date.now() },
+};
+const siblingB = {
+  id: 'ses_sibling_b',
+  directory: projectDir,
+  title: 'Sibling B',
+  time: { created: Date.now(), updated: Date.now() },
+};
+for (const info of [siblingA, siblingB]) {
+  await hooks.event({ event: { type: 'session.created', properties: { info } } });
+}
+await eventually(() => {
+  const bridges = JSON.parse(fs.readFileSync(path.join(process.env.GOLEM_HOME, 'opencode-bridges.json'), 'utf8')).bridges;
+  assert.equal(bridges.filter((b) => b.opencode_pid === process.pid && b.session_id === siblingA.id).length, 1, 'first sibling keeps exactly one bridge row');
+  assert.equal(bridges.filter((b) => b.opencode_pid === process.pid && b.session_id === siblingB.id).length, 1, 'second sibling keeps exactly one bridge row');
+});
+
+const bridgeFile = path.join(process.env.GOLEM_HOME, 'opencode-bridges.json');
+const sessionsFile = path.join(process.env.GOLEM_HOME, 'sessions.json');
+const bridgeRegistry = JSON.parse(fs.readFileSync(bridgeFile, 'utf8'));
+bridgeRegistry.bridges = bridgeRegistry.bridges.filter((b) => b.session_id !== siblingA.id);
+fs.writeFileSync(bridgeFile, JSON.stringify(bridgeRegistry, null, 2));
+const sessionRegistry = JSON.parse(fs.readFileSync(sessionsFile, 'utf8'));
+sessionRegistry.sessions = sessionRegistry.sessions.filter((s) => s.session_id !== siblingA.id);
+fs.writeFileSync(sessionsFile, JSON.stringify(sessionRegistry, null, 2));
+await hooks['chat.message']({ sessionID: siblingA.id });
+assert.ok(JSON.parse(fs.readFileSync(bridgeFile, 'utf8')).bridges.some((b) => b.session_id === siblingA.id), 'known session bridge self-heals in one event');
+assert.ok(JSON.parse(fs.readFileSync(sessionsFile, 'utf8')).sessions.some((s) => s.session_id === siblingA.id), 'known session registry row self-heals in one event');
+
+await hooks.event({ event: { type: 'session.created', properties: { info: child } } });
+await hooks['chat.message']({ sessionID: child.id });
+assert.equal(JSON.parse(fs.readFileSync(bridgeFile, 'utf8')).bridges.some((b) => b.session_id === child.id), false, 'child event cannot create a bridge row');
+assert.equal(JSON.parse(fs.readFileSync(sessionsFile, 'utf8')).sessions.some((s) => s.session_id === child.id), false, 'child event cannot create a session row');
+
+const failing = {
+  id: 'ses_registration_retry',
+  directory: projectDir,
+  title: 'Registration retry',
+  time: { created: Date.now(), updated: Date.now() },
+};
+const bridgeLock = `${bridgeFile}.lock`;
+fs.mkdirSync(bridgeLock);
+try {
+  await hooks.event({ event: { type: 'session.created', properties: { info: failing } } });
+} finally {
+  fs.rmSync(bridgeLock, { recursive: true, force: true });
+}
+await eventually(() => {
+  const log = fs.readFileSync(path.join(process.env.GOLEM_HOME, 'logs', 'opencode-shim.log'), 'utf8');
+  assert.match(log, /\[init\].*pid=.*dir=.*hooks=.*v=/, 'init marker is durable');
+  assert.match(log, /\[session\.created\].*session=ses_sibling_a/, 'session.created marker is durable');
+  assert.match(log, /\[registered\].*ses_sibling_a port=/, 'registered marker is durable');
+  assert.match(log, /\[bridge register\].*failed to acquire/, 'registration failure is logged');
+  const bridges = JSON.parse(fs.readFileSync(bridgeFile, 'utf8')).bridges;
+  assert.ok(bridges.some((b) => b.session_id === failing.id), 'registration retries after a caught lock failure');
+});
+
+const cancelled = {
+  id: 'ses_registration_cancelled',
+  directory: projectDir,
+  title: 'Cancelled registration',
+  time: { created: Date.now(), updated: Date.now() },
+};
+fs.mkdirSync(bridgeLock);
+try {
+  await hooks.event({ event: { type: 'session.created', properties: { info: cancelled } } });
+} finally {
+  fs.rmSync(bridgeLock, { recursive: true, force: true });
+}
+await hooks.event({ event: { type: 'session.deleted', properties: { info: cancelled } } });
+await new Promise((resolve) => setTimeout(resolve, 300));
+assert.equal(JSON.parse(fs.readFileSync(bridgeFile, 'utf8')).bridges.some((b) => b.session_id === cancelled.id), false, 'deleted session is not resurrected by a pending retry');
+assert.ok(JSON.parse(fs.readFileSync(sessionsFile, 'utf8')).sessions.find((s) => s.session_id === cancelled.id)?.ended_at, 'deleted session remains ended after pending retry');
+
+fs.mkdirSync(bridgeLock);
+try {
+  await hooks['chat.message']({ sessionID: siblingB.id });
+} finally {
+  fs.rmSync(bridgeLock, { recursive: true, force: true });
+}
+assert.match(fs.readFileSync(path.join(process.env.GOLEM_HOME, 'logs', 'opencode-shim.log'), 'utf8'), /\[bridge update\].*failed to acquire/, 'recurring update failure is logged and does not escape');
+
 const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), 'golem-oc-history-'));
 const projectDir2 = path.join(tmp2, 'project');
 fs.mkdirSync(projectDir2, { recursive: true });
@@ -136,6 +222,75 @@ fs.writeFileSync(path.join(process.env.GOLEM_HOME, 'sessions.json'), JSON.string
   }],
 }, null, 2));
 const nativeWithoutBridge = await readNativeSessions2(() => true);
-assert.equal(nativeWithoutBridge.some((s) => s.session_id === 'ses_missing_bridge_dead'), false, 'opencode session without bridge is dead');
+assert.equal(nativeWithoutBridge.some((s) => s.session_id === 'ses_missing_bridge_dead'), false, 'opencode session without bridge and without live channel is dead');
 
-console.log('opencode resume dispatchable smoke passed');
+const tmp3 = fs.mkdtempSync(path.join(os.tmpdir(), 'golem-oc-log-rotation-'));
+process.env.GOLEM_HOME = path.join(tmp3, 'golem-home');
+const logDir = path.join(process.env.GOLEM_HOME, 'logs');
+fs.mkdirSync(logDir, { recursive: true });
+fs.writeFileSync(path.join(logDir, 'opencode-shim.log'), Buffer.alloc(5 * 1024 * 1024 + 1, 'x'));
+fs.writeFileSync(path.join(logDir, 'opencode-shim.log.1'), 'old rotation');
+const rotationResume = {
+  id: 'ses_rotation_resume_retry',
+  directory: projectDir,
+  title: 'Rotation resume retry',
+  time: { created: Date.now(), updated: Date.now() },
+};
+const rotationBridgeLock = path.join(process.env.GOLEM_HOME, 'opencode-bridges.json.lock');
+fs.mkdirSync(rotationBridgeLock, { recursive: true });
+const shimUrl3 = pathToFileURL(path.resolve('shims/opencode/index.js')).href + `?t=${Date.now()}-rotation`;
+const { default: opencodeShim3 } = await import(shimUrl3);
+await opencodeShim3({
+  directory: projectDir,
+  client: {
+    session: {
+      list: async () => ({ data: [rotationResume] }),
+      status: async () => ({ data: { [rotationResume.id]: { type: 'idle' } } }),
+      prompt: async () => ({ data: {} }),
+    },
+  },
+});
+setTimeout(() => fs.rmSync(rotationBridgeLock, { recursive: true, force: true }), 1100);
+assert.equal(fs.statSync(path.join(logDir, 'opencode-shim.log.1')).size, 5 * 1024 * 1024 + 1, 'oversized log rotates and replaces prior backup');
+assert.match(fs.readFileSync(path.join(logDir, 'opencode-shim.log'), 'utf8'), /\[init\]/, 'new log begins with init marker after rotation');
+await eventually(() => {
+  const log = fs.readFileSync(path.join(logDir, 'opencode-shim.log'), 'utf8');
+  assert.match(log, /\[bridge update\].*failed to acquire/, 'resume seed failure is logged');
+  const bridges = JSON.parse(fs.readFileSync(path.join(process.env.GOLEM_HOME, 'opencode-bridges.json'), 'utf8')).bridges;
+  assert.ok(bridges.some((b) => b.session_id === rotationResume.id), 'resume seed retries after a caught lock failure');
+}, 5000);
+
+const tmp4 = fs.mkdtempSync(path.join(os.tmpdir(), 'golem-oc-resume-cancel-'));
+process.env.GOLEM_HOME = path.join(tmp4, 'golem-home');
+const cancelledResume = {
+  id: 'ses_cancelled_resume_retry',
+  directory: projectDir,
+  title: 'Cancelled resume retry',
+  time: { created: Date.now(), updated: Date.now() },
+};
+const cancelledBridgeLock = path.join(process.env.GOLEM_HOME, 'opencode-bridges.json.lock');
+fs.mkdirSync(cancelledBridgeLock, { recursive: true });
+const shimUrl4 = pathToFileURL(path.resolve('shims/opencode/index.js')).href + `?t=${Date.now()}-resume-cancel`;
+const { default: opencodeShim4 } = await import(shimUrl4);
+const cancelledHooks = await opencodeShim4({
+  directory: projectDir,
+  client: {
+    session: {
+      list: async () => ({ data: [cancelledResume] }),
+      status: async () => ({ data: { [cancelledResume.id]: { type: 'idle' } } }),
+      prompt: async () => ({ data: {} }),
+    },
+  },
+});
+const cancelledLog = path.join(process.env.GOLEM_HOME, 'logs', 'opencode-shim.log');
+await eventually(() => assert.match(fs.readFileSync(cancelledLog, 'utf8'), /\[bridge update\].*failed to acquire/), 5000);
+fs.rmSync(cancelledBridgeLock, { recursive: true, force: true });
+await cancelledHooks.event({ event: { type: 'session.deleted', properties: { info: cancelledResume } } });
+await new Promise((resolve) => setTimeout(resolve, 300));
+const cancelledBridgesFile = path.join(process.env.GOLEM_HOME, 'opencode-bridges.json');
+const cancelledSessionsFile = path.join(process.env.GOLEM_HOME, 'sessions.json');
+const cancelledBridges = fs.existsSync(cancelledBridgesFile) ? JSON.parse(fs.readFileSync(cancelledBridgesFile, 'utf8')).bridges : [];
+assert.equal(cancelledBridges.some((b) => b.session_id === cancelledResume.id), false, 'deleted resumed session is not resurrected by seed retry');
+assert.ok(JSON.parse(fs.readFileSync(cancelledSessionsFile, 'utf8')).sessions.find((s) => s.session_id === cancelledResume.id)?.ended_at, 'deleted resumed session remains ended after seed retry');
+
+console.log('opencode resume + shim resilience journey passed (10 shim behaviors)');
