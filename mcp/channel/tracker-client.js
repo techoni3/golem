@@ -14,6 +14,7 @@ import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
+import { resolveCallerSessionId } from './identity.js';
 
 // --- golem-home resolution (TKT-0573, ADR-4) --------------------------------
 // This is a hand-maintained MIRROR of lib/golem-home.js's golemHome(). This
@@ -71,7 +72,10 @@ export function dashboardBaseUrl() {
  * env), with CLAUDE_CODE_SESSION_ID as a forward-compat fallback.
  * @returns {string|null}
  */
-export function currentSessionId() {
+export function currentSessionId(injectedId) {
+  // The shim is the only component that knows which sibling made this tool
+  // call. Its injected id is authoritative for this invocation.
+  if (typeof injectedId === 'string' && injectedId.trim()) return injectedId.trim();
   // Explicit launcher override wins; otherwise the LOGICAL id from the parent
   // claude process's session file (~/.claude/sessions/<ppid>.json) — this MCP
   // child is a direct child of it. CLAUDE_CODE_SESSION_ID is a per-run id that
@@ -84,51 +88,9 @@ export function currentSessionId() {
     const j = JSON.parse(fs.readFileSync(f, 'utf8'));
     if (j && typeof j.sessionId === 'string' && j.sessionId) return j.sessionId;
   } catch { /* missing / unreadable — fall through */ }
-  // opencode sessions export NONE of the CC-shaped signals above (no launcher
-  // env, no ~/.claude session file), so without this the tracker tools ran with
-  // no identity: ticket_comment threw "no current session id", and ticket_
-  // create/update recorded author/actor as null → the dashboard attributed
-  // events to "human" (TKT-0777). The opencode runtime shim
-  // (shims/opencode/index.js) already registers a bridge in opencode-bridges.json
-  // keyed by opencode_pid = THIS MCP child's parent pid; resolve our session id
-  // from it. MIRRORS index.js deriveSessionId()/readOpencodeBridgeForParent —
-  // keep the selection (ppid match · pid-alive · newest updated_at) in lockstep.
-  // Read fresh each call so a bridge that registers after MCP boot self-heals.
-  const ocSid = opencodeSessionIdForParent();
-  if (ocSid) return ocSid;
+  const opencode = resolveCallerSessionId({ home: golemHome() });
+  if (opencode.sessionId) return opencode.sessionId;
   return process.env.CLAUDE_CODE_SESSION_ID || null;
-}
-
-/** True if a process with this pid exists (EPERM ⇒ alive but not ours). */
-function pidAlive(pid) {
-  if (!pid || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return !!(err && err.code === 'EPERM');
-  }
-}
-
-/**
- * Resolve THIS session's id from the opencode bridge registry when running as a
- * golem-MCP child of an opencode server. Filters bridges to the one whose
- * opencode_pid is our parent pid (and whose owning pid is alive), newest first.
- * Returns null off opencode / when no live bridge matches.
- * @returns {string|null}
- */
-function opencodeSessionIdForParent() {
-  try {
-    const file = path.join(golemHome(), 'opencode-bridges.json');
-    const json = JSON.parse(fs.readFileSync(file, 'utf8'));
-    const bridges = Array.isArray(json?.bridges) ? json.bridges : [];
-    const match = bridges
-      .filter((b) => b && b.session_id && Number(b.opencode_pid) === Number(process.ppid) && (!b.pid || pidAlive(Number(b.pid))))
-      .sort((a, b) => Date.parse(b.updated_at || b.started_at || 0) - Date.parse(a.updated_at || a.started_at || 0))[0];
-    return match ? match.session_id : null;
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -166,8 +128,8 @@ function projectIdForPath(absRoot) {
  * Returns null when neither yields a value.
  * @returns {string|null}
  */
-export function currentProjectId() {
-  const sid = currentSessionId();
+export function currentProjectId(sessionId) {
+  const sid = sessionId ?? currentSessionId();
   if (sid) {
     try {
       const file = path.join(golemHome(), 'sessions.json');

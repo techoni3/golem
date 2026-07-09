@@ -22,6 +22,9 @@ import { z } from 'zod';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const DASHBOARD_SERVER = path.resolve(__dirname, '../../dashboard/server/index.js');
+const CHANNEL_DIR = process.env.GOLEM_CHANNEL_SOURCE ? path.resolve(process.env.GOLEM_CHANNEL_SOURCE) : __dirname;
+const CHANNEL_SERVER = path.join(CHANNEL_DIR, 'index.js');
+const CHANNEL_ROOT = path.resolve(CHANNEL_DIR, '../..');
 
 const HOST = '127.0.0.1';
 const SESSION_ID = 'test-session-aaaa-bbbb-cccc';
@@ -109,20 +112,30 @@ async function waitForChannel(timeoutMs = 15000) {
 let child;
 let mcpClient;
 let mcpTransport;
+let identityMcpClient;
+let identityMcpTransport;
+let noIdentityMcpClient;
+let noIdentityMcpTransport;
+let ccFallbackMcpClient;
+let ccFallbackMcpTransport;
 let port;
 
 function toolText(result) {
   return result?.content?.find((part) => part.type === 'text')?.text ?? '';
 }
 
-async function callTool(name, args) {
-  const result = await mcpClient.callTool({ name, arguments: args });
+async function callToolFrom(client, name, args) {
+  const result = await client.callTool({ name, arguments: args });
   const text = toolText(result);
   let json = null;
   if (!result.isError && text) {
     try { json = JSON.parse(text); } catch { /* non-JSON success */ }
   }
   return { result, text, json };
+}
+
+async function callTool(name, args) {
+  return callToolFrom(mcpClient, name, args);
 }
 
 async function main() {
@@ -154,7 +167,7 @@ async function main() {
   process.env.GOLEM_CEO_SESSION_ID = SESSION_ID;
   delete process.env.CLAUDE_CODE_SESSION_ID;
 
-  const client = await import('./tracker-client.js');
+  const client = await import(url.pathToFileURL(path.join(CHANNEL_DIR, 'tracker-client.js')).href + `?t=${Date.now()}`);
 
   check('dashboardBaseUrl() reads temp dashboard.json', client.dashboardBaseUrl() === doc.url,
     `got ${client.dashboardBaseUrl()} want ${doc.url}`);
@@ -232,8 +245,8 @@ async function main() {
   mcpClient = new Client({ name: 'golem-ticket-transition-journey', version: '1.0.0' });
   mcpTransport = new StdioClientTransport({
     command: process.execPath,
-    args: [path.join(__dirname, 'index.js')],
-    cwd: path.resolve(__dirname, '../..'),
+    args: [CHANNEL_SERVER],
+    cwd: CHANNEL_ROOT,
     env: {
       ...process.env,
       XDG_CONFIG_HOME: tmpConfigHome,
@@ -261,6 +274,124 @@ async function main() {
   const roleEvent = channelEvents.find((event) => event.params?.meta?.kind === 'role_assign');
   check('POST /role emits role_assign channel event', roleEvent?.params?.content === 'Role assignment test', JSON.stringify(channelEvents));
   check('POST /role never emits a brief event', !channelEvents.some((event) => event.params?.meta?.kind === 'brief'), JSON.stringify(channelEvents));
+
+  // One opencode MCP serves sibling sessions. Per-call shim identity must win
+  // over bridge order, and missing identity must refuse writes rather than
+  // attribute them to whichever sibling heartbeat was newest.
+  const siblingA = 'ses_identity_sibling_a';
+  const siblingB = 'ses_identity_sibling_b';
+  check('injected identity overrides ambient caller id', client.currentSessionId(siblingB) === siblingB, client.currentSessionId(siblingB));
+  const bridgesFile = path.join(tmpGolemHome, 'opencode-bridges.json');
+  const now = new Date().toISOString();
+  fs.writeFileSync(bridgesFile, JSON.stringify({
+    bridges: [
+      { session_id: siblingA, opencode_pid: process.pid, pid: process.pid, host: HOST, port: 1, updated_at: now },
+      { session_id: siblingB, opencode_pid: process.pid, pid: process.pid, host: HOST, port: 1, updated_at: new Date(Date.now() + 1000).toISOString() },
+    ],
+  }));
+  identityMcpClient = new Client({ name: 'golem-identity-journey', version: '1.0.0' });
+  identityMcpTransport = new StdioClientTransport({
+    command: process.execPath,
+    args: [CHANNEL_SERVER],
+    cwd: CHANNEL_ROOT,
+    env: {
+      ...process.env,
+      XDG_CONFIG_HOME: tmpConfigHome,
+      GOLEM_HOME: tmpGolemHome,
+      GOLEM_CEO_SESSION_ID: '',
+      CLAUDE_CODE_SESSION_ID: '',
+      GOLEM_CHANNEL_PORT: '0',
+      HOME: tmpRoot,
+    },
+    stderr: 'pipe',
+  });
+  identityMcpTransport.stderr?.on('data', (d) => process.stderr.write(`[identity-mcp:err] ${d}`));
+  await identityMcpClient.connect(identityMcpTransport);
+
+  const identityTicket = await callToolFrom(identityMcpClient, 'ticket_create', {
+    project: PROJECT_ID,
+    title: 'Per-call identity journey',
+    body: 'Injected metadata must not enter this ticket.',
+    __golem_session_id: siblingB,
+    __golem_call_id: 'call-shim-b',
+    __golem_probe: 'must-be-stripped',
+  });
+  check('injected sibling creates with its own author', !identityTicket.result.isError && identityTicket.json?.created_by === siblingB, identityTicket.text);
+  const siblingCommentA = await callToolFrom(identityMcpClient, 'ticket_comment', {
+    id: identityTicket.json?.id,
+    body: 'Sibling A write',
+    __golem_session_id: siblingA,
+    __golem_call_id: 'call-shim-a',
+  });
+  const siblingCommentB = await callToolFrom(identityMcpClient, 'ticket_comment', {
+    id: identityTicket.json?.id,
+    body: 'Sibling B write',
+    __golem_session_id: siblingB,
+    __golem_call_id: 'call-shim-b',
+  });
+  check('sibling A write succeeds', !siblingCommentA.result.isError, siblingCommentA.text);
+  check('sibling B write succeeds despite newer bridge order', !siblingCommentB.result.isError, siblingCommentB.text);
+  const siblingTicket = await callToolFrom(identityMcpClient, 'ticket_get', { id: identityTicket.json?.id });
+  const siblingAuthors = siblingTicket.json?.comments?.map((comment) => comment.author) || [];
+  check('sibling writes retain their individual authors', siblingAuthors.includes(siblingA) && siblingAuthors.includes(siblingB), JSON.stringify(siblingTicket.json?.comments));
+  check('injected metadata is stripped before ticket handlers', !JSON.stringify(siblingTicket.json).includes('__golem_'), siblingTicket.text);
+
+  const ambiguousWrite = await callToolFrom(identityMcpClient, 'ticket_comment', { id: identityTicket.json?.id, body: 'must not write' });
+  check('ambiguous sibling write is refused', ambiguousWrite.result.isError && /2 sibling sessions.*refusing to write/.test(ambiguousWrite.text), ambiguousWrite.text);
+  const afterAmbiguous = await callToolFrom(identityMcpClient, 'ticket_get', { id: identityTicket.json?.id });
+  check('ambiguous sibling refusal writes no comment', afterAmbiguous.json?.comments?.length === 2, JSON.stringify(afterAmbiguous.json?.comments));
+
+  fs.writeFileSync(bridgesFile, JSON.stringify({ bridges: [{ session_id: siblingA, opencode_pid: process.pid, pid: process.pid, host: HOST, port: 1, updated_at: now }] }));
+  const singleBridgeWrite = await callToolFrom(identityMcpClient, 'ticket_comment', { id: identityTicket.json?.id, body: 'Single bridge back-compat' });
+  check('single bridge resolves without injection', !singleBridgeWrite.result.isError, singleBridgeWrite.text);
+
+  fs.writeFileSync(bridgesFile, JSON.stringify({ bridges: [] }));
+  const channelsFile = path.join(tmpGolemHome, 'channels.json');
+  const channelCountBeforeNoIdentity = JSON.parse(fs.readFileSync(channelsFile, 'utf8')).channels.length;
+  noIdentityMcpClient = new Client({ name: 'golem-no-identity-journey', version: '1.0.0' });
+  noIdentityMcpTransport = new StdioClientTransport({
+    command: process.execPath,
+    args: [CHANNEL_SERVER],
+    cwd: CHANNEL_ROOT,
+    env: {
+      ...process.env,
+      XDG_CONFIG_HOME: tmpConfigHome,
+      GOLEM_HOME: tmpGolemHome,
+      GOLEM_CEO_SESSION_ID: '',
+      CLAUDE_CODE_SESSION_ID: '',
+      GOLEM_CHANNEL_PORT: '0',
+      HOME: tmpRoot,
+    },
+    stderr: 'pipe',
+  });
+  await noIdentityMcpClient.connect(noIdentityMcpTransport);
+  await sleep(50);
+  const channelCountAfterNoIdentity = JSON.parse(fs.readFileSync(channelsFile, 'utf8')).channels.length;
+  check('missing bridge channel does not register', channelCountAfterNoIdentity === channelCountBeforeNoIdentity, `${channelCountBeforeNoIdentity} -> ${channelCountAfterNoIdentity}`);
+  const noBridgeWrite = await callToolFrom(noIdentityMcpClient, 'ticket_comment', { id: identityTicket.json?.id, body: 'must not write without bridge' });
+  check('missing bridge write is refused', noBridgeWrite.result.isError && /no live opencode bridge row.*refusing to write/.test(noBridgeWrite.text), noBridgeWrite.text);
+
+  const ccFallbackId = 'ses_claude_env_fallback';
+  ccFallbackMcpClient = new Client({ name: 'golem-cc-env-fallback-journey', version: '1.0.0' });
+  ccFallbackMcpTransport = new StdioClientTransport({
+    command: process.execPath,
+    args: [CHANNEL_SERVER],
+    cwd: CHANNEL_ROOT,
+    env: {
+      ...process.env,
+      XDG_CONFIG_HOME: tmpConfigHome,
+      GOLEM_HOME: tmpGolemHome,
+      GOLEM_CEO_SESSION_ID: '',
+      CLAUDE_CODE_SESSION_ID: ccFallbackId,
+      GOLEM_CHANNEL_PORT: '0',
+      HOME: tmpRoot,
+    },
+    stderr: 'pipe',
+  });
+  await ccFallbackMcpClient.connect(ccFallbackMcpTransport);
+  await sleep(50);
+  const ccFallbackChannels = JSON.parse(fs.readFileSync(channelsFile, 'utf8')).channels;
+  check('CLAUDE_CODE_SESSION_ID fallback still registers a channel', ccFallbackChannels.some((channel) => channel.session_id === ccFallbackId), JSON.stringify(ccFallbackChannels));
 
   const tools = await mcpClient.listTools();
   const transitionTool = tools.tools.find((tool) => tool.name === 'ticket_transition');
@@ -333,6 +464,12 @@ main()
     // Kill child, clean temp.
     try { await mcpClient?.close(); } catch { /* ignore */ }
     try { await mcpTransport?.close(); } catch { /* ignore */ }
+    try { await identityMcpClient?.close(); } catch { /* ignore */ }
+    try { await identityMcpTransport?.close(); } catch { /* ignore */ }
+    try { await noIdentityMcpClient?.close(); } catch { /* ignore */ }
+    try { await noIdentityMcpTransport?.close(); } catch { /* ignore */ }
+    try { await ccFallbackMcpClient?.close(); } catch { /* ignore */ }
+    try { await ccFallbackMcpTransport?.close(); } catch { /* ignore */ }
     try { child?.kill('SIGKILL'); } catch { /* ignore */ }
     try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* ignore */ }
     if (failures === 0) {

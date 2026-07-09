@@ -29,6 +29,7 @@ import {
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import * as tracker from './tracker-client.js';
+import { bridgeEndpointForParent, resolveCallerSessionId } from './identity.js';
 import { SESSION_ROLES, pushRoleBriefDirect, setSessionRole } from '../../lib/session-role.js';
 
 const VERSION = '0.1.0';
@@ -81,14 +82,12 @@ function deriveSessionId() {
   if (process.env.GOLEM_CEO_SESSION_ID) return process.env.GOLEM_CEO_SESSION_ID;
   const j = readParentSessionFile();
   if (j && typeof j.sessionId === 'string' && j.sessionId) return j.sessionId;
-  const bridge = readOpencodeBridgeForParent();
-  if (bridge?.session_id) return bridge.session_id;
-  return process.env.CLAUDE_CODE_SESSION_ID || '';
+  return resolveCallerSessionId({ home: tracker.golemHome() }).sessionId || process.env.CLAUDE_CODE_SESSION_ID || '';
 }
 function deriveSessionName() {
   const j = readParentSessionFile();
   if (j && typeof j.name === 'string' && j.name) return j.name;
-  const bridge = readOpencodeBridgeForParent();
+  const bridge = bridgeEndpointForParent({ home: tracker.golemHome() });
   return bridge && typeof bridge.name === 'string' && bridge.name ? bridge.name : null;
 }
 // golem-home resolution (TKT-0573, ADR-4) lives in tracker-client.js's
@@ -96,7 +95,6 @@ function deriveSessionName() {
 // mirror of lib/golem-home.js within the same package.
 const CHANNELS_REGISTRY = path.join(tracker.golemHome(), 'channels.json');
 const CHANNELS_LOCK = `${CHANNELS_REGISTRY}.lock`;
-const OPENCODE_BRIDGES_REGISTRY = path.join(tracker.golemHome(), 'opencode-bridges.json');
 
 // Mutable: re-derived on each (re)register so a session file that wasn't written
 // yet at module load, or a later /rename, is picked up within one heartbeat.
@@ -108,7 +106,10 @@ let SESSION_NAME = deriveSessionName();
 const listeners = new Set();
 
 function broadcast(eventName, payload) {
-  const enriched = { session_id: SESSION_ID, ...payload };
+  // Resolve at emission time: a sibling bridge can appear after registration,
+  // and a cached formerly-unique id must not be stamped onto its events.
+  const sessionId = deriveSessionId();
+  const enriched = sessionId ? { session_id: sessionId, ...payload } : { ...payload };
   const data = JSON.stringify(enriched);
   const chunk = `event: ${eventName}\ndata: ${data}\n\n`;
   for (const emit of listeners) {
@@ -163,33 +164,6 @@ function readChannelsRegistry() {
   return { version: 1, channels: [] };
 }
 
-function pidAlive(pid) {
-  if (!pid || pid === 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return err && err.code === 'EPERM';
-  }
-}
-
-function readOpencodeBridgeForParent() {
-  try {
-    const raw = fs.readFileSync(OPENCODE_BRIDGES_REGISTRY, 'utf8');
-    const json = JSON.parse(raw);
-    const bridges = Array.isArray(json?.bridges) ? json.bridges : [];
-    const candidates = bridges.filter((b) => {
-      if (!b || Number(b.opencode_pid) !== Number(process.ppid)) return false;
-      if (b.pid && !pidAlive(Number(b.pid))) return false;
-      return !!(b.session_id && b.host && b.port);
-    });
-    candidates.sort((a, b) => Date.parse(b.updated_at || b.started_at || 0) - Date.parse(a.updated_at || a.started_at || 0));
-    return candidates[0] || null;
-  } catch {
-    return null;
-  }
-}
-
 function writeChannelsRegistry(reg) {
   const tmp = `${CHANNELS_REGISTRY}.tmp.${process.pid}`;
   fs.writeFileSync(tmp, JSON.stringify(reg, null, 2));
@@ -204,11 +178,11 @@ function registerChannel(port) {
   // Re-derive each call: the parent session file may not have existed at module
   // load, and the name changes on /rename. Correcting SESSION_ID here also
   // self-heals a channel that first registered under a fallback run-id.
-  SESSION_ID = deriveSessionId() || SESSION_ID;
+  SESSION_ID = deriveSessionId();
   SESSION_NAME = deriveSessionName();
-  const bridge = readOpencodeBridgeForParent();
+  const bridge = bridgeEndpointForParent({ home: tracker.golemHome() });
   if (!SESSION_ID) {
-    process.stderr.write('[golem-channel] no session id (parent session file + GOLEM_CEO_SESSION_ID/CLAUDE_CODE_SESSION_ID all empty); channel will not register\n');
+    process.stderr.write('[golem-channel] no unambiguous session id; channel will not register\n');
     return;
   }
   withChannelLock(() => {
@@ -756,7 +730,10 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
 
 mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const name = req.params.name;
-  const args = req.params.arguments || {};
+  const rawArgs = req.params.arguments || {};
+  const injectedSessionId = rawArgs.__golem_session_id;
+  const args = Object.fromEntries(Object.entries(rawArgs).filter(([key]) => !key.startsWith('__golem_')));
+  const caller = resolveCallerSessionId({ injectedId: injectedSessionId, home: tracker.golemHome() });
 
   if (name === 'ack') {
     const payload = {
@@ -952,8 +929,13 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       content: [{ type: 'text', text: JSON.stringify(await publicTicketIds(value), null, 2) }],
     });
     try {
-      const sessionId = tracker.currentSessionId();
-      const defaultProject = tracker.currentProjectId();
+      const sessionId = tracker.currentSessionId(injectedSessionId);
+      const defaultProject = tracker.currentProjectId(sessionId);
+      const writeTools = new Set([
+        'ticket_create', 'ticket_update', 'ticket_transition', 'ticket_comment',
+        'ticket_comment_update', 'ticket_comment_reply', 'ticket_dispatch', 'stream_create',
+      ]);
+      if (writeTools.has(name) && !sessionId) throw new Error(caller.error);
 
       // Resolve the `project` query value for LIST-style tools. `all:true` or
       // project "*" ⇒ list across all projects (omit the filter). Otherwise an
@@ -1136,9 +1118,9 @@ async function pushEvent(kind, content, extraMeta = {}) {
   // meta keys must be identifiers (letters/digits/underscore) — hyphens
   // are silently dropped by Claude Code. snake_case only.
   const meta = { kind, ...extraMeta };
-  const bridge = readOpencodeBridgeForParent();
-  if (bridge && bridge.session_id === SESSION_ID) {
-    await postToOpencodeBridge(bridge, { session_id: SESSION_ID, kind, content, meta });
+  const bridge = bridgeEndpointForParent({ home: tracker.golemHome() });
+  if (bridge) {
+    await postToOpencodeBridge(bridge, { session_id: deriveSessionId(), kind, content, meta });
     return;
   }
   await mcp.notification({

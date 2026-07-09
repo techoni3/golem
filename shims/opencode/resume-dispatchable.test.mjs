@@ -137,6 +137,25 @@ await hooks['chat.message']({ sessionID: child.id });
 assert.equal(JSON.parse(fs.readFileSync(bridgeFile, 'utf8')).bridges.some((b) => b.session_id === child.id), false, 'child event cannot create a bridge row');
 assert.equal(JSON.parse(fs.readFileSync(sessionsFile, 'utf8')).sessions.some((s) => s.session_id === child.id), false, 'child event cannot create a session row');
 
+const childGolemArgs = { id: 'GOL-410', body: 'child write' };
+await hooks['tool.execute.before']({ tool: 'golem_ticket_comment', sessionID: child.id, callID: 'call-child-golem' }, { args: childGolemArgs });
+assert.equal(childGolemArgs.__golem_session_id, resumed.id, 'child golem call injects its top-level session id');
+assert.equal(childGolemArgs.__golem_call_id, 'call-child-golem', 'child golem call injects its diagnostic call id');
+
+const bareGolemArgs = { id: 'GOL-410', body: 'top-level write' };
+await hooks['tool.execute.before']({ tool: 'ticket_comment', sessionID: resumed.id, callID: 'call-bare-golem' }, { args: bareGolemArgs });
+assert.equal(bareGolemArgs.__golem_session_id, resumed.id, 'bare golem tool receives injected top-level id');
+
+const foreignArgs = { command: 'true' };
+await hooks['tool.execute.before']({ tool: 'bash', sessionID: resumed.id, callID: 'call-foreign' }, { args: foreignArgs });
+assert.equal(Object.hasOwn(foreignArgs, '__golem_session_id'), false, 'foreign tools never receive golem identity args');
+
+const unresolvedChild = { id: 'ses_child_unknown_parent', parentID: 'ses_missing_parent', directory: projectDir };
+await hooks.event({ event: { type: 'session.created', properties: { info: unresolvedChild } } });
+const unresolvedArgs = { id: 'GOL-410', body: 'must not inject' };
+await hooks['tool.execute.before']({ tool: 'golem_ticket_comment', sessionID: unresolvedChild.id, callID: 'call-unknown-parent' }, { args: unresolvedArgs });
+assert.equal(Object.hasOwn(unresolvedArgs, '__golem_session_id'), false, 'unresolvable child ancestry injects nothing');
+
 const failing = {
   id: 'ses_registration_retry',
   directory: projectDir,

@@ -69,6 +69,20 @@ const MAX_SESSION_REGISTRY_ROWS = 500;
 const MAX_LOG_BYTES = 5 * 1024 * 1024;
 let currentSessionID = "";
 
+// Opencode namespaces MCP tools with a user-configurable server name. Match
+// only golem's suffixes so injected identity keys never reach foreign tools.
+export const GOLEM_TOOL_SUFFIXES = new Set([
+  "ticket_list", "ticket_get", "ticket_create", "ticket_update", "ticket_comment",
+  "ticket_comment_update", "ticket_comment_reply", "ticket_dispatch", "ticket_transition",
+  "ack", "respond", "session_notify", "session_role", "sessions_dispatchable",
+  "subscribe", "unsubscribe", "subscriptions_list", "stream_create", "stream_list",
+  "consult_request", "consult_reply", "consult_status",
+]);
+
+export function isGolemToolName(name) {
+  return typeof name === "string" && [...GOLEM_TOOL_SUFFIXES].some((tool) => name === tool || name.endsWith(`_${tool}`));
+}
+
 function opencodeStateDir() {
   if (process.env.OPENCODE_STATE_DIR) return process.env.OPENCODE_STATE_DIR;
   if (process.env.XDG_STATE_HOME) return join(process.env.XDG_STATE_HOME, "opencode");
@@ -539,6 +553,7 @@ export default async (input) => {
   const initCwd = input?.directory || process.cwd();
   initialCwdForContext = initCwd;
   const sessionDir = new Map(); // sessionID → directory (tool events carry no dir)
+  const parentOf = new Map(); // child sessionID → immediate parent sessionID
   const knownSessionIDs = new Set();
   const cancelledSessionIDs = new Set();
   const trackerContextCache = new Map();
@@ -551,6 +566,18 @@ export default async (input) => {
   };
 
   const dirFor = (sid) => sessionDir.get(sid) || initCwd;
+  const topLevelOf = (sessionID) => {
+    if (!sessionID) return null;
+    let current = sessionID;
+    const seen = new Set();
+    while (parentOf.has(current)) {
+      if (seen.has(current)) return null;
+      seen.add(current);
+      current = parentOf.get(current);
+      if (!current) return null;
+    }
+    return knownSessionIDs.has(current) ? current : null;
+  };
   const base = (sessionID, cwd, extra = {}) => ({ session_id: sessionID || "", cwd: cwd || initCwd, harness: "opencode", model: readOpencodeModel(sessionID), ...extra });
   const bridge = startBridge({ client: input?.client, dirFor, logErr });
   // Child/subagent ids never enter knownSessionIDs, so recurring events can
@@ -639,7 +666,10 @@ export default async (input) => {
         const p = event?.properties || {};
         if (t === "session.created") {
           const info = p.info || {};
-          if (info.parentID) return; // child/subagent session — journaled via the task tool, not as a top-level start
+          if (info.parentID) {
+            parentOf.set(info.id, info.parentID);
+            return; // child/subagent session — journaled via the task tool, not as a top-level start
+          }
           cancelledSessionIDs.delete(info.id);
           logLine("session.created", `session=${info.id || ""}`);
           if (info.directory) sessionDir.set(info.id, info.directory);
@@ -677,7 +707,10 @@ export default async (input) => {
           // (auto-generated after the first message, and on any rename). Keep
           // the registry name fresh so the dashboard shows names, not ses_* ids.
           const info = p.info || {};
-          if (info.parentID) return; // child/subagent session
+          if (info.parentID) {
+            parentOf.set(info.id, info.parentID);
+            return; // child/subagent session
+          }
           if (info.directory) sessionDir.set(info.id, info.directory);
           knownSessionIDs.add(info.id);
           currentSessionID = info.id || currentSessionID;
@@ -686,7 +719,8 @@ export default async (input) => {
           runHook("journal-route.sh", ["pre-compact"], base(p.sessionID, dirFor(p.sessionID)));
         } else if (t === "session.deleted") {
           const info = p.info || {};
-          if (!info.parentID) endSession(info.id, info.directory || dirFor(info.id));
+          if (info.parentID) parentOf.delete(info.id);
+          else endSession(info.id, info.directory || dirFor(info.id));
         } else if (t === "server.instance.disposed") {
           disposed = true;
           const ended = [...knownSessionIDs];
@@ -714,6 +748,17 @@ export default async (input) => {
       try {
         currentSessionID = inp?.sessionID || currentSessionID;
         publishBridge(inp?.sessionID, "busy");
+        if (isGolemToolName(inp?.tool)) {
+          const callerSessionID = topLevelOf(inp?.sessionID);
+          if (callerSessionID && out?.args && typeof out.args === "object" && !Array.isArray(out.args)) {
+            // Local plugins can already act as the user. This trusted shim is
+            // therefore authoritative for the per-call session it injects.
+            out.args.__golem_session_id = callerSessionID;
+            out.args.__golem_call_id = inp?.callID;
+          } else {
+            logLine("identity injection", `not injected tool=${inp?.tool || ""} session=${inp?.sessionID || ""}`);
+          }
+        }
         const kind = inp?.tool === "task" ? "agent-spawn" : "tool-pre";
         runHook("journal-route.sh", [kind], {
           ...base(inp?.sessionID, dirFor(inp?.sessionID)),
