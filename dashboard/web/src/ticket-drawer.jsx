@@ -1033,10 +1033,6 @@ function tdAgo(iso) {
   return window.SubstrateFmt?.fmtTimeAgo?.(t) || '';
 }
 
-function tdTicketRef(t) {
-  return t?.display_id || t?.id || '';
-}
-
 // TKT-0284: spec → work-items panel. Renders the spec's children (work items
 // with parent_id = this spec) as a clickable list, aligned to the 1200px
 // document column like .td-props. Children are read LIVE from the store on
@@ -1104,11 +1100,11 @@ function SpecChildrenPanel({ specId, projectContractId, seedChildren = [], resol
                 {group.children.map((c) => (
                   <a key={c.id}
                     className="td-child-row"
-                    href={window.Router.buildHref({ kind: 'ticket', id: tdTicketRef(c) })}
-                    onClick={(e) => { e.preventDefault(); window.Router.openTicket(tdTicketRef(c)); }}
+                    href={window.Router.buildHref({ kind: 'ticket', id: c.id })}
+                    onClick={(e) => { e.preventDefault(); window.Router.openTicket(c.id); }}
                     title={c.title}
                   >
-                    <span className="td-child-id mono">{tdTicketRef(c)}</span>
+                    <span className="td-child-id mono">{c.display_id || c.id}</span>
                     <span className="td-child-title">{c.title}</span>
                     <span className={`pill ${TD_STATE_PILL[c.state] || 'idle'}`}>{c.state}</span>
                     <span className="td-child-assignee">{resolveAssignee(c.assignee, c.assignee_label)}</span>
