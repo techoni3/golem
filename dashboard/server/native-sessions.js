@@ -441,7 +441,8 @@ export async function readNativeSessions(registeredIdLookup) {
     });
   }
 
-  // Stable, useful ordering: alive first, then most-recently-updated.
+  // Stable, useful ordering: alive first, then most-recently-updated. The
+  // dedup filter below consumes this order to choose its preferred winner.
   out.sort((a, b) => {
     if (a.alive !== b.alive) return a.alive ? -1 : 1;
     return (b.updated_at ?? b.started_at ?? 0) - (a.updated_at ?? a.started_at ?? 0);
@@ -458,9 +459,13 @@ export async function readNativeSessions(registeredIdLookup) {
         claimed.set(scope, row);
         return true;
       }
-      // Claude can report both ids briefly while a resumed session is rekeyed.
+      // Alive-first ordering normally makes the winner authoritative. Still,
+      // never collapse a live resume-rekey row behind a dead winner if that
+      // ordering is changed or removed.
       if (row.harness === 'claudecode' && winner.harness === 'claudecode'
-          && row.pid && Number(row.pid) === Number(winner.pid)) return false;
+          && row.pid && Number(row.pid) === Number(winner.pid)) {
+        return row.alive === true && winner.alive !== true;
+      }
       return row.alive === true;
     });
   } catch {

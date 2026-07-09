@@ -86,7 +86,10 @@ async function assertNativeSessionDiscovery() {
   assert.ok(liveProcess.pid, 'live fixture process spawned');
   try {
     const now = Date.now();
+    const orderIndependentPid = 2_147_483_646;
     fs.writeFileSync(agentsFile, JSON.stringify([
+      { sessionId: 'cc_order_dead', pid: orderIndependentPid, cwd: projectB, name: 'order-independent-rekey', status: 'idle', startedAt: now + 1000 },
+      { sessionId: 'cc_order_live', pid: orderIndependentPid, cwd: projectB, name: 'order-independent-rekey', status: 'idle', startedAt: now - 1000 },
       { sessionId: 'cc_live', pid: liveProcess.pid, cwd: projectA, name: 'dead-live', status: 'idle', startedAt: now },
       { sessionId: 'cc_dead', pid: 2147483647, cwd: projectA, name: 'dead-live', status: 'idle', startedAt: now - 1000 },
       { sessionId: 'cc_resume_new', pid: liveProcess.pid, cwd: projectA, name: 'resume-rekey', status: 'idle', startedAt: now },
@@ -124,7 +127,26 @@ async function assertNativeSessionDiscovery() {
     process.env.FAKE_CLAUDE_AGENTS = agentsFile;
     process.env.PATH = `${bin}${path.delimiter}${process.env.PATH}`;
     const { readNativeSessions } = await import(`../dashboard/server/native-sessions.js?t=${Date.now()}`);
-    const sessions = await readNativeSessions(() => true);
+    const originalKill = process.kill;
+    let orderIndependentChecks = 0;
+    process.kill = (pid, signal) => {
+      if (Number(pid) === orderIndependentPid) {
+        orderIndependentChecks += 1;
+        if (orderIndependentChecks === 1) {
+          const error = new Error('synthetic dead pid');
+          error.code = 'ESRCH';
+          throw error;
+        }
+        return true;
+      }
+      return originalKill.call(process, pid, signal);
+    };
+    let sessions;
+    try {
+      sessions = await readNativeSessions(() => true);
+    } finally {
+      process.kill = originalKill;
+    }
 
     const crossProject = sessions.filter((row) => row.name === 'cross-project');
     assert.equal(crossProject.length, 2, 'same-named live sessions in different projects both surface');
@@ -132,6 +154,9 @@ async function assertNativeSessionDiscovery() {
     assert.equal(sessions.filter((row) => row.name === 'dead-live').length, 1, 'dead same-project name collision collapses to live row');
     assert.equal(sessions.filter((row) => row.name === 'same-project-live').length, 2, 'same-project live name collisions both surface');
     assert.equal(sessions.filter((row) => row.name === 'resume-rekey').length, 1, 'same-pid Claude resume rows collapse');
+    // This live row must survive even with native-sessions.js's out.sort call
+    // deleted: its dead same-pid twin is deliberately first in source order.
+    assert.equal(sessions.find((row) => row.session_id === 'cc_order_live')?.alive, true, 'dead-first same-pid collapse never hides the live row');
     assert.equal(sessions.find((row) => row.session_id === 'oc_fallback')?.alive, true, 'live channel and fresh registry survive a missing bridge');
     assert.equal(sessions.some((row) => row.session_id === 'oc_no_channel'), false, 'missing bridge and channel do not resurrect a session');
     console.log('native session discovery journey passed');
