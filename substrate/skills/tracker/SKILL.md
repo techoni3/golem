@@ -36,17 +36,18 @@ Phase-backed workflow is canonical when `phase` is present:
 
 The server derives board state from phase and enforces transition artifacts. If a transition fails, add the required comment/evidence or stay put.
 
-Prefer `transition({phase})` over `ticket_update({state})` for every lifecycle move. Legacy state cannot express `verifying` or `verified`: `built`, `verifying`, and `verified` all collapse to `review`, so state-based lifecycle writes are lossy. Session attempts to close with `ticket_update({state:'done'})` are rejected once phase enforcement is active.
+Prefer `transition({phase})` over `ticket_update({state})` for every lifecycle move. Legacy state cannot express `verifying` or `verified`: `built`, `verifying`, and `verified` all collapse to `review`, so state-based lifecycle writes are lossy. Session attempts to close with `ticket_update({state:'done'})` will be rejected once phase enforcement lands.
 
 ## Flow On A Brief Or Dispatch
 
 1. Find the ticket: `ticket_list({mine:true})` or `ticket_get` the id named in the brief.
-2. Builders claim dispatched implementation work with `transition({phase:'building'})`: `queued -> building`.
+2. Builders claim dispatched implementation work with `transition({phase:'building'})`: `queued -> building`. After posting the four-part closing brief, they transition `building -> built`.
 3. Managers route verification with `transition({phase:'verifying'})`: `built -> verifying`.
 4. Verifiers do not claim. The manager has already set `verifying`; the explorer posts its PASS/FAIL report, then transitions `verifying -> verified` or `verifying -> rejected`. A verifier never writes legacy state.
-5. Subscribe when you are waiting on handoffs: use `ticket/<display_id>` for one ticket or `spec/<display_id>/tree` for a spec and its children. Subscription digests replace manual polling for long waits.
-6. Do the work. Comment milestones with mechanical evidence: commands and real output, not claims.
-7. Verify before advancing to `built`, `verified`, `rejected`, or `done`; read `golem:verify-done`.
+5. Managers close verified work with `transition({phase:'done'})`: `verified -> done`.
+6. Subscribe when you are waiting on handoffs: use `ticket/<display_id>` for one ticket or `spec/<display_id>/tree` for a spec and its children. Subscription digests replace manual polling for long waits.
+7. Do the work. Comment milestones with mechanical evidence: commands and real output, not claims.
+8. Verify before advancing to `built`, `verified`, `rejected`, or `done`; read `golem:verify-done`.
 
 ## Bus Topics
 
@@ -74,5 +75,5 @@ Inline comments use the same comments table as thread comments. The UI assigns r
 ## State Hygiene
 
 - Keep at most one active in-progress ticket per writing stream.
-- Before going idle, sweep assigned work. Finished work goes to `review`/`built`/`done`; parked work gets a reason and moves to `blocked`/`parked` or is unassigned.
+- Before going idle, sweep assigned work. Advance finished work with `transition({phase})` to the lane-appropriate phase (`built`, `verified`, or `done`); never use legacy `review`. Parked work gets a reason and transitions to `blocked`/`parked` or is unassigned.
 - Stale assigned work is a defect: comment current status and fix the state before starting new work.
