@@ -20,12 +20,13 @@
 //   (c) ~/.golem/sessions.json — written by golem hooks/shims for Claude Code
 //       and non-CC harnesses. Claude Code rows here carry hook_ppid (the hook's
 //       shell), not the session pid, so they use a short recency window rather
-//       than pid-liveness. opencode rows are joined to opencode-bridges.json and
-//       use the owning opencode server pid as the liveness truth.
+//       than pid-liveness. opencode rows require a live channel and use either
+//       bridge pid liveness or a bounded recency fallback when the bridge is gone.
 //
 // Liveness is source-specific: the CLI list is authoritative, ~/.claude files
 // use pid liveness (process.kill(pid,0)), golem-registry Claude Code rows use
-// recency, and opencode rows use bridge pid liveness.
+// recency, and opencode rows require a live channel plus bridge pid liveness or
+// recent registry activity.
 // Registry files can linger after death; stale files must not be resurrected by
 // pid reuse.
 //
@@ -376,15 +377,17 @@ export async function readNativeSessions(registeredIdLookup) {
     const harness = s.harness ?? 'claudecode';
     // Golem-registry Claude Code rows carry hook_ppid (the hook shell), not the
     // real session pid, so pid-liveness can be faked by pid reuse; only native
-    // CLI / ~/.claude registry rows trust pid-liveness. opencode rows are live
-    // only while a matching bridge exists and its owning opencode server pid is
-    // alive; missing bridge means a graceful exit already unregistered it.
+    // CLI / ~/.claude registry rows trust pid-liveness. opencode rows require a
+    // live channel; a live bridge pid is authoritative, while recent registry
+    // activity is a bounded fallback for bridge-loss windows.
     const isNonCc = harness !== 'claudecode';
     const isGolemRegistryCc = harness === 'claudecode' && s._from === 'golem';
     const bridge = harness === 'opencode' ? opencodeBridges.get(s.session_id) : null;
     const bridgePid = Number(bridge?.opencode_pid || bridge?.pid) || null;
     const alive = harness === 'opencode'
-      ? !!(!s.ended_at && bridge && liveChannelSessionIds.has(s.session_id) && pidAlive(bridgePid))
+      ? !!(!s.ended_at && liveChannelSessionIds.has(s.session_id) && (bridge
+        ? pidAlive(bridgePid)
+        : (s.updated_at && (Date.now() - s.updated_at) < GOLEM_SESSION_RECENT_MS)))
       : (isNonCc || isGolemRegistryCc
         ? !!(!s.ended_at && s.updated_at && (Date.now() - s.updated_at) < GOLEM_SESSION_RECENT_MS)
         : pidAlive(s.pid));
@@ -445,13 +448,20 @@ export async function readNativeSessions(registeredIdLookup) {
   });
 
   try {
-    const seenNames = new Set();
+    const claimed = new Map();
     return out.filter((row) => {
       const name = row.name && row.name.trim();
       if (!name) return true;
-      if (seenNames.has(name)) return false;
-      seenNames.add(name);
-      return true;
+      const scope = `${row.project_id ?? row.cwd ?? ''}\0${name}`;
+      const winner = claimed.get(scope);
+      if (!winner) {
+        claimed.set(scope, row);
+        return true;
+      }
+      // Claude can report both ids briefly while a resumed session is rekeyed.
+      if (row.harness === 'claudecode' && winner.harness === 'claudecode'
+          && row.pid && Number(row.pid) === Number(winner.pid)) return false;
+      return row.alive === true;
     });
   } catch {
     return out;
