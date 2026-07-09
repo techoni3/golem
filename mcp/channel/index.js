@@ -512,7 +512,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'ticket_update',
       description:
-        'Golem tracker — patch a ticket. The common case is a STATE transition (todo→in_progress→review→done, or →blocked). The body field is Markdown (+ fenced ```mermaid). Records you as the actor. Verify work mechanically before moving to review/done (see golem:verify-done).',
+        'Golem tracker — patch ticket metadata or use the legacy state field. Use ticket_transition for every lifecycle phase move; do not add phase here. The body field is Markdown (+ fenced ```mermaid). Records you as the actor.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -529,6 +529,21 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           assignee: { type: 'string', description: 'session_id | "human" | null.' },
         },
         required: ['id'],
+      },
+    },
+    {
+      name: 'ticket_transition',
+      description:
+        'Golem tracker — move one ticket through its phase machine. Builders: queued → building → built. Managers: built → verifying and verified → done. Explorers: verifying → verified (PASS) or rejected (FAIL). Read golem:tracker and golem:verify-done first; required artifacts are enforced by the server and rejection text is returned verbatim.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Display ticket id, e.g. GOL-244. Legacy TKT refs still resolve.' },
+          phase: { type: 'string', description: 'Target phase (kind-dependent), e.g. queued|building|blocked|built|verifying|verified|rejected|done.' },
+          reason: { type: 'string', description: 'Reason required by blocked/parked transitions.' },
+          skip_reason: { type: 'string', description: 'Explicit lifecycle skip reason; reserved for the manager-authorized escape hatch once phase enforcement lands.' },
+        },
+        required: ['id', 'phase'],
       },
     },
     {
@@ -995,6 +1010,18 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           if (args[k] !== undefined) patch[k] = args[k];
         }
         return await jsonResult(await tracker.updateTicket(args.id, patch));
+      }
+
+      if (name === 'ticket_transition') {
+        if (!args.id) throw new Error('ticket_transition: id is required');
+        if (!args.phase) throw new Error('ticket_transition: phase is required');
+        if (!sessionId) throw new Error('ticket_transition: no current session id to record as actor');
+        return await jsonResult(await tracker.transitionTicket(args.id, {
+          phase: args.phase,
+          reason: args.reason,
+          skip_reason: args.skip_reason,
+          actor: sessionId,
+        }));
       }
 
       if (name === 'ticket_comment') {

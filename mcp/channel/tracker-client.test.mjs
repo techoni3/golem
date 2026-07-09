@@ -15,11 +15,13 @@ import os from 'node:os';
 import fs from 'node:fs';
 import url from 'node:url';
 import crypto from 'node:crypto';
+import net from 'node:net';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const DASHBOARD_SERVER = path.resolve(__dirname, '../../dashboard/server/index.js');
 
-const PORT = 7616;
 const HOST = '127.0.0.1';
 const SESSION_ID = 'test-session-aaaa-bbbb-cccc';
 const PROJECT_ID = 'testproj-abc123'; // synthetic contract id; we pass it explicitly
@@ -27,8 +29,10 @@ const PROJECT_ID = 'testproj-abc123'; // synthetic contract id; we pass it expli
 // --- temp sandbox ----------------------------------------------------------
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'golem-tracker-test-'));
 const tmpConfigHome = path.join(tmpRoot, 'config'); // XDG_CONFIG_HOME
+const tmpGolemHome = path.join(tmpConfigHome, 'golem');
 const tmpDb = path.join(tmpRoot, 'tracker.db');
 fs.mkdirSync(tmpConfigHome, { recursive: true });
+process.env.GOLEM_HOME = tmpGolemHome;
 
 let failures = 0;
 function check(label, cond, detail) {
@@ -42,6 +46,18 @@ function check(label, cond, detail) {
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function availablePort() {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once('error', reject);
+    probe.listen(0, HOST, () => {
+      const address = probe.address();
+      const port = typeof address === 'object' && address ? address.port : null;
+      probe.close((err) => err ? reject(err) : resolve(port));
+    });
+  });
 }
 
 // Wait until the dashboard self-registers dashboard.json and the API routes are
@@ -67,14 +83,34 @@ async function waitForDashboard(timeoutMs = 15000) {
 }
 
 let child;
+let mcpClient;
+let mcpTransport;
+let port;
+
+function toolText(result) {
+  return result?.content?.find((part) => part.type === 'text')?.text ?? '';
+}
+
+async function callTool(name, args) {
+  const result = await mcpClient.callTool({ name, arguments: args });
+  const text = toolText(result);
+  let json = null;
+  if (!result.isError && text) {
+    try { json = JSON.parse(text); } catch { /* non-JSON success */ }
+  }
+  return { result, text, json };
+}
+
 async function main() {
   // 1) Spawn the dashboard server in the sandbox.
+  port = await availablePort();
   child = spawn('node', [DASHBOARD_SERVER], {
     env: {
       ...process.env,
-      PORT: String(PORT),
+      PORT: String(port),
       HOST,
       GOLEM_TRACKER_DB: tmpDb,
+      GOLEM_HOME: tmpGolemHome,
       XDG_CONFIG_HOME: tmpConfigHome,
       LOG_LEVEL: 'warn',
     },
@@ -85,11 +121,12 @@ async function main() {
 
   const doc = await waitForDashboard();
   check('dashboard self-registered dashboard.json', !!doc.url, JSON.stringify(doc));
-  check('dashboard.json url points at our test port', String(doc.url).includes(`:${PORT}`), doc.url);
+  check('dashboard.json url points at our test port', String(doc.url).includes(`:${port}`), doc.url);
 
   // 2) Configure env so the client resolves THIS dashboard + identity, then
   //    import the client (its helpers read env/fs lazily at call time).
   process.env.XDG_CONFIG_HOME = tmpConfigHome;
+  process.env.GOLEM_HOME = tmpGolemHome;
   process.env.GOLEM_CEO_SESSION_ID = SESSION_ID;
   delete process.env.CLAUDE_CODE_SESSION_ID;
 
@@ -166,6 +203,86 @@ async function main() {
     badCreate = e;
   }
   check('createTicket(no title) throws 400 with server error', badCreate && /400/.test(badCreate.message), badCreate?.message);
+
+  // 10) Drive the real channel MCP handler over stdio.
+  mcpClient = new Client({ name: 'golem-ticket-transition-journey', version: '1.0.0' });
+  mcpTransport = new StdioClientTransport({
+    command: process.execPath,
+    args: [path.join(__dirname, 'index.js')],
+    cwd: path.resolve(__dirname, '../..'),
+    env: {
+      ...process.env,
+      XDG_CONFIG_HOME: tmpConfigHome,
+      GOLEM_HOME: tmpGolemHome,
+      GOLEM_CEO_SESSION_ID: SESSION_ID,
+      GOLEM_CHANNEL_PORT: '0',
+      HOME: tmpRoot,
+    },
+    stderr: 'pipe',
+  });
+  mcpTransport.stderr?.on('data', (d) => process.stderr.write(`[mcp:err] ${d}`));
+  await mcpClient.connect(mcpTransport);
+
+  const tools = await mcpClient.listTools();
+  const transitionTool = tools.tools.find((tool) => tool.name === 'ticket_transition');
+  check('MCP lists ticket_transition', !!transitionTool, tools.tools.map((tool) => tool.name).join(', '));
+  check('ticket_transition description teaches the phase ladder', /queued.*building.*built.*verifying.*verified.*done/s.test(transitionTool?.description || ''), transitionTool?.description);
+
+  const createViaMcp = async (title) => {
+    const out = await callTool('ticket_create', { project: PROJECT_ID, title, kind: 'work-item', assignee: SESSION_ID });
+    check(`ticket_create succeeds: ${title}`, !out.result.isError && !!out.json?.id, out.text);
+    return out.json;
+  };
+
+  const simple = await createViaMcp('MCP transition success');
+  const simpleBuilding = await callTool('ticket_transition', { id: simple.id, phase: 'building' });
+  check('ticket_transition queued -> building succeeds', !simpleBuilding.result.isError && simpleBuilding.json?.phase === 'building', simpleBuilding.text);
+  check('building derives legacy state in_progress', simpleBuilding.json?.state === 'in_progress', simpleBuilding.text);
+
+  const illegal = await createViaMcp('MCP transition illegal');
+  const illegalDone = await callTool('ticket_transition', { id: illegal.id, phase: 'done' });
+  check('illegal transition returns MCP error', illegalDone.result.isError === true, illegalDone.text);
+  check('illegal transition preserves server error verbatim', illegalDone.text === 'transitionTicket: illegal transition queued -> done', illegalDone.text);
+  const illegalAfter = await callTool('ticket_get', { id: illegal.id });
+  check('illegal transition leaves ticket unchanged', illegalAfter.json?.phase === 'queued', illegalAfter.text);
+
+  const missing = await createViaMcp('MCP transition missing artifact');
+  await callTool('ticket_transition', { id: missing.id, phase: 'building' });
+  const missingBuilt = await callTool('ticket_transition', { id: missing.id, phase: 'built' });
+  check('missing artifact returns MCP error', missingBuilt.result.isError === true, missingBuilt.text);
+  check('missing artifact preserves server error verbatim', missingBuilt.text === 'transitionTicket: missing required artifact(s): closingBrief', missingBuilt.text);
+  const missingAfter = await callTool('ticket_get', { id: missing.id });
+  check('missing artifact leaves ticket in building', missingAfter.json?.phase === 'building', missingAfter.text);
+
+  const walk = await createViaMcp('MCP full legal phase walk');
+  await callTool('ticket_transition', { id: walk.id, phase: 'building' });
+  await callTool('ticket_comment', { id: walk.id, body: 'Closing brief: implementation complete with mechanical evidence.' });
+  const walkedBuilt = await callTool('ticket_transition', { id: walk.id, phase: 'built' });
+  check('full walk reaches built', !walkedBuilt.result.isError && walkedBuilt.json?.phase === 'built', walkedBuilt.text);
+  const dispatched = await callTool('ticket_dispatch', { id: walk.id, session_id: SESSION_ID, note: 'verification routing' });
+  check('full walk records manager dispatch artifact', !dispatched.result.isError, dispatched.text);
+  const walkedVerifying = await callTool('ticket_transition', { id: walk.id, phase: 'verifying' });
+  check('full walk reaches verifying', !walkedVerifying.result.isError && walkedVerifying.json?.phase === 'verifying', walkedVerifying.text);
+  await callTool('ticket_comment', { id: walk.id, body: 'Verification PASS: journey test completed.' });
+  const walkedVerified = await callTool('ticket_transition', { id: walk.id, phase: 'verified' });
+  check('full walk reaches verified', !walkedVerified.result.isError && walkedVerified.json?.phase === 'verified', walkedVerified.text);
+  const walkedDone = await callTool('ticket_transition', { id: walk.id, phase: 'done' });
+  check('full walk reaches done through MCP alone', !walkedDone.result.isError && walkedDone.json?.phase === 'done', walkedDone.text);
+
+  const blocked = await createViaMcp('MCP transition reason forwarding');
+  const blockedOut = await callTool('ticket_transition', { id: blocked.id, phase: 'blocked', reason: 'waiting for credentials' });
+  check('ticket_transition forwards reason', !blockedOut.result.isError && blockedOut.json?.phase === 'blocked', blockedOut.text);
+
+  const skipped = await createViaMcp('MCP transition skip reason forwarding');
+  await callTool('ticket_transition', { id: skipped.id, phase: 'building' });
+  await callTool('ticket_comment', { id: skipped.id, body: 'Closing brief: ready for exceptional closure.' });
+  await callTool('ticket_transition', { id: skipped.id, phase: 'built' });
+  const skippedDone = await callTool('ticket_transition', { id: skipped.id, phase: 'done', skip_reason: 'manager-approved test skip' });
+  check('ticket_transition forwards skip_reason', !skippedDone.result.isError && skippedDone.json?.phase === 'done', skippedDone.text);
+
+  const legacy = await createViaMcp('MCP legacy update compatibility');
+  const legacyUpdated = await callTool('ticket_update', { id: legacy.id, state: 'in_progress' });
+  check('ticket_update legacy state remains compatible', !legacyUpdated.result.isError && legacyUpdated.json?.state === 'in_progress', legacyUpdated.text);
 }
 
 main()
@@ -173,8 +290,10 @@ main()
     failures++;
     console.error('UNHANDLED:', err?.stack || err);
   })
-  .finally(() => {
+  .finally(async () => {
     // Kill child, clean temp.
+    try { await mcpClient?.close(); } catch { /* ignore */ }
+    try { await mcpTransport?.close(); } catch { /* ignore */ }
     try { child?.kill('SIGKILL'); } catch { /* ignore */ }
     try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* ignore */ }
     if (failures === 0) {

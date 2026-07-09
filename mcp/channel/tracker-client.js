@@ -208,7 +208,7 @@ function buildUrl(pathname, params) {
  * (Node 18+/20+). X-Sender is set for parity with the channel server's gating —
  * the /api/* routes do NOT check it, but it is harmless.
  */
-async function request(method, pathname, { params, body } = {}) {
+async function request(method, pathname, { params, body, verbatimError = false } = {}) {
   const url = buildUrl(pathname, params);
   const init = {
     method,
@@ -246,7 +246,7 @@ async function request(method, pathname, { params, body } = {}) {
         : typeof parsed === 'string' && parsed
           ? parsed
           : res.statusText;
-    throw new Error(`tracker ${method} ${pathname} → ${res.status} ${serverErr}`);
+    throw new Error(verbatimError ? String(serverErr) : `tracker ${method} ${pathname} → ${res.status} ${serverErr}`);
   }
   return parsed;
 }
@@ -273,6 +273,15 @@ export function createTicket(body) {
 export function updateTicket(id, patch) {
   if (!id) throw new Error('updateTicket: id is required');
   return request('PATCH', `/api/tickets/${encodeURIComponent(id)}`, { body: patch });
+}
+
+/** POST /api/tickets/:id/transition {phase,reason?,skip_reason?,actor} */
+export function transitionTicket(id, input) {
+  if (!id) throw new Error('transitionTicket: id is required');
+  return request('POST', `/api/tickets/${encodeURIComponent(id)}/transition`, {
+    body: input,
+    verbatimError: true,
+  });
 }
 
 /** POST /api/tickets/:id/comments {author,body,quote?,prefix?,suffix?,section?,section_id?,tag?,status?,parent_id?} */

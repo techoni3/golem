@@ -36,15 +36,15 @@ Phase-backed workflow is canonical when `phase` is present:
 
 The server derives board state from phase and enforces transition artifacts. If a transition fails, add the required comment/evidence or stay put.
 
-Prefer `transition({phase})` over `ticket_update({state})` for every lifecycle move. Legacy state cannot express `verifying` or `verified`: `built`, `verifying`, and `verified` all collapse to `review`, so state-based lifecycle writes are lossy. Session attempts to close with `ticket_update({state:'done'})` will be rejected once phase enforcement lands.
+Prefer `ticket_transition({id, phase, reason?, skip_reason?})` over `ticket_update({state})` for every lifecycle move. Legacy state cannot express `verifying` or `verified`: `built`, `verifying`, and `verified` all collapse to `review`, so state-based lifecycle writes are lossy. Session attempts to close with `ticket_update({state:'done'})` will be rejected once phase enforcement lands.
 
 ## Flow On A Brief Or Dispatch
 
 1. Find the ticket: `ticket_list({mine:true})` or `ticket_get` the id named in the brief.
-2. Builders claim dispatched implementation work with `transition({phase:'building'})`: `queued -> building`. After posting the four-part closing brief, they transition `building -> built`.
-3. Managers route verification with `transition({phase:'verifying'})`: `built -> verifying`.
-4. Verifiers do not claim. The manager has already set `verifying`; the explorer posts its PASS/FAIL report, then transitions `verifying -> verified` or `verifying -> rejected`. A verifier never writes legacy state.
-5. Managers close verified work with `transition({phase:'done'})`: `verified -> done`.
+2. Builders claim dispatched implementation work with `ticket_transition({id, phase:'building'})`: `queued -> building`. After posting the four-part closing brief, they call `ticket_transition({id, phase:'built'})`: `building -> built`.
+3. Managers route verification with `ticket_transition({id, phase:'verifying'})`: `built -> verifying`.
+4. Verifiers do not claim. The manager has already set `verifying`; the explorer posts its PASS/FAIL report, then calls `ticket_transition({id, phase:'verified'})` for PASS or `ticket_transition({id, phase:'rejected'})` for FAIL. A verifier never writes legacy state.
+5. Managers close verified work with `ticket_transition({id, phase:'done'})`: `verified -> done`.
 6. Subscribe when you are waiting on handoffs: use `ticket/<display_id>` for one ticket or `spec/<display_id>/tree` for a spec and its children. Subscription digests replace manual polling for long waits.
 7. Do the work. Comment milestones with mechanical evidence: commands and real output, not claims.
 8. Verify before advancing to `built`, `verified`, `rejected`, or `done`; read `golem:verify-done`.
@@ -75,5 +75,5 @@ Inline comments use the same comments table as thread comments. The UI assigns r
 ## State Hygiene
 
 - Keep at most one active in-progress ticket per writing stream.
-- Before going idle, sweep assigned work. Advance finished work with `transition({phase})` to the lane-appropriate phase (`built`, `verified`, or `done`); never use legacy `review`. Parked work gets a reason and transitions to `blocked`/`parked` or is unassigned.
+- Before going idle, sweep assigned work. Advance finished work with `ticket_transition({id, phase, reason?})` to the lane-appropriate phase (`built`, `verified`, or `done`); never use legacy `review`. Parked work gets a reason and transitions to `blocked`/`parked` or is unassigned.
 - Stale assigned work is a defect: comment current status and fix the state before starting new work.
