@@ -1,17 +1,17 @@
 # REPO-MAP.md
-> Last verified: 2026-07-06 @ 88cabcc — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-10 @ f1db53d — maintained via golem:docs-maintenance.
 
 ## Directory structure
-- `substrate/` — source of truth: agents, skills, roles, hooks, MCP, instructions.
+- `substrate/` — source of truth for plugin content.
 - `plugin/` — generated Claude Code render; never hand-edit.
-- `cli/` — thin `golem` CLI: dashboard, sync, role, doctor, status.
-- `lib/` — runtime-path, role, compiler, substrate-lint, LSP libraries.
-- `dashboard/server/` — Fastify REST/WS; sole `tracker.db` owner.
+- `cli/` — thin `golem` command entry point.
+- `lib/` — runtime, role, compiler, lint, and LSP helpers.
+- `dashboard/server/` — Fastify API and sole `tracker.db` owner.
 - `dashboard/web/` — no-bundler React globals.
-- `mcp/channel/` — per-session server for briefs, gates, consults, tracker.
+- `mcp/channel/` — per-session HTTP/MCP channel server.
 - `shims/opencode/` — maps opencode events into hook/session registries.
 - `test/` — journey tests for CLI/compiler enforcement paths.
-- `golem-projects/` — independent checkouts; not this repo.
+- `golem-projects/` — independent checkouts.
 - `.worktrees/` — gitignored builder checkouts; explicit dispatches only.
 
 ## Key modules & entry points
@@ -26,14 +26,18 @@
 - Merges hook-written `sessions.json` with harness registries.
 - Invariant: hooks/shims write registration; dashboard only reads/enriches.
 ### `substrate/hooks/*.sh`
-- SessionStart registers, journals, then injects tracker working-model and LSP hints.
+- SessionStart registers, journals, and injects LSP, Team, and role-card context.
 ### `substrate/instructions/`
-- Global instructions render as managed blocks or plain hook context files; outside-marker user text must survive sync.
+- Global AGENTS spine renders as managed blocks; outside-marker user text survives sync.
+### `substrate/skills/`
+- Role SOPs: `managing`, `planning`, `exploring`, `building`, `consulting` — single SoT per role; AGENTS and role cards reference only.
+### `substrate/roles/`
+- Shallow role cards injected at SessionStart.
 ### `mcp/channel/index.js`
-- Exposes channel replies, consults, gates, and tracker tools per live session.
+- Exposes work briefs, role assignments, replies, consults, gates, and tracker tools per live session.
 
 ## Data flow
-Hooks/shims write sessions, channels, and journals under `~/.golem/`; `journal-route.sh` forwards hook events to bus ingest with spool fallback. Dashboard owns `tracker.db`, drains dispatches/digests, exposes rosters, and broadcasts WS state. Tracker MCP tools call REST; dispatch pushes briefs to channels.
+Hooks/shims write `~/.golem/` registries and journals; dashboard owns `tracker.db`, exposes rosters, and broadcasts state. Tracker MCP tools call REST; dispatch pushes to channels.
 
 ## Constraints & gotchas
 - Claude Code loads `~/.golem/renders/cc-plugin`; sync + update + `/reload-plugins` after substrate edits.
