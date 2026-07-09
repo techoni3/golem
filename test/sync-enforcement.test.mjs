@@ -7,6 +7,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { lintSubstrate } from '../lib/substrate-lint.js';
+import { dedupeNativeSessions } from '../dashboard/server/native-sessions.js';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const cli = path.join(repo, 'cli', 'golem.js');
@@ -63,6 +64,49 @@ function assertFails(label, mutate, pattern) {
   assert.notEqual(res.status, 0, `${label} should fail`);
   assert.match(`${res.stdout}\n${res.stderr}`, pattern, label);
   console.log(`${label}: failed as expected`);
+}
+
+function assertNativeSessionDeduplication() {
+  const row = (session_id, { alive, pid = 42, project_id = 'project-a', name = 'resume-rekey' } = {}) => ({
+    session_id,
+    alive,
+    pid,
+    project_id,
+    name,
+    harness: 'claudecode',
+  });
+
+  // readNativeSessions sorts alive rows first, making a dead winner unreachable
+  // end-to-end; assert the filter itself to pin that invariant under both orders.
+  assert.deepEqual(
+    dedupeNativeSessions([row('dead', { alive: false }), row('live', { alive: true })]).map((entry) => entry.session_id),
+    ['dead', 'live'],
+    'a live same-pid row survives a dead winner',
+  );
+  assert.deepEqual(
+    dedupeNativeSessions([row('live', { alive: true }), row('dead', { alive: false })]).map((entry) => entry.session_id),
+    ['live'],
+    'a live same-pid winner collapses its dead resume-rekey row',
+  );
+  assert.deepEqual(
+    dedupeNativeSessions([row('newer', { alive: true }), row('older', { alive: true })]).map((entry) => entry.session_id),
+    ['newer'],
+    'two live same-pid rows preserve the caller-selected first row',
+  );
+  assert.deepEqual(
+    dedupeNativeSessions([row('newer', { alive: false }), row('older', { alive: false })]).map((entry) => entry.session_id),
+    ['newer'],
+    'two dead same-pid rows collapse to the first row',
+  );
+  assert.deepEqual(
+    dedupeNativeSessions([
+      row('project-a', { alive: true, project_id: 'project-a', name: 'shared-name' }),
+      row('project-b', { alive: true, project_id: 'project-b', name: 'shared-name' }),
+    ]).map((entry) => entry.session_id),
+    ['project-a', 'project-b'],
+    'same-named rows from different projects remain visible',
+  );
+  console.log('native session deduplication invariant passed');
 }
 
 async function assertNativeSessionDiscovery() {
@@ -266,6 +310,7 @@ try {
   console.log('global freshness repair: restored stale render');
 
   assertTrackerContextFiltersStaleRoster();
+  assertNativeSessionDeduplication();
   await assertNativeSessionDiscovery();
 } finally {
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* detached repair may still be closing files */ }

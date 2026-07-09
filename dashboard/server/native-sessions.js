@@ -348,6 +348,32 @@ async function deriveProjectId(cwd) {
   return result;
 }
 
+export function dedupeNativeSessions(rows) {
+  try {
+    const claimed = new Map();
+    return rows.filter((row) => {
+      const name = row.name && row.name.trim();
+      if (!name) return true;
+      const scope = `${row.project_id ?? row.cwd ?? ''}\0${name}`;
+      const winner = claimed.get(scope);
+      if (!winner) {
+        claimed.set(scope, row);
+        return true;
+      }
+      // Alive-first ordering normally makes the winner authoritative. Still,
+      // never collapse a live resume-rekey row behind a dead winner if that
+      // ordering is changed or removed.
+      if (row.harness === 'claudecode' && winner.harness === 'claudecode'
+          && row.pid && Number(row.pid) === Number(winner.pid)) {
+        return row.alive === true && winner.alive !== true;
+      }
+      return row.alive === true;
+    });
+  } catch {
+    return rows;
+  }
+}
+
 /**
  * Build the merged, pid-checked native_sessions array for the snapshot.
  *
@@ -448,27 +474,5 @@ export async function readNativeSessions(registeredIdLookup) {
     return (b.updated_at ?? b.started_at ?? 0) - (a.updated_at ?? a.started_at ?? 0);
   });
 
-  try {
-    const claimed = new Map();
-    return out.filter((row) => {
-      const name = row.name && row.name.trim();
-      if (!name) return true;
-      const scope = `${row.project_id ?? row.cwd ?? ''}\0${name}`;
-      const winner = claimed.get(scope);
-      if (!winner) {
-        claimed.set(scope, row);
-        return true;
-      }
-      // Alive-first ordering normally makes the winner authoritative. Still,
-      // never collapse a live resume-rekey row behind a dead winner if that
-      // ordering is changed or removed.
-      if (row.harness === 'claudecode' && winner.harness === 'claudecode'
-          && row.pid && Number(row.pid) === Number(winner.pid)) {
-        return row.alive === true && winner.alive !== true;
-      }
-      return row.alive === true;
-    });
-  } catch {
-    return out;
-  }
+  return dedupeNativeSessions(out);
 }
