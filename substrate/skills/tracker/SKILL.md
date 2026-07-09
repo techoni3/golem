@@ -36,13 +36,17 @@ Phase-backed workflow is canonical when `phase` is present:
 
 The server derives board state from phase and enforces transition artifacts. If a transition fails, add the required comment/evidence or stay put.
 
+Prefer `transition({phase})` over `ticket_update({state})` for every lifecycle move. Legacy state cannot express `verifying` or `verified`: `built`, `verifying`, and `verified` all collapse to `review`, so state-based lifecycle writes are lossy. Session attempts to close with `ticket_update({state:'done'})` are rejected once phase enforcement is active.
+
 ## Flow On A Brief Or Dispatch
 
 1. Find the ticket: `ticket_list({mine:true})` or `ticket_get` the id named in the brief.
-2. Claim it: move to `in_progress`/`building` as appropriate. A dispatched ticket leaves `todo` immediately when work starts.
-3. Subscribe when you are waiting on handoffs: use `ticket/<display_id>` for one ticket or `spec/<display_id>/tree` for a spec and its children. Subscription digests replace manual polling for long waits.
-4. Do the work. Comment milestones with mechanical evidence: commands and real output, not claims.
-5. Verify before advancing to `review`, `built`, `verified`, or `done`; read `golem:verify-done`.
+2. Builders claim dispatched implementation work with `transition({phase:'building'})`: `queued -> building`.
+3. Managers route verification with `transition({phase:'verifying'})`: `built -> verifying`.
+4. Verifiers do not claim. The manager has already set `verifying`; the explorer posts its PASS/FAIL report, then transitions `verifying -> verified` or `verifying -> rejected`. A verifier never writes legacy state.
+5. Subscribe when you are waiting on handoffs: use `ticket/<display_id>` for one ticket or `spec/<display_id>/tree` for a spec and its children. Subscription digests replace manual polling for long waits.
+6. Do the work. Comment milestones with mechanical evidence: commands and real output, not claims.
+7. Verify before advancing to `built`, `verified`, `rejected`, or `done`; read `golem:verify-done`.
 
 ## Bus Topics
 
