@@ -303,6 +303,17 @@ export function postBrief(sessionId, text) {
   return request('POST', '/api/brief', { body: { session_id: sessionId, text } });
 }
 
+/** Correlated channel lifecycle updates. The dashboard validates target identity. */
+export function acknowledgeEnvelope(id, body) {
+  if (!id) throw new Error('acknowledgeEnvelope: id is required');
+  return request('POST', `/api/message-envelopes/${encodeURIComponent(id)}/ack`, { body });
+}
+
+export function replyEnvelope(id, body) {
+  if (!id) throw new Error('replyEnvelope: id is required');
+  return request('POST', `/api/message-envelopes/${encodeURIComponent(id)}/reply`, { body });
+}
+
 export function subscribeBus({ session_id, topic, classes } = {}) {
   return request('POST', '/api/bus/subscribe', { body: { session_id, topic, classes } });
 }

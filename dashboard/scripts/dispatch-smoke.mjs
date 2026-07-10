@@ -24,6 +24,7 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import url from 'node:url';
 import { spawn } from 'node:child_process';
+import Database from 'better-sqlite3';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const SERVER = path.resolve(__dirname, '..', 'server', 'index.js');
@@ -119,6 +120,13 @@ async function run() {
   check('POST dispatch: ticket.dispatched_to === session_id', disp.body?.ticket?.dispatched_to === SESSION, `dispatched_to ${disp.body?.ticket?.dispatched_to}`);
   check('POST dispatch: dispatched_at set', !!disp.body?.ticket?.dispatched_at, `dispatched_at ${disp.body?.ticket?.dispatched_at}`);
   check('POST dispatch: channel.ok === false (unreachable, as expected)', disp.body?.channel?.ok === false, `channel ${JSON.stringify(disp.body?.channel)}`);
+  check('POST dispatch: truthful queued:false + delivered:false', disp.body?.queued === false && disp.body?.delivered === false, JSON.stringify(disp.body));
+  check('POST dispatch: envelope id returned', typeof disp.body?.envelope_id === 'string', disp.body?.envelope_id);
+
+  const sql = new Database(TMP_DB, { readonly: true });
+  const immediateEnvelope = sql.prepare('SELECT * FROM message_envelopes WHERE id = ?').get(disp.body?.envelope_id);
+  check('immediate envelope is durable and records failed delivery', immediateEnvelope?.target_session_id === SESSION && immediateEnvelope?.status === 'delivery_failed' && !!immediateEnvelope?.delivered_at, JSON.stringify(immediateEnvelope));
+  sql.close();
 
   // --- the durable write is reflected on a fresh GET ------------------
   const got = await jget(`/api/tickets/${tid}`);
@@ -131,6 +139,25 @@ async function run() {
   check('POST dispatch: 404 on unknown ticket', miss.status === 404, `status ${miss.status}`);
   const noSession = await jsend('POST', `/api/tickets/${tid}/dispatch`, { note: 'no session here' });
   check('POST dispatch: 400 on missing session_id', noSession.status === 400, `status ${noSession.status}`);
+
+  // A target with no live session/channel must remain queued, with a durable
+  // envelope linked from the nullable queue column (legacy rows may still be null).
+  const queuedTicket = await jsend('POST', '/api/tickets', { project_id: PID, kind: 'work-item', title: 'Queue the widget' });
+  const queued = await jsend('POST', `/api/tickets/${queuedTicket.body?.id}/dispatch`, { session_id: 'offline-queued-session', mode: 'when_idle' });
+  check('when_idle: truthful queued:true + delivered:false', queued.status === 200 && queued.body?.queued === true && queued.body?.delivered === false, JSON.stringify(queued.body));
+  const queuedRows = await jget('/api/dispatch-queue?status=pending');
+  const queueRow = queuedRows.body?.find((row) => row.id === queued.body?.queue_id);
+  check('when_idle: queue row links durable envelope', typeof queued.body?.envelope_id === 'string' && queueRow?.envelope_id === queued.body.envelope_id, JSON.stringify(queueRow));
+  const sql2 = new Database(TMP_DB, { readonly: true });
+  const queuedEnvelope = sql2.prepare('SELECT * FROM message_envelopes WHERE id = ?').get(queued.body?.envelope_id);
+  check('when_idle: envelope is queued and undelivered', queuedEnvelope?.status === 'queued' && queuedEnvelope?.delivered_at == null, JSON.stringify(queuedEnvelope));
+  const wrongAck = await jsend('POST', `/api/message-envelopes/${queued.body?.envelope_id}/ack`, { target_session_id: 'wrong-session', summary: 'spoof' });
+  check('envelope ack rejects a non-target', wrongAck.status === 403, `status ${wrongAck.status}`);
+  const correctAck = await jsend('POST', `/api/message-envelopes/${queued.body?.envelope_id}/ack`, { target_session_id: 'offline-queued-session', summary: 'picked up' });
+  check('envelope ack accepts stored target', correctAck.status === 200 && correctAck.body?.envelope?.status === 'acknowledged' && !!correctAck.body?.envelope?.acknowledged_at, JSON.stringify(correctAck.body));
+  const reply = await jsend('POST', `/api/message-envelopes/${queued.body?.envelope_id}/reply`, { target_session_id: 'offline-queued-session', text: 'completed' });
+  check('envelope reply stamps completion', reply.status === 200 && reply.body?.envelope?.status === 'replied' && !!reply.body?.envelope?.completed_at, JSON.stringify(reply.body));
+  sql2.close();
 }
 
 let exitCode = 0;

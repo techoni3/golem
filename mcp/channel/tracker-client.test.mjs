@@ -277,6 +277,16 @@ async function main() {
   check('POST /role emits role_assign channel event', roleEvent?.params?.content === 'Role assignment test', JSON.stringify(channelEvents));
   check('POST /role never emits a brief event', !channelEvents.some((event) => event.params?.meta?.kind === 'brief'), JSON.stringify(channelEvents));
 
+  const correlatedBrief = await fetch(`${channelUrl}/brief`, {
+    method: 'POST',
+    headers: { 'X-Sender': 'dashboard', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content: 'Correlated dispatch', envelope_id: 'env-channel-metadata', target_session_id: SESSION_ID }),
+  });
+  check('POST /brief accepts envelope metadata', correlatedBrief.status === 202, `status ${correlatedBrief.status}`);
+  await sleep(50);
+  const briefEvent = channelEvents.find((event) => event.params?.content === 'Correlated dispatch');
+  check('POST /brief carries envelope metadata to channel event', briefEvent?.params?.meta?.envelope_id === 'env-channel-metadata' && briefEvent?.params?.meta?.target_session_id === SESSION_ID, JSON.stringify(briefEvent));
+
   // One opencode MCP serves sibling sessions. Per-call shim identity must win
   // over bridge order, and missing identity must refuse writes rather than
   // attribute them to whichever sibling heartbeat was newest.

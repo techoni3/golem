@@ -248,12 +248,15 @@ export function initDispatchDrainer({
 
         let pushResult;
         try {
-          pushResult = await pushBrief(briefString, sessionId);
+          pushResult = await pushBrief(briefString, sessionId, { envelope_id: row.envelope_id || undefined, sender_session_id: null, target_session_id: sessionId });
         } catch (err) {
           pushResult = { ok: false, error: String(err?.message ?? err) };
         }
 
         tracker.markQueueDelivered(row.id, {
+          error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}`,
+        });
+        if (row.envelope_id) tracker.markEnvelopeDelivery(row.envelope_id, {
           error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}`,
         });
         if (pushResult && pushResult.ok) {

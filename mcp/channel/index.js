@@ -400,6 +400,10 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: 'string',
             description: 'For gate_* kinds: the gate_id from the inbound event.',
           },
+          envelope_id: {
+            type: 'string',
+            description: 'Required when acknowledging a correlated ticket dispatch; copied from the channel event metadata.',
+          },
           summary: {
             type: 'string',
             description: 'One-sentence description of what the CEO did or will do next.',
@@ -428,6 +432,10 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           gate_id: {
             type: 'string',
             description: 'Optional: gate_id if this response is about a specific gate.',
+          },
+          envelope_id: {
+            type: 'string',
+            description: 'Required when replying to a correlated ticket dispatch; copied from the channel event metadata.',
           },
         },
         required: ['text'],
@@ -746,6 +754,16 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       summary: typeof args.summary === 'string' ? args.summary : '',
       ts: new Date().toISOString(),
     };
+    if (args.envelope_id) {
+      try {
+        await tracker.acknowledgeEnvelope(String(args.envelope_id), {
+          target_session_id: tracker.currentSessionId(injectedSessionId), kind: payload.kind, summary: payload.summary,
+        });
+        payload.envelope_id = String(args.envelope_id);
+      } catch (err) {
+        return { isError: true, content: [{ type: 'text', text: `ack: ${err instanceof Error ? err.message : String(err)}` }] };
+      }
+    }
     broadcast('ack', payload);
     return { content: [{ type: 'text', text: 'ack broadcast' }] };
   }
@@ -761,6 +779,16 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       text,
       ts: new Date().toISOString(),
     };
+    if (args.envelope_id) {
+      try {
+        await tracker.replyEnvelope(String(args.envelope_id), {
+          target_session_id: tracker.currentSessionId(injectedSessionId), kind: payload.kind, text,
+        });
+        payload.envelope_id = String(args.envelope_id);
+      } catch (err) {
+        return { isError: true, content: [{ type: 'text', text: `respond: ${err instanceof Error ? err.message : String(err)}` }] };
+      }
+    }
     broadcast('response', payload);
     return { content: [{ type: 'text', text: 'response broadcast' }] };
   }
@@ -1179,7 +1207,8 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'POST' && path === '/brief') {
       const body = await readBody(req);
-      await pushEvent('brief', extractContent(body), {}, targetSessionId);
+      const metadata = extractMetadata(body);
+      await pushEvent('brief', extractContent(body), metadata, targetSessionId || metadata.target_session_id || null);
       return sendJson(res, 202, { ok: true, kind: 'brief' });
     }
 
@@ -1309,6 +1338,20 @@ function extractContent(raw) {
     // not JSON — fall through
   }
   return trimmed;
+}
+
+function extractMetadata(raw) {
+  try {
+    const parsed = JSON.parse(raw || '{}');
+    if (!parsed || typeof parsed !== 'object') return {};
+    const out = {};
+    for (const key of ['envelope_id', 'sender_session_id', 'target_session_id']) {
+      if (typeof parsed[key] === 'string' && parsed[key]) out[key] = parsed[key];
+    }
+    return out;
+  } catch {
+    return {};
+  }
 }
 
 // --- Boot ------------------------------------------------------------------

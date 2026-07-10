@@ -44,7 +44,7 @@ async function resolveBaseUrl(sessionId) {
   };
 }
 
-async function forward(method, pathSuffix, body, sessionId) {
+async function forward(method, pathSuffix, body, sessionId, metadata = null) {
   const { baseUrl, error } = await resolveBaseUrl(sessionId);
   if (!baseUrl) {
     return { ok: false, status: 0, body: '', error: error ?? 'no channel available' };
@@ -75,8 +75,11 @@ async function forward(method, pathSuffix, body, sessionId) {
   }
 }
 
-export async function pushBrief(body, sessionId) {
-  return forward('POST', '/brief', body, sessionId);
+export async function pushBrief(body, sessionId, metadata = null) {
+  // Envelope metadata travels in the body rather than a header so every channel
+  // transport (including the opencode bridge) receives the correlation id.
+  const payload = metadata ? { content: body, ...metadata } : body;
+  return forward('POST', '/brief', payload, sessionId, metadata);
 }
 
 /** Role identity only — channel kind role_assign, never a work brief. */

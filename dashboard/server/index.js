@@ -1381,7 +1381,8 @@ async function main() {
       try { hasChannel = (await listChannels()).some((c) => c.session_id === sessionId); } catch { /* treat as unreachable */ }
       const isIdle = !!target && target.alive && target.status === 'idle' && hasChannel;
       if (!isIdle) {
-        const queueRow = tracker.queueDispatch(id, { session_id: sessionId, note, workspace, actor: 'human' });
+        const briefString = buildDispatchBrief(existing, note, workspace);
+        const queueRow = tracker.queueDispatch(id, { session_id: sessionId, note, workspace, payload: briefString, actor: 'human' });
         chat.record('system', 'info',
           `queued ${queueRow.id.slice(0, 8)} for ${sessionId} — will deliver when idle`);
         const ticket = tracker.getTicket(id);
@@ -1389,7 +1390,7 @@ async function main() {
         // TKT-0286: signal every queue-aware surface (Agents page chips, the
         // session peek drawer list, offline orphans) to refetch.
         broadcastWS({ type: 'dispatch-queue-updated' });
-        return { ok: true, queued: true, queue_id: queueRow.id, ticket };
+        return { ok: true, queued: true, delivered: false, queue_id: queueRow.id, envelope_id: queueRow.envelope_id, ticket };
       }
       // target idle + reachable → fall through to immediate delivery below.
     }
@@ -1404,11 +1405,12 @@ async function main() {
     //    (TKT-0245: extracted to buildDispatchBrief so the drainer produces
     //    byte-identical briefs.)
     const briefString = buildDispatchBrief(existing, note, workspace);
+    const envelope = tracker.createDispatchEnvelope(id, { session_id: sessionId, payload: briefString, actor: 'human' });
 
     // 3) Best-effort channel push — never fail the request on a push miss.
     let channelResult = null;
     try {
-      channelResult = await pushBrief(briefString, sessionId);
+      channelResult = await pushBrief(briefString, sessionId, { envelope_id: envelope.id, sender_session_id: envelope.sender_session_id, target_session_id: sessionId });
     } catch (err) {
       channelResult = { ok: false, error: String(err?.message ?? err) };
     }
@@ -1423,6 +1425,9 @@ async function main() {
       actor: 'human',
       error: channelResult && channelResult.ok ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),
     });
+    tracker.markEnvelopeDelivery(envelope.id, {
+      error: channelResult && channelResult.ok ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),
+    });
     if (channelResult && channelResult.ok) {
       tracker.markCommentDispatchesDeliveredForTicket(id, sessionId);
     }
@@ -1434,9 +1439,39 @@ async function main() {
     // when_idle path that fell through (target was already idle) adds the
     // queued:false / delivered:true hints the plan specifies.
     if (mode === 'when_idle') {
-      return { ok: true, queued: false, delivered: true, ticket, channel: channelResult };
+      return { ok: true, queued: false, delivered: !!channelResult?.ok, envelope_id: envelope.id, ticket, channel: channelResult };
     }
-    return { ok: true, ticket, channel: channelResult };
+    return { ok: true, queued: false, delivered: !!channelResult?.ok, envelope_id: envelope.id, ticket, channel: channelResult };
+  });
+
+  // GOL-421: channel acknowledgements/replies are correlated to an envelope and
+  // only the stored dispatch target may advance its lifecycle.
+  fastify.post('/api/message-envelopes/:id/ack', async (req, reply) => {
+    try {
+      return { ok: true, envelope: tracker.acknowledgeEnvelope(req.params.id, req.body ?? {}) };
+    } catch (err) {
+      const msg = String(err?.message ?? err);
+      return reply.code(/not found/.test(msg) ? 404 : 403).send({ error: msg });
+    }
+  });
+  fastify.post('/api/message-envelopes/:id/reply', async (req, reply) => {
+    try {
+      const envelope = tracker.replyEnvelope(req.params.id, req.body ?? {});
+      // Route to the durable sender identity, never to an ambient/requesting
+      // session. Human-originated dispatches deliberately have no channel route.
+      let sender_delivery = null;
+      if (envelope.sender_session_id) {
+        sender_delivery = await pushBrief(
+          `Reply for dispatch ${envelope.ticket_id}: ${String(req.body?.text || '')}`,
+          envelope.sender_session_id,
+          { envelope_id: envelope.id, sender_session_id: req.body?.target_session_id || null, target_session_id: envelope.sender_session_id },
+        );
+      }
+      return { ok: true, envelope, sender_delivery };
+    } catch (err) {
+      const msg = String(err?.message ?? err);
+      return reply.code(/not found/.test(msg) ? 404 : 403).send({ error: msg });
+    }
   });
 
   // TKT-0245: GET /api/dispatch-queue — list pending queued dispatches,
