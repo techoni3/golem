@@ -3750,6 +3750,12 @@ mark.anno.anno-tail::after {
   cursor: pointer;
 }
 .unacked-dispatch-badge:hover { border-color: color-mix(in oklab, var(--status-review) 55%, transparent); }
+.unacked-dispatch-badge.severity-escalated,
+.unacked-dispatch-badge.severity-failed {
+  color: var(--status-blocked);
+  background: color-mix(in oklab, var(--status-blocked) 14%, var(--bg-1));
+  border-color: color-mix(in oklab, var(--status-blocked) 38%, transparent);
+}
 .unacked-dispatch-dismiss {
   border: 0;
   background: transparent;

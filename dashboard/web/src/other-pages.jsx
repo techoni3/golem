@@ -3,13 +3,20 @@
 function UnackedDispatchBadge({ warning, compact = false }) {
   if (!warning) return null;
   const ticketId = warning.ticket_id;
-  const deliveryId = warning.delivery_event_id;
+  const deliveryId = warning.envelope_id || warning.delivery_event_id;
   const label = warning.display_id || ticketId || 'ticket';
   const deliveredMs = warning.delivered_at ? Date.parse(warning.delivered_at) : NaN;
   const age = Number.isFinite(deliveredMs) ? window.SubstrateFmt?.fmtTimeAgo?.(deliveredMs) : null;
   const session = warning.session_label || warning.session_id || 'target session';
+  const severity = warning.severity || 'awaiting';
+  const statusText = {
+    awaiting: 'awaiting acknowledgement',
+    pinged: 'acknowledgement reminder sent',
+    failed: 'assigned but not delivered',
+    escalated: 'missing acknowledgement escalated',
+  }[severity] || 'dispatch appears unacknowledged';
   const title = [
-    `dispatch to ${session} appears unacknowledged`,
+    `${statusText} for dispatch to ${session}`,
     warning.delivered_at ? `delivered ${warning.delivered_at}` : null,
     warning.window_minutes != null ? `${warning.window_minutes}m window` : null,
     warning.title || null,
@@ -26,8 +33,8 @@ function UnackedDispatchBadge({ warning, compact = false }) {
     window.SubstrateAPI.dismissUnackedDispatch(ticketId, deliveryId).catch((err) => console.error('dismiss unacked failed', err));
   };
   return (
-    <span className="unacked-dispatch-badge" title={title} onClick={open} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') open(e); }}>
-      <span>⚠ {compact ? label : `${label}${age ? ` · ${age}` : ''}`}</span>
+    <span className={`unacked-dispatch-badge severity-${severity}`} title={title} onClick={open} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') open(e); }}>
+      <span>{severity === 'escalated' ? '⛔' : severity === 'failed' ? '✕' : '⚠'} {compact ? `${label} · ${statusText}` : `${label} · ${statusText}${age ? ` · ${age}` : ''}`}</span>
       <button className="unacked-dispatch-dismiss" title="dismiss warning" onClick={dismiss} disabled={!ticketId || deliveryId == null}>×</button>
     </span>
   );

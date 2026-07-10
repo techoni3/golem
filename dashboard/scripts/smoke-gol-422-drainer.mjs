@@ -1,0 +1,63 @@
+#!/usr/bin/env node
+// GOL-422 durable recovery journey: a temporary SQLite DB survives a drainer
+// restart, emits one ping, then exactly one escalation. No ticket ownership or
+// queue row is touched; ping acknowledgement resolves the original root.
+import os from 'node:os';
+import path from 'node:path';
+import fs from 'node:fs';
+import { strict as assert } from 'node:assert';
+import { openTrackerDb } from '../server/tracker-db.js';
+import { initDispatchDrainer } from '../server/dispatch-queue.js';
+
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'golem-422-'));
+const dbPath = path.join(dir, 'tracker.db');
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const ticket = { project_id: 'smoketests-000000', kind: 'work-item', title: 'SMOKE-GOL-422 recovery', body: '', created_by: 'smoke' };
+let tracker;
+let pushed = [];
+const state = { nativeSessions: () => [] };
+const chat = { record() {} };
+const start = () => initDispatchDrainer({ tracker, state, chat, listChannels: async () => [], buildDispatchBrief: () => '', broadcastWS() {}, pushBrief: async (content, session, meta) => { pushed.push({ content, session, meta }); return { ok: true, status: 200 }; } });
+
+try {
+  tracker = openTrackerDb(dbPath);
+  const created = tracker.createTicket(ticket);
+  const root = tracker.createDispatchEnvelope(created.id, { session_id: 'target', actor: 'sender', sender_id: 'sender' });
+  tracker.markEnvelopeDelivery(root.id); // config default window is 5m; make the test due without sleeping.
+  const sql = (statement, ...args) => tracker.raw().prepare(statement).run(...args);
+  sql("UPDATE message_envelopes SET ack_deadline_at = '2000-01-01T00:00:00.000Z' WHERE id = ?", root.id);
+  const ownerBefore = tracker.getTicket(created.id);
+  let drainer = start();
+  await wait(5_300);
+  drainer.close();
+  assert.equal(pushed.length, 1, 'first due pass sent exactly one ping');
+  let rootAfterPing = tracker.getEnvelope(root.id);
+  assert.ok(rootAfterPing.ping_envelope_id, 'root durably links ping');
+  assert.equal(ownerBefore.assignee, tracker.getTicket(created.id).assignee, 'ping did not change assignee');
+  assert.equal(ownerBefore.dispatched_to, tracker.getTicket(created.id).dispatched_to, 'ping did not change dispatched target');
+  // Restart with the same DB and make the post-ping opportunity due.
+  sql("UPDATE message_envelopes SET escalate_after = '2000-01-01T00:00:00.000Z' WHERE id = ?", root.id);
+  drainer = start();
+  await wait(5_300);
+  drainer.close();
+  rootAfterPing = tracker.getEnvelope(root.id);
+  assert.equal(pushed.length, 2, 'restart sent exactly one escalation');
+  assert.ok(rootAfterPing.escalation_envelope_id, 'root durably links escalation');
+  assert.equal(pushed[1].session, 'sender', 'escalation used stored reply route');
+  // Repeated pass cannot duplicate the child.
+  drainer = start(); await wait(5_300); drainer.close();
+  assert.equal(pushed.length, 2, 'repeated tick did not duplicate escalation');
+  // Acknowledge-via-ping explicitly resolves root and preserves ownership.
+  const root2 = tracker.createDispatchEnvelope(created.id, { session_id: 'target', actor: 'sender', sender_id: 'sender' });
+  tracker.markEnvelopeDelivery(root2.id);
+  sql("UPDATE message_envelopes SET ack_deadline_at = '2000-01-01T00:00:00.000Z' WHERE id = ?", root2.id);
+  drainer = start(); await wait(5_300); drainer.close();
+  const ping = tracker.getEnvelope(tracker.getEnvelope(root2.id).ping_envelope_id);
+  tracker.acknowledgeEnvelope(ping.id, { target_session_id: 'target', summary: 'picked up' });
+  const ackedRoot = tracker.getEnvelope(root2.id);
+  assert.ok(ackedRoot.acknowledged_at && ackedRoot.ack_via_envelope_id === ping.id, 'ping acknowledgement resolved root');
+  console.log('PASS GOL-422 drainer/restart journey');
+} finally {
+  try { tracker?.close(); } catch {}
+  fs.rmSync(dir, { recursive: true, force: true });
+}

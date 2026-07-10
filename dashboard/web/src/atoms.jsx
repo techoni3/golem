@@ -233,7 +233,7 @@ function AgentCard({ session, name, queueCount = 0, setRoute, showControls = fal
         {pendingCount > 0 && <span className="native-session-queue-chip" title={`${pendingCount} queued dispatch${pendingCount === 1 ? '' : 'es'}`}>queued {pendingCount}</span>}
         {needsRevival && <span className="native-session-queue-chip" title="queued dispatches are held for an offline or channel-less session">revival needed</span>}
         {!registered && <span className="native-session-badge">unregistered</span>}
-        {unackedWarnings.map((w) => window.UnackedDispatchBadge ? <window.UnackedDispatchBadge key={w.delivery_event_id || w.warning_event_id} warning={w} compact/> : null)}
+        {unackedWarnings.map((w) => window.UnackedDispatchBadge ? <window.UnackedDispatchBadge key={w.envelope_id || w.delivery_event_id || w.warning_event_id} warning={w} compact/> : null)}
       </div>
 
       {statusKind === 'waiting' && s.waiting_for && (

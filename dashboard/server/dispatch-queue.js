@@ -50,19 +50,69 @@ export function initDispatchDrainer({
 
   function unackedWindowMinutes() {
     const n = Number(loadConfig()?.dispatch?.unackedWindowMinutes);
-    return Number.isFinite(n) && n >= 0 ? n : 10;
+    return Number.isFinite(n) && n >= 0 ? n : 5;
   }
 
-  function checkUnackedDispatches() {
-    let rows = [];
+  async function checkUnackedDispatches() {
     const windowMinutes = unackedWindowMinutes();
+    let changed = false;
+    const deliverChild = async (claimed, purpose) => {
+      const child = claimed.envelope;
+      let content = '';
+      try { content = JSON.parse(child.payload || '{}').content || ''; } catch { /* durable fallback below */ }
+      let result;
+      try {
+        result = await pushBrief(content, child.recipient_session_id, {
+          envelope_id: child.id,
+          sender_session_id: child.sender_session_id || null,
+          target_session_id: child.target_session_id || child.recipient_session_id,
+        });
+      } catch (err) {
+        result = { ok: false, error: String(err?.message ?? err) };
+      }
+      const error = result?.ok ? null : (result?.error || `status ${result?.status ?? '?'}`);
+      tracker.markEnvelopeDelivery(child.id, { error });
+      chat.record(result?.ok ? 'user' : 'system', result?.ok ? 'brief' : 'error',
+        result?.ok ? content : `${purpose} for ${claimed.root.ticket_id} failed — ${error}`,
+        { session_id: child.recipient_session_id || null, ticket_id: claimed.root.ticket_id });
+      const ticket = tracker.getTicket(claimed.root.ticket_id);
+      if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
+      changed = true;
+    };
+    try {
+      // New durable envelopes use explicit acknowledgement facts. Escalations
+      // go first, so a failed ping (which stamps escalate_after=now) waits for
+      // the next five-second pass rather than escalating in its own ping pass.
+      for (;;) {
+        const claimed = tracker.claimDueEscalation();
+        if (!claimed) break;
+        if (!claimed.envelope.recipient_session_id) {
+          tracker.markEnvelopeDelivery(claimed.envelope.id, { error: 'no stored reply route for escalation' });
+          const ticket = tracker.getTicket(claimed.root.ticket_id);
+          if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
+          changed = true;
+          continue;
+        }
+        await deliverChild(claimed, 'dispatch escalation');
+      }
+      for (;;) {
+        const claimed = tracker.claimDueAckPing(windowMinutes);
+        if (!claimed) break;
+        await deliverChild(claimed, 'dispatch acknowledgement ping');
+      }
+    } catch (err) {
+      console.error('[dispatch-drainer] unacked check failed:', err);
+      return changed;
+    }
+    // GOL-140 legacy deliveries predate envelope facts and retain their
+    // event/activity heuristic unchanged.
+    let rows = [];
     try {
       rows = tracker.unackedDispatchesForWindow(windowMinutes);
     } catch (err) {
-      console.error('[dispatch-drainer] unacked check failed:', err);
-      return false;
+      console.error('[dispatch-drainer] legacy unacked check failed:', err);
+      return changed;
     }
-    let changed = false;
     for (const row of rows) {
       try {
         tracker.recordUnackedDispatchWarning(row, { windowMinutes });
@@ -116,7 +166,7 @@ export function initDispatchDrainer({
       console.error('[dispatch-drainer] listPendingDispatches failed:', err);
       return;
     }
-    let queueChanged = checkUnackedDispatches();
+    let queueChanged = await checkUnackedDispatches();
     pending = pending || [];
 
     const sessions = state.nativeSessions();
@@ -260,6 +310,7 @@ export function initDispatchDrainer({
 
         tracker.markQueueDelivered(row.id, {
           error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}`,
+          envelope_id: row.envelope_id || null,
         });
         if (row.envelope_id) tracker.markEnvelopeDelivery(row.envelope_id, {
           error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}`,

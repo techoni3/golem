@@ -17,10 +17,11 @@ import { marked } from 'marked';
 import TurndownService from 'turndown';
 import { gfm as turndownGfm } from 'turndown-plugin-gfm';
 import { trackerDbPath } from '../../lib/golem-home.js';
+import { loadConfig } from '../../lib/golem-config.js';
 import { createCommentDispatchService, defaultDispatchStateForComment } from './comment-dispatch.js';
 import { canonicalStateForPhase, initialPhaseForKind, isKnownPhase, legalNextPhases, phaseFromLegacyState, requirementsForPhase } from './phase-machine.js';
 
-const SCHEMA_VERSION = 13;
+const SCHEMA_VERSION = 14;
 
 const KINDS = new Set(['work-item', 'decision', 'spec', 'question', 'fix']);
 const STATES = new Set(['todo', 'in_progress', 'blocked', 'review', 'done', 'archived']);
@@ -372,6 +373,10 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
         picked_up_at      TEXT,
         reply_envelope_id TEXT,
         completed_event_id INTEGER,
+        ping_envelope_id TEXT,
+        escalate_after TEXT,
+        escalation_envelope_id TEXT,
+        ack_via_envelope_id TEXT,
         status            TEXT NOT NULL DEFAULT 'pending',
         created_at        TEXT NOT NULL,
         delivered_at      TEXT,
@@ -682,6 +687,11 @@ WHERE state_changed_at IS NULL`).run();
       ['delivery_attempted_at', 'TEXT'], ['delivery_opportunity_at', 'TEXT'],
       ['delivery_error', 'TEXT'], ['ack_deadline_at', 'TEXT'], ['picked_up_at', 'TEXT'], ['reply_envelope_id', 'TEXT'], ['completed_event_id', 'INTEGER'],
     ]) if (!envelopeCols.includes(col)) db.exec(`ALTER TABLE message_envelopes ADD COLUMN ${col} ${def}`);
+    const envelopeCols14 = db.prepare('PRAGMA table_info(message_envelopes)').all().map((c) => c.name);
+    for (const [col, def] of [
+      ['ping_envelope_id', 'TEXT'], ['escalate_after', 'TEXT'],
+      ['escalation_envelope_id', 'TEXT'], ['ack_via_envelope_id', 'TEXT'],
+    ]) if (!envelopeCols14.includes(col)) db.exec(`ALTER TABLE message_envelopes ADD COLUMN ${col} ${def}`);
 
     // Indexes that depend on lifecycle columns. Idempotent: no-op on fresh
     // DBs (CREATE TABLE above already created them), first-time-create on
@@ -830,7 +840,9 @@ WHERE state_changed_at IS NULL`).run();
         UPDATE message_envelopes
         SET status = CASE WHEN @error IS NULL THEN 'delivered' ELSE 'delivery_failed' END,
             delivered_at = @delivered_at, delivery_attempted_at = @delivered_at,
-            delivery_error = @error, last_error = @error
+            delivery_error = @error, last_error = @error,
+            delivery_opportunity_at = CASE WHEN @error IS NULL THEN COALESCE(delivery_opportunity_at, @delivered_at) ELSE delivery_opportunity_at END,
+            ack_deadline_at = CASE WHEN @error IS NULL AND kind = 'ticket_dispatch' THEN COALESCE(ack_deadline_at, @ack_deadline_at) ELSE ack_deadline_at END
         WHERE id = @id AND status IN ('pending', 'queued', 'delivery_failed')
       `),
       acknowledgeEnvelope: db.prepare(`
@@ -1182,7 +1194,7 @@ WHERE state_changed_at IS NULL`).run();
         AND (@ticket_id IS NULL OR w.ticket_id = @ticket_id)
       ORDER BY w.created_at ASC, w.id ASC
     `).all({ ticket_id: ticketId });
-    return rows.map((row) => {
+    const legacy = rows.map((row) => {
       const data = safeParse(row.warning_data);
       const deliveryEventId = Number(data.delivery_event_id);
       return {
@@ -1199,6 +1211,25 @@ WHERE state_changed_at IS NULL`).run();
         title: row.title ?? null,
       };
     }).filter((w) => !unackedWarningResolved(w));
+    // v13 envelopes require explicit facts. A queued envelope has no delivery
+    // attempt/opportunity, so it is never reported as unhealthy.
+    const envelopes = db.prepare(`
+      SELECT e.*, t.display_id, t.title, sl.label AS session_label
+      FROM message_envelopes e JOIN tickets t ON t.id = e.ticket_id
+      LEFT JOIN session_labels sl ON sl.session_id = e.recipient_session_id
+      WHERE e.kind = 'ticket_dispatch' AND (@ticket_id IS NULL OR e.ticket_id = @ticket_id)
+        AND e.delivery_attempted_at IS NOT NULL AND e.acknowledged_at IS NULL AND e.completed_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM events d WHERE d.ticket_id = e.ticket_id
+          AND d.type = 'dispatch_unacked_dismissed' AND json_extract(d.data, '$.envelope_id') = e.id)
+    `).all({ ticket_id: ticketId }).map((e) => ({
+      attention_kind: 'envelope', envelope_id: e.id, ticket_id: e.ticket_id, project_id: e.project_id,
+      session_id: e.recipient_session_id, session_label: e.session_label ?? null, display_id: e.display_id,
+      title: e.title, delivered_at: e.delivery_opportunity_at || e.delivered_at,
+      severity: e.escalation_envelope_id ? 'escalated' : (e.ping_envelope_id ? 'pinged' : (e.delivery_error ? 'failed' : 'awaiting')),
+      ping_envelope_id: e.ping_envelope_id, escalation_envelope_id: e.escalation_envelope_id,
+      delivery_error: e.delivery_error,
+    }));
+    return [...legacy, ...envelopes];
   }
 
   // TKT-0519: derive + persist a project's display-id prefix. Candidates in
@@ -2101,8 +2132,18 @@ WHERE state_changed_at IS NULL`).run();
     markEnvelopeDelivery(envelopeId, { error = null } = {}) {
       const existing = stmts.getEnvelope.get(envelopeId);
       if (!existing) throw new Error(`markEnvelopeDelivery: envelope '${envelopeId}' not found`);
-      stmts.markEnvelopeDelivery.run({ id: envelopeId, delivered_at: now(), error: error ?? null });
-      return stmts.getEnvelope.get(envelopeId);
+      const ts = now();
+      const minutes = Math.max(0, Number(loadConfig()?.dispatch?.unackedWindowMinutes) || 5);
+      const deadline = new Date(Date.parse(ts) + minutes * 60_000).toISOString();
+      return db.transaction(() => {
+        stmts.markEnvelopeDelivery.run({ id: envelopeId, delivered_at: ts, ack_deadline_at: deadline, error: error ?? null });
+        if (existing.kind === 'ack_ping') {
+          db.prepare(`UPDATE message_envelopes SET escalate_after = ? WHERE id = ?
+            AND ping_envelope_id = ? AND escalation_envelope_id IS NULL AND acknowledged_at IS NULL`)
+            .run(error == null ? deadline : ts, existing.root_id || existing.parent_id, envelopeId);
+        }
+        return stmts.getEnvelope.get(envelopeId);
+      })();
     },
 
     resolveEnvelope(envelopeId, { status, error = null } = {}) {
@@ -2118,11 +2159,21 @@ WHERE state_changed_at IS NULL`).run();
       if (!existing) throw new Error(`acknowledgeEnvelope: envelope '${envelopeId}' not found`);
       if (!target_session_id || existing.recipient_session_id !== target_session_id) throw new Error('acknowledgeEnvelope: target session does not match envelope');
       const ts = now();
-      const fact = stmts.insertEnvelopeFact.run({ envelope_id: envelopeId, recipient_session_id: target_session_id, kind, summary: String(summary), acknowledged_at: ts });
-      if (fact.changes) stmts.acknowledgeEnvelope.run({ id: envelopeId, target_session_id, ts });
-      const envelope = stmts.getEnvelope.get(envelopeId);
-      if (fact.changes) recordEvent({ ticket_id: existing.ticket_id, project_id: existing.project_id, type: 'dispatch_acknowledged', actor: target_session_id, data: { envelope_id: envelopeId, kind, summary } });
-      return envelope;
+      return db.transaction(() => {
+        const fact = stmts.insertEnvelopeFact.run({ envelope_id: envelopeId, recipient_session_id: target_session_id, kind, summary: String(summary), acknowledged_at: ts });
+        if (fact.changes) stmts.acknowledgeEnvelope.run({ id: envelopeId, target_session_id, ts });
+        if (fact.changes && existing.kind === 'ack_ping') {
+          const rootId = existing.root_id || existing.parent_id;
+          const root = stmts.getEnvelope.get(rootId);
+          if (root && root.recipient_session_id === target_session_id) {
+            stmts.insertEnvelopeFact.run({ envelope_id: rootId, recipient_session_id: target_session_id, kind: 'ack_via_ping', summary: String(summary), acknowledged_at: ts });
+            stmts.acknowledgeEnvelope.run({ id: rootId, target_session_id, ts });
+            db.prepare('UPDATE message_envelopes SET ack_via_envelope_id = ? WHERE id = ?').run(envelopeId, rootId);
+          }
+        }
+        if (fact.changes) recordEvent({ ticket_id: existing.ticket_id, project_id: existing.project_id, type: 'dispatch_acknowledged', actor: target_session_id, data: { envelope_id: envelopeId, kind, summary } });
+        return stmts.getEnvelope.get(envelopeId);
+      })();
     },
 
     replyEnvelope(envelopeId, { target_session_id, kind = 'brief', text = '' } = {}) {
@@ -2196,7 +2247,7 @@ WHERE state_changed_at IS NULL`).run();
 
     // Used by the drainer after a delivery attempt. Idempotent on a non-pending
     // row (a concurrent cancel must not throw here).
-    markQueueDelivered(queueId, { error = null } = {}) {
+    markQueueDelivered(queueId, { error = null, envelope_id = null } = {}) {
       const row = stmts.getQueueRow.get(queueId);
       if (!row) throw new Error(`markQueueDelivered: queue row '${queueId}' not found`);
       if (row.status !== 'pending') return row;
@@ -2210,14 +2261,14 @@ WHERE state_changed_at IS NULL`).run();
           project_id: row.project_id,
           type: 'dispatch_delivery_attempted',
           actor: 'golem-drainer',
-          data: { queue_id: queueId, session_id: row.session_id, delivered_at: ts, error: error ?? null },
+          data: { queue_id: queueId, session_id: row.session_id, delivered_at: ts, error: error ?? null, envelope_id: envelope_id ?? null },
         });
         return stmts.getQueueRow.get(queueId);
       });
       return txn();
     },
 
-    markDispatchDeliveryAttempted(ticketId, { session_id, actor = 'human', error = null } = {}) {
+    markDispatchDeliveryAttempted(ticketId, { session_id, actor = 'human', error = null, envelope_id = null } = {}) {
       const ticket = stmts.getTicket.get(ticketId);
       if (!ticket) throw new Error(`markDispatchDeliveryAttempted: ticket '${ticketId}' not found`);
       if (!session_id) throw new Error('markDispatchDeliveryAttempted: session_id is required');
@@ -2227,7 +2278,7 @@ WHERE state_changed_at IS NULL`).run();
         project_id: ticket.project_id,
         type: 'dispatch_delivery_attempted',
         actor,
-        data: { session_id, delivered_at: ts, error: error ?? null },
+        data: { session_id, delivered_at: ts, error: error ?? null, envelope_id: envelope_id ?? null },
       });
     },
 
@@ -2320,6 +2371,7 @@ WHERE state_changed_at IS NULL`).run();
         FROM events e
         JOIN tickets t ON t.id = e.ticket_id
         WHERE e.type = 'dispatch_delivery_attempted'
+          AND json_extract(e.data, '$.envelope_id') IS NULL
           AND e.created_at <= @cutoff
           AND json_extract(e.data, '$.session_id') IS NOT NULL
           AND NOT EXISTS (
@@ -2331,6 +2383,56 @@ WHERE state_changed_at IS NULL`).run();
         ORDER BY e.created_at ASC
       `).all({ cutoff });
       return candidates.filter((row) => !unackedWarningResolved(row));
+    },
+
+    // GOL-422 claims use conditional root updates inside SQLite transactions:
+    // concurrent/restarted drainers can observe a due root, but only one creates
+    // its child. Neither transaction touches ticket ownership fields or queue.
+    claimDueAckPing(windowMinutes = 5) {
+      const ts = now();
+      const txn = db.transaction(() => {
+        const root = db.prepare(`SELECT * FROM message_envelopes
+          WHERE kind = 'ticket_dispatch' AND delivery_opportunity_at IS NOT NULL
+            AND ack_deadline_at <= ? AND acknowledged_at IS NULL AND completed_at IS NULL
+            AND ping_envelope_id IS NULL ORDER BY ack_deadline_at ASC LIMIT 1`).get(ts);
+        if (!root) return null;
+        const childId = crypto.randomUUID();
+        const claimed = db.prepare(`UPDATE message_envelopes SET ping_envelope_id = ?
+          WHERE id = ? AND ping_envelope_id IS NULL AND acknowledged_at IS NULL AND completed_at IS NULL`).run(childId, root.id);
+        if (!claimed.changes) return null;
+        const ageMinutes = Math.max(0, Math.floor((Date.parse(ts) - Date.parse(root.delivery_opportunity_at)) / 60_000));
+        const child = { id: childId, root_id: root.id, parent_id: root.id, ticket_id: root.ticket_id, project_id: root.project_id,
+          sender_id: root.sender_id, reply_to_session_id: root.reply_to_session_id, recipient_session_id: root.recipient_session_id,
+          sender_session_id: root.sender_session_id, target_session_id: root.target_session_id, kind: 'ack_ping',
+          payload: JSON.stringify({ content: `Acknowledgement reminder for dispatch ${root.id}\n\nTicket: ${root.ticket_id}\nDispatch age: ${ageMinutes}m\nPlease acknowledge the original dispatch by acknowledging this ping message_id: ${childId}.` }),
+          status: 'pending', ack_deadline_at: null, created_at: ts };
+        stmts.insertEnvelope.run(child);
+        return { root: stmts.getEnvelope.get(root.id), envelope: stmts.getEnvelope.get(childId) };
+      });
+      return txn();
+    },
+
+    claimDueEscalation() {
+      const ts = now();
+      const txn = db.transaction(() => {
+        const root = db.prepare(`SELECT * FROM message_envelopes
+          WHERE kind = 'ticket_dispatch' AND ping_envelope_id IS NOT NULL AND escalate_after IS NOT NULL
+            AND escalate_after <= ? AND acknowledged_at IS NULL AND completed_at IS NULL
+            AND escalation_envelope_id IS NULL ORDER BY escalate_after ASC LIMIT 1`).get(ts);
+        if (!root) return null;
+        const childId = crypto.randomUUID();
+        const claimed = db.prepare(`UPDATE message_envelopes SET escalation_envelope_id = ?
+          WHERE id = ? AND escalation_envelope_id IS NULL AND acknowledged_at IS NULL AND completed_at IS NULL`).run(childId, root.id);
+        if (!claimed.changes) return null;
+        const child = { id: childId, root_id: root.id, parent_id: root.id, ticket_id: root.ticket_id, project_id: root.project_id,
+          sender_id: root.sender_id, reply_to_session_id: root.reply_to_session_id, recipient_session_id: root.reply_to_session_id,
+          sender_session_id: root.sender_session_id, target_session_id: root.reply_to_session_id, kind: 'ack_escalation',
+          payload: JSON.stringify({ content: `Dispatch escalation for ${root.ticket_id}\n\nOriginal message_id: ${root.id}\nPing message_id: ${root.ping_envelope_id}\nNo acknowledgement after delivery and one reminder.` }),
+          status: 'pending', ack_deadline_at: null, created_at: ts };
+        stmts.insertEnvelope.run(child);
+        return { root: stmts.getEnvelope.get(root.id), envelope: stmts.getEnvelope.get(childId) };
+      });
+      return txn();
     },
 
     recordUnackedDispatchWarning(row, { actor = 'system', windowMinutes = null } = {}) {
@@ -2354,13 +2456,14 @@ WHERE state_changed_at IS NULL`).run();
       const existing = stmts.getTicket.get(ticketId);
       if (!existing) throw new Error(`dismissUnackedDispatchWarning: ticket '${ticketId}' not found`);
       const idNum = Number(deliveryEventId);
-      if (!Number.isFinite(idNum)) throw new Error('dismissUnackedDispatchWarning: delivery_event_id is required');
+      const envelope = stmts.getEnvelope.get(String(deliveryEventId));
+      if (!Number.isFinite(idNum) && (!envelope || envelope.ticket_id !== ticketId)) throw new Error('dismissUnackedDispatchWarning: delivery_event_id or envelope_id is required');
       return recordEvent({
         ticket_id: ticketId,
         project_id: existing.project_id,
         type: 'dispatch_unacked_dismissed',
         actor,
-        data: { delivery_event_id: idNum },
+        data: envelope ? { envelope_id: envelope.id } : { delivery_event_id: idNum },
       });
     },
 

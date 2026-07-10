@@ -1443,6 +1443,7 @@ async function main() {
       session_id: sessionId,
       actor: 'human',
       error: channelResult && channelResult.ok ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),
+      envelope_id: envelope.id,
     });
     tracker.markEnvelopeDelivery(envelope.id, {
       error: channelResult && channelResult.ok ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),

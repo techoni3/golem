@@ -453,7 +453,7 @@ function TrackerCard({ ticket: t, project, assigneeLabel }) {
         {needsAnswer && <span className="pill tracker-answer-badge">❓ needs answer</span>}
         {unacked && (window.UnackedDispatchBadge
           ? <window.UnackedDispatchBadge warning={unackedWarning} compact/>
-          : <span className="pill tracker-answer-badge" title="dispatch delivered but target session has not produced ticket activity">⚠ unacked</span>)}
+          : <span className="pill tracker-answer-badge" title="dispatch needs explicit acknowledgement">⚠ awaiting ack</span>)}
       </div>
       <div className="ticket-id">{t.display_id || t.id}</div>
       <div className="ticket-title">{t.title}</div>
