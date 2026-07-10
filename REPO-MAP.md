@@ -20,7 +20,7 @@
 - Invariant: agents use HTTP/MCP, never direct DB writes.
 ### `tracker-db.js` + `phase-machine.js` + `team-assist.js`
 - Phase is source of truth; `state` is derived.
-- Schema invariant: phases v10, hook UUIDs v11, dispatch workspace v12, and v13 durable message envelopes linked from new queue rows.
+- Schema: phases v10, hook UUIDs v11, dispatch workspace v12, v13 durable envelopes.
 - Team assists suggest least-loaded roles; never auto-dispatch.
 ### `dashboard/server/native-sessions.js`
 - Merges hook-written `sessions.json` with harness registries.
@@ -37,7 +37,7 @@
 - Exposes work briefs, role assignments, replies, consults, gates, and tracker tools per live session.
 
 ## Data flow
-Hooks/shims write `~/.golem/` registries and journals; dashboard owns `tracker.db`, exposes rosters, and broadcasts state. Tracker MCP tools call REST; new dispatches persist an envelope before a channel attempt, while legacy queue rows remain readable without one.
+Hooks/shims write `~/.golem/` registries and journals; dashboard owns `tracker.db`, exposes rosters, and broadcasts state. New dispatches persist an envelope before channel delivery; legacy queue rows need none.
 
 ## Constraints & gotchas
 - Claude Code loads `~/.golem/renders/cc-plugin`; sync + update + `/reload-plugins` after substrate edits.
