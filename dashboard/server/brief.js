@@ -51,6 +51,7 @@ async function forward(method, pathSuffix, body, sessionId) {
   }
   const url = `${baseUrl.replace(/\/$/, '')}${pathSuffix}`;
   const headers = { 'X-Sender': 'dashboard' };
+  if (sessionId) headers['X-Golem-Target-Session'] = sessionId;
   let bodyToSend = undefined;
   if (body !== undefined && body !== null) {
     if (typeof body === 'string') {

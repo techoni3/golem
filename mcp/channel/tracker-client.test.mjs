@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import url from 'node:url';
 import crypto from 'node:crypto';
 import net from 'node:net';
+import { createServer } from 'node:http';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { z } from 'zod';
@@ -118,6 +119,7 @@ let noIdentityMcpClient;
 let noIdentityMcpTransport;
 let ccFallbackMcpClient;
 let ccFallbackMcpTransport;
+let bridgeCaptureServer;
 let port;
 
 function toolText(result) {
@@ -281,12 +283,25 @@ async function main() {
   const siblingA = 'ses_identity_sibling_a';
   const siblingB = 'ses_identity_sibling_b';
   check('injected identity overrides ambient caller id', client.currentSessionId(siblingB) === siblingB, client.currentSessionId(siblingB));
+  const bridgePayloads = [];
+  bridgeCaptureServer = createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    bridgePayloads.push({ path: req.url, body: JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') });
+    res.writeHead(202).end('{}');
+  });
+  await new Promise((resolve, reject) => {
+    bridgeCaptureServer.once('error', reject);
+    bridgeCaptureServer.listen(0, HOST, resolve);
+  });
+  const bridgeAddress = bridgeCaptureServer.address();
+  const bridgePort = typeof bridgeAddress === 'object' && bridgeAddress ? bridgeAddress.port : null;
   const bridgesFile = path.join(tmpGolemHome, 'opencode-bridges.json');
   const now = new Date().toISOString();
   fs.writeFileSync(bridgesFile, JSON.stringify({
     bridges: [
-      { session_id: siblingA, opencode_pid: process.pid, pid: process.pid, host: HOST, port: 1, updated_at: now },
-      { session_id: siblingB, opencode_pid: process.pid, pid: process.pid, host: HOST, port: 1, updated_at: new Date(Date.now() + 1000).toISOString() },
+      { session_id: siblingA, opencode_pid: process.pid, pid: process.pid, host: HOST, port: bridgePort, updated_at: now },
+      { session_id: siblingB, opencode_pid: process.pid, pid: process.pid, host: HOST, port: bridgePort, updated_at: new Date(Date.now() + 1000).toISOString() },
     ],
   }));
   identityMcpClient = new Client({ name: 'golem-identity-journey', version: '1.0.0' });
@@ -301,12 +316,32 @@ async function main() {
       GOLEM_CEO_SESSION_ID: '',
       CLAUDE_CODE_SESSION_ID: '',
       GOLEM_CHANNEL_PORT: '0',
+      GOLEM_CHANNEL_HEARTBEAT_MS: '25',
       HOME: tmpRoot,
     },
     stderr: 'pipe',
   });
   identityMcpTransport.stderr?.on('data', (d) => process.stderr.write(`[identity-mcp:err] ${d}`));
   await identityMcpClient.connect(identityMcpTransport);
+  await sleep(50);
+  const siblingChannels = JSON.parse(fs.readFileSync(path.join(tmpGolemHome, 'channels.json'), 'utf8')).channels;
+  const siblingRows = siblingChannels.filter((channel) => channel.session_id === siblingA || channel.session_id === siblingB);
+  check('shared opencode MCP registers both sibling channel rows', siblingRows.length === 2 && siblingRows[0].port === siblingRows[1].port, JSON.stringify(siblingRows));
+  fs.writeFileSync(path.join(tmpGolemHome, 'sessions.json'), JSON.stringify({ sessions: [
+    { session_id: siblingA, project_id: PROJECT_ID, harness: 'opencode', status: 'idle', updated_at: now },
+    { session_id: siblingB, project_id: PROJECT_ID, harness: 'opencode', status: 'idle', updated_at: now },
+  ] }));
+  const nativeModule = await import(url.pathToFileURL(path.resolve(__dirname, '../../dashboard/server/native-sessions.js')).href + `?t=${Date.now()}`);
+  const nativeSiblings = await nativeModule.readNativeSessions(() => true);
+  const nativeSiblingRows = nativeSiblings.filter((session) => session.session_id === siblingA || session.session_id === siblingB);
+  check('native sessions reports both sibling rows alive', nativeSiblingRows.length === 2 && nativeSiblingRows.every((session) => session.alive === true), JSON.stringify(nativeSiblings));
+  const siblingChannel = siblingRows.find((channel) => channel.session_id === siblingB);
+  const addressedBrief = await fetch(`http://${siblingChannel.host}:${siblingChannel.port}/brief`, {
+    method: 'POST',
+    headers: { 'X-Sender': 'dashboard', 'X-Golem-Target-Session': siblingB, 'Content-Type': 'text/plain' },
+    body: 'Target sibling B',
+  });
+  check('addressed sibling brief reaches bridge', addressedBrief.status === 202 && bridgePayloads.at(-1)?.body?.session_id === siblingB, JSON.stringify(bridgePayloads));
 
   const identityTicket = await callToolFrom(identityMcpClient, 'ticket_create', {
     project: PROJECT_ID,
@@ -341,11 +376,16 @@ async function main() {
   const afterAmbiguous = await callToolFrom(identityMcpClient, 'ticket_get', { id: identityTicket.json?.id });
   check('ambiguous sibling refusal writes no comment', afterAmbiguous.json?.comments?.length === 2, JSON.stringify(afterAmbiguous.json?.comments));
 
-  fs.writeFileSync(bridgesFile, JSON.stringify({ bridges: [{ session_id: siblingA, opencode_pid: process.pid, pid: process.pid, host: HOST, port: 1, updated_at: now }] }));
+  fs.writeFileSync(bridgesFile, JSON.stringify({ bridges: [{ session_id: siblingA, opencode_pid: process.pid, pid: process.pid, host: HOST, port: bridgePort, updated_at: now }] }));
+  await sleep(100);
+  const reapedSiblingRows = JSON.parse(fs.readFileSync(path.join(tmpGolemHome, 'channels.json'), 'utf8')).channels
+    .filter((channel) => channel.session_id === siblingA || channel.session_id === siblingB);
+  check('removed sibling channel row is reaped', reapedSiblingRows.length === 1 && reapedSiblingRows[0].session_id === siblingA, JSON.stringify(reapedSiblingRows));
   const singleBridgeWrite = await callToolFrom(identityMcpClient, 'ticket_comment', { id: identityTicket.json?.id, body: 'Single bridge back-compat' });
   check('single bridge resolves without injection', !singleBridgeWrite.result.isError, singleBridgeWrite.text);
 
   fs.writeFileSync(bridgesFile, JSON.stringify({ bridges: [] }));
+  await sleep(100);
   const channelsFile = path.join(tmpGolemHome, 'channels.json');
   const channelCountBeforeNoIdentity = JSON.parse(fs.readFileSync(channelsFile, 'utf8')).channels.length;
   noIdentityMcpClient = new Client({ name: 'golem-no-identity-journey', version: '1.0.0' });
@@ -470,6 +510,7 @@ main()
     try { await noIdentityMcpTransport?.close(); } catch { /* ignore */ }
     try { await ccFallbackMcpClient?.close(); } catch { /* ignore */ }
     try { await ccFallbackMcpTransport?.close(); } catch { /* ignore */ }
+    try { await new Promise((resolve) => bridgeCaptureServer?.close(resolve) ?? resolve()); } catch { /* ignore */ }
     try { child?.kill('SIGKILL'); } catch { /* ignore */ }
     try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* ignore */ }
     if (failures === 0) {

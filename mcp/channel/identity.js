@@ -26,6 +26,11 @@ function liveBridgesForParent({ home, parentPid = process.ppid }) {
   }
 }
 
+/** Live top-level session bridge rows for this shared opencode server. */
+export function sessionsForParent({ home, parentPid } = {}) {
+  return liveBridgesForParent({ home, parentPid });
+}
+
 /**
  * Resolve the caller for one MCP invocation. A shared opencode MCP cannot
  * infer which sibling called, so ambiguity is an error, never a newest-row

@@ -29,7 +29,7 @@ import {
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import * as tracker from './tracker-client.js';
-import { bridgeEndpointForParent, resolveCallerSessionId } from './identity.js';
+import { bridgeEndpointForParent, resolveCallerSessionId, sessionsForParent } from './identity.js';
 import { SESSION_ROLES, pushRoleBriefDirect, setSessionRole } from '../../lib/session-role.js';
 
 const VERSION = '0.1.0';
@@ -181,7 +181,8 @@ function registerChannel(port) {
   SESSION_ID = deriveSessionId();
   SESSION_NAME = deriveSessionName();
   const bridge = bridgeEndpointForParent({ home: tracker.golemHome() });
-  if (!SESSION_ID) {
+  const siblings = sessionsForParent({ home: tracker.golemHome() });
+  if (!SESSION_ID && siblings.length === 0) {
     process.stderr.write('[golem-channel] no unambiguous session id; channel will not register\n');
     return;
   }
@@ -189,23 +190,26 @@ function registerChannel(port) {
     const reg = readChannelsRegistry();
     // Drop any prior row for THIS process (covers an id corrected from a run-id
     // to the logical id between heartbeats) and any stale row under our id.
-    reg.channels = reg.channels.filter((c) => c.pid !== process.pid && c.session_id !== SESSION_ID);
-    reg.channels.push({
-      session_id: SESSION_ID,
-      name: SESSION_NAME,
-      pid: process.pid,
-      host: HOST,
-      port,
-      version: VERSION,
-      harness: bridge && bridge.session_id === SESSION_ID ? 'opencode' : undefined,
-      started_at: STARTED_AT,
-    });
+    const sessionIds = new Set(siblings.map((row) => row.session_id));
+    reg.channels = reg.channels.filter((c) => c.pid !== process.pid && !sessionIds.has(c.session_id));
+    const rows = siblings.length ? siblings : [{ session_id: SESSION_ID, name: SESSION_NAME }];
+    for (const row of rows) {
+      reg.channels.push({
+        session_id: row.session_id,
+        name: row.name || null,
+        pid: process.pid,
+        host: HOST,
+        port,
+        version: VERSION,
+        harness: siblings.length ? 'opencode' : (bridge && bridge.session_id === SESSION_ID ? 'opencode' : undefined),
+        started_at: STARTED_AT,
+      });
+    }
     writeChannelsRegistry(reg);
   });
 }
 
 function unregisterChannel() {
-  if (!SESSION_ID) return;
   try {
     withChannelLock(() => {
       const reg = readChannelsRegistry();
@@ -1114,13 +1118,13 @@ function sendJson(res, status, body) {
   res.end(data);
 }
 
-async function pushEvent(kind, content, extraMeta = {}) {
+async function pushEvent(kind, content, extraMeta = {}, targetSessionId = null) {
   // meta keys must be identifiers (letters/digits/underscore) — hyphens
   // are silently dropped by Claude Code. snake_case only.
   const meta = { kind, ...extraMeta };
   const bridge = bridgeEndpointForParent({ home: tracker.golemHome() });
   if (bridge) {
-    await postToOpencodeBridge(bridge, { session_id: deriveSessionId(), kind, content, meta });
+    await postToOpencodeBridge(bridge, { session_id: targetSessionId || deriveSessionId(), kind, content, meta });
     return;
   }
   await mcp.notification({
@@ -1164,6 +1168,7 @@ const server = http.createServer(async (req, res) => {
 
     // Every other route is an inbound push — gate the sender.
     const sender = (req.headers['x-sender'] || '').toString();
+    const targetSessionId = (req.headers['x-golem-target-session'] || '').toString() || null;
     if (!ALLOWED_SENDERS.has(sender)) {
       return sendJson(res, 403, {
         ok: false,
@@ -1174,26 +1179,26 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'POST' && path === '/brief') {
       const body = await readBody(req);
-      await pushEvent('brief', extractContent(body));
+      await pushEvent('brief', extractContent(body), {}, targetSessionId);
       return sendJson(res, 202, { ok: true, kind: 'brief' });
     }
 
     // POST /role — identity only (dashboard/CLI role assignment). Never a work brief.
     if (method === 'POST' && path === '/role') {
       const body = await readBody(req);
-      await pushEvent('role_assign', extractContent(body));
+      await pushEvent('role_assign', extractContent(body), {}, targetSessionId);
       return sendJson(res, 202, { ok: true, kind: 'role_assign' });
     }
 
     if (method === 'POST' && path === '/interrupt') {
       const body = await readBody(req);
-      await pushEvent('interrupt', extractContent(body));
+      await pushEvent('interrupt', extractContent(body), {}, targetSessionId);
       return sendJson(res, 202, { ok: true, kind: 'interrupt' });
     }
 
     if (method === 'POST' && path === '/halt') {
       const body = await readBody(req);
-      await pushEvent('halt', extractContent(body) || 'halt requested');
+      await pushEvent('halt', extractContent(body) || 'halt requested', {}, targetSessionId);
       return sendJson(res, 202, { ok: true, kind: 'halt' });
     }
 
@@ -1324,7 +1329,7 @@ server.listen(PORT, HOST, () => {
   // corrected within HEARTBEAT_MS. registerChannel is idempotent (it filters
   // this session's stale rows before re-adding). unref() so the timer never
   // keeps the process alive on its own.
-  const HEARTBEAT_MS = 30_000;
+  const HEARTBEAT_MS = Number(process.env.GOLEM_CHANNEL_HEARTBEAT_MS) || 30_000;
   setInterval(() => {
     try { registerChannel(boundPort); } catch { /* transient — next tick retries */ }
   }, HEARTBEAT_MS).unref();
