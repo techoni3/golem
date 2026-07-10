@@ -894,7 +894,9 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 
     const message = args.ticket ? `${args.ticket}: ${text}` : text;
     try {
-      const delivery = await tracker.postBrief(target.session_id, message);
+      const senderId = tracker.currentSessionId(injectedSessionId);
+      if (!senderId) return { isError: true, content: [{ type: 'text', text: 'session_notify: no trusted caller session id.' }] };
+      const delivery = await tracker.notifySession({ session_id: target.session_id, text: message, sender_id: senderId, project_id: target.project_id || null });
       return { content: [{ type: 'text', text: JSON.stringify({ ok: true, to: target.label || target.name || target.session_id, session_id: target.session_id, delivery }, null, 2) }] };
     } catch (err) {
       return { isError: true, content: [{ type: 'text', text: `session_notify: delivery failed — ${err instanceof Error ? err.message : String(err)}` }] };
@@ -1085,6 +1087,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           note: args.note,
           when_idle: args.when_idle === true,
           workspace: args.workspace || undefined,
+          sender_id: sessionId,
         }));
       }
 

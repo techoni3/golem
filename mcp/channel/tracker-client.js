@@ -170,12 +170,13 @@ function buildUrl(pathname, params) {
  * (Node 18+/20+). X-Sender is set for parity with the channel server's gating —
  * the /api/* routes do NOT check it, but it is harmless.
  */
-async function request(method, pathname, { params, body, verbatimError = false } = {}) {
+async function request(method, pathname, { params, body, verbatimError = false, caller_session_id = null } = {}) {
   const url = buildUrl(pathname, params);
   const init = {
     method,
     headers: { 'X-Sender': 'cli' },
   };
+  if (caller_session_id) init.headers['X-Golem-Caller-Session'] = caller_session_id;
   if (body !== undefined) {
     init.headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(body);
@@ -267,10 +268,10 @@ export function replyComment(id, commentId, body) {
 }
 
 /** POST /api/tickets/:id/dispatch {session_id,note?,mode?} — when_idle:true maps to mode 'when_idle'. */
-export function dispatchTicket(id, { session_id, note, when_idle, workspace } = {}) {
+export function dispatchTicket(id, { session_id, note, when_idle, workspace, sender_id } = {}) {
   if (!id) throw new Error('dispatchTicket: id is required');
   return request('POST', `/api/tickets/${encodeURIComponent(id)}/dispatch`, {
-    body: { session_id, note, mode: when_idle ? 'when_idle' : 'now', workspace: workspace || undefined },
+    body: { session_id, note, mode: when_idle ? 'when_idle' : 'now', workspace: workspace || undefined, sender_id: sender_id || undefined },
   });
 }
 
@@ -303,15 +304,19 @@ export function postBrief(sessionId, text) {
   return request('POST', '/api/brief', { body: { session_id: sessionId, text } });
 }
 
+export function notifySession({ session_id, text, sender_id, project_id } = {}) {
+  return request('POST', '/api/messages/notify', { body: { session_id, text, sender_id, project_id } });
+}
+
 /** Correlated channel lifecycle updates. The dashboard validates target identity. */
 export function acknowledgeEnvelope(id, body) {
   if (!id) throw new Error('acknowledgeEnvelope: id is required');
-  return request('POST', `/api/message-envelopes/${encodeURIComponent(id)}/ack`, { body });
+  return request('POST', `/api/message-envelopes/${encodeURIComponent(id)}/ack`, { body, caller_session_id: body?.target_session_id });
 }
 
 export function replyEnvelope(id, body) {
   if (!id) throw new Error('replyEnvelope: id is required');
-  return request('POST', `/api/message-envelopes/${encodeURIComponent(id)}/reply`, { body });
+  return request('POST', `/api/message-envelopes/${encodeURIComponent(id)}/reply`, { body, caller_session_id: body?.target_session_id });
 }
 
 export function subscribeBus({ session_id, topic, classes } = {}) {

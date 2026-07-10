@@ -687,6 +687,19 @@ async function main() {
     }
     return result;
   });
+  fastify.post('/api/messages/notify', async (req, reply) => {
+    const b = req.body ?? {};
+    try {
+      const envelope = tracker.createNotificationEnvelope({ project_id: b.project_id ?? null, sender_id: b.sender_id, recipient_session_id: b.session_id, payload: b.text });
+      const delivery = await pushBrief(String(b.text || ''), envelope.recipient_session_id, {
+        envelope_id: envelope.id, sender_session_id: envelope.sender_id, target_session_id: envelope.recipient_session_id,
+      });
+      tracker.markEnvelopeDelivery(envelope.id, { error: delivery.ok ? null : (delivery.error || `status ${delivery.status}`) });
+      return { ok: !!delivery.ok, envelope_id: envelope.id, delivery };
+    } catch (err) {
+      return reply.code(400).send({ error: String(err?.message ?? err) });
+    }
+  });
   fastify.post('/api/interrupt', async (req, reply) => {
     const body = extractBody(req);
     const sessionId = extractSessionId(req);
@@ -1340,13 +1353,13 @@ async function main() {
   });
 
   // POST /api/tickets/:id/dispatch — assign a ticket to a live native session
-  // and push it a self-contained brief so that session picks the work up.
+  // and push it a self-contained brief. The response reports the actual
+  // channel attempt separately from the durable assignment/envelope.
   //
   // Durable-first (mirrors the gate handler): setDispatched flips assignee +
   // dispatched_to + dispatched_at and records a `dispatched` event BEFORE we
-  // touch the channel. The channel push is best-effort — an unreachable session
-  // never fails the request, since the assignment is already on disk and the
-  // session (or the user) can pick it up on resume.
+  // touch the channel. Assignment is durable; an unreachable channel is a
+  // failed delivery, not a successful dispatch.
   //
   // TKT-0245: `mode` ('now' | 'when_idle', default 'now'). 'when_idle' queues
   // the dispatch until the target session is idle (the drainer delivers it
@@ -1360,6 +1373,7 @@ async function main() {
     const b = req.body ?? {};
     const sessionId = typeof b.session_id === 'string' && b.session_id.trim() ? b.session_id.trim() : null;
     const note = typeof b.note === 'string' && b.note.trim() ? b.note.trim() : null;
+    const senderId = typeof b.sender_id === 'string' && b.sender_id.trim() ? b.sender_id.trim() : null;
     const mode = typeof b.mode === 'string' ? b.mode : 'now';
     const workspace = typeof b.workspace === 'string' && b.workspace.trim() ? b.workspace.trim() : undefined;
     if (mode !== 'now' && mode !== 'when_idle') {
@@ -1382,7 +1396,7 @@ async function main() {
       const isIdle = !!target && target.alive && target.status === 'idle' && hasChannel;
       if (!isIdle) {
         const briefString = buildDispatchBrief(existing, note, workspace);
-        const queueRow = tracker.queueDispatch(id, { session_id: sessionId, note, workspace, payload: briefString, actor: 'human' });
+        const queueRow = tracker.queueDispatch(id, { session_id: sessionId, note, workspace, payload: briefString, actor: senderId || 'human' });
         chat.record('system', 'info',
           `queued ${queueRow.id.slice(0, 8)} for ${sessionId} — will deliver when idle`);
         const ticket = tracker.getTicket(id);
@@ -1396,7 +1410,7 @@ async function main() {
     }
 
     // 1) Durable write — assign + record the dispatched event. Source of truth.
-    const assigned = tracker.setDispatched(id, { session_id: sessionId, actor: 'human' });
+    const assigned = tracker.setDispatched(id, { session_id: sessionId, actor: senderId || 'human' });
     if (assigned.revoked_session_id) await pushDispatchRevoked(assigned, assigned.revoked_session_id, 'redispatched');
 
     // 2) Build a clear, self-contained brief so the receiving session knows
@@ -1405,7 +1419,7 @@ async function main() {
     //    (TKT-0245: extracted to buildDispatchBrief so the drainer produces
     //    byte-identical briefs.)
     const briefString = buildDispatchBrief(existing, note, workspace);
-    const envelope = tracker.createDispatchEnvelope(id, { session_id: sessionId, payload: briefString, actor: 'human' });
+    const envelope = tracker.createDispatchEnvelope(id, { session_id: sessionId, payload: briefString, actor: senderId || 'human', sender_id: senderId });
 
     // 3) Best-effort channel push — never fail the request on a push miss.
     let channelResult = null;
@@ -1438,17 +1452,17 @@ async function main() {
     // existing callers (MCP ticket_dispatch, older UI) are untouched. The
     // when_idle path that fell through (target was already idle) adds the
     // queued:false / delivered:true hints the plan specifies.
-    if (mode === 'when_idle') {
-      return { ok: true, queued: false, delivered: !!channelResult?.ok, envelope_id: envelope.id, ticket, channel: channelResult };
-    }
-    return { ok: true, queued: false, delivered: !!channelResult?.ok, envelope_id: envelope.id, ticket, channel: channelResult };
+    const delivered = !!channelResult?.ok;
+    return { ok: delivered, assignment: { ok: true, ticket }, queued: false, delivered, envelope_id: envelope.id, ticket,
+      delivery: { ok: delivered, status: channelResult?.status ?? 0, error: delivered ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`) }, channel: channelResult };
   });
 
   // GOL-421: channel acknowledgements/replies are correlated to an envelope and
   // only the stored dispatch target may advance its lifecycle.
   fastify.post('/api/message-envelopes/:id/ack', async (req, reply) => {
     try {
-      return { ok: true, envelope: tracker.acknowledgeEnvelope(req.params.id, req.body ?? {}) };
+      const trustedCaller = typeof req.headers['x-golem-caller-session'] === 'string' ? req.headers['x-golem-caller-session'] : '';
+      return { ok: true, envelope: tracker.acknowledgeEnvelope(req.params.id, { ...(req.body ?? {}), target_session_id: trustedCaller }) };
     } catch (err) {
       const msg = String(err?.message ?? err);
       return reply.code(/not found/.test(msg) ? 404 : 403).send({ error: msg });
@@ -1456,18 +1470,21 @@ async function main() {
   });
   fastify.post('/api/message-envelopes/:id/reply', async (req, reply) => {
     try {
-      const envelope = tracker.replyEnvelope(req.params.id, req.body ?? {});
+      const trustedCaller = typeof req.headers['x-golem-caller-session'] === 'string' ? req.headers['x-golem-caller-session'] : '';
+      const result = tracker.replyEnvelope(req.params.id, { ...(req.body ?? {}), target_session_id: trustedCaller });
+      const envelope = result.envelope;
       // Route to the durable sender identity, never to an ambient/requesting
       // session. Human-originated dispatches deliberately have no channel route.
       let sender_delivery = null;
-      if (envelope.sender_session_id) {
+      if (result.reply.recipient_session_id) {
         sender_delivery = await pushBrief(
           `Reply for dispatch ${envelope.ticket_id}: ${String(req.body?.text || '')}`,
-          envelope.sender_session_id,
-          { envelope_id: envelope.id, sender_session_id: req.body?.target_session_id || null, target_session_id: envelope.sender_session_id },
+          result.reply.recipient_session_id,
+          { envelope_id: result.reply.id, sender_session_id: trustedCaller || null, target_session_id: result.reply.recipient_session_id },
         );
+        tracker.markEnvelopeDelivery(result.reply.id, { error: sender_delivery.ok ? null : (sender_delivery.error || `status ${sender_delivery.status}`) });
       }
-      return { ok: true, envelope, sender_delivery };
+      return { ok: true, envelope, reply: result.reply, sender_delivery };
     } catch (err) {
       const msg = String(err?.message ?? err);
       return reply.code(/not found/.test(msg) ? 404 : 403).send({ error: msg });

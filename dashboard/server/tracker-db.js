@@ -354,12 +354,22 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
       -- Keep dispatch_queue.envelope_id nullable for v12 rows already on disk.
       CREATE TABLE IF NOT EXISTS message_envelopes (
         id                TEXT PRIMARY KEY,
-        ticket_id         TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
-        project_id        TEXT NOT NULL,
+        root_id           TEXT,
+        parent_id         TEXT,
+        ticket_id         TEXT REFERENCES tickets(id) ON DELETE CASCADE,
+        project_id        TEXT,
+        sender_id         TEXT,
+        reply_to_session_id TEXT,
+        recipient_session_id TEXT,
         sender_session_id TEXT,
-        target_session_id TEXT NOT NULL,
+        target_session_id TEXT,
         kind              TEXT NOT NULL DEFAULT 'ticket_dispatch',
-        payload           TEXT NOT NULL DEFAULT '',
+        payload           TEXT NOT NULL DEFAULT '{}',
+        delivery_attempted_at TEXT,
+        delivery_opportunity_at TEXT,
+        delivery_error    TEXT,
+        ack_deadline_at   TEXT,
+        picked_up_at      TEXT,
         status            TEXT NOT NULL DEFAULT 'pending',
         created_at        TEXT NOT NULL,
         delivered_at      TEXT,
@@ -370,6 +380,14 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
       );
       CREATE INDEX IF NOT EXISTS idx_message_envelopes_ticket ON message_envelopes(ticket_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_message_envelopes_target ON message_envelopes(target_session_id, status);
+      CREATE TABLE IF NOT EXISTS message_acknowledgements (
+        envelope_id TEXT NOT NULL REFERENCES message_envelopes(id) ON DELETE CASCADE,
+        recipient_session_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        summary TEXT NOT NULL DEFAULT '',
+        acknowledged_at TEXT NOT NULL,
+        PRIMARY KEY (envelope_id, recipient_session_id)
+      );
 
       -- TKT-0266: durable session-name labels. One row per session_id with a
       -- known name. Survives the session going offline so old tickets still
@@ -652,6 +670,16 @@ WHERE state_changed_at IS NULL`).run();
     // NULL: it predates envelopes and remains visible/monitorable as legacy.
     const dqCols13 = db.prepare('PRAGMA table_info(dispatch_queue)').all().map((c) => c.name);
     if (!dqCols13.includes('envelope_id')) db.exec('ALTER TABLE dispatch_queue ADD COLUMN envelope_id TEXT');
+    // GOL-421 additive facts/links. Keep old columns and rows intact; the old
+    // status is compatibility display data, never the source of core delivery
+    // or acknowledgement truth.
+    const envelopeCols = db.prepare('PRAGMA table_info(message_envelopes)').all().map((c) => c.name);
+    for (const [col, def] of [
+      ['root_id', 'TEXT'], ['parent_id', 'TEXT'], ['sender_id', 'TEXT'],
+      ['reply_to_session_id', 'TEXT'], ['recipient_session_id', 'TEXT'],
+      ['delivery_attempted_at', 'TEXT'], ['delivery_opportunity_at', 'TEXT'],
+      ['delivery_error', 'TEXT'], ['ack_deadline_at', 'TEXT'], ['picked_up_at', 'TEXT'],
+    ]) if (!envelopeCols.includes(col)) db.exec(`ALTER TABLE message_envelopes ADD COLUMN ${col} ${def}`);
 
     // Indexes that depend on lifecycle columns. Idempotent: no-op on fresh
     // DBs (CREATE TABLE above already created them), first-time-create on
@@ -784,19 +812,27 @@ WHERE state_changed_at IS NULL`).run();
       `),
       insertEnvelope: db.prepare(`
         INSERT INTO message_envelopes
-          (id, ticket_id, project_id, sender_session_id, target_session_id, kind, payload, status, created_at)
-        VALUES (@id, @ticket_id, @project_id, @sender_session_id, @target_session_id, 'ticket_dispatch', @payload, @status, @created_at)
+          (id, root_id, parent_id, ticket_id, project_id, sender_id, reply_to_session_id, recipient_session_id, sender_session_id, target_session_id, kind, payload, status, ack_deadline_at, created_at)
+        VALUES (@id, @root_id, @parent_id, @ticket_id, @project_id, @sender_id, @reply_to_session_id, @recipient_session_id, @sender_session_id, @target_session_id, @kind, @payload, @status, @ack_deadline_at, @created_at)
       `),
       getEnvelope: db.prepare('SELECT * FROM message_envelopes WHERE id = ?'),
+      insertEnvelopeFact: db.prepare(`INSERT OR IGNORE INTO message_acknowledgements
+        (envelope_id, recipient_session_id, kind, summary, acknowledged_at)
+        VALUES (@envelope_id, @recipient_session_id, @kind, @summary, @acknowledged_at)`),
+      supersedeOpenEnvelopes: db.prepare(`UPDATE message_envelopes SET completed_at = @ts, status = 'superseded'
+        WHERE ticket_id = @ticket_id AND recipient_session_id != @recipient_session_id
+          AND completed_at IS NULL AND kind = 'ticket_dispatch'`),
       markEnvelopeDelivery: db.prepare(`
         UPDATE message_envelopes
         SET status = CASE WHEN @error IS NULL THEN 'delivered' ELSE 'delivery_failed' END,
-            delivered_at = @delivered_at, last_error = @error
+            delivered_at = @delivered_at, delivery_attempted_at = @delivered_at,
+            delivery_error = @error, last_error = @error
         WHERE id = @id AND status IN ('pending', 'queued', 'delivery_failed')
       `),
       acknowledgeEnvelope: db.prepare(`
-        UPDATE message_envelopes SET status = 'acknowledged', acknowledged_at = @ts
-        WHERE id = @id AND target_session_id = @target_session_id
+        UPDATE message_envelopes SET status = 'acknowledged', acknowledged_at = COALESCE(acknowledged_at, @ts),
+            picked_up_at = COALESCE(picked_up_at, @ts)
+        WHERE id = @id AND recipient_session_id = @target_session_id
           AND status IN ('pending', 'queued', 'delivered', 'delivery_failed')
       `),
       replyEnvelope: db.prepare(`
@@ -1760,6 +1796,14 @@ WHERE state_changed_at IS NULL`).run();
           });
           commentDispatch.markAddressedForTicketActivity(id, actor);
         }
+        const terminalPhase = updates.phase ?? null;
+        if (['built', 'verified', 'rejected', 'done'].includes(terminalPhase) && actor && actor !== 'human') {
+          db.prepare(`UPDATE message_envelopes SET completed_at = COALESCE(completed_at, @ts)
+            WHERE ticket_id = @ticket_id AND recipient_session_id = @actor
+              AND delivery_attempted_at IS NOT NULL AND completed_at IS NULL`).run({ ts, ticket_id: id, actor });
+          recordEvent({ ticket_id: id, project_id: existing.project_id, type: 'dispatch_completion_stamped', actor,
+            data: { phase: terminalPhase } });
+        }
         if ('assignee' in updates && updates.assignee !== existing.assignee) {
           recordEvent({
             ticket_id: id,
@@ -1902,6 +1946,10 @@ WHERE state_changed_at IS NULL`).run();
       if (!session_id) throw new Error('setDispatched: session_id is required');
       const ts = now();
       const txn = db.transaction(() => {
+        // A redispatch cannot leave an earlier envelope/queue actionable.
+        // Legacy queue rows without an envelope_id remain untouched/visible.
+        stmts.supersedeOpenEnvelopes.run({ ticket_id: id, recipient_session_id: session_id, ts });
+        db.prepare("UPDATE dispatch_queue SET status = 'cancelled', resolved_at = @ts WHERE ticket_id = @id AND status = 'pending' AND envelope_id IS NOT NULL").run({ id, ts });
         const previous = existing.dispatched_to && existing.dispatched_to !== session_id ? existing.dispatched_to : null;
         if (previous) {
           recordEvent({
@@ -1967,12 +2015,19 @@ WHERE state_changed_at IS NULL`).run();
         });
         stmts.insertEnvelope.run({
           id: envelopeId,
+          root_id: envelopeId,
+          parent_id: null,
           ticket_id: ticketId,
           project_id: existing.project_id,
+          sender_id: actor === 'human' ? null : actor,
+          reply_to_session_id: actor === 'human' ? null : actor,
+          recipient_session_id: session_id,
           sender_session_id: actor === 'human' ? null : actor,
           target_session_id: session_id,
-          payload: String(payload || ''),
+          kind: 'ticket_dispatch',
+          payload: JSON.stringify({ content: String(payload || '') }),
           status: 'queued',
+          ack_deadline_at: null,
           created_at: ts,
         });
         recordEvent({
@@ -1990,20 +2045,40 @@ WHERE state_changed_at IS NULL`).run();
       return txn();
     },
 
-    createDispatchEnvelope(ticketId, { session_id, payload = '', actor = 'human' } = {}) {
+    createDispatchEnvelope(ticketId, { session_id, payload = '', actor = 'human', sender_id = null } = {}) {
       const ticket = stmts.getTicket.get(ticketId);
       if (!ticket) throw new Error(`createDispatchEnvelope: ticket '${ticketId}' not found`);
       if (!session_id) throw new Error('createDispatchEnvelope: session_id is required');
+      const sender = sender_id || (actor === 'human' ? null : actor);
       const row = {
         id: crypto.randomUUID(),
+        root_id: null,
+        parent_id: null,
         ticket_id: ticketId,
         project_id: ticket.project_id,
-        sender_session_id: actor === 'human' ? null : actor,
+        sender_id: sender,
+        reply_to_session_id: sender,
+        recipient_session_id: session_id,
+        sender_session_id: sender,
         target_session_id: session_id,
-        payload: String(payload || ''),
+        kind: 'ticket_dispatch',
+        payload: JSON.stringify({ content: String(payload || '') }),
         status: 'pending',
+        ack_deadline_at: null,
         created_at: now(),
       };
+      row.root_id = row.id;
+      stmts.insertEnvelope.run(row);
+      return stmts.getEnvelope.get(row.id);
+    },
+
+    createNotificationEnvelope({ project_id = null, sender_id, recipient_session_id, payload = '' } = {}) {
+      if (!sender_id || !recipient_session_id) throw new Error('createNotificationEnvelope: sender and recipient are required');
+      const row = { id: crypto.randomUUID(), root_id: null, parent_id: null, ticket_id: null, project_id,
+        sender_id, reply_to_session_id: sender_id, recipient_session_id, sender_session_id: sender_id,
+        target_session_id: recipient_session_id, kind: 'session_notify', payload: JSON.stringify({ content: String(payload) }),
+        status: 'pending', ack_deadline_at: null, created_at: now() };
+      row.root_id = row.id;
       stmts.insertEnvelope.run(row);
       return stmts.getEnvelope.get(row.id);
     },
@@ -2026,21 +2101,30 @@ WHERE state_changed_at IS NULL`).run();
     acknowledgeEnvelope(envelopeId, { target_session_id, kind = 'brief', summary = '' } = {}) {
       const existing = stmts.getEnvelope.get(envelopeId);
       if (!existing) throw new Error(`acknowledgeEnvelope: envelope '${envelopeId}' not found`);
-      if (!target_session_id || existing.target_session_id !== target_session_id) throw new Error('acknowledgeEnvelope: target session does not match envelope');
-      stmts.acknowledgeEnvelope.run({ id: envelopeId, target_session_id, ts: now() });
+      if (!target_session_id || existing.recipient_session_id !== target_session_id) throw new Error('acknowledgeEnvelope: target session does not match envelope');
+      const ts = now();
+      const fact = stmts.insertEnvelopeFact.run({ envelope_id: envelopeId, recipient_session_id: target_session_id, kind, summary: String(summary), acknowledged_at: ts });
+      if (fact.changes) stmts.acknowledgeEnvelope.run({ id: envelopeId, target_session_id, ts });
       const envelope = stmts.getEnvelope.get(envelopeId);
-      recordEvent({ ticket_id: existing.ticket_id, project_id: existing.project_id, type: 'dispatch_acknowledged', actor: target_session_id, data: { envelope_id: envelopeId, kind, summary } });
+      if (fact.changes) recordEvent({ ticket_id: existing.ticket_id, project_id: existing.project_id, type: 'dispatch_acknowledged', actor: target_session_id, data: { envelope_id: envelopeId, kind, summary } });
       return envelope;
     },
 
     replyEnvelope(envelopeId, { target_session_id, kind = 'brief', text = '' } = {}) {
       const existing = stmts.getEnvelope.get(envelopeId);
       if (!existing) throw new Error(`replyEnvelope: envelope '${envelopeId}' not found`);
-      if (!target_session_id || existing.target_session_id !== target_session_id) throw new Error('replyEnvelope: target session does not match envelope');
-      stmts.replyEnvelope.run({ id: envelopeId, target_session_id, ts: now() });
-      const envelope = stmts.getEnvelope.get(envelopeId);
-      recordEvent({ ticket_id: existing.ticket_id, project_id: existing.project_id, type: 'dispatch_replied', actor: target_session_id, data: { envelope_id: envelopeId, kind, text } });
-      return envelope;
+      if (!target_session_id || existing.recipient_session_id !== target_session_id) throw new Error('replyEnvelope: target session does not match envelope');
+      const ts = now();
+      const child = { id: crypto.randomUUID(), root_id: existing.root_id || existing.id, parent_id: existing.id,
+        ticket_id: existing.ticket_id, project_id: existing.project_id, sender_id: target_session_id,
+        reply_to_session_id: target_session_id, recipient_session_id: existing.reply_to_session_id,
+        sender_session_id: target_session_id, target_session_id: existing.reply_to_session_id,
+        kind: 'reply', payload: JSON.stringify({ text: String(text), kind }), status: 'pending', ack_deadline_at: null, created_at: ts };
+      if (!child.recipient_session_id) throw new Error('replyEnvelope: envelope has no reply route');
+      stmts.insertEnvelope.run(child);
+      stmts.replyEnvelope.run({ id: envelopeId, target_session_id, ts });
+      recordEvent({ ticket_id: existing.ticket_id, project_id: existing.project_id, type: 'dispatch_replied', actor: target_session_id, data: { envelope_id: envelopeId, reply_envelope_id: child.id, kind, text } });
+      return { envelope: stmts.getEnvelope.get(envelopeId), reply: stmts.getEnvelope.get(child.id) };
     },
 
     cancelQueuedDispatch(queueId, { actor = 'human' } = {}) {

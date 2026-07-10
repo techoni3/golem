@@ -88,10 +88,10 @@ async function jget(p) {
   const body = await r.json().catch(() => null);
   return { status: r.status, body };
 }
-async function jsend(method, p, payload) {
+async function jsend(method, p, payload, headers = {}) {
   const r = await fetch(`${BASE}${p}`, {
     method,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...headers },
     body: payload === undefined ? undefined : JSON.stringify(payload),
   });
   const body = await r.json().catch(() => null);
@@ -115,12 +115,13 @@ async function run() {
   // channel registered in the temp XDG → channels.json absent/empty).
   const disp = await jsend('POST', `/api/tickets/${tid}/dispatch`, { session_id: SESSION, note: 'priority one' });
   check('POST dispatch: HTTP 200', disp.status === 200, `status ${disp.status}`);
-  check('POST dispatch: ok:true', disp.body?.ok === true);
+  check('POST dispatch: top-level ok:false on channel failure', disp.body?.ok === false);
+  check('POST dispatch: durable assignment ok:true', disp.body?.assignment?.ok === true);
   check('POST dispatch: ticket.assignee === session_id', disp.body?.ticket?.assignee === SESSION, `assignee ${disp.body?.ticket?.assignee}`);
   check('POST dispatch: ticket.dispatched_to === session_id', disp.body?.ticket?.dispatched_to === SESSION, `dispatched_to ${disp.body?.ticket?.dispatched_to}`);
   check('POST dispatch: dispatched_at set', !!disp.body?.ticket?.dispatched_at, `dispatched_at ${disp.body?.ticket?.dispatched_at}`);
   check('POST dispatch: channel.ok === false (unreachable, as expected)', disp.body?.channel?.ok === false, `channel ${JSON.stringify(disp.body?.channel)}`);
-  check('POST dispatch: truthful queued:false + delivered:false', disp.body?.queued === false && disp.body?.delivered === false, JSON.stringify(disp.body));
+  check('POST dispatch: truthful queued:false + exact failed delivery', disp.body?.queued === false && disp.body?.delivered === false && disp.body?.delivery?.status === 0 && /no channel registered/.test(disp.body?.delivery?.error || ''), JSON.stringify(disp.body));
   check('POST dispatch: envelope id returned', typeof disp.body?.envelope_id === 'string', disp.body?.envelope_id);
 
   const sql = new Database(TMP_DB, { readonly: true });
@@ -143,7 +144,7 @@ async function run() {
   // A target with no live session/channel must remain queued, with a durable
   // envelope linked from the nullable queue column (legacy rows may still be null).
   const queuedTicket = await jsend('POST', '/api/tickets', { project_id: PID, kind: 'work-item', title: 'Queue the widget' });
-  const queued = await jsend('POST', `/api/tickets/${queuedTicket.body?.id}/dispatch`, { session_id: 'offline-queued-session', mode: 'when_idle' });
+  const queued = await jsend('POST', `/api/tickets/${queuedTicket.body?.id}/dispatch`, { session_id: 'offline-queued-session', mode: 'when_idle', sender_id: 'sender-session' });
   check('when_idle: truthful queued:true + delivered:false', queued.status === 200 && queued.body?.queued === true && queued.body?.delivered === false, JSON.stringify(queued.body));
   const queuedRows = await jget('/api/dispatch-queue?status=pending');
   const queueRow = queuedRows.body?.find((row) => row.id === queued.body?.queue_id);
@@ -151,12 +152,18 @@ async function run() {
   const sql2 = new Database(TMP_DB, { readonly: true });
   const queuedEnvelope = sql2.prepare('SELECT * FROM message_envelopes WHERE id = ?').get(queued.body?.envelope_id);
   check('when_idle: envelope is queued and undelivered', queuedEnvelope?.status === 'queued' && queuedEnvelope?.delivered_at == null, JSON.stringify(queuedEnvelope));
-  const wrongAck = await jsend('POST', `/api/message-envelopes/${queued.body?.envelope_id}/ack`, { target_session_id: 'wrong-session', summary: 'spoof' });
+  const wrongAck = await jsend('POST', `/api/message-envelopes/${queued.body?.envelope_id}/ack`, { target_session_id: 'offline-queued-session', summary: 'spoof' }, { 'x-golem-caller-session': 'wrong-session' });
   check('envelope ack rejects a non-target', wrongAck.status === 403, `status ${wrongAck.status}`);
-  const correctAck = await jsend('POST', `/api/message-envelopes/${queued.body?.envelope_id}/ack`, { target_session_id: 'offline-queued-session', summary: 'picked up' });
+  const correctAck = await jsend('POST', `/api/message-envelopes/${queued.body?.envelope_id}/ack`, { target_session_id: 'wrong-session', summary: 'picked up' }, { 'x-golem-caller-session': 'offline-queued-session' });
   check('envelope ack accepts stored target', correctAck.status === 200 && correctAck.body?.envelope?.status === 'acknowledged' && !!correctAck.body?.envelope?.acknowledged_at, JSON.stringify(correctAck.body));
-  const reply = await jsend('POST', `/api/message-envelopes/${queued.body?.envelope_id}/reply`, { target_session_id: 'offline-queued-session', text: 'completed' });
-  check('envelope reply stamps completion', reply.status === 200 && reply.body?.envelope?.status === 'replied' && !!reply.body?.envelope?.completed_at, JSON.stringify(reply.body));
+  const retryAck = await jsend('POST', `/api/message-envelopes/${queued.body?.envelope_id}/ack`, {}, { 'x-golem-caller-session': 'offline-queued-session' });
+  check('same target ack is idempotent', retryAck.status === 200 && retryAck.body?.envelope?.acknowledged_at === correctAck.body?.envelope?.acknowledged_at, JSON.stringify(retryAck.body));
+  const reply = await jsend('POST', `/api/message-envelopes/${queued.body?.envelope_id}/reply`, { text: 'completed' }, { 'x-golem-caller-session': 'offline-queued-session' });
+  check('envelope reply creates routed child', reply.status === 200 && reply.body?.reply?.parent_id === queued.body?.envelope_id && reply.body?.reply?.recipient_session_id === 'sender-session', JSON.stringify(reply.body));
+  const notification = await jsend('POST', '/api/messages/notify', { session_id: 'notify-recipient', sender_id: 'notify-sender', text: 'durable notification', project_id: PID });
+  check('session notify reports failed delivery truthfully', notification.status === 200 && notification.body?.ok === false, JSON.stringify(notification.body));
+  const notificationEnvelope = sql2.prepare('SELECT * FROM message_envelopes WHERE id = ?').get(notification.body?.envelope_id);
+  check('session notify persists nullable-ticket sender/reply route', notificationEnvelope?.ticket_id == null && notificationEnvelope?.sender_id === 'notify-sender' && notificationEnvelope?.reply_to_session_id === 'notify-sender' && notificationEnvelope?.recipient_session_id === 'notify-recipient', JSON.stringify(notificationEnvelope));
   sql2.close();
 }
 
