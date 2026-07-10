@@ -13,7 +13,7 @@ try {
   const { stdout, stderr } = await run(process.execPath, [path.join(here, 'dispatch-smoke.mjs')]);
   process.stdout.write(stdout);
   process.stderr.write(stderr);
-  if (!stdout.includes('when_idle: envelope is queued and undelivered')) throw new Error('queue assertions did not run');
+  if (!stdout.includes('when_idle: envelope is undelivered without relying on status')) throw new Error('queue assertions did not run');
 } catch (err) {
   process.stderr.write(`${err?.stderr || ''}${err?.stdout || ''}`);
   throw err;

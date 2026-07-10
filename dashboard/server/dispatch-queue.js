@@ -244,7 +244,12 @@ export function initDispatchDrainer({
         if (assigned.revoked_session_id) {
           try { await pushBrief(`Dispatch revoked for ${assigned.display_id || assigned.id}: ${assigned.title || ''}\n\nReason: queued dispatch delivered to another session. Stand down unless you receive a new dispatch.`, assigned.revoked_session_id); } catch { /* best-effort */ }
         }
-        const briefString = buildDispatchBrief(ticket, row.note, row.workspace || undefined);
+        const envelope = row.envelope_id ? tracker.getEnvelope(row.envelope_id) : null;
+        let briefString = buildDispatchBrief(ticket, row.note, row.workspace || undefined, row.envelope_id || null);
+        try {
+          const payload = envelope?.payload ? JSON.parse(envelope.payload) : null;
+          if (typeof payload?.content === 'string') briefString = payload.content;
+        } catch { /* legacy rows retain reconstructed brief behavior */ }
 
         let pushResult;
         try {

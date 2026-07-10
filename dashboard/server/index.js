@@ -145,19 +145,20 @@ function workspaceBlock(ticket) {
   ].join('\n');
 }
 
-function buildDispatchBrief(ticket, note, workspace) {
-  if (ticket?.kind === 'spec') return buildSpecBrief(ticket, note, workspace);
+function buildDispatchBrief(ticket, note, workspace, messageId = null) {
+  if (ticket?.kind === 'spec') return buildSpecBrief(ticket, note, workspace, messageId);
   const id = ticket.display_id || ticket.id;
   let brief =
     `You've been assigned tracker ticket ${id}: "${ticket.title}" (project ${ticket.project_id}, kind ${ticket.kind}).\n\n` +
     `${note ? note + '\n\n' : ''}` +
     `Load it with the golem tracker tools (ticket_get ${id}) to read the full body, acceptance criteria, and comment thread, then pick it up: move it to in_progress, do the work, comment progress, and move it to review/done when complete. ` +
-    `If you have blocking questions, create a question-kind ticket in this project assigned to 'human'.`;
+    `If you have blocking questions, create a question-kind ticket in this project assigned to 'human'.` +
+    (messageId ? `\n\nDispatch message_id: ${messageId}\nAcknowledge this dispatch first with ack({ kind: 'brief', summary: '<one sentence>', envelope_id: '${messageId}' }).` : '');
   if (workspace === 'worktree') brief += workspaceBlock(ticket);
   return brief;
 }
 
-function buildSpecBrief(ticket, note, workspace) {
+function buildSpecBrief(ticket, note, workspace, messageId = null) {
   const id = ticket.display_id || ticket.id;
   const comments = (ticket.comments || []).filter((c) => c.dispatch_state === 'undispatched' || c.dispatch_state === 'dispatched');
   const children = ticket.children || [];
@@ -194,6 +195,7 @@ function buildSpecBrief(ticket, note, workspace) {
     '',
     `Load it with the golem tracker tools (ticket_get ${id}) to read the full body, comment thread, and links, then pick it up: move it to in_progress, do the work, comment progress, and move it to review/done when complete.`,
     `If you have blocking questions, create a question-kind ticket in this project assigned to 'human'.`,
+    messageId ? `Dispatch message_id: ${messageId}\nAcknowledge this dispatch first with ack({ kind: 'brief', summary: '<one sentence>', envelope_id: '${messageId}' }).` : null,
   ];
   if (workspace === 'worktree') lines.push(workspaceBlock(ticket));
   return lines.filter((line) => line != null).join('\n');
@@ -1395,8 +1397,10 @@ async function main() {
       try { hasChannel = (await listChannels()).some((c) => c.session_id === sessionId); } catch { /* treat as unreachable */ }
       const isIdle = !!target && target.alive && target.status === 'idle' && hasChannel;
       if (!isIdle) {
-        const briefString = buildDispatchBrief(existing, note, workspace);
-        const queueRow = tracker.queueDispatch(id, { session_id: sessionId, note, workspace, payload: briefString, actor: senderId || 'human' });
+        const envelope = tracker.createDispatchEnvelope(id, { session_id: sessionId, actor: senderId || 'human', sender_id: senderId });
+        const briefString = buildDispatchBrief(existing, note, workspace, envelope.id);
+        tracker.setEnvelopePayload(envelope.id, { content: briefString, envelope_id: envelope.id, sender_id: envelope.sender_id, reply_to_session_id: envelope.reply_to_session_id, recipient_session_id: envelope.recipient_session_id });
+        const queueRow = tracker.queueDispatch(id, { session_id: sessionId, note, workspace, payload: briefString, envelope_id: envelope.id, actor: senderId || 'human' });
         chat.record('system', 'info',
           `queued ${queueRow.id.slice(0, 8)} for ${sessionId} — will deliver when idle`);
         const ticket = tracker.getTicket(id);
@@ -1418,8 +1422,9 @@ async function main() {
     //    tools (ticket_get, etc.) land in WS3 — naming them now is intentional.
     //    (TKT-0245: extracted to buildDispatchBrief so the drainer produces
     //    byte-identical briefs.)
-    const briefString = buildDispatchBrief(existing, note, workspace);
-    const envelope = tracker.createDispatchEnvelope(id, { session_id: sessionId, payload: briefString, actor: senderId || 'human', sender_id: senderId });
+    const envelope = tracker.createDispatchEnvelope(id, { session_id: sessionId, actor: senderId || 'human', sender_id: senderId });
+    const briefString = buildDispatchBrief(existing, note, workspace, envelope.id);
+    tracker.setEnvelopePayload(envelope.id, { content: briefString, envelope_id: envelope.id, sender_id: envelope.sender_id, reply_to_session_id: envelope.reply_to_session_id, recipient_session_id: envelope.recipient_session_id });
 
     // 3) Best-effort channel push — never fail the request on a push miss.
     let channelResult = null;
