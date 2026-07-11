@@ -4,13 +4,14 @@
 // item, then drives the UI headlessly to verify:
 //   1. separation — scratch spec on /specs Draft, NOT on /tracker
 //      (work-items); plain work-item on /tracker, NOT on the specs view.
-//   2. column relabel — PATCH spec → in_progress → card under "Refining".
-//   3. content search — token → flat list with <mark> snippet; click → drawer;
+//   2. bounded board — overflowing spec columns scroll independently.
+//   3. column relabel — PATCH spec → in_progress → card under "Refining".
+//   4. content search — token → flat list with <mark> snippet; click → drawer;
 //      clear → board; gibberish → empty state.
-//   4. spec drawer Work-items panel — both children listed; + Work item opens
+//   5. spec drawer Work-items panel — both children listed; + Work item opens
 //      the composer with Kind=work-item; clicking a child navigates.
-//   5. + New spec → composer with Kind=spec.
-//   6. API contract — /api/tickets/search returns 1 row with snippet+offsets;
+//   6. + New spec → composer with Kind=spec.
+//   7. API contract — /api/tickets/search returns 1 row with snippet+offsets;
 //      /api/tickets?excludeKind=spec has no spec rows.
 // Archives all scratch tickets in finally.
 
@@ -65,7 +66,7 @@ await page.setViewportSize({ width: 1440, height: 900 });
 const pageerrors = [];
 page.on('pageerror', (e) => pageerrors.push(e.message));
 
-let specId = null, childA = null, childB = null, plain = null;
+let specId = null, childA = null, childADisplay = null, childB = null, childBDisplay = null, plain = null;
 const created = [];
 try {
   // ── Scratch tickets ───────────────────────────────────────────────────────
@@ -73,8 +74,10 @@ try {
   specId = specRes.id;
   created.push(specId);
   const childARes = await post('/tickets', { project_id: PROJECT, kind: 'work-item', created_by: 'smoke', title: 'SMOKE-0284 child A', parent_id: specId, body: 'First work item under the scratch spec.' }); childA = childARes.id;
+  childADisplay = childARes.display_id || childA;
   created.push(childA);
-  childB = (await post('/tickets', { project_id: PROJECT, kind: 'work-item', created_by: 'smoke', title: 'SMOKE-0284 child B', parent_id: specId, body: 'Second work item under the scratch spec.' })).id;
+  const childBRes = await post('/tickets', { project_id: PROJECT, kind: 'work-item', created_by: 'smoke', title: 'SMOKE-0284 child B', parent_id: specId, body: 'Second work item under the scratch spec.' }); childB = childBRes.id;
+  childBDisplay = childBRes.display_id || childB;
   created.push(childB);
   plain = (await post('/tickets', { project_id: PROJECT, kind: 'work-item', created_by: 'smoke', title: 'SMOKE-0284 plain work item', body: 'A plain work item with no parent.' })).id;
   created.push(plain);
@@ -90,6 +93,57 @@ try {
   }, specId);
   assert.ok(sep.onSpecsDraft, 'scratch spec renders on /specs in the Draft column');
   assert.match(sep.draftHeader, /Draft/, `Draft column header labeled "Draft" (got "${sep.draftHeader}")`);
+
+  // Clone cards in-browser only to force overflow without creating tracker data.
+  // The board must remain within the page while the column list becomes the
+  // scroll container.
+  const bounded = await page.evaluate((id) => {
+    const pageEl = document.querySelector('.page.specs-page');
+    const kanban = document.querySelector('.specs-board .kanban');
+    const column = document.querySelector('.kanban-col[data-col="todo"]');
+    const list = column?.querySelector('.kanban-list');
+    const card = list?.querySelector(`.ticket[data-ticket-id="${id}"]`);
+    if (!pageEl || !kanban || !column || !list || !card) return null;
+    for (let i = 0; i < 40; i += 1) {
+      const clone = card.cloneNode(true);
+      clone.dataset.ticketId = `layout-clone-${i}`;
+      list.appendChild(clone);
+    }
+    const pageRect = pageEl.getBoundingClientRect();
+    const boardRect = kanban.getBoundingClientRect();
+    const listStyle = getComputedStyle(list);
+    return {
+      overflowY: listStyle.overflowY,
+      scrollHeight: list.scrollHeight,
+      clientHeight: list.clientHeight,
+      boardWithinPage: boardRect.bottom <= pageRect.bottom + 1,
+      columnFillsBoard: column.clientHeight <= kanban.clientHeight
+        && kanban.clientHeight - column.clientHeight <= 8,
+    };
+  }, specId);
+  assert.ok(bounded, 'specs board layout elements are present');
+  assert.equal(bounded.overflowY, 'auto', 'spec column list owns vertical scrolling');
+  assert.ok(bounded.scrollHeight > bounded.clientHeight, 'overflowing spec column has scrollable content');
+  assert.ok(bounded.boardWithinPage, 'specs board remains bounded by the page viewport');
+  assert.ok(bounded.columnFillsBoard, 'spec column fills the bounded board height');
+
+  await page.setViewportSize({ width: 1000, height: 900 });
+  const narrow = await page.evaluate(() => {
+    const kanban = document.querySelector('.specs-board .kanban');
+    if (!kanban) return null;
+    const style = getComputedStyle(kanban);
+    kanban.scrollLeft = kanban.scrollWidth;
+    return {
+      overflowX: style.overflowX,
+      hasHorizontalOverflow: kanban.scrollWidth > kanban.clientWidth,
+      reachedLaterColumns: kanban.scrollLeft > 0,
+    };
+  });
+  assert.ok(narrow, 'narrow specs board is present');
+  assert.equal(narrow.overflowX, 'auto', 'narrow specs board exposes horizontal scrolling');
+  assert.ok(narrow.hasHorizontalOverflow, 'narrow specs board overflows horizontally');
+  assert.ok(narrow.reachedLaterColumns, 'horizontal scrolling reaches later spec columns');
+  await page.setViewportSize({ width: 1440, height: 900 });
 
   await page.goto(`${ORIGIN}/tracker`, { waitUntil: 'networkidle' });
   await wait(600);
@@ -174,7 +228,7 @@ try {
   }
   assert.ok(panel.hasPanel, 'spec drawer renders the Work items panel');
   assert.equal(panel.rowCount, 2, `Work items panel lists both children (got ${panel.rowCount})`);
-  assert.deepEqual(panel.ids.sort(), [childA, childB].sort(), `child ids match (got ${panel.ids.join(', ')})`);
+  assert.deepEqual(panel.ids.sort(), [childADisplay, childBDisplay].sort(), `child ids match (got ${panel.ids.join(', ')})`);
   assert.ok(panel.pills.every(Boolean), 'each child row has a state pill');
 
   // + Work item → composer with Kind=work-item

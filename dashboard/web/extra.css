@@ -3967,8 +3967,35 @@ mark.anno.anno-tail::after {
 .tracker-view-btn.active { color: var(--text-0); background: var(--accent-soft); }
 
 /* Specs board (reusable view — toolbar + board, no page title; mounted in the
-   tracker specs mode + the project-view Specs section). */
+   standalone page + the project-view Specs section). The standalone wrappers
+   need a definite flex height so the shared column lists can scroll. */
+.page.specs-page {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 14px;
+}
 .specs-board { margin-top: 4px; }
+.specs-page .specs-board {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+}
+.specs-page .specs-board .kanban {
+  flex: 1 1 auto;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+/* The reusable board also appears inside the scrolling project page, where it
+   needs an explicit cap rather than the standalone page's remaining height. */
+.project-command-center .specs-board .kanban {
+  max-height: 70vh;
+  grid-template-rows: minmax(0, 1fr);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
 .specs-toolbar { margin-bottom: 8px; }
 .specs-count { font-size: 11px; color: var(--text-3); margin-left: auto; margin-right: 4px; }
 

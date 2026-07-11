@@ -1,7 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-07-10 @ 44bd061 — maintained via golem:docs-maintenance.
-> Includes current working-tree behavior not yet represented by that commit.
-
+> Last verified: 2026-07-11 @ ac34521 — maintained via golem:docs-maintenance.
 ## Directory structure
 - `substrate/` — plugin source of truth.
 - `plugin/` — generated CC render; never hand-edit.
@@ -11,6 +9,7 @@
 - `dashboard/web/` — no-bundler React globals.
 - `mcp/channel/` — per-session HTTP/MCP channel.
 - `shims/opencode/` — maps events into hook/session registries.
+- `docs/architectures/` — versioned standalone architecture field guides.
 - `test/` — journey tests for CLI/compiler enforcement paths.
 - `golem-projects/` — repos.
 - `.worktrees/` — gitignored; explicit dispatches only.
@@ -40,7 +39,7 @@
 ## Data flow
 Hooks/shims write `~/.golem/`; dashboard owns `tracker.db`. Envelope health derives from facts. Passive slots land on real turns or successful envelopes; subscription digests are quiet by default.
 
-Visual deep dive: [session architecture](docs/session-architecture.html). Separate OpenCode/Claude Code startup, hooks, delivery, envelopes, and closing-brief flows.
+Visual deep dive: [session architecture](docs/architectures/session_architecture_5_0_16.html). Current OpenCode/Claude Code control plane, delivery, passive observation, health, and closure flows.
 
 ## Constraints & gotchas
 - Claude installs from `~/.golem/renders/cc-plugin` but runs cached plugin bytes; sync + update + `/reload-plugins` after edits.

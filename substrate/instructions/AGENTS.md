@@ -102,6 +102,7 @@ Trust only mechanical evidence: command output you ran, files changed, tests/che
 - Work in the current checkout unless a dispatch explicitly names a worktree; never create or enter a worktree on your own initiative.
 - Keep tracker state current for feature-sized+ work; stale or wrong ticket state is a defect. Never end a turn with a ticket in the wrong state. Before going idle, sweep your in_progress tickets; fix any of yours untouched for >1 day before starting new work.
 
-## Output Style
+## Response and Output
 
 Keep responses compact and factual. Do not narrate every tool call. Separate final user-facing briefs from noisy tool output with a long horizontal rule when useful.
+Every turn end should provide a quick recap; the human requires a refresher on what was done (with brief description), what's in progress, and what's next.

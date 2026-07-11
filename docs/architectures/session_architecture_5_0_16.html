@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Golem v5.0.16 architecture field guide for the Claude Code and OpenCode control plane.">
+  <title>Golem v5.0.16 — Session Architecture Field Guide</title>
+  <style>
+    :root{
+      --ink:#080b12;--ink-2:#0c111b;--panel:#111826;--panel-2:#151e2f;--line:#26334a;--soft:#1a2435;
+      --fg:#f0ede5;--dim:#b4becf;--faint:#78849a;--cc:#ffb454;--oc:#58d5ff;--channel:#b89cff;
+      --bridge:#ff7898;--dashboard:#49ddb5;--tracker:#a8e063;--store:#7ea7ff;--amber:#ffd166;--danger:#ff7d72;
+      --serif:Iowan Old Style,Palatino Linotype,Book Antiqua,Palatino,Georgia,serif;
+      --mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;--radius:14px;--max:1660px;
+    }
+    *{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:22px;background:var(--ink)}
+    body{margin:0;overflow-x:hidden;color:var(--fg);font:18px/1.62 var(--serif);background:
+      radial-gradient(950px 650px at 88% -10%,rgba(88,213,255,.09),transparent 65%),
+      radial-gradient(850px 620px at 0 6%,rgba(255,180,84,.075),transparent 62%),
+      radial-gradient(900px 680px at 48% 80%,rgba(184,156,255,.045),transparent 66%),var(--ink)}
+    body:before{content:"";position:fixed;z-index:0;inset:0;pointer-events:none;opacity:.65;background-image:linear-gradient(rgba(126,167,255,.027) 1px,transparent 1px),linear-gradient(90deg,rgba(126,167,255,.027) 1px,transparent 1px);background-size:44px 44px;mask-image:radial-gradient(circle at 50% 30%,#000,transparent 87%)}
+    ::selection{background:rgba(88,213,255,.28);color:white}.shell{position:relative;z-index:1;display:grid;grid-template-columns:276px minmax(0,1fr);max-width:var(--max);margin:auto}
+    nav{position:sticky;top:0;align-self:start;height:100vh;overflow:auto;padding:35px 25px 38px 30px;border-right:1px solid var(--soft);background:linear-gradient(180deg,rgba(8,11,18,.96),rgba(8,11,18,.73));backdrop-filter:blur(9px)}
+    .brand,h1,h2,h3{font-family:var(--serif)}.brand{font-size:25px;font-weight:800;line-height:1.02;letter-spacing:-.5px}.brand i{color:var(--oc);font-style:normal}.sub,.eyebrow,.mono,code,th,figcaption,.pill,.toc-label,.step{font-family:var(--mono)}
+    .sub{margin-top:8px;color:var(--faint);font-size:9px;letter-spacing:1.65px;text-transform:uppercase}.toc{list-style:none;margin:27px 0 0;padding:0}.toc-label{margin:17px 0 4px;color:var(--faint);font-size:9px;letter-spacing:1.45px;text-transform:uppercase}.toc a{display:block;padding:5px 0;color:var(--dim);font-size:13px;text-decoration:none;transition:.18s}.toc a:hover,.toc a.active{color:var(--fg);transform:translateX(3px)}
+    main{min-width:0}.hero,section{border-bottom:1px solid var(--soft)}.hero{padding:84px 68px 62px}section{padding:62px 68px}.eyebrow{margin:0 0 12px;color:var(--channel);font-size:10px;letter-spacing:2.3px;text-transform:uppercase}h1,h2,h3{margin:0;line-height:1.08}h1{max-width:1080px;font-size:clamp(49px,6.4vw,94px);font-weight:900;letter-spacing:-3px}h1 span{display:block;color:var(--dim);font-style:italic;font-weight:400}h2{font-size:clamp(35px,4vw,53px);font-weight:600;letter-spacing:-1.2px}h3{font-size:24px;font-weight:600}p{margin:13px 0}.lead{max-width:980px;color:var(--dim);font-size:21px;line-height:1.55}.lede{max-width:1050px;color:var(--dim);font-size:22px;line-height:1.54}strong{color:#fff;font-weight:600}a{color:var(--oc)}code{padding:1px 5px;border:1px solid var(--line);border-radius:5px;background:var(--panel);color:#dce5f5;font-size:.78em;overflow-wrap:anywhere}
+    .legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:28px}.pill{display:inline-flex;align-items:center;gap:8px;padding:7px 11px;border:1px solid var(--line);border-radius:99px;background:rgba(17,24,38,.72);color:var(--dim);font-size:10px}.dot{width:8px;height:8px;border-radius:50%;flex:none}.cc{color:var(--cc)}.oc{color:var(--oc)}.ch{color:var(--channel)}.br{color:var(--bridge)}.db{color:var(--dashboard)}.tr{color:var(--tracker)}.st{color:var(--store)}.am{color:var(--amber)}.red{color:var(--danger)}
+    .grid2,.grid3,.grid4{display:grid;gap:14px;margin-top:25px}.grid2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid3{grid-template-columns:repeat(3,minmax(0,1fr))}.grid4{grid-template-columns:repeat(4,minmax(0,1fr))}.card{min-width:0;padding:21px;border:1px solid var(--line);border-radius:var(--radius);background:linear-gradient(145deg,rgba(21,30,47,.86),rgba(12,17,27,.79))}.card p{margin-bottom:0;color:var(--dim);font-size:16px}.card h3 + p{margin-top:9px}.metric{border-top:3px solid var(--store)}.metric b{display:block;font-family:var(--serif);font-size:26px}.metric small{display:block;margin-top:3px;color:var(--faint);font:9px/1.45 var(--mono);letter-spacing:1px;text-transform:uppercase}
+    .callout{margin:25px 0;padding:16px 20px;border-left:3px solid var(--channel);border-radius:0 10px 10px 0;background:linear-gradient(90deg,rgba(184,156,255,.075),transparent)}.callout strong{display:block;color:var(--channel);font:10px var(--mono);letter-spacing:1.55px;text-transform:uppercase}.callout p{margin:6px 0 0;color:var(--dim);font-size:16px}.callout.warning{border-color:var(--amber);background:linear-gradient(90deg,rgba(255,209,102,.07),transparent)}.callout.warning strong{color:var(--amber)}.callout.good{border-color:var(--dashboard);background:linear-gradient(90deg,rgba(73,221,181,.07),transparent)}.callout.good strong{color:var(--dashboard)}
+    figure{margin:31px 0 12px}.diagram-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);background:radial-gradient(900px 480px at 50% 0,rgba(32,44,67,.5),transparent 72%),var(--ink-2)}.diagram-scroll svg{display:block;min-width:880px;width:100%;height:auto}figcaption{margin-top:10px;color:var(--faint);font-size:11px;line-height:1.55}figcaption b{color:var(--dim);font-weight:600}svg text{font-family:var(--mono)}svg .title{font-size:16px;font-weight:600}svg .label{font-size:12px;fill:#b4becf}svg .small{font-size:10.5px;fill:#8e9aaf}svg .overline{font-size:10px;letter-spacing:1.3px;fill:#78849a}svg .lane{stroke:#26334a;stroke-width:1;stroke-dasharray:5 7}svg .ccbox{fill:rgba(255,180,84,.07);stroke:#ffb454}svg .ocbox{fill:rgba(88,213,255,.07);stroke:#58d5ff}svg .chbox{fill:rgba(184,156,255,.07);stroke:#b89cff}svg .brbox{fill:rgba(255,120,152,.07);stroke:#ff7898}svg .dbbox{fill:rgba(73,221,181,.07);stroke:#49ddb5}svg .trbox{fill:rgba(168,224,99,.07);stroke:#a8e063}svg .stbox{fill:rgba(126,167,255,.07);stroke:#7ea7ff}svg .warnbox{fill:rgba(255,209,102,.06);stroke:#ffd166}
+    .table-wrap{margin:25px 0;overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius)}table{width:100%;min-width:750px;border-collapse:collapse;background:rgba(12,17,27,.76)}th{color:var(--faint);background:rgba(21,30,47,.83);font-size:9px;letter-spacing:1.3px;text-align:left;text-transform:uppercase}th,td{padding:12px 14px;border-bottom:1px solid var(--soft);vertical-align:top}td{color:var(--dim);font-size:14.5px}td:first-child{color:var(--fg);font-weight:600}tr:last-child td{border-bottom:0}
+    .flow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0;margin:26px 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:rgba(12,17,27,.72)}.flow-item{position:relative;min-width:0;padding:18px 16px;border-right:1px solid var(--soft)}.flow-item:last-child{border-right:0}.flow-item:after{content:"→";position:absolute;right:-8px;top:50%;z-index:1;transform:translateY(-50%);color:var(--faint);font:18px var(--mono)}.flow-item:last-child:after{display:none}.step{display:block;color:var(--faint);font-size:9px;letter-spacing:1.2px}.flow-item b{display:block;margin-top:6px;font-size:17px}.flow-item span:last-child{display:block;margin-top:6px;color:var(--dim);font-size:14px;line-height:1.4}
+    .checklist{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:24px}.check{padding:16px 17px;border:1px solid var(--line);border-radius:11px;background:rgba(17,24,38,.55)}.check b{display:block;font-size:17px}.check p{margin:6px 0 0;color:var(--dim);font-size:15px}.check .step{color:var(--dashboard)}.source-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px;margin-top:25px}.source{min-width:0;padding:14px 15px;border:1px solid var(--soft);border-radius:10px;background:rgba(17,24,38,.48)}.source a{display:block;font:11px/1.45 var(--mono);overflow-wrap:anywhere}.source span{display:block;margin-top:6px;color:var(--faint);font-size:14px;line-height:1.42}footer{padding:36px 68px;color:var(--faint);font:10px var(--mono);letter-spacing:.2px}
+    @media(max-width:1100px){.shell{grid-template-columns:1fr}nav{position:static;height:auto;padding:25px 25px 20px;border-right:0;border-bottom:1px solid var(--soft)}.toc{display:flex;flex-wrap:wrap;gap:0 18px}.toc-label{display:none}.toc li{min-width:170px}.grid4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media(max-width:760px){body{font-size:17px}.hero,section,footer{padding-left:20px;padding-right:20px}.hero{padding-top:56px}h1{letter-spacing:-1.7px}.lede,.lead{font-size:19px}.grid2,.grid3,.grid4,.checklist{grid-template-columns:1fr}.flow{grid-template-columns:1fr}.flow-item{border-right:0;border-bottom:1px solid var(--soft)}.flow-item:last-child{border-bottom:0}.flow-item:after{content:"↓";top:auto;bottom:-11px;right:50%;transform:translateX(50%)}.diagram-scroll svg{min-width:780px}.source-grid{grid-template-columns:1fr}.toc li{min-width:145px}}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <nav aria-label="Field guide sections">
+      <a class="brand" href="#top" aria-label="Back to top">Session<br>Architecture<i>.</i></a>
+      <div class="sub">Golem v5.0.16 | field guide</div>
+      <ol class="toc">
+        <li class="toc-label">Control plane</li>
+        <li><a href="#compass">01. Compass</a></li>
+        <li><a href="#provenance">02. Render to runtime</a></li>
+        <li class="toc-label">Reliable coordination</li>
+        <li><a href="#identity">03. Identity and reachability</a></li>
+        <li><a href="#envelopes">04. Actionable envelopes</a></li>
+        <li><a href="#passive">05. Passive observation</a></li>
+        <li><a href="#health">06. Communication health</a></li>
+        <li class="toc-label">Operate</li>
+        <li><a href="#lifecycle">07. Evidence and closure</a></li>
+        <li><a href="#runbook">08. Release checklist</a></li>
+        <li><a href="#sources">09. Source map</a></li>
+      </ol>
+    </nav>
+    <main>
+      <header class="hero" id="top">
+        <p class="eyebrow">Architecture field guide · 11 July 2026</p>
+        <h1>Two harnesses.<span>One accountable control plane.</span></h1>
+        <p class="lede">Golem v5.0.16 gives Claude Code and OpenCode one durable operating surface: normalized session identity, a dashboard-owned tracker, addressed delivery, quiet observation, and evidence-backed work completion. The adapters differ at the runtime edge; authority and coordination converge in the middle.</p>
+        <div class="legend" aria-label="Actor colour key">
+          <span class="pill"><i class="dot" style="background:var(--cc)"></i>Claude Code</span>
+          <span class="pill"><i class="dot" style="background:var(--oc)"></i>OpenCode</span>
+          <span class="pill"><i class="dot" style="background:var(--bridge)"></i>SDK bridge</span>
+          <span class="pill"><i class="dot" style="background:var(--channel)"></i>Channel protocol</span>
+          <span class="pill"><i class="dot" style="background:var(--dashboard)"></i>Dashboard</span>
+          <span class="pill"><i class="dot" style="background:var(--tracker)"></i>Tracker lifecycle</span>
+          <span class="pill"><i class="dot" style="background:var(--store)"></i>Durable registries</span>
+        </div>
+        <div class="grid3">
+          <article class="card"><h3 class="cc">Claude Code</h3><p>Native hooks and a per-session channel child normalize a Claude session into the shared registries and tracker API.</p></article>
+          <article class="card"><h3 class="oc">OpenCode</h3><p>A local shim maps runtime events, owns the SDK bridge, and injects trusted per-call identity for shared MCP tools.</p></article>
+          <article class="card"><h3 class="tr">Control plane</h3><p>The dashboard is the tracker database writer and the place where envelope facts, browser updates, and lifecycle evidence meet.</p></article>
+        </div>
+      </header>
+
+      <section id="compass">
+        <p class="eyebrow">01 · shared mental model</p>
+        <h2>Converge at facts, not at implementation</h2>
+        <p class="lead">An adapter establishes a session and a last-mile delivery method. It does not become a second tracker. The same logical actor can be seen through a native session source, a Golem registry row, a reachable channel, and—in OpenCode—a bridge to the SDK. Those are deliberately separate facts.</p>
+        <figure>
+          <div class="diagram-scroll"><svg viewBox="0 0 1360 600" role="img" aria-label="Claude Code and OpenCode adapters converging on Golem registries and the dashboard control plane">
+            <defs>
+              <marker id="fg-control-cc" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0 0L6 3 0 6z" fill="#ffb454"/></marker>
+              <marker id="fg-control-oc" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0 0L6 3 0 6z" fill="#58d5ff"/></marker>
+              <marker id="fg-control-ch" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0 0L6 3 0 6z" fill="#b89cff"/></marker>
+              <marker id="fg-control-db" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0 0L6 3 0 6z" fill="#49ddb5"/></marker>
+            </defs>
+            <text x="54" y="42" class="overline">HARNESS RUNTIMES</text><text x="510" y="42" class="overline">LOCAL FACT STORES</text><text x="930" y="42" class="overline">CONTROL PLANE</text>
+            <rect x="48" y="72" width="350" height="194" rx="18" class="ccbox"/><text x="78" y="110" fill="#ffb454" font-size="22" font-family="Georgia">Claude Code</text><text x="78" y="139" class="label">plugin cache · native hooks · model turn</text><rect x="79" y="169" width="132" height="59" rx="9" class="ccbox"/><text x="145" y="195" text-anchor="middle" fill="#ffb454" class="title">Hooks</text><text x="145" y="215" text-anchor="middle" class="small">register + journal</text><rect x="238" y="169" width="130" height="59" rx="9" class="chbox"/><text x="303" y="195" text-anchor="middle" fill="#b89cff" class="title">Channel</text><text x="303" y="215" text-anchor="middle" class="small">MCP + HTTP</text>
+            <rect x="48" y="327" width="350" height="194" rx="18" class="ocbox"/><text x="78" y="365" fill="#58d5ff" font-size="22" font-family="Georgia">OpenCode</text><text x="78" y="394" class="label">plugin events · shim · model turn</text><rect x="79" y="424" width="132" height="59" rx="9" class="brbox"/><text x="145" y="450" text-anchor="middle" fill="#ff7898" class="title">SDK bridge</text><text x="145" y="470" text-anchor="middle" class="small">promptAsync</text><rect x="238" y="424" width="130" height="59" rx="9" class="chbox"/><text x="303" y="450" text-anchor="middle" fill="#b89cff" class="title">Channel</text><text x="303" y="470" text-anchor="middle" class="small">shared server</text>
+            <rect x="470" y="72" width="330" height="449" rx="18" class="stbox"/><text x="500" y="109" fill="#7ea7ff" font-size="20" font-family="Georgia">Runtime registries</text><rect x="500" y="135" width="270" height="59" rx="9" class="stbox"/><text x="635" y="160" text-anchor="middle" fill="#7ea7ff" class="title">sessions.json</text><text x="635" y="180" text-anchor="middle" class="small">cross-harness identity and recency</text><rect x="500" y="216" width="270" height="59" rx="9" class="stbox"/><text x="635" y="241" text-anchor="middle" fill="#7ea7ff" class="title">channels.json</text><text x="635" y="261" text-anchor="middle" class="small">reachable HTTP endpoints</text><rect x="500" y="297" width="270" height="59" rx="9" class="brbox"/><text x="635" y="322" text-anchor="middle" fill="#ff7898" class="title">opencode-bridges.json</text><text x="635" y="342" text-anchor="middle" class="small">session to SDK bridge endpoint</text><rect x="500" y="378" width="270" height="59" rx="9" class="stbox"/><text x="635" y="403" text-anchor="middle" fill="#7ea7ff" class="title">journal + spool</text><text x="635" y="423" text-anchor="middle" class="small">local event record and retry buffer</text><text x="500" y="480" class="small">Every artifact answers one question; none is a substitute for another.</text>
+            <rect x="870" y="72" width="440" height="449" rx="18" class="dbbox"/><rect x="905" y="108" width="370" height="83" rx="11" class="dbbox"/><text x="1090" y="141" text-anchor="middle" fill="#49ddb5" font-size="21" font-family="Georgia">Dashboard server</text><text x="1090" y="168" text-anchor="middle" class="label">REST · WebSocket · native-session merge · delivery</text><rect x="905" y="228" width="172" height="86" rx="10" class="trbox"/><text x="991" y="260" text-anchor="middle" fill="#a8e063" class="title">tracker.db</text><text x="991" y="282" text-anchor="middle" class="small">sole SQLite writer</text><rect x="1103" y="228" width="172" height="86" rx="10" class="chbox"/><text x="1189" y="260" text-anchor="middle" fill="#b89cff" class="title">envelopes</text><text x="1189" y="282" text-anchor="middle" class="small">delivery + acknowledgement facts</text><rect x="905" y="352" width="370" height="92" rx="10" class="dbbox"/><text x="1090" y="385" text-anchor="middle" fill="#49ddb5" class="title">Browser snapshot + WebSocket deltas</text><text x="1090" y="409" text-anchor="middle" class="small">derived health · factual timeline · no polling loop</text>
+            <path d="M398 198C440 198 452 165 500 165" fill="none" stroke="#ffb454" stroke-width="2" marker-end="url(#fg-control-cc)"/><path d="M398 453C448 453 455 327 500 327" fill="none" stroke="#58d5ff" stroke-width="2" marker-end="url(#fg-control-oc)"/><path d="M398 198C455 198 448 245 500 245" fill="none" stroke="#b89cff" stroke-width="2" marker-end="url(#fg-control-ch)"/><path d="M398 453C455 453 452 245 500 245" fill="none" stroke="#b89cff" stroke-width="2" marker-end="url(#fg-control-ch)"/><path d="M800 246C850 246 860 150 905 150" fill="none" stroke="#49ddb5" stroke-width="2" marker-end="url(#fg-control-db)"/><path d="M905 272C860 272 850 272 800 272" fill="none" stroke="#b89cff" stroke-width="2" marker-end="url(#fg-control-ch)"/>
+          </svg></div>
+          <figcaption><b>Direction matters.</b> Identity and liveness converge toward the dashboard. An actionable brief travels back through the selected channel and, for OpenCode, through its SDK bridge.</figcaption>
+        </figure>
+        <div class="grid4">
+          <article class="card metric"><b class="st">Identity</b><small>logical session records</small></article>
+          <article class="card metric" style="border-top-color:var(--channel)"><b class="ch">Reachability</b><small>live channel endpoint</small></article>
+          <article class="card metric" style="border-top-color:var(--bridge)"><b class="br">Injection</b><small>OpenCode bridge only</small></article>
+          <article class="card metric" style="border-top-color:var(--tracker)"><b class="tr">Work truth</b><small>dashboard-owned SQLite</small></article>
+        </div>
+        <aside class="callout"><strong>Authority boundary</strong><p>Hooks and the OpenCode shim write registry and journal facts. The dashboard owns <code>tracker.db</code>. Channel MCP tools use dashboard HTTP; agents do not write the tracker database directly.</p></aside>
+      </section>
+
+      <section id="provenance">
+        <p class="eyebrow">02 · deployment is part of the system</p>
+        <h2>Trace the bytes that a session can actually load</h2>
+        <p class="lead">The substrate is the authored plugin source. Each harness has a distinct path from source to active runtime. A clean source checkout is not, by itself, evidence that a live session is running those bytes.</p>
+        <div class="grid2">
+          <article class="card">
+            <h3 class="cc">Claude Code: rendered bundle → installed cache</h3>
+            <p><strong>Source.</strong> <code>substrate/</code> and the channel package are planned by the Claude Code adapter. <strong>Render.</strong> <code>golem sync --target cc</code> writes the workspace plugin render; <code>golem sync --target cc-marketplace</code> creates the local marketplace entry pointing at it.</p>
+            <p><strong>Activation.</strong> Add the workspace marketplace, install or update <code>golem@golem-workspace</code>, then start a new session or run <code>/reload-plugins</code>. A pushed channel event additionally requires a session launched as a channel consumer; merely loading the tools is not consumer activation.</p>
+          </article>
+          <article class="card">
+            <h3 class="oc">OpenCode: rendered files + managed configuration</h3>
+            <p><strong>Source.</strong> The OpenCode adapter renders substrate agents, skills, and instruction blocks. <strong>Render.</strong> Enable <code>harnesses.opencode.enabled</code> in <code>~/.golem/config.json</code>, then run <code>golem sync --target opencode</code>.</p>
+            <p><strong>Activation.</strong> The sync preserves user configuration while merging Golem’s MCP entry, skill path, and file-URL shim into <code>opencode.jsonc</code>; it validates with <code>opencode debug config</code> when the binary is available. Start an OpenCode runtime after that configuration is present. Because its MCP and shim point at the checkout, moving the checkout requires another sync.</p>
+          </article>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Harness</th><th>Rendered / referenced artifact</th><th>Runtime discovery</th><th>Operational implication</th></tr></thead>
+          <tbody>
+            <tr><td>Claude Code</td><td><code>~/.golem/renders/cc-plugin/</code> plus its marketplace render</td><td>Installed plugin cache loads hooks, MCP configuration, skills, and bundled channel dependencies.</td><td>Sync, update the plugin cache when needed, then reload or create a session.</td></tr>
+            <tr><td>OpenCode</td><td>Agents in its XDG config directory; skills in <code>~/.golem/renders/opencode/skills/</code>; managed global instructions</td><td><code>opencode.jsonc</code> supplies the skill path, checkout-backed channel MCP, and file-URL shim.</td><td>The optional harness is disabled by default; enable before syncing and retain a valid config merge.</td></tr>
+            <tr><td>Both</td><td>Root <code>package.json</code> supplies the current package version to compiler output.</td><td>The dashboard URL is discovered from <code>~/.golem/dashboard.json</code> by the channel client.</td><td>Run the dashboard for tracker tools, envelopes, and passive-delta coordination.</td></tr>
+          </tbody>
+        </table></div>
+        <aside class="callout warning"><strong>Version and activation are different checks</strong><p>For Claude Code, the plugin cache and running session are distinct from the workspace render. For OpenCode, the rendered paths and managed config point at an active checkout. Verify the actual harness route, not only a source-file edit.</p></aside>
+      </section>
+
+      <section id="identity">
+        <p class="eyebrow">03 · sessions, channels, bridges</p>
+        <h2>Address a logical actor without guessing</h2>
+        <p class="lead">A session row says who an actor is. A channel row says whether a dashboard message can reach it. An OpenCode bridge says which SDK-bound process can inject a model turn. Separating those facts lets resume, reload, and sibling-session cases remain explicit.</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Store</th><th>Writer</th><th>Fact it carries</th><th>Boundary</th></tr></thead>
+          <tbody>
+            <tr><td><code>~/.claude/sessions/&lt;pid&gt;.json</code></td><td>Claude Code</td><td>Native logical identity, process, cwd, name, and status.</td><td>Preferred by the channel child so a resumed run does not replace a logical identity with a transient environment id.</td></tr>
+            <tr><td><code>~/.golem/sessions.json</code></td><td>Hooks and OpenCode shim</td><td>Cross-harness role, model, project, recency, and ended markers.</td><td>It enriches native discovery; it is not direct proof that every harness process is alive.</td></tr>
+            <tr><td><code>~/.golem/channels.json</code></td><td>Channel child</td><td>Session-addressed localhost endpoint, PID, port, and name.</td><td>Reachability is evaluated separately from identity; stale children remove only their own PID row.</td></tr>
+            <tr><td><code>~/.golem/opencode-bridges.json</code></td><td>OpenCode shim</td><td>Top-level <code>ses_*</code> session, OpenCode process, bridge port, and runtime metadata.</td><td>Only a live bridge can turn an addressed message into <code>promptAsync</code>.</td></tr>
+          </tbody>
+        </table></div>
+        <figure>
+          <div class="diagram-scroll"><svg viewBox="0 0 1360 510" role="img" aria-label="OpenCode sibling identity and fail-closed channel attribution">
+            <defs>
+              <marker id="fg-identity-oc" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0 0L6 3 0 6z" fill="#58d5ff"/></marker>
+              <marker id="fg-identity-ch" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0 0L6 3 0 6z" fill="#b89cff"/></marker>
+              <marker id="fg-identity-br" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0 0L6 3 0 6z" fill="#ff7898"/></marker>
+              <marker id="fg-identity-db" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0 0L6 3 0 6z" fill="#49ddb5"/></marker>
+            </defs>
+            <text x="64" y="42" class="overline">ONE OPENCODE PROCESS</text><text x="486" y="42" class="overline">SHARED CHANNEL SERVER</text><text x="932" y="42" class="overline">DASHBOARD / TRACKER</text>
+            <rect x="55" y="76" width="350" height="346" rx="18" class="ocbox"/><text x="85" y="113" fill="#58d5ff" font-size="21" font-family="Georgia">Top-level siblings</text><rect x="88" y="143" width="285" height="72" rx="10" class="ocbox"/><text x="110" y="171" fill="#58d5ff" class="title">session A</text><text x="110" y="194" class="small">tool call → shim injects session A id</text><rect x="88" y="246" width="285" height="72" rx="10" class="ocbox"/><text x="110" y="274" fill="#58d5ff" class="title">session B</text><text x="110" y="297" class="small">tool call → shim injects session B id</text><rect x="88" y="349" width="285" height="42" rx="8" class="brbox"/><text x="230" y="375" text-anchor="middle" fill="#ff7898" class="small">one local SDK bridge, addressed by session id</text>
+            <rect x="458" y="76" width="365" height="346" rx="18" class="chbox"/><text x="490" y="113" fill="#b89cff" font-size="21" font-family="Georgia">Channel and identity resolver</text><rect x="492" y="149" width="297" height="74" rx="10" class="chbox"/><text x="640" y="177" text-anchor="middle" fill="#b89cff" class="title">Injected id wins</text><text x="640" y="198" text-anchor="middle" class="small">trusted local shim attribution</text><rect x="492" y="250" width="297" height="74" rx="10" class="warnbox"/><text x="640" y="278" text-anchor="middle" fill="#ffd166" class="title">One bridge: fallback</text><text x="640" y="299" text-anchor="middle" class="small">single sibling can resolve unambiguously</text><rect x="492" y="351" width="297" height="42" rx="8" class="warnbox"/><text x="640" y="377" text-anchor="middle" fill="#ffd166" class="small">multiple siblings + no injected id → refuse write</text>
+            <rect x="878" y="76" width="420" height="346" rx="18" class="dbbox"/><text x="910" y="113" fill="#49ddb5" font-size="21" font-family="Georgia">Named facts, not ambient guesses</text><rect x="913" y="151" width="350" height="64" rx="10" class="stbox"/><text x="1088" y="177" text-anchor="middle" fill="#7ea7ff" class="title">sessions / channels / bridges</text><text x="1088" y="198" text-anchor="middle" class="small">identity · reachability · injection</text><rect x="913" y="251" width="350" height="64" rx="10" class="trbox"/><text x="1088" y="277" text-anchor="middle" fill="#a8e063" class="title">tracker actor + envelope target</text><text x="1088" y="298" text-anchor="middle" class="small">validated recipient on ack and reply</text><text x="913" y="372" class="small">Endpoint selection may use a current bridge. Actor attribution never picks the newest sibling.</text>
+            <path d="M373 179C422 179 445 186 492 186" fill="none" stroke="#58d5ff" stroke-width="2" marker-end="url(#fg-identity-oc)"/><path d="M373 282C430 282 440 186 492 186" fill="none" stroke="#58d5ff" stroke-width="2" marker-end="url(#fg-identity-oc)"/><path d="M789 186C842 186 858 183 913 183" fill="none" stroke="#b89cff" stroke-width="2" marker-end="url(#fg-identity-ch)"/><path d="M789 282C842 282 856 282 913 282" fill="none" stroke="#49ddb5" stroke-width="2" marker-end="url(#fg-identity-db)"/><path d="M823 372C858 372 868 318 913 283" fill="none" stroke="#ff7898" stroke-width="1.7" marker-end="url(#fg-identity-br)"/>
+          </svg></div>
+          <figcaption><b>Fail closed is a feature.</b> A shared OpenCode MCP server can route an addressed delivery through the bridge, but a tracker write without a trusted sibling identity is refused rather than attributed to whichever sibling was seen most recently.</figcaption>
+        </figure>
+        <div class="grid2"><article class="card"><h3 class="oc">OpenCode lifecycle boundary</h3><p>The shim tracks top-level sessions, keeps child sessions from fabricating dispatch endpoints, and treats retry as busy. It writes registration and bridge state without waiting on shell hooks, so a hook failure does not stall the host runtime.</p></article><article class="card"><h3 class="cc">Claude Code discovery boundary</h3><p>Native session discovery prioritizes the Claude CLI view, then native registry files, while Golem rows contribute metadata. For resumed sessions, the parent session file preserves the logical identity that channels and tracker actors share.</p></article></div>
+      </section>
+
+      <section id="envelopes">
+        <p class="eyebrow">04 · durable work delivery</p>
+        <h2>A brief is a tracked conversation, not a best-effort push</h2>
+        <p class="lead">A dispatch creates an addressable message envelope. Delivery acceptance records an opportunity to show the brief; it does not prove the model picked it up. The recipient acknowledges the correlated envelope, can reply through its stored route, and produces lifecycle evidence while doing the work.</p>
+        <figure>
+          <div class="diagram-scroll"><svg viewBox="0 0 1390 660" role="img" aria-label="Durable actionable envelope from assignment through acknowledgement, reply, and completion">
+            <defs>
+              <marker id="fg-envelope-tr" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0 0L6 3 0 6z" fill="#a8e063"/></marker>
+              <marker id="fg-envelope-ch" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0 0L6 3 0 6z" fill="#b89cff"/></marker>
+              <marker id="fg-envelope-br" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0 0L6 3 0 6z" fill="#ff7898"/></marker>
+              <marker id="fg-envelope-db" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0 0L6 3 0 6z" fill="#49ddb5"/></marker>
+            </defs>
+            <text x="110" y="44" text-anchor="middle" fill="#a8e063" class="title">Sender</text><text x="370" y="44" text-anchor="middle" fill="#49ddb5" class="title">Dashboard + tracker</text><text x="650" y="44" text-anchor="middle" fill="#b89cff" class="title">Channel</text><text x="930" y="44" text-anchor="middle" fill="#ff7898" class="title">Harness last mile</text><text x="1190" y="44" text-anchor="middle" fill="#f0ede5" class="title">Recipient turn</text>
+            <line x1="110" y1="67" x2="110" y2="620" class="lane"/><line x1="370" y1="67" x2="370" y2="620" class="lane"/><line x1="650" y1="67" x2="650" y2="620" class="lane"/><line x1="930" y1="67" x2="930" y2="620" class="lane"/><line x1="1190" y1="67" x2="1190" y2="620" class="lane"/>
+            <text x="22" y="108" class="overline">DURABLE INTENT</text><line x1="110" y1="103" x2="350" y2="103" stroke="#a8e063" stroke-width="2" marker-end="url(#fg-envelope-tr)"/><text x="230" y="91" text-anchor="middle" fill="#a8e063" class="small">dispatch request</text><rect x="292" y="126" width="156" height="75" rx="10" class="trbox"/><text x="370" y="154" text-anchor="middle" fill="#a8e063" class="title">Assign or queue</text><text x="370" y="176" text-anchor="middle" class="small">persist ticket + envelope</text><text x="370" y="193" text-anchor="middle" class="small">before a last-mile try</text>
+            <text x="22" y="270" class="overline">DELIVERY OPPORTUNITY</text><line x1="448" y1="248" x2="630" y2="248" stroke="#b89cff" stroke-width="2" marker-end="url(#fg-envelope-ch)"/><text x="539" y="236" text-anchor="middle" fill="#b89cff" class="small">addressed brief + envelope id</text><rect x="575" y="271" width="150" height="64" rx="10" class="chbox"/><text x="650" y="297" text-anchor="middle" fill="#b89cff" class="title">Route target</text><text x="650" y="318" text-anchor="middle" class="small">channel or bridge</text><line x1="725" y1="303" x2="910" y2="303" stroke="#ff7898" stroke-width="2" marker-end="url(#fg-envelope-br)"/><text x="817" y="291" text-anchor="middle" fill="#ff7898" class="small">CC notification / OC promptAsync</text><line x1="950" y1="355" x2="1170" y2="355" stroke="#b89cff" stroke-width="2" marker-end="url(#fg-envelope-ch)"/><text x="1060" y="343" text-anchor="middle" fill="#b89cff" class="small">accepted → delivery opportunity fact</text>
+            <text x="22" y="438" class="overline">PICKUP + RETURN</text><rect x="1115" y="409" width="150" height="64" rx="10" class="chbox"/><text x="1190" y="435" text-anchor="middle" fill="#b89cff" class="title">Ack first</text><text x="1190" y="456" text-anchor="middle" class="small">same envelope id</text><line x1="1115" y1="502" x2="670" y2="502" stroke="#b89cff" stroke-width="2" marker-end="url(#fg-envelope-ch)"/><text x="890" y="490" text-anchor="middle" fill="#b89cff" class="small">recipient-validated acknowledgement</text><line x1="630" y1="526" x2="390" y2="526" stroke="#49ddb5" stroke-width="2" marker-end="url(#fg-envelope-db)"/><text x="510" y="514" text-anchor="middle" fill="#49ddb5" class="small">acknowledgement fact</text><path d="M1190 548C980 610 600 610 390 548" fill="none" stroke="#49ddb5" stroke-width="1.8" marker-end="url(#fg-envelope-db)"/><text x="790" y="633" text-anchor="middle" fill="#49ddb5" class="small">reply child follows the stored sender route · phase evidence stamps completion for the acting recipient</text>
+          </svg></div>
+          <figcaption><b>Accepted is not acknowledged.</b> The transport writes the delivery opportunity first; the recipient’s correlated acknowledgement is the pickup fact. A reply is a child envelope, routed to the stored sender instead of an ambient session.</figcaption>
+        </figure>
+        <div class="flow" aria-label="Actionable delivery stages">
+          <div class="flow-item"><span class="step">01</span><b class="tr">Intent</b><span>Immediate dispatch durably assigns before delivery. Idle delivery persists a queue row and its envelope.</span></div>
+          <div class="flow-item"><span class="step">02</span><b class="ch">Opportunity</b><span>A live channel accepts an addressed brief. Offline or unreachable queued work remains pending rather than being burned.</span></div>
+          <div class="flow-item"><span class="step">03</span><b class="db">Pickup</b><span>The stored target acknowledges the correlated envelope; spoofed or mismatched callers are rejected.</span></div>
+          <div class="flow-item"><span class="step">04</span><b class="br">Reply</b><span>A reply child uses the durable sender route. Its delivery is independently recorded.</span></div>
+          <div class="flow-item"><span class="step">05</span><b class="tr">Completion</b><span>Eligible terminal phase evidence from the acting recipient stamps the delivered envelope complete.</span></div>
+        </div>
+        <div class="grid2"><article class="card"><h3 class="am">Unacknowledged is bounded</h3><p>After a delivery opportunity reaches its acknowledgement deadline, the drainer creates one acknowledgement reminder. If it remains unacknowledged after that reminder’s escalation point, it creates one escalation through the stored reply route.</p></article><article class="card"><h3 class="red">No automatic reassignment</h3><p>Reminder and escalation add facts; they do not select a replacement owner. Ticket ownership changes only through an explicit dispatch or reassignment action, preserving an auditable accountability chain.</p></article></div>
+      </section>
+
+      <section id="passive">
+        <p class="eyebrow">05 · model-free observation</p>
+        <h2>Observe quietly; settle only when context actually lands</h2>
+        <p class="lead">Tracker history is durable, but it does not independently wake a model. Passive observation distills a narrow set of actionable changes into a per-session buffer and attaches it only to a next real turn or an already-actionable accepted delivery.</p>
+        <div class="grid3">
+          <article class="card"><h3 class="tr">Allowed facts</h3><p>Canonical tracker events project phase, assignment, blocker state, and result. Ordinary comments, activity telemetry, and mirrored spec-tree rows do not become prompt context.</p></article>
+          <article class="card"><h3 class="st">Slot and cursor</h3><p>One slot per recipient, ticket, and category coalesces baseline to latest value. A per-session cursor preserves a claimed batch for replay if the lease is not settled.</p></article>
+          <article class="card"><h3 class="ch">Quiet interest</h3><p>Manual subscriptions can make a recipient eligible for passive facts. Subscription digests are disabled by default, so a subscription does not create an unsolicited model turn.</p></article>
+        </div>
+        <figure>
+          <div class="diagram-scroll"><svg viewBox="0 0 1360 580" role="img" aria-label="Passive observation slots and next real turn injection for Claude Code and OpenCode">
+            <defs>
+              <marker id="fg-passive-tr" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0 0L6 3 0 6z" fill="#a8e063"/></marker>
+              <marker id="fg-passive-cc" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0 0L6 3 0 6z" fill="#ffb454"/></marker>
+              <marker id="fg-passive-oc" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0 0L6 3 0 6z" fill="#58d5ff"/></marker>
+              <marker id="fg-passive-db" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0 0L6 3 0 6z" fill="#49ddb5"/></marker>
+            </defs>
+            <text x="58" y="42" class="overline">TRACKER EVENT</text><text x="430" y="42" class="overline">PASSIVE BUFFER</text><text x="863" y="42" class="overline">NEXT REAL TURN</text>
+            <rect x="52" y="76" width="295" height="375" rx="18" class="trbox"/><text x="82" y="113" fill="#a8e063" font-size="20" font-family="Georgia">Canonical ticket fact</text><rect x="84" y="150" width="230" height="48" rx="8" class="trbox"/><text x="199" y="180" text-anchor="middle" class="label">phase / assignment</text><rect x="84" y="216" width="230" height="48" rx="8" class="trbox"/><text x="199" y="246" text-anchor="middle" class="label">blocker / result</text><text x="84" y="306" class="small">Exclude: comments, activity, mirrored rows.</text><text x="84" y="333" class="small">Recipients: related actors and manual interest;</text><text x="84" y="351" class="small">never the actor who made the change.</text><text x="84" y="401" fill="#a8e063" class="small">No model invocation here.</text>
+            <rect x="407" y="76" width="388" height="375" rx="18" class="stbox"/><text x="438" y="113" fill="#7ea7ff" font-size="20" font-family="Georgia">Per-session durable buffer</text><rect x="440" y="148" width="322" height="72" rx="9" class="stbox"/><text x="601" y="176" text-anchor="middle" fill="#7ea7ff" class="title">passive_slots</text><text x="601" y="198" text-anchor="middle" class="small">recipient × ticket × category; coalesce net change</text><rect x="440" y="246" width="322" height="72" rx="9" class="stbox"/><text x="601" y="274" text-anchor="middle" fill="#7ea7ff" class="title">passive_cursors</text><text x="601" y="296" text-anchor="middle" class="small">claimed batch + lease + replay boundary</text><text x="440" y="360" class="small">Batch cap: 20 ticket groups or 4096 bytes.</text><text x="440" y="382" class="small">Lease: one claimant; failed settlement leaves it replayable.</text>
+            <rect x="854" y="76" width="450" height="375" rx="18" class="dbbox"/><text x="886" y="113" fill="#49ddb5" font-size="20" font-family="Georgia">Attach only at an existing turn</text><rect x="889" y="149" width="175" height="128" rx="10" class="ccbox"/><text x="976" y="179" text-anchor="middle" fill="#ffb454" class="title">Claude Code</text><text x="976" y="205" text-anchor="middle" class="small">UserPromptSubmit claims</text><text x="976" y="225" text-anchor="middle" class="small">additionalContext</text><text x="976" y="245" text-anchor="middle" class="small">then commits serialized output</text><rect x="1092" y="149" width="175" height="128" rx="10" class="ocbox"/><text x="1179" y="179" text-anchor="middle" fill="#58d5ff" class="title">OpenCode</text><text x="1179" y="205" text-anchor="middle" class="small">chat.message appends</text><text x="1179" y="225" text-anchor="middle" class="small">a part to the submitted turn</text><text x="1179" y="245" text-anchor="middle" class="small">then commits mutation</text><rect x="889" y="315" width="378" height="77" rx="10" class="chbox"/><text x="1078" y="344" text-anchor="middle" fill="#b89cff" class="title">Accepted actionable delivery may carry the same batch</text><text x="1078" y="367" text-anchor="middle" class="small">commit only after the delivery opportunity is accepted; otherwise release</text>
+            <path d="M347 240C382 240 397 184 440 184" fill="none" stroke="#a8e063" stroke-width="2" marker-end="url(#fg-passive-tr)"/><path d="M762 282C810 282 824 213 889 213" fill="none" stroke="#ffb454" stroke-width="2" marker-end="url(#fg-passive-cc)"/><path d="M762 282C835 282 1003 213 1092 213" fill="none" stroke="#58d5ff" stroke-width="2" marker-end="url(#fg-passive-oc)"/><path d="M762 282C817 282 826 354 889 354" fill="none" stroke="#49ddb5" stroke-width="2" marker-end="url(#fg-passive-db)"/>
+          </svg></div>
+          <figcaption><b>Delivery is a settlement boundary.</b> Claiming a batch reserves exact bytes. Claude Code commits after producing its additional context; OpenCode commits after the outgoing message is mutated; an actionable route commits only after the harness accepts delivery. Failure releases the lease for deterministic replay.</figcaption>
+        </figure>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Moment</th><th>Claude Code</th><th>OpenCode</th><th>Settlement rule</th></tr></thead>
+          <tbody>
+            <tr><td>Real user turn</td><td><code>UserPromptSubmit</code> asks for a batch and returns it as <code>additionalContext</code>.</td><td><code>chat.message</code> appends the batch to the already-submitted outgoing message.</td><td>Commit only after the exact turn object/output contains the context.</td></tr>
+            <tr><td>Actionable brief</td><td>The channel acceptance is the delivery opportunity.</td><td>The bridge waits for <code>promptAsync</code> acceptance.</td><td>Commit only after acceptance; a failed delivery releases the batch.</td></tr>
+            <tr><td>Observation alone</td><td colspan="3">No prompt is started. Quiet subscriptions retain history and can contribute eligible facts without turning the model on.</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <section id="health">
+        <p class="eyebrow">06 · derived communication health</p>
+        <h2>Make attention visible without inventing a second state machine</h2>
+        <p class="lead">Communication health is read from envelope facts: assignment, queueing, delivery attempt or opportunity, acknowledgement, reminder, escalation, reply, completion, and dismissal. The API returns a display-safe factual timeline rather than raw message payloads; the dashboard derives severity at read time.</p>
+        <div class="grid3">
+          <article class="card"><h3 class="tr">Green</h3><p>No active delivery failure or unacknowledged deadline is degrading health. Queued work is counted but does not by itself make communication unhealthy.</p></article>
+          <article class="card"><h3 class="am">Amber</h3><p>An active envelope is awaiting acknowledgement or has received its reminder. The timeline retains the original delivery and deadline facts.</p></article>
+          <article class="card"><h3 class="red">Red / Needs You</h3><p>Delivery failure or escalation is red. “Needs You” is narrower: it identifies an active, unacknowledged escalation rather than every red item.</p></article>
+        </div>
+        <div class="flow" aria-label="Communication health UI data flow">
+          <div class="flow-item"><span class="step">READ</span><b class="db">Health APIs</b><span><code>/api/communication-health</code> and envelope views derive root status from durable facts.</span></div>
+          <div class="flow-item"><span class="step">SUMMARIZE</span><b class="tr">Agents indicator</b><span>Green, amber, or red labels surface health and a bounded Needs You count.</span></div>
+          <div class="flow-item"><span class="step">INSPECT</span><b class="ch">Timeline drawer</b><span>Needs attention, in-flight, and history views expose factual progression and links.</span></div>
+          <div class="flow-item"><span class="step">INVALIDATE</span><b class="db">WebSocket signal</b><span>Fact changes bump a revision; the client refetches derived data once.</span></div>
+          <div class="flow-item"><span class="step">PRESERVE</span><b class="st">Evidence remains</b><span>Dismissing attention removes the alert, not the envelope evidence retained in history.</span></div>
+        </div>
+        <aside class="callout good"><strong>Freshness model</strong><p>The browser starts from a snapshot and reacts to WebSocket deltas. Communication surfaces use revision-driven refetches after relevant fact changes; they do not run a polling loop. The dashboard remains the single source for the derived health calculation.</p></aside>
+      </section>
+
+      <section id="lifecycle">
+        <p class="eyebrow">07 · work, evidence, closure</p>
+        <h2>Delivery starts a work journey; it does not replace proof</h2>
+        <p class="lead">The tracker phase machine governs the work lifecycle. A dispatched builder still reads the assigned work, follows its role lane, records mechanical evidence, and leaves a closing brief. Delivery facts explain communication; ticket phases and comments explain whether the requested work was actually completed.</p>
+        <div class="grid2">
+          <article class="card"><h3 class="tr">Lifecycle authority</h3><p>Tracker phase is the workflow source of truth and board state is derived. Phase transitions, ticket events, and comments are persisted by the dashboard, then rebroadcast to browser clients and eligible passive observers.</p></article>
+          <article class="card"><h3 class="db">Completion evidence</h3><p>When an acting non-human recipient reaches an eligible terminal phase on a delivered ticket, the envelope can be stamped complete. That links communication to a tracked result without treating transport acceptance as proof of implementation.</p></article>
+        </div>
+        <div class="checklist">
+          <article class="check"><span class="step">ROLE</span><b>Pick up the right lane</b><p>Load the assigned work and apply the manager, planner, builder, or explorer contract before altering lifecycle state.</p></article>
+          <article class="check"><span class="step">EVIDENCE</span><b>Run the claimed checks</b><p>Mechanical output—not an assertion—supports a review, built, verified, or done transition.</p></article>
+          <article class="check"><span class="step">CLOSE</span><b>Leave the four-part brief</b><p>State what changed, acceptance evidence, human test steps, and any deferred work or limitations.</p></article>
+          <article class="check"><span class="step">OBSERVE</span><b>Keep coordination calm</b><p>Subscribe when quiet interest is enough; use a durable actionable envelope when another session must be asked to act.</p></article>
+        </div>
+      </section>
+
+      <section id="runbook">
+        <p class="eyebrow">08 · operating checklist</p>
+        <h2>Load the intended bytes, then verify the intended route</h2>
+        <p class="lead">Use this release sequence after a change to substrate, channel code, hooks, or the OpenCode shim. It distinguishes render correctness from harness activation and from live delivery readiness.</p>
+        <div class="grid2">
+          <article class="card">
+            <h3 class="cc">Claude Code release path</h3>
+            <ol>
+              <li>Set the intended root package version, then run <code>golem sync --target cc</code> and <code>golem sync --target cc-marketplace</code>.</li>
+              <li>Use the workspace marketplace and update <code>golem@golem-workspace</code> so Claude’s installed cache receives the rendered plugin.</li>
+              <li>Start a new session or run <code>/reload-plugins</code>.</li>
+              <li>For pushed briefs, launch the target as a channel consumer and confirm its channel registration is reachable.</li>
+            </ol>
+          </article>
+          <article class="card">
+            <h3 class="oc">OpenCode release path</h3>
+            <ol>
+              <li>Enable <code>harnesses.opencode.enabled</code> in <code>~/.golem/config.json</code>.</li>
+              <li>Run <code>golem sync --target opencode</code>; retain a successful managed <code>opencode.jsonc</code> merge and its validation when the binary is available.</li>
+              <li>Confirm the configured checkout paths still point to this repository; re-sync after moving it.</li>
+              <li>Start OpenCode, then confirm its top-level session has both a bridge row and a reachable channel row before dispatching work.</li>
+            </ol>
+          </article>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Verify</th><th>Question answered</th><th>Evidence to inspect</th></tr></thead>
+          <tbody>
+            <tr><td>Compiler / render</td><td>Did the right generated artifacts come from current source?</td><td>Targeted <code>golem sync --check</code>; generated render paths and managed config.</td></tr>
+            <tr><td>Harness activation</td><td>Did the runtime load those artifacts?</td><td>Claude plugin install/update plus reload or new session; OpenCode config validation and a newly started runtime.</td></tr>
+            <tr><td>Session reachability</td><td>Can this logical actor receive a push now?</td><td>Matched live session, channel registration, and for OpenCode a live bridge.</td></tr>
+            <tr><td>Coordination</td><td>Did delivery, pickup, and work completion happen?</td><td>Envelope facts, correlated acknowledgement, tracker events, test output, and closing brief.</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <section id="sources">
+        <p class="eyebrow">09 · implementation source map</p>
+        <h2>Read the boundary that owns the fact</h2>
+        <p class="lead">This guide is grounded in the current repository paths below. The map favors ownership boundaries and runtime seams over exhaustive implementation detail.</p>
+        <div class="source-grid">
+          <div class="source"><a href="../../dashboard/server/tracker-db.js">dashboard/server/tracker-db.js</a><span>SQLite schema, phase-derived events, passive slots/cursors, envelopes, and derived communication health.</span></div>
+          <div class="source"><a href="../../dashboard/server/dispatch-queue.js">dashboard/server/dispatch-queue.js</a><span>Idle delivery drain, acknowledgement reminder and escalation delivery, quiet subscription behavior.</span></div>
+          <div class="source"><a href="../../dashboard/server/index.js">dashboard/server/index.js</a><span>Dashboard REST and WebSocket boundary, dispatch route, envelope correlation, passive-delta endpoints.</span></div>
+          <div class="source"><a href="../../dashboard/server/native-sessions.js">dashboard/server/native-sessions.js</a><span>Cross-source native session merge, liveness rules, and OpenCode bridge/channel checks.</span></div>
+          <div class="source"><a href="../../mcp/channel/index.js">mcp/channel/index.js</a><span>Per-session channel process, registry registration, channel events, acknowledgement/reply tool handling.</span></div>
+          <div class="source"><a href="../../mcp/channel/identity.js">mcp/channel/identity.js</a><span>OpenCode sibling attribution and the fail-closed caller-resolution policy.</span></div>
+          <div class="source"><a href="../../mcp/channel/tracker-client.js">mcp/channel/tracker-client.js</a><span>HTTP-only tracker client and current session/project identity helpers.</span></div>
+          <div class="source"><a href="../../shims/opencode/index.js">shims/opencode/index.js</a><span>OpenCode lifecycle shim, SDK bridge, real-message passive injection, and trusted per-call identity injection.</span></div>
+          <div class="source"><a href="../../substrate/hooks/hooks.json">substrate/hooks/hooks.json</a><span>Claude Code hook wiring, including session lifecycle and UserPromptSubmit passive observation.</span></div>
+          <div class="source"><a href="../../substrate/hooks/passive-delta.sh">substrate/hooks/passive-delta.sh</a><span>Claude Code lease claim, additional-context serialization, and fail-open settlement path.</span></div>
+          <div class="source"><a href="../../lib/compiler/adapters/cc.js">lib/compiler/adapters/cc.js</a><span>Claude Code render plan, bundled channel source, plugin metadata versioning, and marketplace render.</span></div>
+          <div class="source"><a href="../../lib/compiler/adapters/opencode.js">lib/compiler/adapters/opencode.js</a><span>OpenCode render paths, frontmatter translation, and managed configuration merge.</span></div>
+          <div class="source"><a href="../../lib/golem-config.js">lib/golem-config.js</a><span>Harness enablement defaults and quiet subscription-digest default.</span></div>
+          <div class="source"><a href="../../dashboard/web/src/communication-drawer.jsx">dashboard/web/src/communication-drawer.jsx</a><span>Factual envelope drill-down and derived Needs You presentation.</span></div>
+          <div class="source"><a href="../../dashboard/web/src/other-pages.jsx">dashboard/web/src/other-pages.jsx</a><span>Agents-page communication health indicator and severity language.</span></div>
+          <div class="source"><a href="../../dashboard/web/src/store.js">dashboard/web/src/store.js</a><span>Snapshot boot, WebSocket invalidations, and revision-driven client refresh.</span></div>
+        </div>
+      </section>
+      <footer>Golem v5.0.16 session architecture field guide · grounded at repository HEAD <span class="mono">ac34521</span> · 2026-07-11</footer>
+    </main>
+  </div>
+  <script>
+    (() => {
+      const links = [...document.querySelectorAll('.toc a[href^="#"]')];
+      const byId = new Map(links.map((link) => [link.getAttribute('href').slice(1), link]));
+      const setActive = (id) => {
+        links.forEach((link) => link.classList.toggle('active', link === byId.get(id)));
+      };
+      links.forEach((link) => link.addEventListener('click', () => setActive(link.getAttribute('href').slice(1))));
+      if (!('IntersectionObserver' in window)) {
+        setActive('compass');
+        return;
+      }
+      const observer = new IntersectionObserver((entries) => {
+        const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+        if (visible) setActive(visible.target.id);
+      }, { rootMargin: '-18% 0px -70% 0px', threshold: 0.01 });
+      [...byId.keys()].map((id) => document.getElementById(id)).filter(Boolean).forEach((section) => observer.observe(section));
+    })();
+  </script>
+</body>
+</html>
