@@ -41,6 +41,9 @@
     // TKT-0286: bumped on every dispatch-queue-updated WS signal so queue-aware
     // surfaces (Agents page, session peek drawer) refetch the queue.
     dispatchQueueRev: 0,
+    // GOL-425: a payload-free WS invalidation for read-only envelope health.
+    // Consumers fetch once on this revision change; no polling is introduced.
+    communicationHealthRev: 0,
     rolesRev: 0,
   };
 
@@ -345,6 +348,10 @@
             break;
           case 'ticket-updated':
             applyTicketUpdated(msg);
+            // A terminal ticket transition can stamp an envelope completion
+            // fact in the same tracker transaction. Reuse this existing WS
+            // signal as a health invalidation rather than adding a timer.
+            state.communicationHealthRev = (state.communicationHealthRev || 0) + 1;
             break;
           case 'ticket-comment':
             applyTicketComment(msg);
@@ -359,6 +366,10 @@
             // TKT-0286: payload-free signal — bump a rev counter so queue-aware
             // surfaces refetch /api/dispatch-queue. No polling.
             state.dispatchQueueRev = (state.dispatchQueueRev || 0) + 1;
+            notify();
+            break;
+          case 'communication-health-updated':
+            state.communicationHealthRev = (state.communicationHealthRev || 0) + 1;
             notify();
             break;
           case 'roles-updated':

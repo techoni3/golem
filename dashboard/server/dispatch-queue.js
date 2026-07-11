@@ -300,6 +300,16 @@ export function initDispatchDrainer({
           const payload = envelope?.payload ? JSON.parse(envelope.payload) : null;
           if (typeof payload?.content === 'string') briefString = payload.content;
         } catch { /* legacy rows retain reconstructed brief behavior */ }
+        let passive = null;
+        if (row.envelope_id) {
+          try {
+            const claim = tracker.claimPassiveDelta(sessionId);
+            if (claim?.lease_id && claim?.batch?.body) {
+              passive = claim;
+              briefString = `${briefString}\n\n${claim.batch.body}`;
+            }
+          } catch { /* passive delivery must not hold a queued dispatch */ }
+        }
 
         let pushResult;
         try {
@@ -308,13 +318,25 @@ export function initDispatchDrainer({
           pushResult = { ok: false, error: String(err?.message ?? err) };
         }
 
-        tracker.markQueueDelivered(row.id, {
-          error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}`,
-          envelope_id: row.envelope_id || null,
-        });
-        if (row.envelope_id) tracker.markEnvelopeDelivery(row.envelope_id, {
-          error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}`,
-        });
+        // Set the outcome from the delivery opportunity before queue/envelope
+        // writes: their failure must not replay context that already landed.
+        const passiveCommitted = !!pushResult?.ok;
+        try {
+          tracker.markQueueDelivered(row.id, {
+            error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}`,
+            envelope_id: row.envelope_id || null,
+          });
+          if (row.envelope_id) tracker.markEnvelopeDelivery(row.envelope_id, {
+            error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}`,
+          });
+        } finally {
+          if (passive?.lease_id) {
+            try {
+              if (passiveCommitted) tracker.commitPassiveDelta(sessionId, passive.lease_id);
+              else tracker.releasePassiveDelta(sessionId, passive.lease_id);
+            } catch { /* a failed settlement leaves the batch replayable */ }
+          }
+        }
         if (pushResult && pushResult.ok) {
           tracker.markCommentDispatchesDeliveredForTicket(ticket.id, sessionId);
         }
@@ -344,7 +366,21 @@ export function initDispatchDrainer({
     let digestChanged = false;
     try {
       const subsBySession = tracker.activeSubscriptionsBySession();
+      const subscriptionDigestEnabled = loadConfig()?.events?.subscriptionDigestEnabled === true;
       for (const [sessionId, subs] of subsBySession) {
+        if (!subscriptionDigestEnabled) {
+          // GOL-424: preserve event history but quietly advance each durable
+          // cursor through eligible classes. Re-enabling legacy digests later
+          // therefore cannot replay the disabled-era backlog into a model turn.
+          for (const sub of subs) {
+            const pending = tracker.pendingEventsForSubscription(sub);
+            if (pending.to_seq > pending.from_seq) {
+              tracker.advanceSubscriptionCursor(sub.id, pending.from_seq, pending.to_seq);
+              digestChanged = true;
+            }
+          }
+          continue;
+        }
         const s = byId.get(sessionId);
         if (!s || !s.alive || !channelIds.has(sessionId)) continue;
         const last = lastDeliveredAt.get(sessionId);
@@ -376,7 +412,12 @@ export function initDispatchDrainer({
     }
     // TKT-0286: one signal per tick if any queue row transitioned (deliver,
     // expire, or a drainer-internal cancel) — queue-aware surfaces refetch.
-    if (queueChanged) broadcastWS({ type: 'dispatch-queue-updated' });
+    if (queueChanged) {
+      broadcastWS({ type: 'dispatch-queue-updated' });
+      // Envelope delivery/ping/escalation facts changed. The Agents health
+      // drawer listens for this signal and refetches once; it never polls.
+      broadcastWS({ type: 'communication-health-updated' });
+    }
     if (digestChanged) broadcastWS({ type: 'bus-subscriptions-updated' });
   }
 
@@ -386,6 +427,9 @@ export function initDispatchDrainer({
   timer.unref();
 
   return {
+    // Exposed for deterministic journey coverage; production still runs it on
+    // the interval above.
+    tick,
     close() {
       stopped = true;
       if (timer) {

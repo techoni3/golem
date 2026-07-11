@@ -21,7 +21,7 @@ import { loadConfig } from '../../lib/golem-config.js';
 import { createCommentDispatchService, defaultDispatchStateForComment } from './comment-dispatch.js';
 import { canonicalStateForPhase, initialPhaseForKind, isKnownPhase, legalNextPhases, phaseFromLegacyState, requirementsForPhase } from './phase-machine.js';
 
-const SCHEMA_VERSION = 14;
+const SCHEMA_VERSION = 15;
 
 const KINDS = new Set(['work-item', 'decision', 'spec', 'question', 'fix']);
 const STATES = new Set(['todo', 'in_progress', 'blocked', 'review', 'done', 'archived']);
@@ -31,6 +31,9 @@ const COMMENT_TAGS = new Set(['confirmed', 'partial', 'disputed', 'fix', 'risk',
 const EVENT_CLASSES = new Set(['tracker', 'lifecycle', 'activity', 'custom']);
 const DEFAULT_SUBSCRIPTION_CLASSES = ['tracker', 'lifecycle', 'custom'];
 const SUBSCRIPTION_BACKLOG_CAP = 500;
+const PASSIVE_GROUP_CAP = 20;
+const PASSIVE_BYTE_CAP = 4096;
+const PASSIVE_LEASE_MS = 30_000;
 const LIFECYCLE_EVENTS = new Set(['session-start', 'session-end', 'user-prompt', 'stop', 'subagent-stop', 'pre-compact', 'notification']);
 const ACTIVITY_EVENTS = new Set(['tool-pre', 'tool-post', 'agent-spawn', 'agent-return', 'send-message', 'send-message-post']);
 
@@ -316,6 +319,7 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
         topic          TEXT NOT NULL,
         classes_filter TEXT NOT NULL DEFAULT '["tracker","lifecycle","custom"]',
         status         TEXT NOT NULL DEFAULT 'active',
+        manual         INTEGER NOT NULL DEFAULT 0,
         cursor_seq     INTEGER NOT NULL DEFAULT 0,
         created_at     TEXT NOT NULL,
         expires_at     TEXT,
@@ -394,6 +398,35 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
         summary TEXT NOT NULL DEFAULT '',
         acknowledged_at TEXT NOT NULL,
         PRIMARY KEY (envelope_id, recipient_session_id)
+      );
+
+      -- GOL-423: model-free, per-session deltas. A slot is coalesced by the
+      -- recipient/ticket/category key; a cursor owns at most one replayable
+      -- claimed batch, so an interrupted next-turn hook cannot lose it.
+      CREATE TABLE IF NOT EXISTS passive_slots (
+        session_id     TEXT NOT NULL,
+        ticket_id      TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+        category       TEXT NOT NULL,
+        baseline       TEXT NOT NULL,
+        value          TEXT NOT NULL,
+        first_event_id INTEGER NOT NULL,
+        last_event_id  INTEGER NOT NULL,
+        created_at     TEXT NOT NULL,
+        updated_at     TEXT NOT NULL,
+        PRIMARY KEY (session_id, ticket_id, category)
+      );
+      CREATE INDEX IF NOT EXISTS idx_passive_slots_session ON passive_slots(session_id, ticket_id, category);
+      CREATE TABLE IF NOT EXISTS passive_cursors (
+        session_id          TEXT PRIMARY KEY,
+        cursor_seq          INTEGER NOT NULL DEFAULT 0,
+        pending_batch_id    TEXT,
+        pending_body        TEXT,
+        pending_slots       TEXT,
+        pending_to_seq      INTEGER,
+        lease_id            TEXT,
+        lease_expires_at    TEXT,
+        pending_created_at  TEXT,
+        updated_at          TEXT NOT NULL
       );
 
       -- TKT-0266: durable session-name labels. One row per session_id with a
@@ -693,12 +726,45 @@ WHERE state_changed_at IS NULL`).run();
       ['escalation_envelope_id', 'TEXT'], ['ack_via_envelope_id', 'TEXT'],
     ]) if (!envelopeCols14.includes(col)) db.exec(`ALTER TABLE message_envelopes ADD COLUMN ${col} ${def}`);
 
+    // Schema migration v14 -> v15 (GOL-423): preserve which subscriptions were
+    // explicitly manual even when lifecycle resume later replaces their reason.
+    const subscriptionCols15 = db.prepare('PRAGMA table_info(subscriptions)').all().map((c) => c.name);
+    if (!subscriptionCols15.includes('manual')) db.exec("ALTER TABLE subscriptions ADD COLUMN manual INTEGER NOT NULL DEFAULT 0");
+    db.prepare("UPDATE subscriptions SET manual = 1 WHERE manual = 0 AND reason = 'manual'").run();
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS passive_slots (
+        session_id     TEXT NOT NULL,
+        ticket_id      TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+        category       TEXT NOT NULL,
+        baseline       TEXT NOT NULL,
+        value          TEXT NOT NULL,
+        first_event_id INTEGER NOT NULL,
+        last_event_id  INTEGER NOT NULL,
+        created_at     TEXT NOT NULL,
+        updated_at     TEXT NOT NULL,
+        PRIMARY KEY (session_id, ticket_id, category)
+      );
+      CREATE INDEX IF NOT EXISTS idx_passive_slots_session ON passive_slots(session_id, ticket_id, category);
+      CREATE TABLE IF NOT EXISTS passive_cursors (
+        session_id          TEXT PRIMARY KEY,
+        cursor_seq          INTEGER NOT NULL DEFAULT 0,
+        pending_batch_id    TEXT,
+        pending_body        TEXT,
+        pending_slots       TEXT,
+        pending_to_seq      INTEGER,
+        lease_id            TEXT,
+        lease_expires_at    TEXT,
+        pending_created_at  TEXT,
+        updated_at          TEXT NOT NULL
+      );
+    `);
+
     // Indexes that depend on lifecycle columns. Idempotent: no-op on fresh
     // DBs (CREATE TABLE above already created them), first-time-create on
     // existing DBs (where the ALTER TABLE above just added the columns).
     db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_state_rank ON tickets(state, rank)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_done_at ON tickets(done_at) WHERE done_at IS NOT NULL`);
-    // Update schema_version to the current version (v5).
+    // Update schema_version to the current version.
     db.prepare('UPDATE meta SET value = ? WHERE key = ?').run(String(SCHEMA_VERSION), 'schema_version');
 }
 
@@ -743,11 +809,12 @@ WHERE state_changed_at IS NULL`).run();
       `),
       getEventByUuid: db.prepare('SELECT * FROM events WHERE event_uuid = ?'),
       upsertSubscription: db.prepare(`
-        INSERT INTO subscriptions (id, session_id, topic, classes_filter, status, cursor_seq, created_at, expires_at, reason)
-        VALUES (@id, @session_id, @topic, @classes_filter, 'active', @cursor_seq, @created_at, @expires_at, @reason)
+        INSERT INTO subscriptions (id, session_id, topic, classes_filter, status, manual, cursor_seq, created_at, expires_at, reason)
+        VALUES (@id, @session_id, @topic, @classes_filter, 'active', @manual, @cursor_seq, @created_at, @expires_at, @reason)
         ON CONFLICT(session_id, topic) DO UPDATE SET
           classes_filter = excluded.classes_filter,
           status = 'active',
+          manual = CASE WHEN subscriptions.manual = 1 OR excluded.manual = 1 THEN 1 ELSE 0 END,
           expires_at = excluded.expires_at,
           reason = excluded.reason
       `),
@@ -944,6 +1011,12 @@ WHERE state_changed_at IS NULL`).run();
     };
     const info = stmts.insertEvent.run(row);
     const out = { id: Number(info.lastInsertRowid), ...row, data: safeParse(row.data) };
+    // GOL-423 deliberately projects only the canonical ticket event. Spec-tree
+    // mirrors are written below as separate rows and must never duplicate a
+    // recipient's passive delta; activity/lifecycle telemetry is excluded too.
+    if (ticket && cls === 'tracker' && derivedTopic === ticketTopic(ticket)) {
+      projectPassiveEvent({ event: out, ticket });
+    }
     const mirrorTopic = !topic && cls === 'tracker' ? specTreeTopicForTicket(ticket) : null;
     if (mirrorTopic && mirrorTopic !== derivedTopic) {
       const mirror = {
@@ -1031,6 +1104,289 @@ WHERE state_changed_at IS NULL`).run();
     }
   }
 
+  // ---- GOL-423 passive next-turn deltas ----------------------------------
+  // These helpers intentionally live beside recordEvent: the event ledger is
+  // the one durable source from which we can project a deterministic, bounded
+  // recipient view without turning ordinary tracker activity into a push.
+  function passiveJson(value) {
+    return JSON.stringify(value ?? null);
+  }
+
+  function parsePassiveJson(raw, fallback = null) {
+    try { return JSON.parse(raw); } catch { return fallback; }
+  }
+
+  function passiveText(value) {
+    const text = value == null || value === '' ? 'none' : String(value);
+    return text.length > 160 ? `${text.slice(0, 157)}…` : text;
+  }
+
+  function passiveIsBlocked(phase) {
+    return phase === 'blocked' || phase === 'parked';
+  }
+
+  function resultForPhase(phase) {
+    if (!['built', 'verified', 'rejected', 'done'].includes(phase)) return null;
+    return {
+      built: phase === 'built',
+      verdict: phase === 'rejected' ? 'FAIL' : (phase === 'verified' ? 'PASS' : null),
+      terminal: phase === 'done' ? 'done' : null,
+    };
+  }
+
+  function mergePassiveResult(previous, next) {
+    const prev = previous && typeof previous === 'object' ? previous : {};
+    const value = {
+      built: !!prev.built || !!next?.built,
+      // FAIL wins if both verdicts were observed before a batch is consumed.
+      verdict: prev.verdict === 'FAIL' || next?.verdict === 'FAIL'
+        ? 'FAIL'
+        : (prev.verdict === 'PASS' || next?.verdict === 'PASS' ? 'PASS' : null),
+      terminal: prev.terminal === 'done' || next?.terminal === 'done' ? 'done' : null,
+    };
+    return value;
+  }
+
+  function passiveChangesForEvent(event) {
+    const data = event.data && typeof event.data === 'object' ? event.data : {};
+    const changes = [];
+    const phaseEvent = event.type === 'phase_change' || event.type === 'state_change' || event.type === 'auto_archived';
+    const fromPhase = data.from_phase ?? data.from ?? null;
+    const toPhase = data.to_phase ?? data.to ?? null;
+    if (phaseEvent && toPhase != null && fromPhase !== toPhase) {
+      changes.push({ category: 'phase', baseline: fromPhase, value: toPhase });
+      const fromBlocked = passiveIsBlocked(fromPhase);
+      const toBlocked = passiveIsBlocked(toPhase);
+      if (fromBlocked !== toBlocked) {
+        changes.push({ category: 'blocker', baseline: fromBlocked ? 'blocked' : 'clear', value: toBlocked ? 'blocked' : 'clear' });
+      }
+      const result = resultForPhase(toPhase);
+      if (result) changes.push({ category: 'result', baseline: { built: false, verdict: null, terminal: null }, value: result });
+    }
+    if (event.type === 'assigned') {
+      changes.push({ category: 'assignment', baseline: data.from ?? null, value: data.to ?? null });
+    } else if (event.type === 'dispatched' || event.type === 'dispatch_queued') {
+      changes.push({ category: 'assignment', baseline: data.from ?? null, value: data.to ?? data.session_id ?? null });
+    } else if (event.type === 'dispatch_revoked') {
+      changes.push({ category: 'assignment', baseline: data.previous_session_id ?? null, value: data.next_session_id ?? null });
+    }
+    return changes;
+  }
+
+  function passiveRecipientAllowed(sessionId, actor) {
+    const id = String(sessionId || '').trim();
+    if (!id || id === String(actor || '').trim()) return false;
+    if (id === 'human' || id === 'you' || id === 'unattributed' || id === 'system' || id.startsWith('human:')) return false;
+    return true;
+  }
+
+  function passiveRelationshipRecipients(ticket, actor) {
+    const contexts = [ticket];
+    const parent = ticket?.parent_id ? stmts.getTicket.get(ticket.parent_id) : null;
+    if (parent?.kind === 'spec') contexts.push(parent);
+    const candidates = new Set();
+    const topics = new Set();
+    for (const context of contexts) {
+      if (!context) continue;
+      candidates.add(context.assignee);
+      candidates.add(context.dispatched_to);
+      const envelope = db.prepare(`SELECT sender_id, reply_to_session_id, recipient_session_id, sender_session_id, target_session_id
+        FROM message_envelopes
+        WHERE ticket_id = ? AND status != 'superseded'
+        ORDER BY created_at DESC, id DESC LIMIT 1`).get(context.id);
+      if (envelope) {
+        for (const key of ['sender_id', 'reply_to_session_id', 'recipient_session_id', 'sender_session_id', 'target_session_id']) candidates.add(envelope[key]);
+      }
+      const topic = ticketTopic(context);
+      if (topic) topics.add(topic);
+      if (context.kind === 'spec') topics.add(`spec/${context.display_id || context.id}/tree`);
+    }
+    if (topics.size) {
+      const placeholders = [...topics].map(() => '?').join(', ');
+      for (const row of db.prepare(`SELECT session_id FROM subscriptions
+        WHERE status = 'active' AND manual = 1 AND topic IN (${placeholders})`).all(...topics)) {
+        candidates.add(row.session_id);
+      }
+    }
+    return [...candidates].filter((sessionId) => passiveRecipientAllowed(sessionId, actor));
+  }
+
+  function upsertPassiveSlot({ sessionId, ticketId, category, baseline, value, eventId, ts }) {
+    const existing = db.prepare(`SELECT * FROM passive_slots
+      WHERE session_id = ? AND ticket_id = ? AND category = ?`).get(sessionId, ticketId, category);
+    const firstBaseline = existing ? parsePassiveJson(existing.baseline) : baseline;
+    const nextValue = category === 'result'
+      ? mergePassiveResult(existing ? parsePassiveJson(existing.value, {}) : {}, value)
+      : value;
+    if (category !== 'result' && passiveJson(firstBaseline) === passiveJson(nextValue)) {
+      if (existing) db.prepare('DELETE FROM passive_slots WHERE session_id = ? AND ticket_id = ? AND category = ?').run(sessionId, ticketId, category);
+      return;
+    }
+    if (existing) {
+      db.prepare(`UPDATE passive_slots SET value = ?, last_event_id = ?, updated_at = ?
+        WHERE session_id = ? AND ticket_id = ? AND category = ?`).run(
+        passiveJson(nextValue), eventId, ts, sessionId, ticketId, category,
+      );
+      return;
+    }
+    db.prepare(`INSERT INTO passive_slots
+      (session_id, ticket_id, category, baseline, value, first_event_id, last_event_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      sessionId, ticketId, category, passiveJson(firstBaseline), passiveJson(nextValue), eventId, eventId, ts, ts,
+    );
+  }
+
+  function projectPassiveEvent({ event, ticket }) {
+    const changes = passiveChangesForEvent(event);
+    if (!changes.length) return;
+    const recipients = passiveRelationshipRecipients(ticket, event.actor);
+    if (!recipients.length) return;
+    for (const sessionId of recipients) {
+      for (const change of changes) {
+        upsertPassiveSlot({
+          sessionId,
+          ticketId: ticket.id,
+          category: change.category,
+          baseline: change.baseline,
+          value: change.value,
+          eventId: event.id,
+          ts: event.created_at,
+        });
+      }
+    }
+  }
+
+  function passiveCategoryLine(category, baseline, value) {
+    if (category === 'result') {
+      const result = value && typeof value === 'object' ? value : {};
+      return `result: ${[result.built ? 'built' : null, result.verdict, result.terminal].filter(Boolean).join('; ') || 'updated'}`;
+    }
+    const from = passiveText(baseline);
+    const to = passiveText(value);
+    return from === to ? `${category}: ${to}` : `${category}: ${from} → ${to}`;
+  }
+
+  function buildPassiveBatch(sessionId) {
+    const rows = db.prepare(`SELECT s.*, t.display_id, t.seq
+      FROM passive_slots s JOIN tickets t ON t.id = s.ticket_id
+      WHERE s.session_id = ?
+      ORDER BY t.seq ASC, t.id ASC,
+        CASE s.category WHEN 'phase' THEN 1 WHEN 'assignment' THEN 2 WHEN 'blocker' THEN 3 WHEN 'result' THEN 4 ELSE 99 END ASC`).all(sessionId);
+    if (!rows.length) return null;
+    const byTicket = new Map();
+    for (const row of rows) {
+      const group = byTicket.get(row.ticket_id) ?? { ticket_id: row.ticket_id, label: row.display_id || row.ticket_id, slots: [] };
+      group.slots.push(row);
+      byTicket.set(row.ticket_id, group);
+    }
+    const groups = [];
+    let body = 'Since your last turn:';
+    for (const group of byTicket.values()) {
+      if (groups.length >= PASSIVE_GROUP_CAP) break;
+      const lines = [`- ${passiveText(group.label)}`];
+      for (const slot of group.slots) {
+        lines.push(`  ${passiveCategoryLine(slot.category, parsePassiveJson(slot.baseline), parsePassiveJson(slot.value))}`);
+      }
+      const candidate = `${body}\n${lines.join('\n')}`;
+      if (Buffer.byteLength(candidate, 'utf8') > PASSIVE_BYTE_CAP) break;
+      body = candidate;
+      groups.push(group);
+    }
+    if (!groups.length) return null;
+    const slots = groups.flatMap((group) => group.slots.map((slot) => ({
+      ticket_id: slot.ticket_id,
+      category: slot.category,
+      last_event_id: Number(slot.last_event_id),
+    })));
+    return {
+      id: crypto.randomUUID(),
+      body,
+      slots,
+      ticket_count: groups.length,
+      to_seq: Math.max(...slots.map((slot) => slot.last_event_id)),
+    };
+  }
+
+  function claimPassiveDelta(sessionId, { leaseMs = PASSIVE_LEASE_MS } = {}) {
+    if (!sessionId) throw new Error('claimPassiveDelta: session_id is required');
+    const ts = now();
+    const safeLeaseMs = Math.max(1_000, Math.min(120_000, Number(leaseMs) || PASSIVE_LEASE_MS));
+    return db.transaction(() => {
+      const cursor = db.prepare('SELECT * FROM passive_cursors WHERE session_id = ?').get(sessionId);
+      const leaseActive = cursor?.lease_id && Date.parse(cursor.lease_expires_at || '') > Date.parse(ts);
+      if (cursor?.pending_batch_id) {
+        if (leaseActive) return { busy: true, retry_at: cursor.lease_expires_at };
+        const lease_id = crypto.randomUUID();
+        const lease_expires_at = new Date(Date.parse(ts) + safeLeaseMs).toISOString();
+        db.prepare('UPDATE passive_cursors SET lease_id = ?, lease_expires_at = ?, updated_at = ? WHERE session_id = ?')
+          .run(lease_id, lease_expires_at, ts, sessionId);
+        const slots = parsePassiveJson(cursor.pending_slots, []);
+        return {
+          lease_id,
+          replayed: true,
+          batch: { id: cursor.pending_batch_id, body: cursor.pending_body, ticket_count: new Set(slots.map((slot) => slot.ticket_id)).size, to_seq: cursor.pending_to_seq },
+        };
+      }
+      const batch = buildPassiveBatch(sessionId);
+      if (!batch) {
+        if (!cursor) db.prepare('INSERT INTO passive_cursors (session_id, cursor_seq, updated_at) VALUES (?, 0, ?)').run(sessionId, ts);
+        return { batch: null };
+      }
+      const lease_id = crypto.randomUUID();
+      const lease_expires_at = new Date(Date.parse(ts) + safeLeaseMs).toISOString();
+      if (cursor) {
+        db.prepare(`UPDATE passive_cursors SET pending_batch_id = ?, pending_body = ?, pending_slots = ?, pending_to_seq = ?,
+          lease_id = ?, lease_expires_at = ?, pending_created_at = ?, updated_at = ? WHERE session_id = ?`).run(
+          batch.id, batch.body, passiveJson(batch.slots), batch.to_seq, lease_id, lease_expires_at, ts, ts, sessionId,
+        );
+      } else {
+        db.prepare(`INSERT INTO passive_cursors
+          (session_id, cursor_seq, pending_batch_id, pending_body, pending_slots, pending_to_seq, lease_id, lease_expires_at, pending_created_at, updated_at)
+          VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+          sessionId, batch.id, batch.body, passiveJson(batch.slots), batch.to_seq, lease_id, lease_expires_at, ts, ts,
+        );
+      }
+      return { lease_id, replayed: false, batch: { id: batch.id, body: batch.body, ticket_count: batch.ticket_count, to_seq: batch.to_seq } };
+    })();
+  }
+
+  function commitPassiveDelta(sessionId, leaseId) {
+    if (!sessionId || !leaseId) throw new Error('commitPassiveDelta: session_id and lease_id are required');
+    const ts = now();
+    return db.transaction(() => {
+      const cursor = db.prepare('SELECT * FROM passive_cursors WHERE session_id = ?').get(sessionId);
+      if (!cursor?.pending_batch_id) return { committed: false, missing: true };
+      if (cursor.lease_id !== leaseId) throw new Error('commitPassiveDelta: lease does not match current claim');
+      const slots = parsePassiveJson(cursor.pending_slots, []);
+      const remove = db.prepare(`DELETE FROM passive_slots
+        WHERE session_id = ? AND ticket_id = ? AND category = ? AND last_event_id <= ?`);
+      let removed = 0;
+      for (const slot of slots) {
+        removed += remove.run(sessionId, slot.ticket_id, slot.category, Number(slot.last_event_id) || 0).changes;
+      }
+      db.prepare(`UPDATE passive_cursors SET cursor_seq = MAX(cursor_seq, ?), pending_batch_id = NULL, pending_body = NULL,
+        pending_slots = NULL, pending_to_seq = NULL, lease_id = NULL, lease_expires_at = NULL, pending_created_at = NULL, updated_at = ?
+        WHERE session_id = ?`).run(Number(cursor.pending_to_seq) || 0, ts, sessionId);
+      return { committed: true, removed, cursor_seq: Math.max(Number(cursor.cursor_seq) || 0, Number(cursor.pending_to_seq) || 0) };
+    })();
+  }
+
+  function releasePassiveDelta(sessionId, leaseId) {
+    if (!sessionId || !leaseId) throw new Error('releasePassiveDelta: session_id and lease_id are required');
+    return db.transaction(() => {
+      // Compare-and-swap the lease in the UPDATE itself. A release that was
+      // delayed behind an expired/reclaimed cursor must never clear its newer
+      // lease after the caller's initial view became stale.
+      const info = db.prepare(`UPDATE passive_cursors
+        SET lease_id = NULL, lease_expires_at = NULL, updated_at = ?
+        WHERE session_id = ? AND lease_id = ? AND pending_batch_id IS NOT NULL`).run(now(), sessionId, leaseId);
+      if (info.changes) return { released: true };
+      const cursor = db.prepare('SELECT pending_batch_id FROM passive_cursors WHERE session_id = ?').get(sessionId);
+      if (!cursor?.pending_batch_id) return { released: false, missing: true };
+      throw new Error('releasePassiveDelta: lease does not match current claim');
+    })();
+  }
+
   // TKT-0266: resolve an assignee/dispatched_to value to its persisted durable
   // label from session_labels. Returns null for 'human' (the UI renders "You")
   // and for sessions with no persisted label (caller falls back to the live
@@ -1076,6 +1432,7 @@ WHERE state_changed_at IS NULL`).run();
       session_id,
       topic,
       classes_filter: serializeClasses(classes),
+      manual: reason == null || reason === 'manual' ? 1 : 0,
       cursor_seq: cursor_seq == null ? maxEventSeqForTopic(topic) : Math.max(0, Number(cursor_seq) || 0),
       created_at: ts,
       expires_at: expires_at ?? null,
@@ -1084,11 +1441,6 @@ WHERE state_changed_at IS NULL`).run();
     stmts.upsertSubscription.run(row);
     const existing = db.prepare('SELECT * FROM subscriptions WHERE session_id = ? AND topic = ?').get(session_id, topic);
     return hydrateSubscription(existing);
-  }
-
-  function autoSubscribe(sessionId, topic, reason) {
-    if (!sessionId || !topic || sessionId === 'human') return null;
-    return subscribeSession({ session_id: sessionId, topic, reason: reason || 'auto' });
   }
 
   function activeSubscriptionsBySession() {
@@ -1214,22 +1566,229 @@ WHERE state_changed_at IS NULL`).run();
     // v13 envelopes require explicit facts. A queued envelope has no delivery
     // attempt/opportunity, so it is never reported as unhealthy.
     const envelopes = db.prepare(`
-      SELECT e.*, t.display_id, t.title, sl.label AS session_label
+      SELECT e.*, t.display_id, t.title, sl.label AS session_label,
+             escalation.acknowledged_at AS escalation_acknowledged_at,
+             escalation.status AS escalation_status,
+             escalation.delivery_error AS escalation_delivery_error
       FROM message_envelopes e JOIN tickets t ON t.id = e.ticket_id
       LEFT JOIN session_labels sl ON sl.session_id = e.recipient_session_id
+      LEFT JOIN message_envelopes escalation ON escalation.id = e.escalation_envelope_id
       WHERE e.kind = 'ticket_dispatch' AND (@ticket_id IS NULL OR e.ticket_id = @ticket_id)
         AND e.delivery_attempted_at IS NOT NULL AND e.acknowledged_at IS NULL AND e.completed_at IS NULL
         AND NOT EXISTS (SELECT 1 FROM events d WHERE d.ticket_id = e.ticket_id
           AND d.type = 'dispatch_unacked_dismissed' AND json_extract(d.data, '$.envelope_id') = e.id)
-    `).all({ ticket_id: ticketId }).map((e) => ({
-      attention_kind: 'envelope', envelope_id: e.id, ticket_id: e.ticket_id, project_id: e.project_id,
-      session_id: e.recipient_session_id, session_label: e.session_label ?? null, display_id: e.display_id,
-      title: e.title, delivered_at: e.delivery_opportunity_at || e.delivered_at,
-      severity: e.escalation_envelope_id ? 'escalated' : (e.ping_envelope_id ? 'pinged' : (e.delivery_error ? 'failed' : 'awaiting')),
-      ping_envelope_id: e.ping_envelope_id, escalation_envelope_id: e.escalation_envelope_id,
-      delivery_error: e.delivery_error,
-    }));
+    `).all({ ticket_id: ticketId }).map((e) => {
+      // An acknowledged escalation remains timeline evidence, but no longer
+      // represents an outstanding escalation. A failed escalation remains red
+      // even if a later acknowledgement fact exists.
+      const escalationOutstanding = !!e.escalation_envelope_id
+        && (e.escalation_status === 'delivery_failed' || !!e.escalation_delivery_error || !e.escalation_acknowledged_at);
+      return {
+        attention_kind: 'envelope', envelope_id: e.id, ticket_id: e.ticket_id, project_id: e.project_id,
+        session_id: e.recipient_session_id, session_label: e.session_label ?? null, display_id: e.display_id,
+        title: e.title, delivered_at: e.delivery_opportunity_at || e.delivered_at,
+        severity: escalationOutstanding ? 'escalated' : (e.ping_envelope_id ? 'pinged' : (e.delivery_error ? 'failed' : 'awaiting')),
+        ping_envelope_id: e.ping_envelope_id, escalation_envelope_id: e.escalation_envelope_id,
+        delivery_error: e.delivery_error,
+      };
+    });
     return [...legacy, ...envelopes];
+  }
+
+  // GOL-425: presentation queries for the durable envelope protocol. These are
+  // deliberately derived from message_envelopes, acknowledgement facts, and
+  // dismissal events; they must never grow a second persisted "attention"
+  // state. One row represents a dispatch root and its small child envelope
+  // tree, which is the useful unit for a human handoff timeline.
+  function envelopeRootRows(filter = {}) {
+    const where = ["e.kind = 'ticket_dispatch'", '(e.root_id = e.id OR e.root_id IS NULL)'];
+    const params = {};
+    if (filter.envelope_id) { where.push('e.id = @envelope_id'); params.envelope_id = filter.envelope_id; }
+    if (filter.project_id) { where.push('e.project_id = @project_id'); params.project_id = filter.project_id; }
+    if (filter.ticket_id) { where.push('e.ticket_id = @ticket_id'); params.ticket_id = filter.ticket_id; }
+    if (filter.session_id) { where.push('e.recipient_session_id = @session_id'); params.session_id = filter.session_id; }
+    if (filter.from) { where.push('e.created_at >= @from'); params.from = filter.from; }
+    if (filter.to) { where.push('e.created_at <= @to'); params.to = filter.to; }
+    const limit = Math.min(500, Math.max(1, Number(filter.limit) || 100));
+    if (!filter.all) params.limit = limit;
+    return db.prepare(`
+      SELECT e.*, t.display_id, t.title, sl.label AS session_label,
+             dq.id AS queue_id, dq.status AS queue_status, dq.created_at AS queue_created_at
+      FROM message_envelopes e
+      LEFT JOIN tickets t ON t.id = e.ticket_id
+      LEFT JOIN session_labels sl ON sl.session_id = e.recipient_session_id
+      LEFT JOIN dispatch_queue dq ON dq.envelope_id = e.id AND dq.status = 'pending'
+      WHERE ${where.join(' AND ')}
+      ORDER BY e.created_at DESC, e.id DESC
+      ${filter.all ? '' : 'LIMIT @limit'}
+    `).all(params);
+  }
+
+  function factsForEnvelopeTree(rootId) {
+    const children = db.prepare(`
+      SELECT * FROM message_envelopes
+      WHERE id = ? OR parent_id = ?
+      ORDER BY created_at ASC, id ASC
+    `).all(rootId, rootId);
+    const acknowledgements = new Map();
+    for (const envelope of children) {
+      const rows = db.prepare(`
+        SELECT envelope_id, recipient_session_id, kind, summary, acknowledged_at
+        FROM message_acknowledgements WHERE envelope_id = ?
+        ORDER BY acknowledged_at ASC
+      `).all(envelope.id);
+      acknowledgements.set(envelope.id, rows);
+    }
+    return { children, acknowledgements };
+  }
+
+  function dismissalForEnvelope(root) {
+    if (!root?.ticket_id) return null;
+    return db.prepare(`
+      SELECT id, actor, created_at
+      FROM events
+      WHERE ticket_id = ? AND type = 'dispatch_unacked_dismissed'
+        AND json_extract(data, '$.envelope_id') = ?
+      ORDER BY created_at DESC, id DESC
+      LIMIT 1
+    `).get(root.ticket_id, root.id) ?? null;
+  }
+
+  function envelopeView(root, nowMs = Date.now()) {
+    const { children, acknowledgements } = factsForEnvelopeTree(root.id);
+    const byKind = new Map(children.map((row) => [row.kind, row]));
+    const ping = byKind.get('ack_ping') ?? null;
+    const escalation = byKind.get('escalation') ?? null;
+    const dismissal = dismissalForEnvelope(root);
+    const closed = !!(root.acknowledged_at || root.completed_at);
+    const queued = root.queue_status === 'pending';
+    const deadlineMs = Date.parse(root.ack_deadline_at || '');
+    const overdue = !closed && Number.isFinite(deadlineMs) && deadlineMs <= nowMs;
+    const rootDeliveryFailed = root.status === 'delivery_failed' || !!root.delivery_error;
+    const escalationFailed = !!escalation && (escalation.status === 'delivery_failed' || !!escalation.delivery_error);
+    const escalationOutstanding = !!escalation && (escalationFailed || !escalation.acknowledged_at);
+    const missingDelivery = !closed && !queued && !root.delivery_attempted_at
+      && ['pending', 'delivery_failed'].includes(root.status);
+
+    let severity = 'healthy';
+    if (!dismissal && !closed) {
+      if (escalationOutstanding) severity = 'escalated';
+      else if (rootDeliveryFailed || missingDelivery) severity = 'failed';
+      else if (root.delivery_attempted_at || root.delivery_opportunity_at) severity = (ping || overdue) ? 'pinged' : 'awaiting';
+    }
+    const active = !dismissal && !closed && (queued || severity !== 'healthy');
+    // An escalation is for the original sender. It needs a human only when its
+    // own acknowledgement never arrives, or when its delivery attempt failed.
+    const needsAttention = !dismissal && !closed && escalationOutstanding;
+    const state = needsAttention ? 'needs_attention' : (active ? 'in_flight' : 'history');
+
+    const facts = [];
+    const add = (kind, label, at, detail = null, factSeverity = null) => {
+      if (!at) return;
+      facts.push({ kind, label, at, detail: detail || null, severity: factSeverity || null });
+    };
+    add('assigned', `Assigned to ${root.session_label || root.recipient_session_id || 'target session'}`, root.created_at);
+    if (queued) add('queued', 'Queued for an idle delivery opportunity', root.queue_created_at || root.created_at);
+    if (root.delivery_attempted_at) {
+      add(rootDeliveryFailed ? 'delivery_error' : 'delivery_attempt', rootDeliveryFailed ? 'Delivery attempt failed' : 'Delivery attempted', root.delivery_attempted_at, root.delivery_error || root.last_error, rootDeliveryFailed ? 'failed' : null);
+    }
+    if (root.delivery_opportunity_at) add('delivery_opportunity', 'Delivery opportunity recorded', root.delivery_opportunity_at);
+    if (root.ack_deadline_at) add('deadline', 'Acknowledgement deadline', root.ack_deadline_at, overdue && !closed ? 'overdue' : null, overdue && !closed ? 'pinged' : null);
+    for (const child of children) {
+      const childFacts = acknowledgements.get(child.id) ?? [];
+      if (child.id !== root.id) {
+        const kindLabel = child.kind === 'ack_ping' ? 'Acknowledgement reminder' : child.kind === 'escalation' ? 'Escalation' : child.kind === 'reply' ? 'Reply' : child.kind;
+        add(child.kind, `${kindLabel} created`, child.created_at);
+      }
+      if (child.delivery_attempted_at) {
+        const failed = child.status === 'delivery_failed' || !!child.delivery_error;
+        const kindLabel = child.kind === 'ack_ping' ? 'Reminder' : child.kind === 'escalation' ? 'Escalation' : child.kind === 'reply' ? 'Reply' : 'Delivery';
+        add(failed ? `${child.kind}_delivery_error` : `${child.kind}_delivery`, failed ? `${kindLabel} delivery failed` : `${kindLabel} delivered`, child.delivery_attempted_at, child.delivery_error || child.last_error, failed ? 'failed' : null);
+      }
+      for (const ack of childFacts) {
+        const via = child.kind === 'ack_ping' ? ' via reminder' : child.kind === 'escalation' ? ' for escalation' : '';
+        add('acknowledged', `Acknowledged${via} by ${ack.recipient_session_id}`, ack.acknowledged_at, ack.kind || null);
+      }
+    }
+    if (root.replied_at) add('reply', 'Reply recorded', root.replied_at);
+    if (root.completed_at) {
+      const label = root.status === 'superseded' ? 'Superseded by a newer dispatch'
+        : root.status === 'cancelled' ? 'Cancelled'
+          : root.status === 'expired' ? 'Expired'
+            : 'Completed';
+      add('completion', label, root.completed_at, root.last_error || null);
+    }
+    if (dismissal) add('dismissed', `Attention dismissed by ${dismissal.actor || 'human'}`, dismissal.created_at);
+    facts.sort((a, b) => String(a.at).localeCompare(String(b.at)) || a.label.localeCompare(b.label));
+
+    return {
+      id: root.id,
+      root_id: root.root_id || root.id,
+      ticket_id: root.ticket_id,
+      ticket_display_id: root.display_id || root.ticket_id,
+      ticket_title: root.title || null,
+      project_id: root.project_id,
+      session_id: root.recipient_session_id,
+      session_label: root.session_label || null,
+      created_at: root.created_at,
+      status: root.status,
+      severity,
+      state,
+      active,
+      queued,
+      overdue,
+      dismissed: !!dismissal,
+      needs_attention: needsAttention,
+      facts,
+    };
+  }
+
+  function matchesEnvelopeFilter(view, filter = {}) {
+    const state = filter.state;
+    if (state) {
+      if (state === 'needs_attention' && !view.needs_attention) return false;
+      else if (state === 'in_flight' && view.state !== 'in_flight') return false;
+      else if (state === 'history' && view.state !== 'history') return false;
+      else if (['queued', 'awaiting', 'pinged', 'failed', 'escalated', 'healthy'].includes(state)
+        && !(state === 'queued' ? view.queued : view.severity === state)) return false;
+    }
+    if (filter.fact) {
+      const hasFact = view.facts.some((fact) => {
+        if (filter.fact === 'delivery') {
+          return ['delivery_attempt', 'delivery_opportunity', 'delivery_error'].includes(fact.kind)
+            || fact.kind.endsWith('_delivery') || fact.kind.endsWith('_delivery_error');
+        }
+        return fact.kind === filter.fact || fact.kind.startsWith(`${filter.fact}_`);
+      });
+      if (!hasFact) return false;
+    }
+    return true;
+  }
+
+  function listEnvelopeViews(filter = {}) {
+    return envelopeRootRows(filter)
+      .map((root) => envelopeView(root))
+      .filter((view) => matchesEnvelopeFilter(view, filter));
+  }
+
+  function communicationHealth(filter = {}) {
+    const items = listEnvelopeViews({ ...filter, all: true });
+    const red = items.filter((item) => item.active && ['failed', 'escalated'].includes(item.severity)).length;
+    const amber = items.filter((item) => item.active && ['awaiting', 'pinged'].includes(item.severity)).length;
+    const queued = items.filter((item) => item.queued && !item.dismissed).length;
+    const needsAttention = items.filter((item) => item.needs_attention).length;
+    const inFlight = items.filter((item) => item.state === 'in_flight').length;
+    return {
+      health: {
+        level: red > 0 ? 'red' : amber > 0 ? 'amber' : 'green',
+        red,
+        amber,
+        queued,
+        in_flight: inFlight,
+        needs_attention: needsAttention,
+      },
+      needs_attention: items.filter((item) => item.needs_attention),
+    };
   }
 
   // TKT-0519: derive + persist a project's display-id prefix. Candidates in
@@ -1315,6 +1874,12 @@ WHERE state_changed_at IS NULL`).run();
     recordEvent,
 
     ingestBusEvents,
+
+    claimPassiveDelta,
+
+    commitPassiveDelta,
+
+    releasePassiveDelta,
 
     subscribe({ session_id, topic, classes = null, cursor_seq = null, expires_at = null, reason = null } = {}) {
       return subscribeSession({ session_id, topic, classes, cursor_seq, expires_at, reason });
@@ -1531,9 +2096,6 @@ WHERE state_changed_at IS NULL`).run();
           actor: created_by,
           data: { kind, state: nextState, phase: nextPhase, title },
         });
-        const topic = ticketTopic(row);
-        autoSubscribe(created_by, topic, 'ticket_creator');
-        autoSubscribe(assignee, topic, 'ticket_assignee');
         return row;
       });
       return hydrateTicket(txn());
@@ -1846,7 +2408,6 @@ WHERE state_changed_at IS NULL`).run();
             actor,
             data: { from: existing.assignee, to: updates.assignee },
           });
-          autoSubscribe(updates.assignee, ticketTopic(stmts.getTicket.get(id)), 'ticket_assignee');
         }
         return stmts.getTicket.get(id);
       });
@@ -2003,12 +2564,8 @@ WHERE state_changed_at IS NULL`).run();
           project_id: existing.project_id,
           type: 'dispatched',
           actor,
-          data: { session_id },
+          data: { from: existing.assignee ?? existing.dispatched_to ?? null, to: session_id, session_id },
         });
-        const topic = ticketTopic(updated);
-        autoSubscribe(actor, topic, 'ticket_dispatcher');
-        autoSubscribe(session_id, topic, 'ticket_assignee');
-        if (updated.kind === 'spec') autoSubscribe(session_id, `spec/${updated.display_id || updated.id}/tree`, 'spec_tree_dispatch_target');
         return { row: updated, revoked_session_id: previous };
       });
       const result = txn();
@@ -2069,11 +2626,8 @@ WHERE state_changed_at IS NULL`).run();
           project_id: existing.project_id,
           type: 'dispatch_queued',
           actor,
-          data: { session_id, queue_id: queueId, envelope_id: envelopeId },
+          data: { from: existing.assignee ?? null, to: session_id, session_id, queue_id: queueId, envelope_id: envelopeId },
         });
-        autoSubscribe(actor, ticketTopic(existing), 'ticket_dispatcher');
-        autoSubscribe(session_id, ticketTopic(existing), 'ticket_assignee');
-        if (existing.kind === 'spec') autoSubscribe(session_id, `spec/${existing.display_id || existing.id}/tree`, 'spec_tree_dispatch_target');
         return { ...stmts.getQueueRow.get(queueId), envelope: stmts.getEnvelope.get(envelopeId) };
       });
       return txn();
@@ -2117,6 +2671,22 @@ WHERE state_changed_at IS NULL`).run();
     getEnvelope(envelopeId) {
       return stmts.getEnvelope.get(envelopeId) ?? null;
     },
+
+    // Read-only handoff-health surface. The endpoint layer resolves user-facing
+    // ticket ids; this layer deliberately accepts canonical ids only.
+    listEnvelopeViews,
+
+    getEnvelopeView(envelopeId) {
+      const envelope = stmts.getEnvelope.get(envelopeId);
+      if (!envelope) return null;
+      const rootId = envelope.root_id || envelope.id;
+      const root = stmts.getEnvelope.get(rootId);
+      if (!root || root.kind !== 'ticket_dispatch') return null;
+      const row = envelopeRootRows({ envelope_id: root.id, limit: 1 })[0];
+      return row ? envelopeView(row) : null;
+    },
+
+    communicationHealth,
 
     createNotificationEnvelope({ project_id = null, sender_id, recipient_session_id, payload = '' } = {}) {
       if (!sender_id || !recipient_session_id) throw new Error('createNotificationEnvelope: sender and recipient are required');
@@ -2426,7 +2996,7 @@ WHERE state_changed_at IS NULL`).run();
         if (!claimed.changes) return null;
         const child = { id: childId, root_id: root.id, parent_id: root.id, ticket_id: root.ticket_id, project_id: root.project_id,
           sender_id: root.sender_id, reply_to_session_id: root.reply_to_session_id, recipient_session_id: root.reply_to_session_id,
-          sender_session_id: root.sender_session_id, target_session_id: root.reply_to_session_id, kind: 'ack_escalation',
+          sender_session_id: root.sender_session_id, target_session_id: root.reply_to_session_id, kind: 'escalation',
           payload: JSON.stringify({ content: `Dispatch escalation for ${root.ticket_id}\n\nOriginal message_id: ${root.id}\nPing message_id: ${root.ping_envelope_id}\nNo acknowledgement after delivery and one reminder.` }),
           status: 'pending', ack_deadline_at: null, created_at: ts };
         stmts.insertEnvelope.run(child);

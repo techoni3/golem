@@ -94,20 +94,25 @@ async function waitForDashboard(timeoutMs = 15000) {
   throw new Error('dashboard did not become ready within timeout');
 }
 
-async function waitForChannel(timeoutMs = 15000) {
+async function waitForChannelEntry(sessionId, timeoutMs = 15000, predicate = () => true) {
   const channelsFile = path.join(tmpGolemHome, 'channels.json');
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
       const channels = JSON.parse(fs.readFileSync(channelsFile, 'utf8')).channels || [];
-      const channel = channels.find((entry) => entry.session_id === SESSION_ID);
-      if (channel?.host && channel?.port) return `http://${channel.host}:${channel.port}`;
+      const channel = channels.find((entry) => entry.session_id === sessionId);
+      if (channel?.host && channel?.port && predicate(channel)) return channel;
     } catch {
       /* channel has not registered yet */
     }
     await sleep(50);
   }
   throw new Error('channel did not register within timeout');
+}
+
+async function waitForChannel(timeoutMs = 15000) {
+  const channel = await waitForChannelEntry(SESSION_ID, timeoutMs);
+  return `http://${channel.host}:${channel.port}`;
 }
 
 let child;
@@ -381,6 +386,24 @@ async function main() {
   check('sibling writes retain their individual authors', siblingAuthors.includes(siblingA) && siblingAuthors.includes(siblingB), JSON.stringify(siblingTicket.json?.comments));
   check('injected metadata is stripped before ticket handlers', !JSON.stringify(siblingTicket.json).includes('__golem_'), siblingTicket.text);
 
+  const siblingSubA = await callToolFrom(identityMcpClient, 'subscribe', {
+    topic: 'ticket/SIBLING-A', __golem_session_id: siblingA, __golem_call_id: 'sub-a', __golem_probe: 'must-be-stripped',
+  });
+  const siblingSubB = await callToolFrom(identityMcpClient, 'subscribe', {
+    topic: 'ticket/SIBLING-B', __golem_session_id: siblingB, __golem_call_id: 'sub-b', __golem_probe: 'must-be-stripped',
+  });
+  check('sibling A subscription uses its injected caller identity', !siblingSubA.result.isError && siblingSubA.json?.session_id === siblingA, siblingSubA.text);
+  check('sibling B subscription uses its injected caller identity', !siblingSubB.result.isError && siblingSubB.json?.session_id === siblingB, siblingSubB.text);
+  const siblingSubsA = await callToolFrom(identityMcpClient, 'subscriptions_list', { __golem_session_id: siblingA, __golem_call_id: 'list-a' });
+  const siblingSubsB = await callToolFrom(identityMcpClient, 'subscriptions_list', { __golem_session_id: siblingB, __golem_call_id: 'list-b' });
+  check('sibling subscription lists stay isolated', Array.isArray(siblingSubsA.json) && Array.isArray(siblingSubsB.json) && siblingSubsA.json.some((sub) => sub.topic === 'ticket/SIBLING-A') && !siblingSubsA.json.some((sub) => sub.topic === 'ticket/SIBLING-B') && siblingSubsB.json.some((sub) => sub.topic === 'ticket/SIBLING-B') && !siblingSubsB.json.some((sub) => sub.topic === 'ticket/SIBLING-A'), `${siblingSubsA.text}\n${siblingSubsB.text}`);
+  check('subscription injected metadata is stripped before tracker handlers', !JSON.stringify([siblingSubA.json, siblingSubB.json, siblingSubsA.json, siblingSubsB.json]).includes('__golem_'), `${siblingSubA.text}\n${siblingSubB.text}`);
+  const siblingUnsubA = await callToolFrom(identityMcpClient, 'unsubscribe', { topic: 'ticket/SIBLING-A', __golem_session_id: siblingA, __golem_call_id: 'unsub-a' });
+  const afterUnsubB = await callToolFrom(identityMcpClient, 'subscriptions_list', { __golem_session_id: siblingB, __golem_call_id: 'list-b-after' });
+  check('sibling unsubscribe affects only its injected caller subscription', !siblingUnsubA.result.isError && afterUnsubB.json?.some((sub) => sub.topic === 'ticket/SIBLING-B'), `${siblingUnsubA.text}\n${afterUnsubB.text}`);
+  const ambiguousSub = await callToolFrom(identityMcpClient, 'subscribe', { topic: 'ticket/AMBIGUOUS' });
+  check('ambiguous sibling subscription fails closed', ambiguousSub.result.isError && /no trusted caller session id/.test(ambiguousSub.text), ambiguousSub.text);
+
   const ambiguousWrite = await callToolFrom(identityMcpClient, 'ticket_comment', { id: identityTicket.json?.id, body: 'must not write' });
   check('ambiguous sibling write is refused', ambiguousWrite.result.isError && /2 sibling sessions.*refusing to write/.test(ambiguousWrite.text), ambiguousWrite.text);
   const afterAmbiguous = await callToolFrom(identityMcpClient, 'ticket_get', { id: identityTicket.json?.id });
@@ -394,6 +417,9 @@ async function main() {
   const singleBridgeWrite = await callToolFrom(identityMcpClient, 'ticket_comment', { id: identityTicket.json?.id, body: 'Single bridge back-compat' });
   check('single bridge resolves without injection', !singleBridgeWrite.result.isError, singleBridgeWrite.text);
 
+  await identityMcpClient.close();
+  identityMcpClient = null;
+  identityMcpTransport = null;
   fs.writeFileSync(bridgesFile, JSON.stringify({ bridges: [] }));
   await sleep(100);
   const channelsFile = path.join(tmpGolemHome, 'channels.json');
@@ -410,6 +436,7 @@ async function main() {
       GOLEM_CEO_SESSION_ID: '',
       CLAUDE_CODE_SESSION_ID: '',
       GOLEM_CHANNEL_PORT: '0',
+      GOLEM_CHANNEL_HEARTBEAT_MS: '60000',
       HOME: tmpRoot,
     },
     stderr: 'pipe',
@@ -420,6 +447,82 @@ async function main() {
   check('missing bridge channel does not register', channelCountAfterNoIdentity === channelCountBeforeNoIdentity, `${channelCountBeforeNoIdentity} -> ${channelCountAfterNoIdentity}`);
   const noBridgeWrite = await callToolFrom(noIdentityMcpClient, 'ticket_comment', { id: identityTicket.json?.id, body: 'must not write without bridge' });
   check('missing bridge write is refused', noBridgeWrite.result.isError && /no live opencode bridge row.*refusing to write/.test(noBridgeWrite.text), noBridgeWrite.text);
+
+  const lateBridgeId = 'ses_late_opencode_bridge';
+  const lateBridgeStarted = Date.now();
+  fs.writeFileSync(bridgesFile, JSON.stringify({ bridges: [{
+    session_id: lateBridgeId,
+    opencode_pid: process.pid,
+    pid: process.pid,
+    host: HOST,
+    port: bridgePort,
+    name: 'late-bridge',
+    updated_at: new Date().toISOString(),
+  }] }));
+  let lateBridgeChannel = null;
+  try { lateBridgeChannel = await waitForChannelEntry(lateBridgeId, 1000); } catch { /* asserted below */ }
+  const lateBridgeElapsed = Date.now() - lateBridgeStarted;
+  check('late opencode bridge registers before the 60s heartbeat', !!lateBridgeChannel && lateBridgeElapsed < 1000, `${lateBridgeElapsed}ms ${JSON.stringify(lateBridgeChannel)}`);
+
+  const lateSiblingBridgeId = 'ses_late_opencode_sibling';
+  const lateSiblingStarted = Date.now();
+  fs.writeFileSync(bridgesFile, JSON.stringify({ bridges: [{
+    session_id: lateBridgeId,
+    opencode_pid: process.pid,
+    pid: process.pid,
+    host: HOST,
+    port: bridgePort,
+    name: 'late-bridge',
+    updated_at: new Date().toISOString(),
+  }, {
+    session_id: lateSiblingBridgeId,
+    opencode_pid: process.pid,
+    pid: process.pid,
+    host: HOST,
+    port: bridgePort,
+    name: 'late-sibling',
+    updated_at: new Date().toISOString(),
+  }] }));
+  let lateSiblingChannel = null;
+  try { lateSiblingChannel = await waitForChannelEntry(lateSiblingBridgeId, 1000); } catch { /* asserted below */ }
+  const lateSiblingElapsed = Date.now() - lateSiblingStarted;
+  check('late opencode sibling registers before the heartbeat', !!lateSiblingChannel && lateSiblingElapsed < 1000, `${lateSiblingElapsed}ms ${JSON.stringify(lateSiblingChannel)}`);
+
+  fs.writeFileSync(bridgesFile, JSON.stringify({ bridges: [{
+    session_id: lateBridgeId,
+    opencode_pid: process.pid,
+    pid: process.pid,
+    host: HOST,
+    port: bridgePort,
+    name: 'late-bridge-renamed',
+    updated_at: new Date().toISOString(),
+  }, {
+    session_id: lateSiblingBridgeId,
+    opencode_pid: process.pid,
+    pid: process.pid,
+    host: HOST,
+    port: bridgePort,
+    name: 'late-sibling',
+    updated_at: new Date().toISOString(),
+  }] }));
+  let renamedLateBridge = null;
+  try {
+    renamedLateBridge = await waitForChannelEntry(lateBridgeId, 1000, (channel) => channel.name === 'late-bridge-renamed');
+  } catch { /* asserted below */ }
+  check('late opencode bridge name refreshes before the heartbeat', renamedLateBridge?.name === 'late-bridge-renamed', JSON.stringify(renamedLateBridge));
+
+  fs.writeFileSync(bridgesFile, JSON.stringify({ bridges: [] }));
+  const removalDeadline = Date.now() + 1000;
+  let lateBridgeRemoved = false;
+  while (Date.now() < removalDeadline) {
+    const channels = JSON.parse(fs.readFileSync(channelsFile, 'utf8')).channels || [];
+    if (!channels.some((channel) => channel.session_id === lateBridgeId)) {
+      lateBridgeRemoved = true;
+      break;
+    }
+    await sleep(25);
+  }
+  check('removed late opencode bridge promptly reaps its channel', lateBridgeRemoved, JSON.stringify(JSON.parse(fs.readFileSync(channelsFile, 'utf8')).channels));
 
   const ccFallbackId = 'ses_claude_env_fallback';
   ccFallbackMcpClient = new Client({ name: 'golem-cc-env-fallback-journey', version: '1.0.0' });

@@ -49,10 +49,51 @@ function compactPath(p) {
   return `.../${parts.slice(-2).join('/')}`;
 }
 
+function CommunicationHealthIndicator({ health, onOpen }) {
+  const summary = health?.health || { level: 'green', red: 0, amber: 0, needs_attention: 0, queued: 0 };
+  const level = summary.level || 'green';
+  const needsAttention = Math.max(0, Number(summary.needs_attention) || 0);
+  const deliveryFailures = Math.max(0, (Number(summary.red) || 0) - needsAttention);
+  const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+  const label = level === 'red'
+    ? needsAttention > 0
+      ? [`${needsAttention} needs attention`, deliveryFailures > 0 ? plural(deliveryFailures, 'delivery failure') : null].filter(Boolean).join(' · ')
+      : plural(Math.max(1, Number(summary.red) || 0), 'delivery failure')
+    : level === 'amber'
+      ? `${summary.amber} awaiting acknowledgement`
+      : 'communication healthy';
+  const detail = level === 'green' && summary.queued
+    ? `${summary.queued} queued without degrading delivery health`
+    : label;
+  return (
+    <button
+      type="button"
+      className={`communication-health-indicator severity-${level}`}
+      data-testid="communication-health-indicator"
+      title={`Communication health: ${detail}. Open envelope timeline.`}
+      onClick={onOpen}
+    >
+      <span className="communication-health-dot"/>
+      <span className="communication-health-label">{label}</span>
+    </button>
+  );
+}
+
 function AgentsPage({ setRoute }) {
   useStore();
   const all = window.Store.getNativeSessions();
   const rolesRev = window.Store.getRolesRev ? window.Store.getRolesRev() : 0;
+  // The server broadcasts a payload-free fact-change signal. Fetching once per
+  // signal keeps this compact summary live without a dashboard polling loop.
+  const communicationHealthRev = window.Store.getState().communicationHealthRev || 0;
+  const [communicationHealth, setCommunicationHealth] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    window.SubstrateAPI.communicationHealth()
+      .then((result) => { if (!cancelled) setCommunicationHealth(result); })
+      .catch(() => { if (!cancelled) setCommunicationHealth(null); });
+    return () => { cancelled = true; };
+  }, [communicationHealthRev]);
 
   // v4: the server already pid-checks native sessions and marks them .alive.
   // Drop anything not alive so dead registry rows / stale CLI entries never
@@ -105,11 +146,15 @@ function AgentsPage({ setRoute }) {
 
   return (
     <div className="page">
-      <div className="page-header">
+      <div className="page-header agents-page-header">
         <div>
           <h1 className="page-title">Agents</h1>
           <div className="page-subtitle">{alive.length} native Claude Code session{alive.length === 1 ? '' : 's'} online.</div>
         </div>
+        <CommunicationHealthIndicator
+          health={communicationHealth}
+          onOpen={() => window.openCommunicationDrawer?.()}
+        />
       </div>
 
       <RolesPanel rev={rolesRev}/>

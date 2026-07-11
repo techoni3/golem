@@ -3767,6 +3767,118 @@ mark.anno.anno-tail::after {
 }
 .unacked-dispatch-dismiss:hover { color: var(--text-0); }
 
+/* ===== GOL-425: compact Agents communication health + factual drawer ===== */
+.communication-health-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  max-width: min(360px, 48vw);
+  border: 1px solid var(--border-2);
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--text-2);
+  padding: 4px 10px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: .01em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.communication-health-indicator:hover { border-color: var(--border-3); color: var(--text-0); }
+.communication-health-dot,
+.communication-severity-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--status-active);
+  box-shadow: 0 0 8px color-mix(in oklab, var(--status-active) 65%, transparent);
+}
+.communication-health-indicator.severity-amber,
+.communication-severity-dot.severity-awaiting,
+.communication-severity-dot.severity-pinged,
+.communication-severity-dot.severity-amber {
+  color: var(--status-review);
+  border-color: color-mix(in oklab, var(--status-review) 38%, transparent);
+}
+.communication-health-indicator.severity-amber .communication-health-dot,
+.communication-severity-dot.severity-awaiting,
+.communication-severity-dot.severity-pinged,
+.communication-severity-dot.severity-amber { background: var(--status-review); box-shadow: 0 0 8px color-mix(in oklab, var(--status-review) 65%, transparent); }
+.communication-health-indicator.severity-red,
+.communication-severity-dot.severity-failed,
+.communication-severity-dot.severity-escalated,
+.communication-severity-dot.severity-red {
+  color: var(--status-blocked);
+  border-color: color-mix(in oklab, var(--status-blocked) 38%, transparent);
+}
+.communication-health-indicator.severity-red .communication-health-dot,
+.communication-severity-dot.severity-failed,
+.communication-severity-dot.severity-escalated,
+.communication-severity-dot.severity-red { background: var(--status-blocked); box-shadow: 0 0 8px color-mix(in oklab, var(--status-blocked) 65%, transparent); }
+.communication-health-label { overflow: hidden; text-overflow: ellipsis; }
+
+.communication-drawer { width: min(620px, 96vw); }
+.communication-drawer-header { padding-bottom: 12px; }
+.communication-drawer-header .drawer-title-row { margin-bottom: 12px; }
+.communication-drawer-subtitle { color: var(--text-3); font-size: 11px; line-height: 1.45; }
+.communication-filter-tabs { display: flex; gap: 5px; overflow-x: auto; padding-bottom: 1px; }
+.communication-filter-tab {
+  flex: 0 0 auto;
+  border: 1px solid var(--border-2);
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--text-3);
+  padding: 4px 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  cursor: pointer;
+}
+.communication-filter-tab:hover { color: var(--text-1); border-color: var(--border-3); }
+.communication-filter-tab.active { color: var(--text-0); border-color: var(--accent-border); background: var(--accent-soft); }
+.communication-drawer-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px 16px 30px; display: flex; flex-direction: column; gap: 10px; }
+.communication-empty,
+.communication-error { padding: 28px 14px; text-align: center; color: var(--text-3); font-family: var(--font-mono); font-size: 11px; line-height: 1.55; }
+.communication-error { color: var(--status-blocked); border: 1px solid color-mix(in oklab, var(--status-blocked) 35%, transparent); border-radius: var(--radius-1); background: color-mix(in oklab, var(--status-blocked) 8%, var(--bg-1)); }
+.communication-envelope { background: var(--bg-1); border: 1px solid var(--border-1); border-left: 3px solid var(--border-2); border-radius: var(--radius-1); padding: 10px 12px; min-width: 0; }
+.communication-envelope.severity-awaiting,
+.communication-envelope.severity-pinged { border-left-color: var(--status-review); }
+.communication-envelope.severity-failed,
+.communication-envelope.severity-escalated { border-left-color: var(--status-blocked); }
+.communication-envelope-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.communication-state { font-family: var(--font-mono); font-size: 10px; color: var(--text-3); text-transform: uppercase; letter-spacing: .06em; }
+.communication-state.severity-awaiting,
+.communication-state.severity-pinged { color: var(--status-review); }
+.communication-state.severity-failed,
+.communication-state.severity-escalated { color: var(--status-blocked); }
+.communication-dismiss { margin-left: auto; border: 0; background: transparent; color: var(--text-3); padding: 1px 0 1px 6px; font-family: var(--font-mono); font-size: 10px; cursor: pointer; }
+.communication-dismiss:hover { color: var(--text-0); text-decoration: underline; }
+.communication-envelope-links { display: flex; align-items: baseline; flex-wrap: wrap; gap: 5px 8px; min-width: 0; margin: 7px 0 9px; }
+.communication-ticket-link,
+.communication-session-link { color: var(--accent); font-size: 11px; text-decoration: none; }
+.communication-ticket-link:hover,
+.communication-session-link:hover { color: var(--text-0); text-decoration: underline; }
+.communication-ticket-title { min-width: 0; flex: 1 1 160px; color: var(--text-1); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.communication-session-link { color: var(--text-3); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.communication-facts { list-style: none; display: flex; flex-direction: column; gap: 5px; margin: 0; padding: 0; }
+.communication-fact { display: grid; grid-template-columns: 78px minmax(0, 1fr); align-items: baseline; gap: 8px; font-size: 11.5px; color: var(--text-2); min-width: 0; }
+.communication-fact-time { color: var(--text-4); font-size: 10px; white-space: nowrap; }
+.communication-fact-label { min-width: 0; }
+.communication-fact-detail { grid-column: 2; color: var(--text-3); font-family: var(--font-mono); font-size: 10px; overflow-wrap: anywhere; }
+.communication-fact.severity-failed .communication-fact-label { color: var(--status-blocked); }
+.communication-fact.severity-pinged .communication-fact-label { color: var(--status-review); }
+
+@media (max-width: 620px) {
+  .agents-page-header { align-items: flex-start; gap: 12px; margin-bottom: 20px; }
+  .communication-health-indicator { max-width: 52vw; padding-inline: 8px; }
+  .communication-drawer { width: 100vw; max-width: 100vw; }
+  .communication-drawer-body { padding: 12px 12px 24px; }
+  .communication-envelope { padding: 9px 10px; }
+  .communication-fact { grid-template-columns: 67px minmax(0, 1fr); gap: 6px; }
+  .communication-ticket-title { flex-basis: 100%; }
+}
+
 /* Offline-orphans section rows (pending dispatches whose target session is
    dead). Mirrors the agents-section styling family. */
 .agents-section-orphans .agents-section-title { color: var(--status-review); }

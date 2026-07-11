@@ -14,7 +14,9 @@ process.env.GOLEM_HOME = path.join(tmp, 'golem-home');
 
 const shimUrl = pathToFileURL(path.resolve('shims/opencode/index.js')).href + `?t=${Date.now()}`;
 const nativeUrl = pathToFileURL(path.resolve('dashboard/server/native-sessions.js')).href + `?t=${Date.now()}`;
-const { default: opencodeShim } = await import(shimUrl);
+const shimModule = await import(shimUrl);
+assert.deepEqual(Object.keys(shimModule), ['default'], 'OpenCode plugin module exposes only its callable plugin export');
+const { default: opencodeShim } = shimModule;
 const { readNativeSessions } = await import(nativeUrl);
 
 const resumed = {
@@ -129,8 +131,11 @@ const sessionRegistry = JSON.parse(fs.readFileSync(sessionsFile, 'utf8'));
 sessionRegistry.sessions = sessionRegistry.sessions.filter((s) => s.session_id !== siblingA.id);
 fs.writeFileSync(sessionsFile, JSON.stringify(sessionRegistry, null, 2));
 await hooks['chat.message']({ sessionID: siblingA.id });
-assert.ok(JSON.parse(fs.readFileSync(bridgeFile, 'utf8')).bridges.some((b) => b.session_id === siblingA.id), 'known session bridge self-heals in one event');
-assert.ok(JSON.parse(fs.readFileSync(sessionsFile, 'utf8')).sessions.some((s) => s.session_id === siblingA.id), 'known session registry row self-heals in one event');
+assert.equal(JSON.parse(fs.readFileSync(bridgeFile, 'utf8')).bridges.some((b) => b.session_id === siblingA.id), false, 'chat.message does not fabricate a busy bridge update');
+assert.equal(JSON.parse(fs.readFileSync(sessionsFile, 'utf8')).sessions.some((s) => s.session_id === siblingA.id), false, 'chat.message does not fabricate a busy session update');
+await hooks.event({ event: { type: 'session.status', properties: { sessionID: siblingA.id, status: { type: 'idle' } } } });
+assert.ok(JSON.parse(fs.readFileSync(bridgeFile, 'utf8')).bridges.some((b) => b.session_id === siblingA.id), 'real session status self-heals known bridge');
+assert.ok(JSON.parse(fs.readFileSync(sessionsFile, 'utf8')).sessions.some((s) => s.session_id === siblingA.id), 'real session status self-heals known registry row');
 
 await hooks.event({ event: { type: 'session.created', properties: { info: child } } });
 await hooks['chat.message']({ sessionID: child.id });
@@ -198,7 +203,7 @@ assert.ok(JSON.parse(fs.readFileSync(sessionsFile, 'utf8')).sessions.find((s) =>
 
 fs.mkdirSync(bridgeLock);
 try {
-  await hooks['chat.message']({ sessionID: siblingB.id });
+  await hooks.event({ event: { type: 'session.status', properties: { sessionID: siblingB.id, status: { type: 'busy' } } } });
 } finally {
   fs.rmSync(bridgeLock, { recursive: true, force: true });
 }

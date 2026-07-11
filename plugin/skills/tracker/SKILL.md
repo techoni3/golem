@@ -46,7 +46,7 @@ Prefer `ticket_transition({id, phase, reason?, skip_reason?})` over `ticket_upda
 3. Managers route verification with `ticket_transition({id, phase:'verifying'})`: `built -> verifying`.
 4. Verifiers do not claim. The manager has already set `verifying`; the explorer posts its PASS/FAIL report, then calls `ticket_transition({id, phase:'verified'})` for PASS or `ticket_transition({id, phase:'rejected'})` for FAIL. A verifier never writes legacy state.
 5. Managers close verified work with `ticket_transition({id, phase:'done'})`: `verified -> done`.
-6. Subscribe when you are waiting on handoffs: use `ticket/<display_id>` for one ticket or `spec/<display_id>/tree` for a spec and its children. Subscription digests replace manual polling for long waits.
+6. Subscribe when you are waiting on handoffs: use `ticket/<display_id>` for one ticket or `spec/<display_id>/tree` for a spec and its children. This is quiet next-turn interest, not a wake-up: the four passive ticket deltas appear only on your next real user turn or actionable envelope.
 7. Do the work. Comment milestones with mechanical evidence: commands and real output, not claims.
 8. Verify before advancing to `built`, `verified`, `rejected`, or `done`; read `golem:verify-done`.
 
@@ -54,8 +54,8 @@ Prefer `ticket_transition({id, phase, reason?, skip_reason?})` over `ticket_upda
 
 - Ticket mutations emit tracker events on `ticket/<display_id>`.
 - Child ticket mutations also mirror to `spec/<parent-display-id>/tree`.
-- Hook/session events use lifecycle/activity/custom classes and are delivered only to subscriptions whose class filter matches.
-- Default subscription classes are `tracker`, `lifecycle`, and `custom`; activity is opt-in to keep digests small.
+- Subscriptions preserve durable event history/cursors; normal delivery is disabled by default, so they never create a standalone model turn.
+- Manual exact ticket/spec subscriptions contribute only passive phase, assignment, blocker, and result deltas. Activity/raw history is never injected into a prompt.
 
 ## Decompose Larger Work
 

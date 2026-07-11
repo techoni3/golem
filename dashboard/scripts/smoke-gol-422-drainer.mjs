@@ -43,6 +43,7 @@ try {
   rootAfterPing = tracker.getEnvelope(root.id);
   assert.equal(pushed.length, 2, 'restart sent exactly one escalation');
   assert.ok(rootAfterPing.escalation_envelope_id, 'root durably links escalation');
+  assert.equal(tracker.getEnvelope(rootAfterPing.escalation_envelope_id)?.kind, 'escalation', 'child uses the envelope protocol escalation kind');
   assert.equal(pushed[1].session, 'sender', 'escalation used stored reply route');
   // Repeated pass cannot duplicate the child.
   drainer = start(); await wait(5_300); drainer.close();
@@ -56,6 +57,18 @@ try {
   tracker.acknowledgeEnvelope(ping.id, { target_session_id: 'target', summary: 'picked up' });
   const ackedRoot = tracker.getEnvelope(root2.id);
   assert.ok(ackedRoot.acknowledged_at && ackedRoot.ack_via_envelope_id === ping.id, 'ping acknowledgement resolved root');
+  const pushedBeforeLegacy = pushed.length;
+  // GOL-140 envelope-less delivery attempts still produce their legacy warning,
+  // rather than being consumed by GOL-422 durable recovery.
+  const legacyAttempt = tracker.markDispatchDeliveryAttempted(created.id, { session_id: 'legacy-target', actor: 'legacy-sender' });
+  assert.equal(legacyAttempt.data.envelope_id, null, 'legacy attempt has no durable envelope id');
+  sql("UPDATE events SET created_at = '2000-01-01T00:00:00.000Z' WHERE id = ?", legacyAttempt.id);
+  drainer = start(); await wait(5_300); drainer.close();
+  const legacyWarning = tracker.raw().prepare(`SELECT id FROM events
+    WHERE type = 'dispatch_unacked_warning'
+      AND CAST(json_extract(data, '$.delivery_event_id') AS INTEGER) = ?`).get(legacyAttempt.id);
+  assert.ok(legacyWarning, 'legacy envelope-less delivery retained its GOL-140 warning');
+  assert.equal(pushed.length, pushedBeforeLegacy, 'legacy warning did not create another durable child');
   console.log('PASS GOL-422 drainer/restart journey');
 } finally {
   try { tracker?.close(); } catch {}

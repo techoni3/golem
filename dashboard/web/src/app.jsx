@@ -76,11 +76,14 @@ function App() {
         open={!!route.overlays.chat}
         sessionId={route.overlays.chat}
         onClose={() => window.Router.closeOverlay('chat')}/>
-      <NativeSessionDrawer
-        open={!!route.overlays.ns}
-        sessionId={route.overlays.ns}
-        onClose={() => window.Router.closeOverlay('ns')}/>
-      <CreateTicketDrawer
+       <NativeSessionDrawer
+         open={!!route.overlays.ns}
+         sessionId={route.overlays.ns}
+         onClose={() => window.Router.closeOverlay('ns')}/>
+       <CommunicationDrawer
+         open={!!route.overlays.communication}
+         onClose={() => window.Router.closeOverlay('communication')}/>
+       <CreateTicketDrawer
         open={!!route.overlays.compose}
         preselectProject={route.overlays.composeProject || ''}
         preselectKind={route.overlays.composeKind || ''}

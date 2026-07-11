@@ -25,7 +25,7 @@ Channel kind `role_assign` (dashboard/CLI role picker) is **identity only**. Ack
 
 1. Size the request. Feature work gets a tracker ticket or spec; tiny work does not.
 2. Manager front door when a live manager exists; explicit user/session targets always override.
-3. Subscribe before waiting: `ticket/<display_id>` or `spec/<display_id>/tree` — do not poll.
+3. Subscribe before waiting: `ticket/<display_id>` or `spec/<display_id>/tree` — quiet next-turn interest, never a model wake-up; do not poll.
 4. One writer per checkout. Parallel builders need one orchestrator-directed worktree each. Read-only recon may fan out.
 5. Advance by phase, not vibes. If a transition rejects, add the missing artifact or stay put.
 6. Close implementation with the four-part brief: what changed · acceptance + evidence · human test steps · not-done/deferred.

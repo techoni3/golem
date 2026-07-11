@@ -32,16 +32,19 @@ golem sync --target opencode
 
 ## What it renders
 
-opencode reads golem's pieces from **two** locations (unlike the CC plugin,
-which is one bundle), plus a managed config merge:
+opencode reads golem's pieces from **three** rendered locations (unlike the CC
+plugin, which is one bundle), plus checkout-backed MCP and shim entries in the
+managed config merge:
 
 | Piece  | Rendered to | How opencode finds it |
 |--------|-------------|-----------------------|
 | Agents | `~/.config/opencode/agent/<name>.md` | opencode's **fixed** global agent dir — there is no config key to add extra agent search paths, so the files must live there physically. |
 | Skills | `~/.golem/renders/opencode/skills/<name>/SKILL.md` | that dir is appended to the `skills.paths` array in `opencode.jsonc`. |
+| Instructions | `~/.config/opencode/AGENTS.md` and `tracker-context.md` | managed global instructions and the tracker-context snapshot in opencode's config directory. |
 | MCP    | `mcp.golem` in `opencode.jsonc` | a `local` server pointing at the repo's `mcp/channel/index.js` (referenced by absolute path — no copy, unlike the CC plugin bundle). |
+| Shim   | `plugin[]` in `opencode.jsonc` | a `file://` plugin pointing at the repo's `shims/opencode/index.js`; it maps lifecycle events and owns the SDK bridge. |
 
-Both render passes use the same engine (lockfile / tamper-detection / orphan
+All three compiler render passes use the same engine (lockfile / tamper-detection / orphan
 pruning) as the CC target, keyed independently by output dir.
 
 ## Dialect translation
@@ -56,17 +59,18 @@ Agent **frontmatter** is *translated*, not copied — a Claude Code agent's
   attempting a full 1:1 tool-map.
 - `model` is **omitted** so the opencode session's own default model is
   inherited. (The typical opencode setup runs GPT auth with no Anthropic
-  models available, so pinning `model: opus` would break the agent. Fill in
-  `harnesses.opencode.modelMap` later if you want explicit per-agent models.)
+  models available, so pinning `model: opus` would break the agent.
+  `harnesses.opencode.modelMap` is currently reserved and not consumed.)
 
 Agent and skill **bodies** are copied but run through the compiler's
 `{{#if opencode}}` / `{{#if claudecode}}` templating, so the two CC-specific
 bits render their opencode variant:
 
-- `skills/journaling` — the "mechanical journaling is automatic via plugin
-  hooks" note becomes "needs Claude Code hooks; under opencode `hook.jsonl` is
-  not auto-written" (opencode has no golem lifecycle hooks).
-- `skills/pr-conventions` — the `🤖 Generated with [Claude Code]` PR trailer
+- `skills/journaling` currently renders a stale claim that `hook.jsonl` is not
+  automatic under opencode. Runtime does map lifecycle, chat, and tool events
+  through the shim into the same journal scripts, so the file is written
+  without Claude Code's native hook manifest.
+- `skills/git-conventions` — the `🤖 Generated with [Claude Code]` PR trailer
   becomes `[opencode]`.
 
 Rendering the CC branch and dropping the opencode branch leaves every existing
@@ -76,19 +80,21 @@ is unaffected.
 ## Config merge safety
 
 `opencode.jsonc` is merged with `jsonc-parser` (comment-preserving), touching
-**only** the two managed keys `mcp.golem` and `skills.paths` — your own keys,
-comments, and formatting survive, and `skills.paths` is appended to (never
-overwritten). Every write is guarded: the file is backed up, written, then
-validated with the real `opencode debug config`; on validation failure the
-previous file is restored and the sync fails loudly. (This follows the P3
-lesson: validate against the actual tool, not just the published schema.) On
-success the backup is removed.
+the managed `mcp.golem`, `skills.paths`, and golem shim entry in `plugin[]`,
+your own keys, comments, and formatting survive, and arrays are appended to
+rather than replaced. An existing file is backed up; a newly created file is
+removed if validation fails. When the opencode binary is available, the result is validated with the real
+`opencode debug config`; validation failure restores the previous file and fails
+the sync. If the binary is unavailable, the merge is retained with a warning and
+has not been runtime-validated. On successful validation the backup is removed.
 
 ## Version pinning & doctor
 
-A clean, validated sync pins `harnesses.opencode.testedVersion` to the running
-`opencode --version`. `golem doctor` warns on skew (rendered against one
-version, a different one installed) and reports opencode render drift.
+Sync records the running `opencode --version` in
+`harnesses.opencode.testedVersion`; `golem doctor` warns on later skew and
+reports render drift. An unchanged config can be repinned without rerunning
+`opencode debug config`, so the pin is a compatibility target rather than proof
+that every sync path validated against that version.
 
 ## Caveats
 
@@ -133,14 +139,15 @@ Runtime flow:
   `client.session.status()` reports as active. If opencode returns no active ids,
   the shim falls back to the single most-recent top-level session only when it was
   updated recently, so persistent opencode history is not resurrected as live.
-- The MCP channel process is a child of the opencode process, so its heartbeat
-  resolves the matching bridge by `process.ppid`, registers its own HTTP port in
-  `~/.golem/channels.json` under that `ses_*` id, and marks the row
-  `harness:"opencode"`.
+- The MCP channel process is a child of the opencode process. It resolves bridge
+  rows by `process.ppid`, registers its own HTTP port in
+  `~/.golem/channels.json`, and watches bridge membership/name changes so late
+  sessions appear immediately; a 30-second heartbeat remains the recovery
+  backstop.
 - Dashboard dispatch still POSTs to the registered channel server. For opencode
   parents, the channel server forwards the push to the shim bridge; the shim
   injects the canonical `<channel source="golem" kind="...">...</channel>` text
-  into the live session with `client.session.prompt(...)`.
+  into the live session with `client.session.promptAsync(...)`.
 - `session.idle`, busy `session.status`, `chat.message`, and tool events update
   the bridge and `sessions.json` status/recency so `sessions_dispatchable` can
   show idle/busy and queue `when_idle` dispatches the same way it does for Claude
@@ -148,8 +155,9 @@ Runtime flow:
   `session.status` carries `status` as an OBJECT (`{type:"idle"|"retry"|"busy"}`);
   the shim collapses it to the plain string the dashboard compares against
   (`retry` counts as `busy`).
-- The shim also records the active opencode model in `~/.golem/sessions.json`
-  from opencode's runtime state file (`~/.local/state/opencode/model.json`,
+- The shim also records the active opencode model in `~/.golem/sessions.json`.
+  It first queries the per-session value in opencode's SQLite database, then
+  falls back to the runtime state file (`~/.local/state/opencode/model.json`,
   `recent[0].modelID`). Model changes are refreshed on shim-visible
   session/chat/tool/status activity; there is no idle heartbeat that fakes recent
   activity.
@@ -158,10 +166,10 @@ Runtime flow:
   after the first message, updated on rename). Events from child/subagent
   sessions can only update existing rows, never insert, so they cannot create
   phantom sessions or dispatch endpoints.
-- `session.deleted`, `server.instance.disposed`, and opencode bridge pid liveness
-  drive death. The dashboard treats an opencode session with no matching bridge,
-  or a bridge whose owning opencode pid is gone, as dead; `last_seen_at` is only
-  a recency/activity hint.
+- `session.deleted`, `server.instance.disposed`, channel liveness, and opencode
+  bridge pid liveness drive death. A live channel can bridge a bounded
+  bridge-loss window from recent registry activity; stale activity alone does
+  not create a dispatch endpoint.
 
 The bridge is fail-open: HTTP or SDK errors are logged to
 `~/.golem/logs/opencode-shim.log` and must not crash or stall opencode.

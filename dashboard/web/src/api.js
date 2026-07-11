@@ -174,6 +174,9 @@
     createWS,
     snapshot: () => getJSON('/api/snapshot'),
     meta: () => getJSON('/api/meta'),
+    communicationHealth: (params) => getJSON(`/api/communication-health${qs(params)}`),
+    listMessageEnvelopes: (params) => getJSON(`/api/message-envelopes${qs(params)}`),
+    getMessageEnvelope: (id) => getJSON(`/api/message-envelopes/${encodeURIComponent(id)}`),
     projects: () => getJSON('/api/projects'),
     workspaces: () => getJSON('/api/workspaces'),
     // v4 (fix round 2): peek payload for one native session — recent central-

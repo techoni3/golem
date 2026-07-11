@@ -1,49 +1,52 @@
 # REPO-MAP.md
-> Last verified: 2026-07-10 @ eab500e — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-10 @ 44bd061 — maintained via golem:docs-maintenance.
+> Includes current working-tree behavior not yet represented by that commit.
 
 ## Directory structure
-- `substrate/` — source of truth for plugin content.
-- `plugin/` — generated Claude Code render; never hand-edit.
+- `substrate/` — plugin source of truth.
+- `plugin/` — generated CC render; never hand-edit.
 - `cli/` — thin `golem` command entry point.
-- `lib/` — runtime, role, compiler, lint, and LSP helpers.
-- `dashboard/server/` — Fastify API and sole `tracker.db` owner.
+- `lib/` — runtime, role, compiler, lint, LSP helpers.
+- `dashboard/server/` — Fastify API and `tracker.db` owner.
 - `dashboard/web/` — no-bundler React globals.
-- `mcp/channel/` — per-session HTTP/MCP channel server.
-- `shims/opencode/` — maps opencode events into hook/session registries.
+- `mcp/channel/` — per-session HTTP/MCP channel.
+- `shims/opencode/` — maps events into hook/session registries.
 - `test/` — journey tests for CLI/compiler enforcement paths.
-- `golem-projects/` — independent checkouts.
-- `.worktrees/` — gitignored builder checkouts; explicit dispatches only.
+- `golem-projects/` — repos.
+- `.worktrees/` — gitignored; explicit dispatches only.
 
 ## Key modules & entry points
 ### `dashboard/server/index.js`
-- Registers REST/WS; tracker/hook ingest rebroadcast through `broadcastWS`.
+- Registers REST/WS; envelope health is read-only and fact changes rebroadcast.
 - Invariant: agents use HTTP/MCP, never direct DB writes.
 ### `tracker-db.js` + `phase-machine.js` + `team-assist.js`
-- Phase is source of truth; `state` is derived.
-- Schema: phases v10, hook UUIDs v11, dispatch workspace v12, v13 durable envelopes.
-- Team assists suggest least-loaded roles; never auto-dispatch.
+- Phase is source of truth; `state` derives from it.
+- Schema v10 phases through v15 cursors.
+- Assists suggest; never dispatch.
 ### `dashboard/server/native-sessions.js`
 - Merges hook-written `sessions.json` with harness registries.
-- Invariant: hooks/shims write registration; dashboard only reads/enriches.
+- Hooks/shims own registration; dashboard may materialize bus status into existing rows.
 ### `substrate/hooks/*.sh`
-- SessionStart registers, journals, and injects LSP, Team, and role-card context.
+- SessionStart registers, journals, and contextualizes; prompts add passive deltas.
 ### `substrate/instructions/`
-- Global AGENTS spine renders as managed blocks; outside-marker user text survives sync.
+- Managed global AGENTS blocks preserve user text.
 ### `substrate/skills/`
-- Role SOPs: `managing`, `planning`, `exploring`, `building`, `consulting` — single SoT per role; AGENTS and role cards reference only.
+- Role SOPs are the single source of truth for each role.
 ### `substrate/roles/`
 - Shallow role cards injected at SessionStart.
 ### `mcp/channel/index.js`
-- Exposes work briefs, role assignments, replies, consults, gates, and tracker tools per live session.
+- Exposes briefs, roles, replies, consults, gates, and tracker tools.
 
 ## Data flow
-Hooks/shims write `~/.golem/` registries and journals; dashboard owns `tracker.db`, exposes rosters, and broadcasts state. New dispatches persist an envelope before channel delivery; legacy queue rows need none.
+Hooks/shims write `~/.golem/`; dashboard owns `tracker.db`. Envelope health derives from facts. Passive slots land on real turns or successful envelopes; subscription digests are quiet by default.
+
+Visual deep dive: [session architecture](docs/session-architecture.html). Separate OpenCode/Claude Code startup, hooks, delivery, envelopes, and closing-brief flows.
 
 ## Constraints & gotchas
-- Claude Code loads `~/.golem/renders/cc-plugin`; sync + update + `/reload-plugins` after substrate edits.
-- Dashboard `.jsx` files are globals; duplicate top-level names shadow by load order.
+- Claude installs from `~/.golem/renders/cc-plugin` but runs cached plugin bytes; sync + update + `/reload-plugins` after edits.
+- Dashboard `.jsx` files are globals; duplicates shadow by load order.
 - `plugin/` is a render target, not the source of truth; hand edits there are overwritten.
-- Worktree builders self-check; manager/planner reconciles on main.
+- Worktree builders self-check; manager/planner reconciles.
 
 ## Common tasks
 | Task | Files | Verify with |

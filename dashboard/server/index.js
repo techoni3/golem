@@ -201,6 +201,29 @@ function buildSpecBrief(ticket, note, workspace, messageId = null) {
   return lines.filter((line) => line != null).join('\n');
 }
 
+// GOL-423: a passive batch only rides an already-actionable delivery. Claiming
+// or committing it must never make the dispatch/reply path fail; an unavailable
+// buffer simply leaves the normal brief untouched for this opportunity.
+function appendPassiveDelta(tracker, sessionId, brief) {
+  try {
+    const claim = tracker.claimPassiveDelta(sessionId);
+    if (!claim?.lease_id || !claim?.batch?.body) return { brief, claim: null };
+    return { brief: `${brief}\n\n${claim.batch.body}`, claim };
+  } catch {
+    return { brief, claim: null };
+  }
+}
+
+function settlePassiveDelta(tracker, sessionId, claim, delivered) {
+  if (!claim?.lease_id) return;
+  try {
+    if (delivered) tracker.commitPassiveDelta(sessionId, claim.lease_id);
+    else tracker.releasePassiveDelta(sessionId, claim.lease_id);
+  } catch {
+    // The durable batch remains replayable after an interrupted settlement.
+  }
+}
+
 function statusForHookEvent(type) {
   switch (type) {
     case 'session-start': return 'idle';
@@ -637,6 +660,89 @@ async function main() {
     chat: chat.snapshot(),
   }));
 
+  // GOL-425: compact, read-only inspection over durable envelope facts. These
+  // routes expose dispatch roots rather than raw event rows; status/attention
+  // are derived at query time from delivery, acknowledgement, child-envelope,
+  // and dismissal facts.
+  const COMMUNICATION_ENVELOPE_STATES = new Set([
+    'needs_attention', 'in_flight', 'history', 'queued',
+    'awaiting', 'pinged', 'failed', 'escalated', 'healthy',
+  ]);
+  // Public fact filters intentionally use stable categories. `delivery` also
+  // covers root and protocol-child attempt/opportunity/error fact rows.
+  const COMMUNICATION_ENVELOPE_FACTS = new Set([
+    'assigned', 'queued', 'delivery', 'deadline', 'acknowledged',
+    'ack_ping', 'escalation', 'reply', 'completion', 'dismissed',
+  ]);
+
+  function communicationQueryString(query, name) {
+    if (query[name] == null) return null;
+    if (typeof query[name] !== 'string' || !query[name].trim()) throw new Error(`${name} must be a non-empty string`);
+    return query[name].trim();
+  }
+
+  function communicationTimestamp(query, name) {
+    const value = communicationQueryString(query, name);
+    if (value == null) return null;
+    const ms = Date.parse(value);
+    if (!Number.isFinite(ms)) throw new Error(`${name} must be a parseable timestamp`);
+    return new Date(ms).toISOString();
+  }
+
+  function communicationEnvelopeFilter(query = {}) {
+    const ticketValue = communicationQueryString(query, 'ticket') || '';
+    const ticket = ticketValue ? resolveTicketRef(ticketValue) : null;
+    const projectValue = communicationQueryString(query, 'project');
+    const sessionValue = communicationQueryString(query, 'session');
+    const state = communicationQueryString(query, 'state');
+    const fact = communicationQueryString(query, 'fact');
+    if (state && !COMMUNICATION_ENVELOPE_STATES.has(state)) throw new Error(`state must be one of: ${[...COMMUNICATION_ENVELOPE_STATES].join(', ')}`);
+    if (fact && !COMMUNICATION_ENVELOPE_FACTS.has(fact)) throw new Error(`fact must be one of: ${[...COMMUNICATION_ENVELOPE_FACTS].join(', ')}`);
+    const from = communicationTimestamp(query, 'from');
+    const to = communicationTimestamp(query, 'to');
+    if (from && to && from > to) throw new Error('from must be less than or equal to to');
+    let limit = null;
+    if (query.limit != null) {
+      if (typeof query.limit !== 'string' || !/^[1-9]\d*$/.test(query.limit)) throw new Error('limit must be an integer from 1 to 500');
+      limit = Number(query.limit);
+      if (!Number.isSafeInteger(limit) || limit > 500) throw new Error('limit must be an integer from 1 to 500');
+    }
+    return {
+      ticket_id: ticket?.id ?? (ticketValue || null),
+      project_id: projectValue ? (resolveProjectId(projectValue) || projectValue) : null,
+      session_id: sessionValue,
+      state,
+      fact,
+      from,
+      to,
+      limit,
+    };
+  }
+
+  fastify.get('/api/communication-health', async (req, reply) => {
+    try {
+      return tracker.communicationHealth(communicationEnvelopeFilter(req.query ?? {}));
+    } catch (err) {
+      return reply.code(400).send({ error: String(err?.message ?? err) });
+    }
+  });
+
+  fastify.get('/api/message-envelopes', async (req, reply) => {
+    try {
+      const filter = communicationEnvelopeFilter(req.query ?? {});
+      const items = tracker.listEnvelopeViews(filter);
+      return { items, total: items.length };
+    } catch (err) {
+      return reply.code(400).send({ error: String(err?.message ?? err) });
+    }
+  });
+
+  fastify.get('/api/message-envelopes/:id', async (req, reply) => {
+    const item = tracker.getEnvelopeView(req.params.id);
+    if (!item) return reply.code(404).send({ error: 'not_found' });
+    return item;
+  });
+
   fastify.get('/api/chat', async () => chat.snapshot());
 
   // ---- Orchestrator intrusion proxy (dashboard → golem MCP channel server) ----
@@ -678,6 +784,15 @@ async function main() {
     return sid && sid.trim() ? sid.trim() : null;
   }
 
+  function requirePassiveCaller(req, reply, sessionId) {
+    const caller = typeof req.headers['x-golem-caller-session'] === 'string'
+      ? req.headers['x-golem-caller-session'].trim()
+      : '';
+    if (caller && caller === sessionId) return true;
+    reply.code(403).send({ error: 'passive delta caller does not match intended session' });
+    return false;
+  }
+
   fastify.post('/api/brief', async (req, reply) => {
     const body = extractBody(req);
     const sessionId = extractSessionId(req);
@@ -693,10 +808,20 @@ async function main() {
     const b = req.body ?? {};
     try {
       const envelope = tracker.createNotificationEnvelope({ project_id: b.project_id ?? null, sender_id: b.sender_id, recipient_session_id: b.session_id, payload: b.text });
-      const delivery = await pushBrief(String(b.text || ''), envelope.recipient_session_id, {
-        envelope_id: envelope.id, sender_session_id: envelope.sender_id, target_session_id: envelope.recipient_session_id,
-      });
-      tracker.markEnvelopeDelivery(envelope.id, { error: delivery.ok ? null : (delivery.error || `status ${delivery.status}`) });
+      const passive = appendPassiveDelta(tracker, envelope.recipient_session_id, String(b.text || ''));
+      let delivery;
+      let passiveCommitted = false;
+      try {
+        delivery = await pushBrief(passive.brief, envelope.recipient_session_id, {
+          envelope_id: envelope.id, sender_session_id: envelope.sender_id, target_session_id: envelope.recipient_session_id,
+        });
+        // Decide from the delivery opportunity before durable bookkeeping: a
+        // bookkeeping failure must not replay context that already reached it.
+        passiveCommitted = !!delivery?.ok;
+        tracker.markEnvelopeDelivery(envelope.id, { error: delivery.ok ? null : (delivery.error || `status ${delivery.status}`) });
+      } finally {
+        settlePassiveDelta(tracker, envelope.recipient_session_id, passive.claim, passiveCommitted);
+      }
       return { ok: !!delivery.ok, envelope_id: envelope.id, delivery };
     } catch (err) {
       return reply.code(400).send({ error: String(err?.message ?? err) });
@@ -1242,6 +1367,7 @@ async function main() {
       const ticket = tracker.getTicket(id);
       if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
       broadcastWS({ type: 'native-sessions-update', native_sessions: enrichSessionRows(state.nativeSessions(), state.channels()), channels: state.channels() });
+      broadcastWS({ type: 'communication-health-updated' });
       return event;
     } catch (err) {
       const msg = String(err?.message ?? err);
@@ -1408,6 +1534,7 @@ async function main() {
         // TKT-0286: signal every queue-aware surface (Agents page chips, the
         // session peek drawer list, offline orphans) to refetch.
         broadcastWS({ type: 'dispatch-queue-updated' });
+        broadcastWS({ type: 'communication-health-updated' });
         return { ok: true, queued: true, delivered: false, queue_id: queueRow.id, envelope_id: queueRow.envelope_id, ticket };
       }
       // target idle + reachable → fall through to immediate delivery below.
@@ -1423,37 +1550,48 @@ async function main() {
     //    (TKT-0245: extracted to buildDispatchBrief so the drainer produces
     //    byte-identical briefs.)
     const envelope = tracker.createDispatchEnvelope(id, { session_id: sessionId, actor: senderId || 'human', sender_id: senderId });
-    const briefString = buildDispatchBrief(existing, note, workspace, envelope.id);
+    const baseBriefString = buildDispatchBrief(existing, note, workspace, envelope.id);
+    const passive = appendPassiveDelta(tracker, sessionId, baseBriefString);
+    const briefString = passive.brief;
     tracker.setEnvelopePayload(envelope.id, { content: briefString, envelope_id: envelope.id, sender_id: envelope.sender_id, reply_to_session_id: envelope.reply_to_session_id, recipient_session_id: envelope.recipient_session_id });
 
     // 3) Best-effort channel push — never fail the request on a push miss.
     let channelResult = null;
+    let passiveCommitted = false;
     try {
-      channelResult = await pushBrief(briefString, sessionId, { envelope_id: envelope.id, sender_session_id: envelope.sender_session_id, target_session_id: sessionId });
-    } catch (err) {
-      channelResult = { ok: false, error: String(err?.message ?? err) };
+      try {
+        channelResult = await pushBrief(briefString, sessionId, { envelope_id: envelope.id, sender_session_id: envelope.sender_session_id, target_session_id: sessionId });
+      } catch (err) {
+        channelResult = { ok: false, error: String(err?.message ?? err) };
+      }
+      // The push is the delivery opportunity. Set this before chat or tracker
+      // writes so their failures cannot release delivered passive context.
+      passiveCommitted = !!channelResult?.ok;
+      if (channelResult && channelResult.ok) {
+        chat.record('user', 'brief', briefString, { session_id: sessionId });
+      } else {
+        const detail = channelResult?.error || `status ${channelResult?.status ?? '?'}`;
+        chat.record('system', 'error', `dispatch of ${existing.display_id || id} to ${sessionId} — channel ${detail} (ticket assigned; session will pick it up on resume)`);
+      }
+      tracker.markDispatchDeliveryAttempted(id, {
+        session_id: sessionId,
+        actor: 'human',
+        error: channelResult && channelResult.ok ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),
+        envelope_id: envelope.id,
+      });
+      tracker.markEnvelopeDelivery(envelope.id, {
+        error: channelResult && channelResult.ok ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),
+      });
+    } finally {
+      settlePassiveDelta(tracker, sessionId, passive.claim, passiveCommitted);
     }
-    if (channelResult && channelResult.ok) {
-      chat.record('user', 'brief', briefString, { session_id: sessionId });
-    } else {
-      const detail = channelResult?.error || `status ${channelResult?.status ?? '?'}`;
-      chat.record('system', 'error', `dispatch of ${existing.display_id || id} to ${sessionId} — channel ${detail} (ticket assigned; session will pick it up on resume)`);
-    }
-    tracker.markDispatchDeliveryAttempted(id, {
-      session_id: sessionId,
-      actor: 'human',
-      error: channelResult && channelResult.ok ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),
-      envelope_id: envelope.id,
-    });
-    tracker.markEnvelopeDelivery(envelope.id, {
-      error: channelResult && channelResult.ok ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),
-    });
     if (channelResult && channelResult.ok) {
       tracker.markCommentDispatchesDeliveredForTicket(id, sessionId);
     }
 
     const ticket = tracker.getTicket(id);
     broadcastWS({ type: 'ticket-updated', ticket });
+    broadcastWS({ type: 'communication-health-updated' });
     // Bare 'now' POSTs (the default) keep the exact original response shape so
     // existing callers (MCP ticket_dispatch, older UI) are untouched. The
     // when_idle path that fell through (target was already idle) adds the
@@ -1468,7 +1606,12 @@ async function main() {
   fastify.post('/api/message-envelopes/:id/ack', async (req, reply) => {
     try {
       const trustedCaller = typeof req.headers['x-golem-caller-session'] === 'string' ? req.headers['x-golem-caller-session'] : '';
-      return { ok: true, envelope: tracker.acknowledgeEnvelope(req.params.id, { ...(req.body ?? {}), target_session_id: trustedCaller }) };
+      const envelope = tracker.acknowledgeEnvelope(req.params.id, { ...(req.body ?? {}), target_session_id: trustedCaller });
+      const ticket = envelope?.ticket_id ? tracker.getTicket(envelope.ticket_id) : null;
+      if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
+      broadcastWS({ type: 'communication-health-updated' });
+      broadcastWS({ type: 'native-sessions-update', native_sessions: enrichSessionRows(state.nativeSessions(), state.channels()), channels: state.channels() });
+      return { ok: true, envelope };
     } catch (err) {
       const msg = String(err?.message ?? err);
       return reply.code(/not found/.test(msg) ? 404 : 403).send({ error: msg });
@@ -1483,13 +1626,24 @@ async function main() {
       // session. Human-originated dispatches deliberately have no channel route.
       let sender_delivery = null;
       if (result.reply.recipient_session_id) {
-        sender_delivery = await pushBrief(
-          `Reply for dispatch ${envelope.ticket_id}: ${String(req.body?.text || '')}`,
-          result.reply.recipient_session_id,
-          { envelope_id: result.reply.id, sender_session_id: trustedCaller || null, target_session_id: result.reply.recipient_session_id },
-        );
-        tracker.markEnvelopeDelivery(result.reply.id, { error: sender_delivery.ok ? null : (sender_delivery.error || `status ${sender_delivery.status}`) });
+        const baseBrief = `Reply for dispatch ${envelope.ticket_id}: ${String(req.body?.text || '')}`;
+        const passive = appendPassiveDelta(tracker, result.reply.recipient_session_id, baseBrief);
+        let passiveCommitted = false;
+        try {
+          sender_delivery = await pushBrief(
+            passive.brief,
+            result.reply.recipient_session_id,
+            { envelope_id: result.reply.id, sender_session_id: trustedCaller || null, target_session_id: result.reply.recipient_session_id },
+          );
+          passiveCommitted = !!sender_delivery?.ok;
+          tracker.markEnvelopeDelivery(result.reply.id, { error: sender_delivery.ok ? null : (sender_delivery.error || `status ${sender_delivery.status}`) });
+        } finally {
+          settlePassiveDelta(tracker, result.reply.recipient_session_id, passive.claim, passiveCommitted);
+        }
       }
+      const ticket = envelope?.ticket_id ? tracker.getTicket(envelope.ticket_id) : null;
+      if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
+      broadcastWS({ type: 'communication-health-updated' });
       return { ok: true, envelope, reply: result.reply, sender_delivery };
     } catch (err) {
       const msg = String(err?.message ?? err);
@@ -1525,11 +1679,47 @@ async function main() {
       if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
       // TKT-0286: signal queue-aware surfaces to refetch (the row is gone).
       broadcastWS({ type: 'dispatch-queue-updated' });
+      broadcastWS({ type: 'communication-health-updated' });
       return { ok: true };
     } catch (err) {
       const msg = String(err?.message ?? err);
       if (/not found|not pending/i.test(msg)) return reply.code(404).send({ error: msg });
       return reply.code(400).send({ error: msg });
+    }
+  });
+
+  // GOL-423: local Claude Code hooks and actionable envelope paths share this
+  // lease protocol. A busy lease deliberately returns 409 rather than creating
+  // a second batch; callers fail open and retry on their next real turn.
+  fastify.post('/api/passive-deltas/:sessionId/claim', async (req, reply) => {
+    const sessionId = String(req.params.sessionId || '').trim();
+    if (!requirePassiveCaller(req, reply, sessionId)) return;
+    try {
+      const result = tracker.claimPassiveDelta(sessionId);
+      if (result.busy) return reply.code(409).send({ ok: false, error: 'passive delta is already claimed', retry_at: result.retry_at });
+      return { ok: true, ...result };
+    } catch (err) {
+      return reply.code(400).send({ error: String(err?.message ?? err) });
+    }
+  });
+
+  fastify.post('/api/passive-deltas/:sessionId/commit', async (req, reply) => {
+    const sessionId = String(req.params.sessionId || '').trim();
+    if (!requirePassiveCaller(req, reply, sessionId)) return;
+    try {
+      return { ok: true, ...tracker.commitPassiveDelta(sessionId, req.body?.lease_id) };
+    } catch (err) {
+      return reply.code(/lease/.test(String(err?.message ?? err)) ? 409 : 400).send({ error: String(err?.message ?? err) });
+    }
+  });
+
+  fastify.post('/api/passive-deltas/:sessionId/release', async (req, reply) => {
+    const sessionId = String(req.params.sessionId || '').trim();
+    if (!requirePassiveCaller(req, reply, sessionId)) return;
+    try {
+      return { ok: true, ...tracker.releasePassiveDelta(sessionId, req.body?.lease_id) };
+    } catch (err) {
+      return reply.code(/lease/.test(String(err?.message ?? err)) ? 409 : 400).send({ error: String(err?.message ?? err) });
     }
   });
 

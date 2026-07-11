@@ -1,6 +1,6 @@
 {
   "name": "golem",
-  "version": "5.0.15",
+  "version": "5.0.16",
   "description": "Golem — substrate compiler, dashboard/tracker, and CLI for the agentic harness.",
   "type": "module",
   "bin": {
@@ -24,7 +24,7 @@
   },
   "scripts": {
     "check": "node --check cli/golem.js && node cli/golem.js sync --check --all",
-    "test": "node test/sync-enforcement.test.mjs && node shims/opencode/resume-dispatchable.test.mjs && node mcp/channel/tracker-client.test.mjs",
+    "test": "node test/sync-enforcement.test.mjs && node shims/opencode/resume-dispatchable.test.mjs && node shims/opencode/passive-delta.test.mjs && node mcp/channel/tracker-client.test.mjs",
     "dashboard": "node dashboard/server/index.js",
     "dashboard:dev": "node --watch dashboard/server/index.js",
     "check:dashboard": "dashboard/scripts/check.sh"

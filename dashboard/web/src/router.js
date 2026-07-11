@@ -16,7 +16,7 @@
 //   /tickets/<id>     → { kind:'ticket', id }
 //
 // Drawers are URL overlays carried as query params on the current page's path:
-//   ?ticket=<id>  ?compose=1 (&project=<pid> &kind=<k> &parent=<id>)  ?chat=<sid>  ?ns=<sid>
+//   ?ticket=<id>  ?compose=1 (&project=<pid> &kind=<k> &parent=<id>)  ?chat=<sid>  ?ns=<sid>  ?communication=1
 // Opening a drawer PUSHES a history entry (so Back closes it); closing either
 // pops that entry (history.back) or, for deep-linked overlays with nothing to
 // pop, replaceState-strips the param.
@@ -123,6 +123,7 @@
       chat: query.chat || null,
       ns: query.ns || null,
       ideas: !!query.ideas, // TKT-0206: global ideas stack overlay
+      communication: !!query.communication,
     };
     return route;
   };

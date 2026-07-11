@@ -29,6 +29,7 @@ import {
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import * as tracker from './tracker-client.js';
+import { bridgeEndpointForParent, resolveCallerSessionId, sessionsForParent } from './identity.js';
 import { SESSION_ROLES, pushRoleBriefDirect, setSessionRole } from '../../lib/session-role.js';
 
 const VERSION = '0.1.0';
@@ -81,14 +82,12 @@ function deriveSessionId() {
   if (process.env.GOLEM_CEO_SESSION_ID) return process.env.GOLEM_CEO_SESSION_ID;
   const j = readParentSessionFile();
   if (j && typeof j.sessionId === 'string' && j.sessionId) return j.sessionId;
-  const bridge = readOpencodeBridgeForParent();
-  if (bridge?.session_id) return bridge.session_id;
-  return process.env.CLAUDE_CODE_SESSION_ID || '';
+  return resolveCallerSessionId({ home: tracker.golemHome() }).sessionId || process.env.CLAUDE_CODE_SESSION_ID || '';
 }
 function deriveSessionName() {
   const j = readParentSessionFile();
   if (j && typeof j.name === 'string' && j.name) return j.name;
-  const bridge = readOpencodeBridgeForParent();
+  const bridge = bridgeEndpointForParent({ home: tracker.golemHome() });
   return bridge && typeof bridge.name === 'string' && bridge.name ? bridge.name : null;
 }
 // golem-home resolution (TKT-0573, ADR-4) lives in tracker-client.js's
@@ -97,6 +96,14 @@ function deriveSessionName() {
 const CHANNELS_REGISTRY = path.join(tracker.golemHome(), 'channels.json');
 const CHANNELS_LOCK = `${CHANNELS_REGISTRY}.lock`;
 const OPENCODE_BRIDGES_REGISTRY = path.join(tracker.golemHome(), 'opencode-bridges.json');
+
+// Claude Code supplies an identity through its parent registry or environment.
+// OpenCode does not: its shim writes a bridge shortly after this MCP starts.
+const WATCH_OPENCODE_BRIDGES = !(
+  process.env.GOLEM_CEO_SESSION_ID
+  || readParentSessionFile()?.sessionId
+  || process.env.CLAUDE_CODE_SESSION_ID
+);
 
 // Mutable: re-derived on each (re)register so a session file that wasn't written
 // yet at module load, or a later /rename, is picked up within one heartbeat.
@@ -108,7 +115,10 @@ let SESSION_NAME = deriveSessionName();
 const listeners = new Set();
 
 function broadcast(eventName, payload) {
-  const enriched = { session_id: SESSION_ID, ...payload };
+  // Resolve at emission time: a sibling bridge can appear after registration,
+  // and a cached formerly-unique id must not be stamped onto its events.
+  const sessionId = deriveSessionId();
+  const enriched = sessionId ? { session_id: sessionId, ...payload } : { ...payload };
   const data = JSON.stringify(enriched);
   const chunk = `event: ${eventName}\ndata: ${data}\n\n`;
   for (const emit of listeners) {
@@ -163,33 +173,6 @@ function readChannelsRegistry() {
   return { version: 1, channels: [] };
 }
 
-function pidAlive(pid) {
-  if (!pid || pid === 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return err && err.code === 'EPERM';
-  }
-}
-
-function readOpencodeBridgeForParent() {
-  try {
-    const raw = fs.readFileSync(OPENCODE_BRIDGES_REGISTRY, 'utf8');
-    const json = JSON.parse(raw);
-    const bridges = Array.isArray(json?.bridges) ? json.bridges : [];
-    const candidates = bridges.filter((b) => {
-      if (!b || Number(b.opencode_pid) !== Number(process.ppid)) return false;
-      if (b.pid && !pidAlive(Number(b.pid))) return false;
-      return !!(b.session_id && b.host && b.port);
-    });
-    candidates.sort((a, b) => Date.parse(b.updated_at || b.started_at || 0) - Date.parse(a.updated_at || a.started_at || 0));
-    return candidates[0] || null;
-  } catch {
-    return null;
-  }
-}
-
 function writeChannelsRegistry(reg) {
   const tmp = `${CHANNELS_REGISTRY}.tmp.${process.pid}`;
   fs.writeFileSync(tmp, JSON.stringify(reg, null, 2));
@@ -200,38 +183,81 @@ function writeChannelsRegistry(reg) {
 // stable started_at instead of advancing it every tick.
 const STARTED_AT = new Date().toISOString();
 
-function registerChannel(port) {
+function registerChannel(port, { logMissing = true } = {}) {
   // Re-derive each call: the parent session file may not have existed at module
   // load, and the name changes on /rename. Correcting SESSION_ID here also
   // self-heals a channel that first registered under a fallback run-id.
-  SESSION_ID = deriveSessionId() || SESSION_ID;
+  SESSION_ID = deriveSessionId();
   SESSION_NAME = deriveSessionName();
-  const bridge = readOpencodeBridgeForParent();
-  if (!SESSION_ID) {
-    process.stderr.write('[golem-channel] no session id (parent session file + GOLEM_CEO_SESSION_ID/CLAUDE_CODE_SESSION_ID all empty); channel will not register\n');
-    return;
+  const bridge = bridgeEndpointForParent({ home: tracker.golemHome() });
+  const siblings = sessionsForParent({ home: tracker.golemHome() });
+  if (!SESSION_ID && siblings.length === 0) {
+    if (WATCH_OPENCODE_BRIDGES) {
+      withChannelLock(() => {
+        const reg = readChannelsRegistry();
+        const before = reg.channels.length;
+        reg.channels = reg.channels.filter((channel) => channel.pid !== process.pid);
+        if (reg.channels.length !== before) writeChannelsRegistry(reg);
+      });
+    }
+    if (logMissing) process.stderr.write('[golem-channel] no unambiguous session id; channel will not register\n');
+    return false;
   }
   withChannelLock(() => {
     const reg = readChannelsRegistry();
     // Drop any prior row for THIS process (covers an id corrected from a run-id
     // to the logical id between heartbeats) and any stale row under our id.
-    reg.channels = reg.channels.filter((c) => c.pid !== process.pid && c.session_id !== SESSION_ID);
-    reg.channels.push({
-      session_id: SESSION_ID,
-      name: SESSION_NAME,
-      pid: process.pid,
-      host: HOST,
-      port,
-      version: VERSION,
-      harness: bridge && bridge.session_id === SESSION_ID ? 'opencode' : undefined,
-      started_at: STARTED_AT,
-    });
+    const sessionIds = new Set(siblings.map((row) => row.session_id));
+    reg.channels = reg.channels.filter((c) => c.pid !== process.pid && !sessionIds.has(c.session_id));
+    const rows = siblings.length ? siblings : [{ session_id: SESSION_ID, name: SESSION_NAME }];
+    for (const row of rows) {
+      reg.channels.push({
+        session_id: row.session_id,
+        name: row.name || null,
+        pid: process.pid,
+        host: HOST,
+        port,
+        version: VERSION,
+        harness: siblings.length ? 'opencode' : (bridge && bridge.session_id === SESSION_ID ? 'opencode' : undefined),
+        started_at: STARTED_AT,
+      });
+    }
     writeChannelsRegistry(reg);
   });
+  return true;
+}
+
+function opencodeSiblingSignature() {
+  return JSON.stringify(
+    sessionsForParent({ home: tracker.golemHome() })
+      .map((row) => [row.session_id, row.name || null])
+      .sort(([a], [b]) => a.localeCompare(b)),
+  );
+}
+
+let bridgeWatchListener = null;
+
+function watchOpencodeBridges(port) {
+  if (!WATCH_OPENCODE_BRIDGES || bridgeWatchListener) return;
+  let previousSignature = null;
+  bridgeWatchListener = () => {
+    const nextSignature = opencodeSiblingSignature();
+    if (nextSignature === previousSignature) return;
+    previousSignature = nextSignature;
+    try { registerChannel(port, { logMissing: false }); } catch { /* transient — heartbeat retries */ }
+  };
+  fs.watchFile(OPENCODE_BRIDGES_REGISTRY, { persistent: false, interval: 100 }, bridgeWatchListener);
+  // Close the narrow race between the first registration attempt and watcher setup.
+  bridgeWatchListener();
+}
+
+function stopWatchingOpencodeBridges() {
+  if (!bridgeWatchListener) return;
+  fs.unwatchFile(OPENCODE_BRIDGES_REGISTRY, bridgeWatchListener);
+  bridgeWatchListener = null;
 }
 
 function unregisterChannel() {
-  if (!SESSION_ID) return;
   try {
     withChannelLock(() => {
       const reg = readChannelsRegistry();
@@ -422,6 +448,10 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: 'string',
             description: 'For gate_* kinds: the gate_id from the inbound event.',
           },
+          envelope_id: {
+            type: 'string',
+            description: 'Required when acknowledging a correlated ticket dispatch; copied from the channel event metadata.',
+          },
           summary: {
             type: 'string',
             description: 'One-sentence description of what the CEO did or will do next.',
@@ -450,6 +480,10 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           gate_id: {
             type: 'string',
             description: 'Optional: gate_id if this response is about a specific gate.',
+          },
+          envelope_id: {
+            type: 'string',
+            description: 'Required when replying to a correlated ticket dispatch; copied from the channel event metadata.',
           },
         },
         required: ['text'],
@@ -665,7 +699,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
 
     {
       name: 'subscribe',
-      description: 'Subscribe this session to a named golem event-bus topic such as ticket/GOL-311 or spec/GOL-306/tree. Classes default to tracker,lifecycle,custom; include activity explicitly for the firehose.',
+      description: 'Quietly observe an exact ticket/<display_id> or spec/<display_id>/tree topic on this session’s next real user turn; it never wakes a model. Manual interest contributes only passive phase, assignment, blocker, and result deltas. Classes remain durable history filters; activity is opt-in for history, not prompt injection.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -688,7 +722,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'subscriptions_list',
-      description: 'List this session\'s golem event-bus subscriptions and cursors.',
+      description: 'List this session\'s durable quiet subscriptions and cursors.',
       inputSchema: { type: 'object', properties: {} },
     },
 
@@ -756,7 +790,10 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
 
 mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const name = req.params.name;
-  const args = req.params.arguments || {};
+  const rawArgs = req.params.arguments || {};
+  const injectedSessionId = rawArgs.__golem_session_id;
+  const args = Object.fromEntries(Object.entries(rawArgs).filter(([key]) => !key.startsWith('__golem_')));
+  const caller = resolveCallerSessionId({ injectedId: injectedSessionId, home: tracker.golemHome() });
 
   if (name === 'ack') {
     const payload = {
@@ -765,6 +802,16 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       summary: typeof args.summary === 'string' ? args.summary : '',
       ts: new Date().toISOString(),
     };
+    if (args.envelope_id) {
+      try {
+        await tracker.acknowledgeEnvelope(String(args.envelope_id), {
+          target_session_id: tracker.currentSessionId(injectedSessionId), kind: payload.kind, summary: payload.summary,
+        });
+        payload.envelope_id = String(args.envelope_id);
+      } catch (err) {
+        return { isError: true, content: [{ type: 'text', text: `ack: ${err instanceof Error ? err.message : String(err)}` }] };
+      }
+    }
     broadcast('ack', payload);
     return { content: [{ type: 'text', text: 'ack broadcast' }] };
   }
@@ -780,6 +827,16 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       text,
       ts: new Date().toISOString(),
     };
+    if (args.envelope_id) {
+      try {
+        await tracker.replyEnvelope(String(args.envelope_id), {
+          target_session_id: tracker.currentSessionId(injectedSessionId), kind: payload.kind, text,
+        });
+        payload.envelope_id = String(args.envelope_id);
+      } catch (err) {
+        return { isError: true, content: [{ type: 'text', text: `respond: ${err instanceof Error ? err.message : String(err)}` }] };
+      }
+    }
     broadcast('response', payload);
     return { content: [{ type: 'text', text: 'response broadcast' }] };
   }
@@ -885,7 +942,9 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 
     const message = args.ticket ? `${args.ticket}: ${text}` : text;
     try {
-      const delivery = await tracker.postBrief(target.session_id, message);
+      const senderId = tracker.currentSessionId(injectedSessionId);
+      if (!senderId) return { isError: true, content: [{ type: 'text', text: 'session_notify: no trusted caller session id.' }] };
+      const delivery = await tracker.notifySession({ session_id: target.session_id, text: message, sender_id: senderId, project_id: target.project_id || null });
       return { content: [{ type: 'text', text: JSON.stringify({ ok: true, to: target.label || target.name || target.session_id, session_id: target.session_id, delivery }, null, 2) }] };
     } catch (err) {
       return { isError: true, content: [{ type: 'text', text: `session_notify: delivery failed — ${err instanceof Error ? err.message : String(err)}` }] };
@@ -893,19 +952,20 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   }
 
   if (name === 'subscribe' || name === 'unsubscribe' || name === 'subscriptions_list') {
-    if (!SESSION_ID) return { isError: true, content: [{ type: 'text', text: `${name}: no current session id` }] };
+    const sessionId = tracker.currentSessionId(injectedSessionId);
+    if (!sessionId) return { isError: true, content: [{ type: 'text', text: `${name}: no trusted caller session id` }] };
     try {
       if (name === 'subscribe') {
         if (!args.topic) throw new Error('subscribe: topic is required');
-        const out = await tracker.subscribeBus({ session_id: SESSION_ID, topic: String(args.topic), classes: args.classes });
+        const out = await tracker.subscribeBus({ session_id: sessionId, topic: String(args.topic), classes: args.classes });
         return { content: [{ type: 'text', text: JSON.stringify(out, null, 2) }] };
       }
       if (name === 'unsubscribe') {
         if (!args.topic) throw new Error('unsubscribe: topic is required');
-        const out = await tracker.unsubscribeBus({ session_id: SESSION_ID, topic: String(args.topic) });
+        const out = await tracker.unsubscribeBus({ session_id: sessionId, topic: String(args.topic) });
         return { content: [{ type: 'text', text: JSON.stringify(out, null, 2) }] };
       }
-      const out = await tracker.listBusSubscriptions(SESSION_ID);
+      const out = await tracker.listBusSubscriptions(sessionId);
       return { content: [{ type: 'text', text: JSON.stringify(out, null, 2) }] };
     } catch (err) {
       return { isError: true, content: [{ type: 'text', text: err instanceof Error ? err.message : String(err) }] };
@@ -952,8 +1012,13 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       content: [{ type: 'text', text: JSON.stringify(await publicTicketIds(value), null, 2) }],
     });
     try {
-      const sessionId = tracker.currentSessionId();
-      const defaultProject = tracker.currentProjectId();
+      const sessionId = tracker.currentSessionId(injectedSessionId);
+      const defaultProject = tracker.currentProjectId(sessionId);
+      const writeTools = new Set([
+        'ticket_create', 'ticket_update', 'ticket_transition', 'ticket_comment',
+        'ticket_comment_update', 'ticket_comment_reply', 'ticket_dispatch', 'stream_create',
+      ]);
+      if (writeTools.has(name) && !sessionId) throw new Error(caller.error);
 
       // Resolve the `project` query value for LIST-style tools. `all:true` or
       // project "*" ⇒ list across all projects (omit the filter). Otherwise an
@@ -1071,6 +1136,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           note: args.note,
           when_idle: args.when_idle === true,
           workspace: args.workspace || undefined,
+          sender_id: sessionId,
         }));
       }
 
@@ -1132,13 +1198,13 @@ function sendJson(res, status, body) {
   res.end(data);
 }
 
-async function pushEvent(kind, content, extraMeta = {}) {
+async function pushEvent(kind, content, extraMeta = {}, targetSessionId = null) {
   // meta keys must be identifiers (letters/digits/underscore) — hyphens
   // are silently dropped by Claude Code. snake_case only.
   const meta = { kind, ...extraMeta };
-  const bridge = readOpencodeBridgeForParent();
-  if (bridge && bridge.session_id === SESSION_ID) {
-    await postToOpencodeBridge(bridge, { session_id: SESSION_ID, kind, content, meta });
+  const bridge = bridgeEndpointForParent({ home: tracker.golemHome() });
+  if (bridge) {
+    await postToOpencodeBridge(bridge, { session_id: targetSessionId || deriveSessionId(), kind, content, meta });
     return;
   }
   await mcp.notification({
@@ -1182,6 +1248,7 @@ const server = http.createServer(async (req, res) => {
 
     // Every other route is an inbound push — gate the sender.
     const sender = (req.headers['x-sender'] || '').toString();
+    const targetSessionId = (req.headers['x-golem-target-session'] || '').toString() || null;
     if (!ALLOWED_SENDERS.has(sender)) {
       return sendJson(res, 403, {
         ok: false,
@@ -1192,26 +1259,27 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'POST' && path === '/brief') {
       const body = await readBody(req);
-      await pushEvent('brief', extractContent(body));
+      const metadata = extractMetadata(body);
+      await pushEvent('brief', extractContent(body), metadata, targetSessionId || metadata.target_session_id || null);
       return sendJson(res, 202, { ok: true, kind: 'brief' });
     }
 
     // POST /role — identity only (dashboard/CLI role assignment). Never a work brief.
     if (method === 'POST' && path === '/role') {
       const body = await readBody(req);
-      await pushEvent('role_assign', extractContent(body));
+      await pushEvent('role_assign', extractContent(body), {}, targetSessionId);
       return sendJson(res, 202, { ok: true, kind: 'role_assign' });
     }
 
     if (method === 'POST' && path === '/interrupt') {
       const body = await readBody(req);
-      await pushEvent('interrupt', extractContent(body));
+      await pushEvent('interrupt', extractContent(body), {}, targetSessionId);
       return sendJson(res, 202, { ok: true, kind: 'interrupt' });
     }
 
     if (method === 'POST' && path === '/halt') {
       const body = await readBody(req);
-      await pushEvent('halt', extractContent(body) || 'halt requested');
+      await pushEvent('halt', extractContent(body) || 'halt requested', {}, targetSessionId);
       return sendJson(res, 202, { ok: true, kind: 'halt' });
     }
 
@@ -1324,6 +1392,20 @@ function extractContent(raw) {
   return trimmed;
 }
 
+function extractMetadata(raw) {
+  try {
+    const parsed = JSON.parse(raw || '{}');
+    if (!parsed || typeof parsed !== 'object') return {};
+    const out = {};
+    for (const key of ['envelope_id', 'sender_session_id', 'target_session_id']) {
+      if (typeof parsed[key] === 'string' && parsed[key]) out[key] = parsed[key];
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 // --- Boot ------------------------------------------------------------------
 server.listen(PORT, HOST, () => {
   const addr = server.address();
@@ -1335,6 +1417,7 @@ server.listen(PORT, HOST, () => {
   try { registerChannel(boundPort); } catch (err) {
     process.stderr.write(`[golem-channel] register failed: ${err.message}\n`);
   }
+  watchOpencodeBridges(boundPort);
   // Re-assert registration on an interval. registerChannel only fires once at
   // listen — if this session's entry is ever lost afterward (a cross-process
   // write race, a manual edit, file corruption), it would never come back.
@@ -1342,7 +1425,7 @@ server.listen(PORT, HOST, () => {
   // corrected within HEARTBEAT_MS. registerChannel is idempotent (it filters
   // this session's stale rows before re-adding). unref() so the timer never
   // keeps the process alive on its own.
-  const HEARTBEAT_MS = 30_000;
+  const HEARTBEAT_MS = Number(process.env.GOLEM_CHANNEL_HEARTBEAT_MS) || 30_000;
   setInterval(() => {
     try { registerChannel(boundPort); } catch { /* transient — next tick retries */ }
   }, HEARTBEAT_MS).unref();
@@ -1353,6 +1436,7 @@ server.listen(PORT, HOST, () => {
 // primary cleanup path.
 function shutdown(code = 0, why = 'signal') {
   try { process.stderr.write(`[golem-channel] shutdown (${why})\n`); } catch { /* stderr gone */ }
+  stopWatchingOpencodeBridges();
   unregisterChannel();
   try { server.close(); } catch { /* ignore */ }
   process.exit(code);
@@ -1360,7 +1444,10 @@ function shutdown(code = 0, why = 'signal') {
 process.on('SIGINT',  () => shutdown(0, 'SIGINT'));
 process.on('SIGTERM', () => shutdown(0, 'SIGTERM'));
 process.on('SIGHUP',  () => shutdown(0, 'SIGHUP'));
-process.on('beforeExit', () => unregisterChannel());
+process.on('beforeExit', () => {
+  stopWatchingOpencodeBridges();
+  unregisterChannel();
+});
 // TKT-0369: the channel died mid-session with zero trace (no stderr, no crash
 // report) — every abnormal exit must say why, or the next death is
 // undiagnosable. Claude Code persists this stderr into its MCP log.

@@ -71,7 +71,7 @@ let currentSessionID = "";
 
 // Opencode namespaces MCP tools with a user-configurable server name. Match
 // only golem's suffixes so injected identity keys never reach foreign tools.
-export const GOLEM_TOOL_SUFFIXES = new Set([
+const GOLEM_TOOL_SUFFIXES = new Set([
   "ticket_list", "ticket_get", "ticket_create", "ticket_update", "ticket_comment",
   "ticket_comment_update", "ticket_comment_reply", "ticket_dispatch", "ticket_transition",
   "ack", "respond", "session_notify", "session_role", "sessions_dispatchable",
@@ -79,7 +79,7 @@ export const GOLEM_TOOL_SUFFIXES = new Set([
   "consult_request", "consult_reply", "consult_status",
 ]);
 
-export function isGolemToolName(name) {
+function isGolemToolName(name) {
   return typeof name === "string" && [...GOLEM_TOOL_SUFFIXES].some((tool) => name === tool || name.endsWith(`_${tool}`));
 }
 
@@ -458,6 +458,61 @@ async function readBody(req) {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+function dashboardBaseUrl() {
+  if (process.env.GOLEM_DASHBOARD_URL) return process.env.GOLEM_DASHBOARD_URL.replace(/\/+$/, "");
+  try {
+    const doc = JSON.parse(readFileSync(join(golemHome(), "dashboard.json"), "utf8"));
+    if (typeof doc?.url === "string" && doc.url.trim()) return doc.url.replace(/\/+$/, "");
+    if (doc?.host && doc?.port) return `http://${doc.host}:${doc.port}`;
+  } catch { /* dashboard not ready — fail open below */ }
+  return null;
+}
+
+async function passiveDeltaRequest(sessionID, action, body = null) {
+  if (!sessionID) return null;
+  const baseUrl = dashboardBaseUrl();
+  if (!baseUrl) return null;
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 600);
+  try {
+    const response = await fetch(`${baseUrl}/api/passive-deltas/${encodeURIComponent(sessionID)}/${action}`, {
+      method: "POST",
+      headers: {
+        "X-Golem-Caller-Session": sessionID,
+        ...(body ? { "Content-Type": "application/json" } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: ctl.signal,
+    });
+    if (!response.ok) return null;
+    return await response.json();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// GOL-424: chat.message is OpenCode's mutation seam for an already-submitted
+// real user message. This intentionally never calls session.prompt/noReply;
+// only the existing message gains the durable next-turn context.
+async function appendPassiveDeltaToMessage(sessionID, output) {
+  const claim = await passiveDeltaRequest(sessionID, "claim");
+  const leaseID = claim?.lease_id;
+  const text = claim?.batch?.body;
+  if (!leaseID || !text) return;
+  let committed = false;
+  try {
+    if (!Array.isArray(output?.parts)) return;
+    output.parts.push({ type: "text", text });
+    // The mutation above is synchronous; commit only after the exact part has
+    // entered OpenCode's outgoing message serialization object.
+    committed = Boolean((await passiveDeltaRequest(sessionID, "commit", { lease_id: leaseID }))?.committed);
+  } finally {
+    if (!committed) await passiveDeltaRequest(sessionID, "release", { lease_id: leaseID });
+  }
+}
+
 function startBridge({ client, dirFor, logErr }) {
   let port = null;
   const server = createServer(async (req, res) => {
@@ -478,10 +533,17 @@ function startBridge({ client, dirFor, logErr }) {
       if (!sessionID) return sendJson(res, 409, { ok: false, error: "no active opencode session" });
 
       const text = channelTag(kind, content, meta);
-      client.session.prompt({
+      // OpenCode SDK v1.17.18 defines promptAsync as POST /prompt_async with a
+      // 204 "Prompt accepted" response; prompt instead waits on /message for a
+      // created assistant result. This bridge needs the former acceptance fact,
+      // not a fire-and-forget request or a completed model turn.
+      if (typeof client?.session?.promptAsync !== "function") throw new Error("OpenCode session.promptAsync is unavailable");
+      const accepted = await client.session.promptAsync({
         path: { id: sessionID },
         body: { parts: [{ type: "text", text }] },
-      }).catch((e) => logErr("bridge prompt", e));
+        throwOnError: true,
+      });
+      if (accepted?.error || accepted?.response?.ok === false) throw new Error("OpenCode rejected actionable prompt");
       const model = readOpencodeModel(sessionID);
       updateSessionRegistry({ sessionID, cwd: dirFor(sessionID), status: "busy", model });
       if (port) updateBridge({ sessionID, cwd: dirFor(sessionID), status: "busy", port, model });
@@ -734,10 +796,10 @@ export default async (input) => {
       }
     },
 
-    "chat.message": async (inp) => {
+    "chat.message": async (inp, out) => {
       try {
         currentSessionID = inp?.sessionID || currentSessionID;
-        publishBridge(inp?.sessionID, "busy");
+        await appendPassiveDeltaToMessage(inp?.sessionID, out);
         runHook("journal-route.sh", ["user-prompt"], base(inp?.sessionID, dirFor(inp?.sessionID)));
       } catch (e) {
         logErr("chat.message", e);
