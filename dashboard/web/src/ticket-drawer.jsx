@@ -67,6 +67,10 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
   const [editingTitle, setEditingTitle] = React.useState(false);
   const [titleDraft, setTitleDraft] = React.useState('');
   const titleInputRef = React.useRef(null);
+  const tdScrollRef = React.useRef(null);
+  const editTextareaRef = React.useRef(null);
+  const editActionsRef = React.useRef(null);
+  const specPreviewRef = React.useRef(null);
 
   // Drawer width preset (persisted) + field-controls collapse (collapsed by
   // default; the body/state/assignee/priority fields are rarely changed and
@@ -327,6 +331,47 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
       .catch((err) => { console.error('save ticket failed', err); setSaving(false); });
   }, [ticketId, editBuf]);
 
+  // Editing has a fixed bottom action bar outside .td-scroll. Measure only the
+  // direct layout landmarks (not every nested field) so the editor follows the
+  // actual viewport. Specs reserve a compact Work Items preview below the editor.
+  React.useLayoutEffect(() => {
+    if (!editBuf) return undefined;
+    const textarea = editTextareaRef.current;
+    const scroller = tdScrollRef.current;
+    if (!textarea || !scroller) return undefined;
+
+    const updateHeight = () => {
+      const textareaTop = textarea.getBoundingClientRect().top;
+      const scrollerBottom = scroller.getBoundingClientRect().bottom;
+      const actionTop = editActionsRef.current?.getBoundingClientRect().top;
+      const visibleBottom = Math.min(scrollerBottom, actionTop ?? scrollerBottom);
+      const bodyArea = textarea.closest('.td-body-area');
+      const bodyStyle = bodyArea ? window.getComputedStyle(bodyArea) : null;
+      const bodyBorders = bodyStyle
+        ? (parseFloat(bodyStyle.borderTopWidth) || 0) + (parseFloat(bodyStyle.borderBottomWidth) || 0)
+        : 0;
+      const previewHeader = specPreviewRef.current?.querySelector('.td-children-header');
+      const previewHeight = ticket?.kind === 'spec'
+        ? Math.max(64, Math.ceil(previewHeader?.getBoundingClientRect().height || 0) + 36)
+        : 0;
+      const height = Math.max(120, Math.floor(visibleBottom - textareaTop - bodyBorders - previewHeight));
+      if (textarea.style.height !== `${height}px`) textarea.style.height = `${height}px`;
+    };
+
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    [scroller, editActionsRef.current, specPreviewRef.current]
+      .filter(Boolean)
+      .forEach((node) => observer.observe(node));
+    window.addEventListener('resize', updateHeight);
+    window.visualViewport?.addEventListener('resize', updateHeight);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateHeight);
+      window.visualViewport?.removeEventListener('resize', updateHeight);
+    };
+  }, [!!editBuf, widthPct, variant, ticket?.kind]);
+
   // TKT-0233: inline title edit — click the h2 to edit, Enter/blur commits, Esc reverts.
   const startTitleEdit = React.useCallback(() => {
     setTitleDraft(ticket?.title || '');
@@ -553,8 +598,8 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
     : null;
   const Shell = isPage ? 'div' : 'aside';
   const shellClass = isPage
-    ? `ticket-page${isQuestion ? ' td-has-question-return' : ''}`
-    : `drawer ${open ? 'open' : ''} drawer-ticket${isQuestion ? ' td-has-question-return' : ''}`;
+    ? `ticket-page${isQuestion ? ' td-has-question-return' : ''}${editBuf ? ' td-editing' : ''}`
+    : `drawer ${open ? 'open' : ''} drawer-ticket${isQuestion ? ' td-has-question-return' : ''}${editBuf ? ' td-editing' : ''}`;
   const shellStyle = isPage ? undefined : { width: `${widthPct}vw` };
 
   return (
@@ -645,7 +690,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
               </div>
             </div>
 
-            <div className="td-scroll">
+            <div className="td-scroll" ref={tdScrollRef}>
               {/* TKT-0285: fields sidebar — the .td-props panel (TKT-0233) moves
                   into a sticky left .td-side; the title + body + (0284) Work-items
                   panel live in .td-main, which re-centers within the remaining
@@ -955,6 +1000,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                 {editBuf ? (
                   <div className="td-edit">
                     <textarea
+                      ref={editTextareaRef}
                       className="td-edit-body orch-modal-textarea"
                       rows={8}
                       value={editBuf.body}
@@ -962,12 +1008,6 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                       onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setEditBuf(null); } }}
                       placeholder="Body (Markdown) — plain text auto-wraps into paragraphs"
                     />
-                    <div className="td-edit-actions">
-                      <button className="orch-btn ghost" onClick={() => setEditBuf(null)} disabled={saving}>Cancel</button>
-                      <button className="orch-btn primary" onClick={onSaveEdit} disabled={saving}>
-                        {saving ? 'Saving…' : 'Save'}
-                      </button>
-                    </div>
                   </div>
                 ) : ticket.body ? (
                   <TdAnnotate
@@ -993,18 +1033,27 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                   instantly (its creation broadcasts ticket-created, not a
                   parent refresh). Non-spec tickets skip the panel v1. */}
               {ticket.kind === 'spec' && (
-                <SpecChildrenPanel
-                  specId={ticket.id}
-                  projectContractId={ticket.project_id}
-                  seedChildren={ticket.children || []}
-                  resolveAssignee={resolveActor}
-                />
+                <div className="td-spec-children-preview" ref={specPreviewRef}>
+                  <SpecChildrenPanel
+                    specId={ticket.id}
+                    projectContractId={ticket.project_id}
+                    seedChildren={ticket.children || []}
+                    resolveAssignee={resolveActor}
+                  />
+                </div>
               )}
               </div>{/* /.td-main */}
               </div>{/* /.td-layout */}
             </div>
 
-            {isQuestion ? (
+            {editBuf ? (
+              <div className="td-edit-actions" ref={editActionsRef}>
+                <button className="orch-btn ghost" onClick={() => setEditBuf(null)} disabled={saving}>Cancel</button>
+                <button className="orch-btn primary" onClick={onSaveEdit} disabled={saving}>
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            ) : isQuestion ? (
               <QuestionReturn
                 onComment={onAddComment}
                 onReturn={onReturn}

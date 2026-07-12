@@ -149,47 +149,6 @@ function CreateTicketDrawer({ open, preselectProject, preselectKind, preselectPa
   // ref because it never drives a render — only buildBody reads it on submit.
   const parentIdRef = React.useRef(null);
   const bodyRef = React.useRef(null);
-  // TKT-0198: tracks whether the user has manually dragged the resize handle.
-  // While false, an effect recomputes the body's inline style.height to fill
-  // the available drawer space (adaptive default). Once the user drags, the
-  // effect stops writing and the inline style.height from the drag wins —
-  // and from then on the body can overflow the drawer container into the
-  // .ct-scroll. Refreshing the drawer (Esc + reopen) re-arms the adaptive.
-  const bodyUserSizedRef = React.useRef(false);
-
-  // TKT-0198: compute the adaptive body height on first render / on
-  // drawer-width change. Measures the available space (drawer scroll
-  // container minus the other fields' heights) and sets the textarea's
-  // inline style.height to that value. Skipped once the user has manually
-  // resized the body.
-  React.useEffect(() => {
-    if (!open) return;
-    if (bodyUserSizedRef.current) return;
-    const compute = () => {
-      const scroller = document.querySelector('.drawer-compose .ct-scroll');
-      const ta = bodyRef.current;
-      if (!scroller || !ta) return;
-      // Sum the heights of the body field's SIBLINGS (every other .ct-field
-      // and the action bar is below .ct-scroll, so the scroller's own
-      // clientHeight minus non-body children = available for the body).
-      const scrollRect = scroller.getBoundingClientRect();
-      const otherFields = Array.from(scroller.querySelectorAll('.ct-field'))
-        .filter((f) => !f.classList.contains('ct-field--grow'));
-      const usedByOthers = otherFields.reduce((s, f) => s + f.getBoundingClientRect().height, 0);
-      const gapCount = scroller.querySelectorAll('.ct-field').length - 1; // gap between fields
-      const totalGaps = gapCount * 9; // matches .ct-scroll { gap: 9px }
-      const available = scrollRect.height - usedByOthers - totalGaps - 24; // 12 top + 12 bottom padding
-      const minH = 120;
-      const finalH = Math.max(minH, Math.floor(available));
-      ta.style.height = `${finalH}px`;
-    };
-    compute();
-    // Recompute on resize (the user might have changed drawer width).
-    const ro = new ResizeObserver(compute);
-    const scroller = document.querySelector('.drawer-compose .ct-scroll');
-    if (scroller) ro.observe(scroller);
-    return () => ro.disconnect();
-  }, [open, widthPct]);
 
   // Drawer width preset (persisted).
   const [widthPct, setWidthPct] = React.useState(ctLoadWidth);
@@ -563,14 +522,31 @@ const discard = () => {
             </div>
           )}
 
-          <div className="ct-field">
-            <label className="ct-label">Project</label>
-            <select className="ct-input" value={projectId} onChange={onProjectChange} disabled={submitting}>
-              <option value="">Select a project…</option>
-              {projects.filter((p) => p.project_id).map((p) => (
-                <option key={p.project_id} value={p.project_id}>{p.name}</option>
-              ))}
-            </select>
+          <div className="ct-row">
+            <div className="ct-field">
+              <label className="ct-label">Project</label>
+              <select className="ct-input" value={projectId} onChange={onProjectChange} disabled={submitting}>
+                <option value="">Select a project…</option>
+                {projects.filter((p) => p.project_id).map((p) => (
+                  <option key={p.project_id} value={p.project_id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="ct-field">
+              <label className="ct-label">Stream</label>
+              <select className="ct-input" value={streamId} onChange={(e) => setStreamId(e.target.value)} disabled={submitting || !projectId}>
+                <option value="">None</option>
+                {streams.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div className="ct-field">
+              <label className="ct-label">Assignee</label>
+              <select className="ct-input" value={assignee} onChange={(e) => setAssignee(e.target.value)} disabled={submitting || !projectId}>
+                <option value="">Unassigned</option>
+                <option value="human">Human</option>
+                {sessions.map((s) => <option key={s.session_id} value={s.session_id}>{s.label}</option>)}
+              </select>
+            </div>
           </div>
 
           <div className="ct-row">
@@ -602,6 +578,19 @@ const discard = () => {
               onChange={(e) => setTitle(e.target.value)} disabled={submitting} autoFocus/>
           </div>
 
+          {/* TKT-0198: the standalone "Dispatch to session" field is gone.
+              Pick a live session in the Assignee dropdown above and click
+              Save & Dispatch — Assignee now doubles as the dispatch target.
+              If no live session exists in the project, Save & Dispatch is
+              disabled with a hint. */}
+          {!canDispatch && projectId && (
+            <div className="ct-dispatch-hint">
+              No live session in this project — start one with <span className="mono">cd &lt;project&gt; &amp;&amp; claude</span> to use Save &amp; Dispatch.
+            </div>
+          )}
+
+          {error && <div className="ct-error">{error}</div>}
+
           <div className="ct-field ct-field--grow">
             <label className="ct-label">Body <span className="ct-label-hint">Markdown · paste or drop images</span></label>
             <textarea ref={bodyRef} className="orch-modal-textarea" rows={5} value={body}
@@ -609,7 +598,6 @@ const discard = () => {
               onChange={(e) => { bodyTemplateIdRef.current = null; setBody(e.target.value); }}
               onPaste={onPaste}
               onDrop={onDrop}
-              onResize={() => { bodyUserSizedRef.current = true; }}
               onDragOver={(e) => { if (e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.includes('Files')) e.preventDefault(); }}
               disabled={submitting}/>
             {uploads.length > 0 && (
@@ -627,36 +615,6 @@ const discard = () => {
             )}
           </div>
 
-          <div className="ct-row">
-            <div className="ct-field">
-              <label className="ct-label">Stream</label>
-              <select className="ct-input" value={streamId} onChange={(e) => setStreamId(e.target.value)} disabled={submitting || !projectId}>
-                <option value="">None</option>
-                {streams.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </div>
-            <div className="ct-field">
-              <label className="ct-label">Assignee</label>
-              <select className="ct-input" value={assignee} onChange={(e) => setAssignee(e.target.value)} disabled={submitting || !projectId}>
-                <option value="">Unassigned</option>
-                <option value="human">Human</option>
-                {sessions.map((s) => <option key={s.session_id} value={s.session_id}>{s.label}</option>)}
-              </select>
-            </div>
-          </div>
-
-          {/* TKT-0198: the standalone "Dispatch to session" field is gone.
-              Pick a live session in the Assignee dropdown above and click
-              Save & Dispatch — Assignee now doubles as the dispatch target.
-              If no live session exists in the project, Save & Dispatch is
-              disabled with a hint. */}
-          {!canDispatch && projectId && (
-            <div className="ct-dispatch-hint">
-              No live session in this project — start one with <span className="mono">cd &lt;project&gt; &amp;&amp; claude</span> to use Save &amp; Dispatch.
-            </div>
-          )}
-
-          {error && <div className="ct-error">{error}</div>}
         </div>
 
         {/* ── Sticky actions ── */}
