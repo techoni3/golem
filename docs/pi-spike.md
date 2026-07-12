@@ -21,5 +21,12 @@ Tested 2026-07-13 in an isolated `HOME`, `GOLEM_HOME`, and `XDG_CONFIG_HOME`.
   JSONL inbox on the next real input and transforms that input with the queued
   text. It explicitly advertises `push_delivery: false`.
 
+Dashboard ticket dispatches address the canonical Pi UUID and durably append one
+JSONL record before reporting `{ queued: true, delivered: false }`. The extension
+atomically renames the inbox before reading, so concurrent producers recreate a
+separate inbox. Valid records are delivered per-line; malformed records are
+preserved in `.dead-letter.jsonl`, and unexpected claim-processing failures
+restore the claimed bytes for retry without replacing concurrent appends.
+
 The journey test proves rendering is isolated and portable, records the runtime
 probe result, and refuses to infer Tier A from the existence of an in-process API.

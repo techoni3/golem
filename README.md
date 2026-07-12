@@ -36,6 +36,8 @@ is **Tier B** support: start/resume/rename/status/tool events produce canonical
 facts and durable addressed work is pulled on the next input. Pi documents
 in-process message APIs, but no external endpoint for addressing a live idle
 TUI was found or mechanically proven, so Golem does not advertise Pi push.
+Dashboard dispatch therefore reports Pi work as queued for next-turn delivery,
+not delivered push.
 
 ## Local data and permissions
 

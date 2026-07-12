@@ -1,28 +1,19 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { golemHome } from './lib/golem-home.js';
+import { upsertSessionFact } from './lib/session-facts.js';
 
 export default function golem(pi) {
-  const home = process.env.GOLEM_HOME || path.join(os.homedir(), '.golem');
+  const home = golemHome();
   let canonicalId;
   function record(ctx, event, status, observations = {}) {
     const id = ctx.sessionManager.getSessionId();
     canonicalId = id;
-    const file = path.join(home, 'session-facts.json');
     try {
-      fs.mkdirSync(home, { recursive: true });
-      let registry = { version: 1, facts: [] };
-      try { registry = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
-      if (registry.version !== 1 || !Array.isArray(registry.facts)) return;
-      const i = registry.facts.findIndex((fact) => fact.canonical_id === id);
-      const old = i < 0 ? {} : registry.facts[i];
-      const fact = { ...old, canonical_id: id, continuation_key: id, harness: 'pi',
-        locator: { session_id: id, session_file: ctx.sessionManager.getSessionFile() }, project_path: ctx.cwd,
+      upsertSessionFact({ canonical_id: id, continuation_key: id, harness: 'pi',
+        locator: { raw_session_id: id, session_file: ctx.sessionManager.getSessionFile() }, project_path: ctx.cwd,
         name: ctx.sessionManager.getSessionName(), status, delivery: { mode: 'next_turn', push: false },
-        lifecycle_event: event, observations, revision: (old.revision || 0) + 1, observed_at: new Date().toISOString() };
-      if (i < 0) registry.facts.push(fact); else registry.facts[i] = fact;
-      const tmp = `${file}.tmp.${process.pid}`;
-      fs.writeFileSync(tmp, `${JSON.stringify(registry, null, 2)}\n`, { mode: 0o600 }); fs.renameSync(tmp, file);
+        lifecycle_event: event, observations, observed_at: new Date().toISOString() });
     } catch {}
   }
   pi.on('session_start', (event, ctx) => record(ctx, 'session_start', 'idle', { reason: event.reason }));
@@ -34,12 +25,22 @@ export default function golem(pi) {
   pi.on('input', (_event, ctx) => {
     const id = canonicalId || ctx.sessionManager.getSessionId();
     const inbox = path.join(home, 'pi-inbox', `${id}.jsonl`);
+    const claim = `${inbox}.claimed.${process.pid}.${Date.now()}`;
+    try { fs.renameSync(inbox, claim); } catch { return; }
     try {
-      const lines = fs.readFileSync(inbox, 'utf8').split('\n').filter(Boolean);
-      if (!lines.length) return;
-      const messages = lines.map((line) => JSON.parse(line)).filter((x) => typeof x?.text === 'string');
-      fs.renameSync(inbox, `${inbox}.claimed.${Date.now()}`);
+      const messages = [];
+      const malformed = [];
+      for (const line of fs.readFileSync(claim, 'utf8').split('\n').filter(Boolean)) {
+        try { const value = JSON.parse(line); if (typeof value?.text === 'string') messages.push(value); else malformed.push(line); }
+        catch { malformed.push(line); }
+      }
+      if (malformed.length) fs.appendFileSync(`${inbox}.dead-letter.jsonl`, `${malformed.join('\n')}\n`, { mode: 0o600 });
+      fs.unlinkSync(claim);
       if (messages.length) return { action: 'transform', text: `${_event.text}\n\n${messages.map((x) => x.text).join('\n\n')}` };
-    } catch {}
+    } catch {
+      // Retry the whole claimed batch. If producers already recreated inbox,
+      // append the claimed bytes instead of replacing their concurrent writes.
+      try { fs.appendFileSync(inbox, fs.readFileSync(claim)); fs.unlinkSync(claim); } catch {}
+    }
   });
 }

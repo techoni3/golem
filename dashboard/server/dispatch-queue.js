@@ -27,6 +27,7 @@
 // (already refreshed every 3s by state.js) on its own 5s tick.
 
 import { loadConfig } from '../../lib/golem-config.js';
+import { enqueuePiBrief } from '../../lib/pi-inbox.js';
 
 const TICK_MS = 5_000;
 const COOLDOWN_MS = 60_000;
@@ -193,6 +194,7 @@ export function initDispatchDrainer({
     // TKT-0286: broadcast dispatch-queue-updated once if any row transitioned this tick.
     for (const [sessionId, rows] of bySession) {
       const s = byId.get(sessionId);
+      const isPi = s?.harness === 'pi';
 
       const waveGate = (row) => {
         try {
@@ -207,7 +209,7 @@ export function initDispatchDrainer({
 
       // Session unknown, dead, OR unreachable (channel MCP down — TKT-0369):
       // hold rows pending (60m expiry), never burn one on a push that can't land.
-      if (!s || !s.alive || !channelIds.has(sessionId)) {
+      if (!s || !s.alive || (!isPi && !channelIds.has(sessionId))) {
         const oldest = rows.find((row) => !isWaveHeld(row));
         if (!oldest) continue; // all rows are wave-held; do not expire them as offline.
         const createdMs = Date.parse(oldest.created_at);
@@ -313,7 +315,9 @@ export function initDispatchDrainer({
 
         let pushResult;
         try {
-          pushResult = await pushBrief(briefString, sessionId, { envelope_id: row.envelope_id || undefined, sender_session_id: null, target_session_id: sessionId });
+          pushResult = isPi
+            ? enqueuePiBrief(sessionId, briefString, { envelope_id: row.envelope_id || null, ticket_id: ticket.id })
+            : await pushBrief(briefString, sessionId, { envelope_id: row.envelope_id || undefined, sender_session_id: null, target_session_id: sessionId });
         } catch (err) {
           pushResult = { ok: false, error: String(err?.message ?? err) };
         }
@@ -342,7 +346,7 @@ export function initDispatchDrainer({
         }
 
         if (pushResult && pushResult.ok) {
-          chat.record('user', 'brief', briefString, { session_id: sessionId });
+          chat.record('user', 'brief', briefString, { session_id: sessionId, delivery: pushResult.queued ? 'next_turn' : 'push' });
         } else {
           const detail = pushResult?.error || `status ${pushResult?.status ?? '?'}`;
           chat.record(

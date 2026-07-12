@@ -10,6 +10,7 @@ import { CONFIG } from './config.js';
 import { createState } from './state.js';
 import { roleMetaMap } from './roles.js';
 import { pushBrief, pushRoleAssign, pushInterrupt, pushHalt, pushGateVerdict, channelHealth, listChannels } from './brief.js';
+import { enqueuePiBrief } from '../../lib/pi-inbox.js';
 import { createChat } from './chat.js';
 import { readNativeSessionPeek } from './native-session-peek.js';
 import { openTrackerDb } from './tracker-db.js';
@@ -1516,18 +1517,20 @@ async function main() {
 
     const existing = ticketRef;
     if (!sessionId) return reply.code(400).send({ error: 'session_id is required' });
+    const nativeTarget = state.nativeSessions().find((s) => s.session_id === sessionId);
+    const isPi = nativeTarget?.harness === 'pi';
 
     // 'when_idle': queue for delivery on idle unless the target is already idle
     // (in which case fall through to the immediate 'now' path — no queue row).
     if (mode === 'when_idle') {
-      const target = state.nativeSessions().find((s) => s.session_id === sessionId);
+      const target = nativeTarget;
       // TKT-0369: only fall through to the immediate path when the target is
       // idle AND actually reachable — an idle session with a dead channel MCP
       // must queue (the row delivers when the channel re-registers), not burn
       // on an immediate push that cannot succeed.
       let hasChannel = false;
       try { hasChannel = (await listChannels()).some((c) => c.session_id === sessionId); } catch { /* treat as unreachable */ }
-      const isIdle = !!target && target.alive && target.status === 'idle' && hasChannel;
+      const isIdle = !!target && target.alive && target.status === 'idle' && (isPi || hasChannel);
       if (!isIdle) {
         const envelope = tracker.createDispatchEnvelope(id, { session_id: sessionId, actor: senderId || 'human', sender_id: senderId });
         const briefString = buildDispatchBrief(existing, note, workspace, envelope.id);
@@ -1566,7 +1569,9 @@ async function main() {
     let passiveCommitted = false;
     try {
       try {
-        channelResult = await pushBrief(briefString, sessionId, { envelope_id: envelope.id, sender_session_id: envelope.sender_session_id, target_session_id: sessionId });
+        channelResult = isPi
+          ? enqueuePiBrief(sessionId, briefString, { envelope_id: envelope.id, ticket_id: id })
+          : await pushBrief(briefString, sessionId, { envelope_id: envelope.id, sender_session_id: envelope.sender_session_id, target_session_id: sessionId });
       } catch (err) {
         channelResult = { ok: false, error: String(err?.message ?? err) };
       }
@@ -1574,7 +1579,7 @@ async function main() {
       // writes so their failures cannot release delivered passive context.
       passiveCommitted = !!channelResult?.ok;
       if (channelResult && channelResult.ok) {
-        chat.record('user', 'brief', briefString, { session_id: sessionId });
+        chat.record('user', 'brief', briefString, { session_id: sessionId, delivery: channelResult.queued ? 'next_turn' : 'push' });
       } else {
         const detail = channelResult?.error || `status ${channelResult?.status ?? '?'}`;
         chat.record('system', 'error', `dispatch of ${existing.display_id || id} to ${sessionId} — channel ${detail} (ticket assigned; session will pick it up on resume)`);
@@ -1602,9 +1607,10 @@ async function main() {
     // existing callers (MCP ticket_dispatch, older UI) are untouched. The
     // when_idle path that fell through (target was already idle) adds the
     // queued:false / delivered:true hints the plan specifies.
-    const delivered = !!channelResult?.ok;
-    return { ok: delivered, assignment: { ok: true, ticket }, queued: false, delivered, envelope_id: envelope.id, ticket,
-      delivery: { ok: delivered, status: channelResult?.status ?? 0, error: delivered ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`) }, channel: channelResult };
+    const delivered = !!channelResult?.ok && !channelResult?.queued;
+    const queued = !!channelResult?.queued;
+    return { ok: delivered || queued, assignment: { ok: true, ticket }, queued, delivered, envelope_id: envelope.id, ticket,
+      delivery: { ok: delivered || queued, queued, mode: queued ? 'next_turn' : 'push', status: channelResult?.status ?? 0, error: delivered || queued ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`) }, channel: channelResult };
   });
 
   // GOL-421: channel acknowledgements/replies are correlated to an envelope and
