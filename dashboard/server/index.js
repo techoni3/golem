@@ -10,7 +10,6 @@ import { CONFIG } from './config.js';
 import { createState } from './state.js';
 import { roleMetaMap } from './roles.js';
 import { pushBrief, pushRoleAssign, pushInterrupt, pushHalt, pushGateVerdict, channelHealth, listChannels } from './brief.js';
-import { enqueuePiBrief } from '../../lib/pi-inbox.js';
 import { createChat } from './chat.js';
 import { readNativeSessionPeek } from './native-session-peek.js';
 import { openTrackerDb } from './tracker-db.js';
@@ -1522,7 +1521,7 @@ async function main() {
 
     // 'when_idle': queue for delivery on idle unless the target is already idle
     // (in which case fall through to the immediate 'now' path — no queue row).
-    if (mode === 'when_idle') {
+    if (mode === 'when_idle' || isPi) {
       const target = nativeTarget;
       // TKT-0369: only fall through to the immediate path when the target is
       // idle AND actually reachable — an idle session with a dead channel MCP
@@ -1530,7 +1529,7 @@ async function main() {
       // on an immediate push that cannot succeed.
       let hasChannel = false;
       try { hasChannel = (await listChannels()).some((c) => c.session_id === sessionId); } catch { /* treat as unreachable */ }
-      const isIdle = !!target && target.alive && target.status === 'idle' && (isPi || hasChannel);
+      const isIdle = !isPi && !!target && target.alive && target.status === 'idle' && hasChannel;
       if (!isIdle) {
         const envelope = tracker.createDispatchEnvelope(id, { session_id: sessionId, actor: senderId || 'human', sender_id: senderId });
         const briefString = buildDispatchBrief(existing, note, workspace, envelope.id);
@@ -1569,9 +1568,7 @@ async function main() {
     let passiveCommitted = false;
     try {
       try {
-        channelResult = isPi
-          ? enqueuePiBrief(sessionId, briefString, { envelope_id: envelope.id, ticket_id: id })
-          : await pushBrief(briefString, sessionId, { envelope_id: envelope.id, sender_session_id: envelope.sender_session_id, target_session_id: sessionId });
+        channelResult = await pushBrief(briefString, sessionId, { envelope_id: envelope.id, sender_session_id: envelope.sender_session_id, target_session_id: sessionId });
       } catch (err) {
         channelResult = { ok: false, error: String(err?.message ?? err) };
       }

@@ -27,7 +27,8 @@
 // (already refreshed every 3s by state.js) on its own 5s tick.
 
 import { loadConfig } from '../../lib/golem-config.js';
-import { enqueuePiBrief } from '../../lib/pi-inbox.js';
+import fs from 'node:fs';
+import { claimPiPickupAcks, enqueuePiBrief } from '../../lib/pi-inbox.js';
 
 const TICK_MS = 5_000;
 const COOLDOWN_MS = 60_000;
@@ -161,6 +162,16 @@ export function initDispatchDrainer({
   async function tick() {
     if (stopped) return;
     let pending;
+    for (const ack of claimPiPickupAcks()) {
+      try {
+        const meta = ack.value?.metadata || {};
+        if (meta.queue_id) tracker.markQueueDelivered(meta.queue_id, { envelope_id: meta.envelope_id || null });
+        if (meta.envelope_id) tracker.markEnvelopeDelivery(meta.envelope_id, { error: null });
+        if (meta.passive_lease_id) tracker.commitPassiveDelta(ack.value.metadata.session_id, meta.passive_lease_id);
+        if (meta.ticket_id) tracker.markCommentDispatchesDeliveredForTicket(meta.ticket_id, meta.session_id);
+        fs.unlinkSync(ack.file);
+      } catch (err) { console.error('[dispatch-drainer] Pi pickup settlement failed:', err); }
+    }
     try {
       pending = tracker.listPendingDispatches();
     } catch (err) {
@@ -316,7 +327,7 @@ export function initDispatchDrainer({
         let pushResult;
         try {
           pushResult = isPi
-            ? enqueuePiBrief(sessionId, briefString, { envelope_id: row.envelope_id || null, ticket_id: ticket.id })
+            ? enqueuePiBrief(sessionId, briefString, { queue_id: row.id, envelope_id: row.envelope_id || null, ticket_id: ticket.id, session_id: sessionId, passive_lease_id: passive?.lease_id || null })
             : await pushBrief(briefString, sessionId, { envelope_id: row.envelope_id || undefined, sender_session_id: null, target_session_id: sessionId });
         } catch (err) {
           pushResult = { ok: false, error: String(err?.message ?? err) };
@@ -326,22 +337,21 @@ export function initDispatchDrainer({
         // writes: their failure must not replay context that already landed.
         const passiveCommitted = !!pushResult?.ok;
         try {
-          tracker.markQueueDelivered(row.id, {
-            error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}`,
-            envelope_id: row.envelope_id || null,
-          });
-          if (row.envelope_id) tracker.markEnvelopeDelivery(row.envelope_id, {
-            error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}`,
-          });
+          if (pushResult.queued) tracker.markQueueNextTurn(row.id);
+          else {
+            tracker.markQueueDelivered(row.id, { error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}`, envelope_id: row.envelope_id || null });
+            if (row.envelope_id) tracker.markEnvelopeDelivery(row.envelope_id, { error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}` });
+          }
         } finally {
           if (passive?.lease_id) {
             try {
-              if (passiveCommitted) tracker.commitPassiveDelta(sessionId, passive.lease_id);
+              if (passiveCommitted && !pushResult.queued) tracker.commitPassiveDelta(sessionId, passive.lease_id);
+              else if (pushResult.queued) { /* pickup ack settles this lease */ }
               else tracker.releasePassiveDelta(sessionId, passive.lease_id);
             } catch { /* a failed settlement leaves the batch replayable */ }
           }
         }
-        if (pushResult && pushResult.ok) {
+        if (pushResult && pushResult.ok && !pushResult.queued) {
           tracker.markCommentDispatchesDeliveredForTicket(ticket.id, sessionId);
         }
 

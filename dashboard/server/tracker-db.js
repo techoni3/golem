@@ -849,7 +849,7 @@ WHERE state_changed_at IS NULL`).run();
         "UPDATE dispatch_queue SET status = 'cancelled', resolved_at = @resolved_at WHERE ticket_id = @ticket_id AND status = 'pending'"
       ),
       getPendingForTicket: db.prepare(
-        "SELECT * FROM dispatch_queue WHERE ticket_id = ? AND status = 'pending'"
+        "SELECT * FROM dispatch_queue WHERE ticket_id = ? AND status IN ('pending','next_turn')"
       ),
       getQueueRow: db.prepare('SELECT * FROM dispatch_queue WHERE id = ?'),
       cancelQueueRow: db.prepare(
@@ -859,19 +859,20 @@ WHERE state_changed_at IS NULL`).run();
         "UPDATE dispatch_queue SET status = 'expired', last_error = @last_error, resolved_at = @resolved_at WHERE id = @id AND status = 'pending'"
       ),
       markQueueDeliveredRow: db.prepare(
-        "UPDATE dispatch_queue SET status = 'delivered', delivered_at = @delivered_at, last_error = @last_error, resolved_at = @resolved_at WHERE id = @id AND status = 'pending'"
+        "UPDATE dispatch_queue SET status = 'delivered', delivered_at = @delivered_at, last_error = @last_error, resolved_at = @resolved_at WHERE id = @id AND status IN ('pending','next_turn')"
       ),
+      markQueueNextTurnRow: db.prepare("UPDATE dispatch_queue SET status = 'next_turn' WHERE id = @id AND status = 'pending'"),
       listPendingDispatches: db.prepare(
         "SELECT * FROM dispatch_queue WHERE status = 'pending' ORDER BY created_at ASC"
       ),
       listPendingForSession: db.prepare(
-        "SELECT * FROM dispatch_queue WHERE session_id = ? AND status = 'pending' ORDER BY created_at ASC"
+        "SELECT * FROM dispatch_queue WHERE session_id = ? AND status IN ('pending','next_turn') ORDER BY created_at ASC"
       ),
       countPendingForSession: db.prepare(
-        "SELECT COUNT(*) AS n FROM dispatch_queue WHERE session_id = ? AND status = 'pending'"
+        "SELECT COUNT(*) AS n FROM dispatch_queue WHERE session_id = ? AND status IN ('pending','next_turn')"
       ),
       countPendingBySession: db.prepare(
-        "SELECT session_id, COUNT(*) AS n FROM dispatch_queue WHERE status = 'pending' GROUP BY session_id"
+        "SELECT session_id, COUNT(*) AS n FROM dispatch_queue WHERE status IN ('pending','next_turn') GROUP BY session_id"
       ),
       currentInProgressForSession: db.prepare(
         "SELECT id, display_id, title FROM tickets WHERE state = 'in_progress' AND (assignee = ? OR dispatched_to = ?) ORDER BY state_changed_at DESC, updated_at DESC, seq DESC LIMIT 1"
@@ -2820,7 +2821,7 @@ WHERE state_changed_at IS NULL`).run();
     markQueueDelivered(queueId, { error = null, envelope_id = null } = {}) {
       const row = stmts.getQueueRow.get(queueId);
       if (!row) throw new Error(`markQueueDelivered: queue row '${queueId}' not found`);
-      if (row.status !== 'pending') return row;
+      if (!['pending', 'next_turn'].includes(row.status)) return row;
       const ts = now();
       const txn = db.transaction(() => {
         stmts.markQueueDeliveredRow.run({
@@ -2836,6 +2837,13 @@ WHERE state_changed_at IS NULL`).run();
         return stmts.getQueueRow.get(queueId);
       });
       return txn();
+    },
+
+    markQueueNextTurn(queueId) {
+      const row = stmts.getQueueRow.get(queueId);
+      if (!row) throw new Error(`markQueueNextTurn: queue row '${queueId}' not found`);
+      stmts.markQueueNextTurnRow.run({ id: queueId });
+      return stmts.getQueueRow.get(queueId);
     },
 
     markDispatchDeliveryAttempted(ticketId, { session_id, actor = 'human', error = null, envelope_id = null } = {}) {

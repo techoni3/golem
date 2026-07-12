@@ -24,23 +24,20 @@ export default function golem(pi) {
   pi.on('session_shutdown', (event, ctx) => record(ctx, 'session_shutdown', 'ended', { reason: event.reason }));
   pi.on('input', (_event, ctx) => {
     const id = canonicalId || ctx.sessionManager.getSessionId();
-    const inbox = path.join(home, 'pi-inbox', `${id}.jsonl`);
-    const claim = `${inbox}.claimed.${process.pid}.${Date.now()}`;
-    try { fs.renameSync(inbox, claim); } catch { return; }
-    try {
-      const messages = [];
-      const malformed = [];
-      for (const line of fs.readFileSync(claim, 'utf8').split('\n').filter(Boolean)) {
-        try { const value = JSON.parse(line); if (typeof value?.text === 'string') messages.push(value); else malformed.push(line); }
-        catch { malformed.push(line); }
+    const root = path.join(home, 'pi-inbox', id); const pending = path.join(root, 'pending');
+    const messages = [];
+    for (const name of fs.existsSync(pending) ? fs.readdirSync(pending).sort() : []) {
+      const source = path.join(pending, name); const processing = path.join(root, 'processing', name);
+      try {
+        fs.mkdirSync(path.dirname(processing), { recursive: true }); fs.renameSync(source, processing);
+        const value = JSON.parse(fs.readFileSync(processing, 'utf8'));
+        if (typeof value?.text !== 'string') throw new Error('invalid text');
+        messages.push(value); fs.mkdirSync(path.join(root, 'acks'), { recursive: true });
+        fs.renameSync(processing, path.join(root, 'acks', name));
+      } catch {
+        try { fs.mkdirSync(path.join(root, 'dead-letter'), { recursive: true }); fs.renameSync(processing, path.join(root, 'dead-letter', name)); } catch {}
       }
-      if (malformed.length) fs.appendFileSync(`${inbox}.dead-letter.jsonl`, `${malformed.join('\n')}\n`, { mode: 0o600 });
-      fs.unlinkSync(claim);
-      if (messages.length) return { action: 'transform', text: `${_event.text}\n\n${messages.map((x) => x.text).join('\n\n')}` };
-    } catch {
-      // Retry the whole claimed batch. If producers already recreated inbox,
-      // append the claimed bytes instead of replacing their concurrent writes.
-      try { fs.appendFileSync(inbox, fs.readFileSync(claim)); fs.unlinkSync(claim); } catch {}
     }
+    if (messages.length) return { action: 'transform', text: `${_event.text}\n\n${messages.map((x) => x.text).join('\n\n')}` };
   });
 }
