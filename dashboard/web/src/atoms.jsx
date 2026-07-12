@@ -89,6 +89,30 @@ function ConnectionPill({ status }) {
   );
 }
 
+function DrawerBackdrop({ open, onClose }) {
+  return <div className={`drawer-backdrop ${open ? 'open' : ''}`} onClick={onClose} aria-hidden="true"/>;
+}
+
+function DrawerPanel({ open, onClose, label = 'Details', className = '', children, ...props }) {
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const previous = document.activeElement;
+    ref.current?.focus();
+    const onKey = (event) => { if (event.key === 'Escape') onClose?.(); };
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('keydown', onKey); previous?.focus?.(); };
+  }, [open, onClose]);
+  return (
+    <aside ref={ref} className={`drawer ${open ? 'open' : ''}${className ? ` ${className}` : ''}`}
+      role="dialog" aria-modal="true" aria-label={label} aria-hidden={!open} tabIndex={-1} {...props}>
+      {children}
+    </aside>
+  );
+}
+window.DrawerBackdrop = DrawerBackdrop;
+window.DrawerPanel = DrawerPanel;
+
 // v4: PLAN.md progress — a compact "N/M" bar that expands to the flat
 // checkbox-item list on click. Renders nothing when the project has no plan.
 // `color` themes the fill bar to match the project.
@@ -135,17 +159,10 @@ function sessionStatusKind(s) {
 function HarnessIcon({ harness }) {
   const h = harness || 'claudecode';
   const cls = h === 'opencode' ? 'opencode' : h === 'claudecode' ? 'claudecode' : 'other';
-  const base = window.ModelProviders?.iconBase;
-  const src = h === 'opencode'
-    ? base && `${base}opencode.svg`
-    : h === 'claudecode'
-      ? base && `${base}claudecode-color.svg`
-      : null;
+  const initials = h === 'opencode' ? 'OC' : h === 'claudecode' ? 'CC' : h.slice(0, 2).toUpperCase();
   return (
     <span className={`agent-harness-icon ${cls}`} title={`harness: ${h}`} aria-label={`harness ${h}`}>
-      {src ? <img src={src} alt="" loading="lazy"/> : (
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="2"/><path d="M8 12h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
-      )}
+      <span aria-hidden="true">{initials}</span>
     </span>
   );
 }
@@ -155,7 +172,7 @@ function ModelPill({ model }) {
   const provider = window.ModelProviders?.providerForModel?.(model);
   return (
     <span className="agent-model-pill" title={provider ? `${provider.label}: ${model}` : model}>
-      {provider?.iconSrc ? <span className="agent-model-icon"><img src={provider.iconSrc} alt="" loading="lazy"/></span> : null}<span>{model}</span>
+      <span className="agent-model-icon" aria-hidden="true">{provider?.initials || 'AI'}</span><span>{model}</span>
     </span>
   );
 }

@@ -106,13 +106,6 @@ function CommunicationDrawer({ open, onClose }) {
   }, [open, filter, communicationHealthRev]);
 
   React.useEffect(() => load(), [load]);
-  React.useEffect(() => {
-    if (!open) return;
-    const onKey = (event) => { if (event.key === 'Escape') onClose?.(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
-
   const dismiss = (item) => {
     if (!item?.ticket_id || !item?.id) return;
     // Do not optimistically erase facts. The existing dismissal endpoint emits
@@ -124,8 +117,8 @@ function CommunicationDrawer({ open, onClose }) {
 
   return (
     <>
-      <div className={`drawer-backdrop ${open ? 'open' : ''}`} onClick={onClose}/>
-      <aside className={`drawer communication-drawer ${open ? 'open' : ''}`} data-testid="communication-drawer" aria-hidden={!open} aria-label="Communication health">
+      <DrawerBackdrop open={open} onClose={onClose}/>
+      <DrawerPanel open={open} onClose={onClose} label="Communication health" className="communication-drawer" data-testid="communication-drawer">
         <div className="drawer-header communication-drawer-header">
           <div className="drawer-title-row">
             <span className={`communication-severity-dot severity-${summary?.level || 'green'}`}/>
@@ -157,7 +150,7 @@ function CommunicationDrawer({ open, onClose }) {
           {!loading && !error && items.length === 0 && <div className="communication-empty" data-testid="communication-empty">No {COMMUNICATION_FILTERS.find((option) => option.id === filter)?.label.toLowerCase()} envelopes.</div>}
           {!loading && !error && items.map((item) => <CommunicationEnvelopeRow key={item.id} item={item} onDismiss={dismiss}/>) }
         </div>
-      </aside>
+      </DrawerPanel>
     </>
   );
 }

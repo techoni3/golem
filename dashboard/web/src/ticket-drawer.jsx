@@ -596,18 +596,18 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
   const projectHref = project
     ? window.Router.buildHref({ kind: 'project', id: project.id, tab: 'agents' })
     : null;
-  const Shell = isPage ? 'div' : 'aside';
+  const Shell = isPage ? 'div' : DrawerPanel;
   const shellClass = isPage
     ? `ticket-page${isQuestion ? ' td-has-question-return' : ''}${editBuf ? ' td-editing' : ''}`
-    : `drawer ${open ? 'open' : ''} drawer-ticket${isQuestion ? ' td-has-question-return' : ''}${editBuf ? ' td-editing' : ''}`;
+    : `drawer-ticket${isQuestion ? ' td-has-question-return' : ''}${editBuf ? ' td-editing' : ''}`;
   const shellStyle = isPage ? undefined : { width: `${widthPct}vw` };
 
   return (
     <>
       {isPage ? null : (
-        <div className={`drawer-backdrop ${open ? 'open' : ''}`} onClick={close}/>
+        <DrawerBackdrop open={open} onClose={close}/>
       )}
-      <Shell className={shellClass} style={shellStyle}>
+      <Shell className={shellClass} style={shellStyle} {...(isPage ? {} : { open, onClose: close, label: ticket ? `Ticket ${ticket.display_id || ticket.id}` : 'Ticket details' })}>
         {!open && !isPage ? null : loading && !ticket ? (
           <div className="td-loading">
             <div className="drawer-header">

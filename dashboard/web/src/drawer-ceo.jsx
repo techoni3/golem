@@ -93,8 +93,8 @@ function CeoChatDrawer({ open, sessionId, onClose }) {
 
   return (
     <>
-      <div className={`drawer-backdrop ${open ? 'open' : ''}`} onClick={() => onClose && onClose()}/>
-      <aside className={`drawer ${open ? 'open' : ''} drawer-ceo`}>
+      <DrawerBackdrop open={open} onClose={onClose}/>
+      <DrawerPanel open={open} onClose={onClose} label="Session conversation" className="drawer-ceo">
         <div className="drawer-header">
           <div className="drawer-title-row">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -156,7 +156,7 @@ function CeoChatDrawer({ open, sessionId, onClose }) {
         {toast && (
           <div className={`orch-toast ${toast.kind} drawer-toast`} key={toast.id}>{toast.text}</div>
         )}
-      </aside>
+      </DrawerPanel>
     </>
   );
 }
