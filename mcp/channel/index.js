@@ -1465,6 +1465,10 @@ process.on('exit', (code) => {
   try { process.stderr.write(`[golem-channel] exit code=${code}\n`); } catch { /* stderr gone */ }
 });
 
+// SDK 1.29.0's StdioServerTransport does not translate stdin EOF into
+// transport.onclose. Observe EOF directly so a host disappearing without a
+// signal cannot leave the HTTP channel registered as a zombie.
+process.stdin.once('end', () => shutdown(0, 'mcp stdin closed by host'));
 await mcp.connect(new StdioServerTransport());
 // TKT-0369: if the host closes the MCP stdio transport without killing us, the
 // HTTP server would keep this process alive as a ZOMBIE channel — registered in

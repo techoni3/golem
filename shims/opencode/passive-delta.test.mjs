@@ -54,18 +54,26 @@ function childResult(child) {
 async function stopChild(child, result, name) {
   if (!child || !result) return;
   if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
-  const timeout = sleep(5_000).then(() => { throw new Error(`${name} did not exit after SIGTERM`); });
+  let stopped;
   try {
-    const stopped = await Promise.race([result, timeout]);
-    if (stopped.error) throw stopped.error;
-  } catch (error) {
+    stopped = await withTimeout(result, 5_000, `${name} did not exit after SIGTERM`);
+  } catch {
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-    const killed = await Promise.race([
-      result,
-      sleep(5_000).then(() => { throw new Error(`${name} did not exit after SIGKILL`); }),
-    ]);
-    if (killed.error) throw killed.error;
-    if (child.exitCode === null && child.signalCode === null) throw error;
+    stopped = await withTimeout(result, 5_000, `${name} did not exit after SIGKILL`);
+  }
+  if (stopped.error) throw stopped.error;
+}
+
+async function withTimeout(promise, timeoutMs, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    timer.unref();
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -96,11 +104,6 @@ async function passiveClaim(base, id) {
 }
 
 try {
-  assert.match(
-    fs.readFileSync(channelServer, 'utf8'),
-    /mcp\.onclose\s*=\s*\(\)\s*=>\s*shutdown\(0,\s*'mcp transport closed by host'\)/,
-    'closed MCP transport remains wired to shut down the channel process',
-  );
   fs.mkdirSync(home, { recursive: true });
   fs.mkdirSync(projectDir, { recursive: true });
   fs.mkdirSync(hooksDir, { recursive: true });
@@ -216,6 +219,17 @@ try {
   await fetch(`${base}/api/passive-deltas/${sessionID}/release`, {
     method: 'POST', headers: { 'X-Golem-Caller-Session': sessionID, 'Content-Type': 'application/json' }, body: JSON.stringify({ lease_id: replay.lease_id }),
   });
+
+  channel.stdin.end();
+  const eofShutdown = await withTimeout(channelResult, 5_000, `channel survived MCP stdin EOF; stderr: ${channelStderr || '(none)'}`);
+  assert.equal(eofShutdown.error, null, 'channel process closes cleanly after MCP stdin EOF');
+  assert.equal(eofShutdown.code, 0, 'MCP stdin EOF shuts down the channel with exit code 0');
+  assert.equal(eofShutdown.signal, null, 'MCP stdin EOF shuts down without an external signal');
+  assert.match(channelStderr, /shutdown \(mcp stdin closed by host\)/, 'runtime shutdown reports MCP stdin EOF');
+  await eventually(() => {
+    const channels = JSON.parse(fs.readFileSync(path.join(home, 'channels.json'), 'utf8')).channels;
+    assert.equal(channels.some((entry) => entry.pid === registeredChannel.pid), false);
+  }, 'MCP stdin EOF did not unregister the channel');
 
 } finally {
   if (channel?.stdin && !channel.stdin.destroyed) channel.stdin.end();
