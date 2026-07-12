@@ -3,12 +3,13 @@
 Golem is a local orchestration plugin, tracker/dashboard, and CLI for Claude
 Code and OpenCode. It requires Node.js 20 or newer. Claude Code is the supported
 plugin/channel surface; OpenCode supports rendered agents, skills, and MCP
-configuration.
+configuration. The npm package is `@laveesingh/golem`; the rendered harness
+plugin remains named `golem`.
 
 ## Install and render
 
 ```sh
-npm install -g golem
+npm install -g @laveesingh/golem
 golem sync --target cc
 golem sync --target cc-marketplace
 claude plugin marketplace add ~/.golem/renders/cc-marketplace

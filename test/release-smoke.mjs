@@ -32,8 +32,10 @@ try {
   run('npm', ['init', '-y'], installDir);
   run('npm', ['install', '--no-audit', '--no-fund', tarball], installDir);
 
-  const packageRoot = path.resolve(path.dirname(createRequire(path.join(installDir, 'package.json')).resolve('golem')), '..');
+  const installedRequire = createRequire(path.join(installDir, 'package.json'));
+  const packageRoot = path.resolve(path.dirname(installedRequire.resolve('@laveesingh/golem')), '..');
   assert.notEqual(packageRoot, repo, 'CLI must resolve from the installed tarball');
+  assert.equal(JSON.parse(readFileSync(path.join(packageRoot, 'package.json'))).name, '@laveesingh/golem');
   const cli = path.join(packageRoot, 'cli', 'golem.js');
   run(process.execPath, [cli, 'help'], installDir);
   run(process.execPath, [cli, 'sync', '--target', 'cc'], installDir);
