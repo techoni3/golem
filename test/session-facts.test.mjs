@@ -30,4 +30,18 @@ assert.equal(readEndpointLeases({ now: 2001 }).length, 0);
 for (const file of ['session-facts.json', 'endpoint-leases.json']) {
   assert.doesNotThrow(() => JSON.parse(fs.readFileSync(path.join(process.env.GOLEM_HOME, file), 'utf8')), `${file} remains atomic JSON`);
 }
-console.log('canonical session facts + endpoint leases journey passed (12 assertions)');
+
+const corruptFacts = path.join(process.env.GOLEM_HOME, 'corrupt-facts.json');
+fs.writeFileSync(corruptFacts, '{"version":1,"facts":[');
+const corruptBytes = fs.readFileSync(corruptFacts);
+assert.throws(() => upsertSessionFact({ canonical_id: 'must-not-write', harness: 'opencode', locator: { raw_session_id: 'raw' } }, { file: corruptFacts }), /cannot read facts registry/);
+assert.deepEqual(fs.readFileSync(corruptFacts), corruptBytes, 'malformed registry is preserved byte-for-byte');
+
+const projected = upsertSessionFact({ canonical_id: 'unprobed', harness: 'opencode', locator: { raw_session_id: 'unprobed' }, project_path: process.cwd(), status: 'idle' });
+renewEndpointLease({ canonical_id: projected.canonical_id, owner_token: 'unprobed-owner', host: '127.0.0.1', port: 9 });
+const { readNativeSessions } = await import('../dashboard/server/native-sessions.js');
+const unprobed = (await readNativeSessions(() => true)).find((row) => row.session_id === projected.canonical_id);
+assert.equal(unprobed?.alive, false, 'valid but unprobed lease never makes projection alive');
+assert.equal(unprobed?.endpoint_health, 'unverified', 'lease validity is distinct from verified endpoint health');
+
+console.log('canonical session facts + endpoint leases journey passed (16 assertions)');

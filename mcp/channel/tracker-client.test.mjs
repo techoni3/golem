@@ -270,6 +270,14 @@ async function main() {
   await mcpClient.connect(mcpTransport);
 
   const channelUrl = await waitForChannel();
+  const leases = JSON.parse(fs.readFileSync(path.join(tmpGolemHome, 'endpoint-leases.json'), 'utf8')).leases;
+  const lease = leases.find((row) => row.canonical_id === SESSION_ID);
+  const validHealth = await fetch(`${channelUrl}/healthz?${new URLSearchParams({ session_id: SESSION_ID, owner_token: lease.owner_token })}`);
+  check('identity-bound lease health succeeds', validHealth.status === 200, await validHealth.text());
+  const wrongSessionHealth = await fetch(`${channelUrl}/healthz?${new URLSearchParams({ session_id: 'wrong-session', owner_token: lease.owner_token })}`);
+  check('lease health rejects wrong canonical session', wrongSessionHealth.status === 403, await wrongSessionHealth.text());
+  const wrongOwnerHealth = await fetch(`${channelUrl}/healthz?${new URLSearchParams({ session_id: SESSION_ID, owner_token: 'wrong-owner' })}`);
+  check('lease health rejects wrong owner token', wrongOwnerHealth.status === 403, await wrongOwnerHealth.text());
   const roleResponse = await fetch(`${channelUrl}/role`, {
     method: 'POST',
     headers: { 'X-Sender': 'dashboard', 'Content-Type': 'text/plain' },
@@ -347,7 +355,9 @@ async function main() {
     { session_id: siblingB, project_id: PROJECT_ID, harness: 'opencode', status: 'idle', updated_at: now },
   ] }));
   const nativeModule = await import(url.pathToFileURL(path.resolve(__dirname, '../../dashboard/server/native-sessions.js')).href + `?t=${Date.now()}`);
-  const nativeSiblings = await nativeModule.readNativeSessions(() => true);
+  const channelsModule = await import(url.pathToFileURL(path.resolve(__dirname, '../../dashboard/server/channels.js')).href + `?t=${Date.now()}`);
+  const verifiedSiblingChannels = await channelsModule.readChannels();
+  const nativeSiblings = await nativeModule.readNativeSessions(() => true, verifiedSiblingChannels);
   const nativeSiblingRows = nativeSiblings.filter((session) => session.session_id === siblingA || session.session_id === siblingB);
   check('native sessions reports both sibling rows alive', nativeSiblingRows.length === 2 && nativeSiblingRows.every((session) => session.alive === true), JSON.stringify(nativeSiblings));
   const siblingChannel = siblingRows.find((channel) => channel.session_id === siblingB);

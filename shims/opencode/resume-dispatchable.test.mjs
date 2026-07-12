@@ -96,7 +96,7 @@ fs.writeFileSync(path.join(process.env.GOLEM_HOME, 'channels.json'), JSON.string
 }, null, 2));
 renewEndpointLease({ canonical_id: resumed.id, owner_token: 'journey-channel', host: '127.0.0.1', port: 12345 });
 
-const native = await readNativeSessions(() => true);
+const native = await readNativeSessions(() => true, [{ session_id: resumed.id, endpoint_health: 'healthy', expires_at: new Date(Date.now() + 30_000).toISOString() }]);
 const live = native.find((s) => s.session_id === resumed.id);
 assert.ok(live, 'dashboard native-session discovery sees resumed opencode session');
 assert.equal(live.alive, true);

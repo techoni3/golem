@@ -183,7 +183,7 @@ function writeChannelsRegistry(reg) {
 // Captured once at module load so the periodic re-register heartbeat keeps a
 // stable started_at instead of advancing it every tick.
 const STARTED_AT = new Date().toISOString();
-const LEASE_OWNER = `channel:${process.pid}:${STARTED_AT}`;
+const LEASE_OWNER = crypto.randomBytes(32).toString('base64url');
 
 function registerChannel(port, { logMissing = true } = {}) {
   // Re-derive each call: the parent session file may not have existed at module
@@ -1241,7 +1241,14 @@ const server = http.createServer(async (req, res) => {
   try {
     // GET /healthz — smoke endpoint
     if (method === 'GET' && path === '/healthz') {
-      return sendJson(res, 200, { ok: true, version: VERSION });
+      const canonicalId = url.searchParams.get('session_id');
+      const ownerToken = url.searchParams.get('owner_token');
+      const ownedIds = new Set(sessionsForParent({ home: tracker.golemHome() }).map((row) => row.session_id));
+      if (SESSION_ID) ownedIds.add(SESSION_ID);
+      if (!canonicalId || ownerToken !== LEASE_OWNER || !ownedIds.has(canonicalId)) {
+        return sendJson(res, 403, { ok: false, error: 'lease identity mismatch' });
+      }
+      return sendJson(res, 200, { ok: true, version: VERSION, canonical_id: canonicalId, owner_token: LEASE_OWNER });
     }
 
     // GET /events — SSE stream of CEO acks
