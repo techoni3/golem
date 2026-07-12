@@ -23,7 +23,9 @@ import { golemHome, dashboardJsonPath, journalDirFor, sessionsJsonPath } from '.
 import { createRole, deleteRole, getRole, listRoleCards, pushRoleBriefDirect, roleChangeBrief, roleMission, setSessionRole, updateRoleMeta, writeRoleCard } from '../../lib/session-role.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
-const WEB_ROOT = path.resolve(__dirname, '..', 'web');
+const WEB_SOURCE_ROOT = path.resolve(__dirname, '..', 'web');
+const WEB_DIST_ROOT = path.resolve(__dirname, '..', 'dist');
+const WEB_ROOT = fs.existsSync(path.join(WEB_DIST_ROOT, 'index.html')) ? WEB_DIST_ROOT : WEB_SOURCE_ROOT;
 // The tracker genre templates live OUTSIDE dashboard/, in the substrate
 // source tree at substrate/skills/tracker/templates/ (TKT-0574 — plugin/ is
 // now a generated render of substrate/, not the SoT). Resolve the repo root
@@ -650,7 +652,9 @@ async function main() {
   // and streams.
   function trackerSnapshot() {
     return {
-      tickets: tracker.listTickets({}),
+      // The client owns the archived visibility toggle/search. Include those
+      // rows in the canonical snapshot so toggling never depends on a refetch.
+      tickets: tracker.listTickets({ includeArchived: true }),
       streams: listAllStreams(),
     };
   }

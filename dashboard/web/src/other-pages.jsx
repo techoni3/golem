@@ -460,9 +460,9 @@ function ProjectCard({ p, setRoute }) {
         </div>
         <div className="project-stat" style={{ marginLeft: 'auto' }}>
           <div className="project-stat-value tnum" style={{ color: p.color }}>
-            {Math.round((p.progress || 0) * 100)}%
+            {Number.isFinite(Number(p.progress)) ? `${Math.round(Number(p.progress) * 100)}%` : '—'}
           </div>
-          <div className="project-stat-label">{p.total_tickets} tickets</div>
+          <div className="project-stat-label">{Number.isFinite(Number(p.total_tickets)) ? p.total_tickets : 0} tickets</div>
         </div>
       </div>
       <div className="project-card-progress">

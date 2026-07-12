@@ -2136,13 +2136,13 @@ WHERE state_changed_at IS NULL`).run();
       return row ? api.getTicket(row.id) : null;
     },
 
-    // TKT-0107: maximum updated_at across all tickets for a project. Powers
-    // the composite last_activity_at signal in the sidebar ordering.
+    // Maximum user-work recency for a project. Archived rows are excluded:
+    // archive sweeps are maintenance and must not make dormant projects recent.
     // Returns 0 when the project has no tickets.
     maxTicketUpdatedAt(projectId) {
       if (!projectId) return 0;
       const row = db.prepare(
-        'SELECT MAX(updated_at) AS m FROM tickets WHERE project_id = ?'
+        "SELECT MAX(updated_at) AS m FROM tickets WHERE project_id = ? AND state != 'archived'"
       ).get(projectId);
       if (!row?.m) return 0;
       // updated_at is stored as ISO text; parse to ms.

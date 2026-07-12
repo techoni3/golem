@@ -77,25 +77,32 @@ function stalenessInfo(updated_at) {
   return { text: `${days}d`, aged };
 }
 
-function TrackerBoard({ view }) {
+function TrackerBoard({ view, route = {} }) {
   useStore();
   const projects = window.Store.getProjects();
 
-  const [projectFilter, setProjectFilter] = React.useState('');   // '' = all, else project_id
-  const [kindFilter, setKindFilter] = React.useState('');         // '' = all
-  const [assigneeFilter, setAssigneeFilter] = React.useState(''); // '' all | human | __unassigned__
-  const [showArchived, setShowArchived] = React.useState(false);
-  const [needsAnswer, setNeedsAnswer] = React.useState(false);    // WS6 quick filter
+  const [projectFilter, setProjectFilter] = React.useState(route.project || '');
+  const [kindFilter, setKindFilter] = React.useState(route.kindFilter || '');
+  const [assigneeFilter, setAssigneeFilter] = React.useState(route.assignee || '');
+  const [showArchived, setShowArchived] = React.useState(!!route.archived);
+  const [needsAnswer, setNeedsAnswer] = React.useState(!!route.needsAnswer);
   // TKT-0104: client-side search. Debounced 80ms to avoid jank on fast typing.
   // Matches against id, title, kind, priority, assignee label, project name
   // (cross-project view only). Body text intentionally NOT matched (would
   // require fetching every ticket's full body).
-  const [searchInput, setSearchInput] = React.useState('');
-  const [searchQuery, setSearchQuery] = React.useState('');
+  const [searchInput, setSearchInput] = React.useState(route.q || '');
+  const [searchQuery, setSearchQuery] = React.useState((route.q || '').trim().toLowerCase());
   React.useEffect(() => {
     const t = setTimeout(() => setSearchQuery(searchInput.trim().toLowerCase()), 80);
     return () => clearTimeout(t);
   }, [searchInput]);
+  React.useEffect(() => {
+    window.Router.go({
+      kind: 'tracker', view, project: projectFilter, kindFilter,
+      assignee: assigneeFilter, q: searchInput.trim(),
+      archived: showArchived, needsAnswer,
+    }, { replace: true });
+  }, [view, projectFilter, kindFilter, assigneeFilter, searchInput, showArchived, needsAnswer]);
 
   // Build a label resolver for assignees from the dispatchable sessions of the
   // currently-selected project (so session_id → friendly label where known).
