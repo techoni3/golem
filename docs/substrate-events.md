@@ -59,4 +59,4 @@ Useful subscriptions:
 
 ## Harness Normalization
 
-Claude Code hooks and the opencode shim both normalize into the same script stdin shape: `session_id`, `cwd`, `harness`, optional tool fields, and raw payload. Codex's adapter records only documented hook fields in canonical `session-facts.json` and marks delivery `next_turn` with `push: false`; it never parses unstable transcripts. The scripts derive project identity from the cwd, write the hook journal, and forward to the bus. Adapters must remain non-blocking and fail-open.
+Claude Code hooks and the opencode shim both normalize into the same script stdin shape: `session_id`, `cwd`, `harness`, optional tool fields, and raw payload. Codex's adapter records only documented hook fields through the canonical locked session-fact writer and marks delivery `pull` with `push: false`; it never parses unstable transcripts. `SubagentStop` records the child observation without changing the parent session's status. The scripts derive project identity from the cwd, write the hook journal, and forward to the bus. Adapters must remain non-blocking and fail-open.

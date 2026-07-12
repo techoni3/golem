@@ -26,9 +26,9 @@ Codex users run `golem sync --target codex`, then
 the documented Codex plugin manifest, bundled MCP server, and lifecycle hooks.
 Codex requires users to review and trust non-managed plugin hooks with `/hooks`.
 This is **Tier B** support: lifecycle facts, skills, subagents, MCP tools, and
-pull/next-turn pickup are supported, but ordinary Codex CLI has no documented
+explicit pull are supported, but ordinary Codex CLI has no documented
 out-of-band turn-injection API. Golem therefore queues dispatches and never
-reports them as push-delivered. App Server integration is not included.
+reports them as push- or next-turn-delivered. App Server integration is not included.
 
 Pi users run `golem sync --target pi` and load the portable extension using the
 command in its rendered README. Pi itself requires Node.js 22.19 or newer. This

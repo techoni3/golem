@@ -57,6 +57,8 @@ try {
   const codexRoot = path.join(env.GOLEM_HOME, 'renders', 'codex');
   assert.equal(JSON.parse(readFileSync(path.join(codexRoot, 'plugins', 'golem', '.codex-plugin', 'plugin.json'))).name, 'golem');
   assert.equal(JSON.parse(readFileSync(path.join(codexRoot, 'plugins', 'golem', 'capabilities.json'))).push_delivery, false);
+  assert.deepEqual(JSON.parse(readFileSync(path.join(codexRoot, 'plugins', 'golem', 'capabilities.json'))).delivery, ['pull']);
+  assert.ok(readFileSync(path.join(codexRoot, 'plugins', 'golem', 'lib', 'session-facts.js'), 'utf8').includes('withRegistryLock'));
   assert.equal(JSON.parse(readFileSync(path.join(env.GOLEM_HOME, 'renders', 'pi', 'capabilities.json'))).tier, 'B');
   console.log(`release smoke passed: ${tarballName}`);
   console.log(`installed root: ${packageRoot}`);
