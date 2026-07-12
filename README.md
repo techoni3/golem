@@ -1,8 +1,8 @@
 # Golem
 
 Golem is a local orchestration plugin, tracker/dashboard, and CLI for Claude
-Code and OpenCode. It requires Node.js 20 or newer. Claude Code is the supported
-plugin/channel surface; OpenCode supports rendered agents, skills, and MCP
+Code, OpenCode, and Codex. It requires Node.js 20 or newer. Claude Code is the supported
+push-capable plugin/channel surface; OpenCode supports rendered agents, skills, and MCP
 configuration. The npm package is `@laveesingh/golem`; the rendered harness
 plugin remains named `golem`.
 
@@ -20,6 +20,15 @@ OpenCode users run `golem sync --target opencode`. See
 [`substrate/README.md`](substrate/README.md) for channel launch and update
 details. Roll back by uninstalling the marketplace plugin or installing a
 previous npm version, rendering again, and reloading the harness.
+
+Codex users run `golem sync --target codex`, then
+`codex plugin marketplace add ~/.golem/renders/codex`. The generated bundle uses
+the documented Codex plugin manifest, bundled MCP server, and lifecycle hooks.
+Codex requires users to review and trust non-managed plugin hooks with `/hooks`.
+This is **Tier B** support: lifecycle facts, skills, subagents, MCP tools, and
+pull/next-turn pickup are supported, but ordinary Codex CLI has no documented
+out-of-band turn-injection API. Golem therefore queues dispatches and never
+reports them as push-delivered. App Server integration is not included.
 
 ## Local data and permissions
 

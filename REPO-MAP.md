@@ -9,6 +9,7 @@
 - `dashboard/web/` — no-bundler React globals.
 - `mcp/channel/` — per-session HTTP/MCP channel.
 - `shims/opencode/` — maps events into hook/session registries.
+- `shims/codex/` — documented Codex hooks into canonical Tier B session facts.
 - `docs/architectures/` — versioned standalone architecture field guides.
 - `test/` — journey tests for CLI/compiler enforcement paths.
 - `golem-projects/` — repos.

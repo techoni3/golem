@@ -42,7 +42,7 @@
   },
   "scripts": {
     "check": "node --check cli/golem.js && node cli/golem.js sync --check --all",
-    "test": "node test/session-facts.test.mjs && node test/sync-enforcement.test.mjs && node shims/opencode/resume-dispatchable.test.mjs && node shims/opencode/passive-delta.test.mjs && node mcp/channel/tracker-client.test.mjs",
+    "test": "node test/session-facts.test.mjs && node test/codex-journey.test.mjs && node test/sync-enforcement.test.mjs && node shims/opencode/resume-dispatchable.test.mjs && node shims/opencode/passive-delta.test.mjs && node mcp/channel/tracker-client.test.mjs",
     "postinstall": "npm ci --omit=dev --prefix mcp/channel",
     "test:release": "node test/release-smoke.mjs",
     "dashboard": "node dashboard/server/index.js",
