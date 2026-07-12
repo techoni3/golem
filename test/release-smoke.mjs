@@ -36,7 +36,9 @@ try {
   const installedRequire = createRequire(path.join(installDir, 'package.json'));
   const packageRoot = path.resolve(path.dirname(installedRequire.resolve('@laveesingh/golem')), '..');
   assert.notEqual(packageRoot, repo, 'CLI must resolve from the installed tarball');
-  assert.equal(JSON.parse(readFileSync(path.join(packageRoot, 'package.json'))).name, '@laveesingh/golem');
+  const installedPackage = JSON.parse(readFileSync(path.join(packageRoot, 'package.json')));
+  assert.equal(installedPackage.name, '@laveesingh/golem');
+  assert.equal(installedPackage.publishConfig?.access, 'public');
   assert.ok(readFileSync(path.join(packageRoot, 'substrate', 'README.md'), 'utf8').includes(scopedRollbackPath));
   const cli = path.join(packageRoot, 'cli', 'golem.js');
   run(process.execPath, [cli, 'help'], installDir);
