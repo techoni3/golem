@@ -66,9 +66,10 @@ claude plugin install golem@golem-workspace --scope user
 Or interactively inside a session: `/plugin marketplace add
 ~/.golem/renders/cc-marketplace` then `/plugin install golem@golem-workspace`.
 
-Fresh clone only: `node_modules/` is gitignored, so run `npm install --prefix
-mcp/channel` once before syncing — `golem sync --target cc` copies the
-channel server's deps from disk into the render.
+The npm package installs the channel server's locked production dependencies
+automatically. Source contributors can restore them with `npm ci --prefix
+mcp/channel`; `golem sync --target cc` copies those dependencies into the
+render so the plugin does not depend on the source checkout at runtime.
 
 Verify: `claude plugin list` (look for `golem@golem-workspace` enabled) and
 `claude plugin validate ~/.golem/renders/cc-plugin`.
@@ -83,7 +84,7 @@ breaks (it's still a byte-for-byte-checkable copy of `substrate/`, per
 TKT-0574):
 
 ```bash
-claude plugin marketplace add /Users/laveesingh/Documents/software/experiments/golem
+claude plugin marketplace add "$(npm root -g)/golem"
 claude plugin install golem@golem-local --scope user
 ```
 

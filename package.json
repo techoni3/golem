@@ -15,9 +15,15 @@
     "dashboard/server/",
     "dashboard/web/",
     "lib/",
+    "mcp/channel/",
     "plugin/",
     "shims/",
-    "README.md"
+    "substrate/",
+    "CONTRIBUTING.md",
+    "LICENSE",
+    "PRIVACY.md",
+    "README.md",
+    "SECURITY.md"
   ],
   "engines": {
     "node": ">=20"
@@ -25,6 +31,8 @@
   "scripts": {
     "check": "node --check cli/golem.js && node cli/golem.js sync --check --all",
     "test": "node test/sync-enforcement.test.mjs && node shims/opencode/resume-dispatchable.test.mjs && node shims/opencode/passive-delta.test.mjs && node mcp/channel/tracker-client.test.mjs",
+    "postinstall": "npm ci --omit=dev --prefix mcp/channel",
+    "test:release": "node test/release-smoke.mjs",
     "dashboard": "node dashboard/server/index.js",
     "dashboard:dev": "node --watch dashboard/server/index.js",
     "check:dashboard": "dashboard/scripts/check.sh"
