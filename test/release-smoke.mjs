@@ -46,6 +46,7 @@ try {
   run(process.execPath, [cli, 'sync', '--target', 'cc-marketplace'], installDir);
   run(process.execPath, [cli, 'sync', '--target', 'opencode'], installDir);
   run(process.execPath, [cli, 'sync', '--target', 'codex'], installDir);
+  run(process.execPath, [cli, 'sync', '--target', 'pi'], installDir);
 
   const renderedChannel = path.join(env.GOLEM_HOME, 'renders', 'cc-plugin', 'mcp', 'channel');
   assert.ok(readFileSync(path.join(env.GOLEM_HOME, 'renders', 'cc-plugin', 'README.md'), 'utf8').includes(scopedRollbackPath));
@@ -56,6 +57,7 @@ try {
   const codexRoot = path.join(env.GOLEM_HOME, 'renders', 'codex');
   assert.equal(JSON.parse(readFileSync(path.join(codexRoot, 'plugins', 'golem', '.codex-plugin', 'plugin.json'))).name, 'golem');
   assert.equal(JSON.parse(readFileSync(path.join(codexRoot, 'plugins', 'golem', 'capabilities.json'))).push_delivery, false);
+  assert.equal(JSON.parse(readFileSync(path.join(env.GOLEM_HOME, 'renders', 'pi', 'capabilities.json'))).tier, 'B');
   console.log(`release smoke passed: ${tarballName}`);
   console.log(`installed root: ${packageRoot}`);
   console.log(`rendered channel SDK: ${sdk}`);

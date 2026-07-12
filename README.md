@@ -1,7 +1,7 @@
 # Golem
 
 Golem is a local orchestration plugin, tracker/dashboard, and CLI for Claude
-Code, OpenCode, and Codex. It requires Node.js 20 or newer. Claude Code is the supported
+Code, OpenCode, Codex, and Pi. It requires Node.js 20 or newer. Claude Code is the supported
 push-capable plugin/channel surface; OpenCode supports rendered agents, skills, and MCP
 configuration. The npm package is `@laveesingh/golem`; the rendered harness
 plugin remains named `golem`.
@@ -29,6 +29,13 @@ This is **Tier B** support: lifecycle facts, skills, subagents, MCP tools, and
 pull/next-turn pickup are supported, but ordinary Codex CLI has no documented
 out-of-band turn-injection API. Golem therefore queues dispatches and never
 reports them as push-delivered. App Server integration is not included.
+
+Pi users run `golem sync --target pi` and load the portable extension using the
+command in its rendered README. Pi itself requires Node.js 22.19 or newer. This
+is **Tier B** support: start/resume/rename/status/tool events produce canonical
+facts and durable addressed work is pulled on the next input. Pi documents
+in-process message APIs, but no external endpoint for addressing a live idle
+TUI was found or mechanically proven, so Golem does not advertise Pi push.
 
 ## Local data and permissions
 
