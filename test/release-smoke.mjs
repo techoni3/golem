@@ -20,6 +20,7 @@ const env = {
   PORT: '17421',
   GOLEM_DASHBOARD_URL: 'http://127.0.0.1:17421',
 };
+const scopedRollbackPath = '$(npm root -g)/@laveesingh/golem';
 
 function run(file, args, cwd = temp) {
   return execFileSync(file, args, { cwd, env, encoding: 'utf8', stdio: 'pipe' });
@@ -36,6 +37,7 @@ try {
   const packageRoot = path.resolve(path.dirname(installedRequire.resolve('@laveesingh/golem')), '..');
   assert.notEqual(packageRoot, repo, 'CLI must resolve from the installed tarball');
   assert.equal(JSON.parse(readFileSync(path.join(packageRoot, 'package.json'))).name, '@laveesingh/golem');
+  assert.ok(readFileSync(path.join(packageRoot, 'substrate', 'README.md'), 'utf8').includes(scopedRollbackPath));
   const cli = path.join(packageRoot, 'cli', 'golem.js');
   run(process.execPath, [cli, 'help'], installDir);
   run(process.execPath, [cli, 'sync', '--target', 'cc'], installDir);
@@ -43,6 +45,7 @@ try {
   run(process.execPath, [cli, 'sync', '--target', 'opencode'], installDir);
 
   const renderedChannel = path.join(env.GOLEM_HOME, 'renders', 'cc-plugin', 'mcp', 'channel');
+  assert.ok(readFileSync(path.join(env.GOLEM_HOME, 'renders', 'cc-plugin', 'README.md'), 'utf8').includes(scopedRollbackPath));
   const channelRequire = createRequire(path.join(renderedChannel, 'index.js'));
   const sdk = channelRequire.resolve('@modelcontextprotocol/sdk/server/index.js');
   assert.ok(realpathSync(sdk).startsWith(realpathSync(renderedChannel)), 'rendered channel SDK must be self-contained');

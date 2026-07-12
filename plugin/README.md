@@ -84,7 +84,7 @@ breaks (it's still a byte-for-byte-checkable copy of `substrate/`, per
 TKT-0574):
 
 ```bash
-claude plugin marketplace add "$(npm root -g)/golem"
+claude plugin marketplace add "$(npm root -g)/@laveesingh/golem"
 claude plugin install golem@golem-local --scope user
 ```
 
