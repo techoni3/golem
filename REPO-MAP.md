@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-07-11 @ ac34521 — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-13 @ 37c7bf0 — maintained via golem:docs-maintenance.
 ## Directory structure
 - `substrate/` — plugin source of truth.
 - `plugin/` — generated CC render; never hand-edit.
@@ -25,6 +25,8 @@
 ### `dashboard/server/native-sessions.js`
 - Merges hook-written `sessions.json` with harness registries.
 - Hooks/shims own registration; dashboard may materialize bus status into existing rows.
+- `lib/session-facts.js` is the atomic canonical identity/freshness authority;
+  expiring, health-checked endpoint leases replace PID-only reachability for adopted sessions.
 ### `substrate/hooks/*.sh`
 - SessionStart registers, journals, and contextualizes; prompts add passive deltas.
 ### `substrate/instructions/`
@@ -38,8 +40,6 @@
 
 ## Data flow
 Hooks/shims write `~/.golem/`; dashboard owns `tracker.db`. Envelope health derives from facts. Passive slots land on real turns or successful envelopes; subscription digests are quiet by default.
-
-Visual deep dive: [session architecture](docs/architectures/session_architecture_5_0_16.html). Current OpenCode/Claude Code control plane, delivery, passive observation, health, and closure flows.
 
 ## Constraints & gotchas
 - Claude installs from `~/.golem/renders/cc-plugin` but runs cached plugin bytes; sync + update + `/reload-plugins` after edits.

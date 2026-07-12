@@ -517,6 +517,7 @@ async function main() {
 
   function enrichSessionRows(rows, channels = []) {
     const channelIds = new Set((channels || []).map((c) => c.session_id).filter(Boolean));
+    const channelById = new Map((channels || []).filter((c) => c.session_id).map((c) => [c.session_id, c]));
     const pendingBySession = tracker.countPendingDispatchesBySession();
     const unackedBySession = new Map();
     for (const warning of tracker.activeUnackedWarnings()) {
@@ -529,6 +530,7 @@ async function main() {
       role: s.role ?? null,
       harness: s.harness ?? 'claudecode',
       reachable: channelIds.has(s.session_id),
+      endpoint_health: channelById.get(s.session_id)?.endpoint_health ?? (s.fact_observed_at ? 'unreachable' : (s.endpoint_health ?? 'legacy')),
       pending_count: pendingBySession.get(s.session_id) ?? 0,
       current_in_progress_ticket: tracker.currentInProgressTicketForSession(s.session_id),
       has_unacked_dispatch: (unackedBySession.get(s.session_id) ?? []).length > 0,
@@ -1849,6 +1851,10 @@ async function main() {
       if (!s.alive) continue;
       if (wanted != null && s.project_id !== wanted) continue;
       const ch = channelBySession.get(s.session_id);
+      // Once a harness has adopted canonical facts, an authenticated healthy
+      // endpoint lease is part of dispatchability. Legacy rows retain the
+      // queue-while-unreachable compatibility behavior during migration.
+      if (s.fact_observed_at && !ch) continue;
       const team = teamBySession.get(s.session_id);
       // TKT-0369: an alive session whose channel MCP died must NOT silently
       // vanish from the picker — it stays listed with reachable:false so the UI

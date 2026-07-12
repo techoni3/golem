@@ -42,6 +42,7 @@ import {
   resolveProjectRoot,
 } from './project-id.js';
 import { channelsJsonPath, golemHome, sessionsJsonPath } from '../../lib/golem-home.js';
+import { readEndpointLeases, readSessionFacts } from '../../lib/session-facts.js';
 
 const HOME = os.homedir();
 const SESSIONS_DIR = path.join(HOME, '.claude', 'sessions');
@@ -397,9 +398,27 @@ export async function readNativeSessions(registeredIdLookup) {
   const registryRows = registryRaw; // already normalized
   const filteredGolemRows = dropTransientClaudeGolemRows(golemRaw, [...registryRows, ...cliRows]);
   const merged = mergeSources(cliRows, registryRows, filteredGolemRows);
+  const facts = readSessionFacts();
+  const leases = readEndpointLeases();
+  const leaseBySession = new Map(leases.map((lease) => [lease.canonical_id, lease]));
+  const mergedById = new Map(merged.filter((row) => row.session_id).map((row) => [row.session_id, row]));
+  for (const fact of facts) {
+    const previous = mergedById.get(fact.canonical_id) || {};
+    mergedById.set(fact.canonical_id, {
+      ...previous,
+      session_id: fact.canonical_id,
+      cwd: fact.project_path ?? previous.cwd ?? null,
+      name: fact.name ?? previous.name ?? null,
+      status: fact.status ?? previous.status ?? null,
+      model: fact.model ?? previous.model ?? null,
+      harness: fact.harness,
+      updated_at: msFromIso(fact.observed_at),
+      _fact: fact,
+    });
+  }
 
   const out = [];
-  for (const s of merged) {
+  for (const s of mergedById.values()) {
     const harness = s.harness ?? 'claudecode';
     // Golem-registry Claude Code rows carry hook_ppid (the hook shell), not the
     // real session pid, so pid-liveness can be faked by pid reuse; only native
@@ -410,10 +429,12 @@ export async function readNativeSessions(registeredIdLookup) {
     const isGolemRegistryCc = harness === 'claudecode' && s._from === 'golem';
     const bridge = harness === 'opencode' ? opencodeBridges.get(s.session_id) : null;
     const bridgePid = Number(bridge?.opencode_pid || bridge?.pid) || null;
+    const factFresh = !s._fact || (s.updated_at && Date.now() - s.updated_at < GOLEM_SESSION_RECENT_MS);
+    const endpointLease = leaseBySession.get(s.session_id);
     const alive = harness === 'opencode'
-      ? !!(!s.ended_at && liveChannelSessionIds.has(s.session_id) && (bridge
+      ? !!(!s.ended_at && factFresh && (endpointLease || (!s._fact && liveChannelSessionIds.has(s.session_id) && (bridge
         ? pidAlive(bridgePid)
-        : (s.updated_at && (Date.now() - s.updated_at) < GOLEM_SESSION_RECENT_MS)))
+        : (s.updated_at && (Date.now() - s.updated_at) < GOLEM_SESSION_RECENT_MS)))))
       : (isNonCc || isGolemRegistryCc
         ? !!(!s.ended_at && s.updated_at && (Date.now() - s.updated_at) < GOLEM_SESSION_RECENT_MS)
         : pidAlive(s.pid));
@@ -464,6 +485,11 @@ export async function readNativeSessions(registeredIdLookup) {
       role_updated_at: s.role_updated_at ?? null,
       role_updated_by: s.role_updated_by ?? null,
       source: 'native',
+      fact_fresh: !!s._fact && factFresh,
+      fact_observed_at: s._fact?.observed_at ?? null,
+      fact_revision: s._fact?.revision ?? null,
+      endpoint_health: endpointLease ? 'leased' : (s._fact ? 'unleased' : 'legacy'),
+      endpoint_expires_at: endpointLease?.expires_at ?? null,
     });
   }
 

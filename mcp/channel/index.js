@@ -31,6 +31,7 @@ import {
 import * as tracker from './tracker-client.js';
 import { bridgeEndpointForParent, resolveCallerSessionId, sessionsForParent } from './identity.js';
 import { SESSION_ROLES, pushRoleBriefDirect, setSessionRole } from '../../lib/session-role.js';
+import { releaseEndpointLeases, renewEndpointLease, upsertSessionFact } from '../../lib/session-facts.js';
 
 const VERSION = '0.1.0';
 // Port selection (multi-CEO safe by default):
@@ -182,6 +183,7 @@ function writeChannelsRegistry(reg) {
 // Captured once at module load so the periodic re-register heartbeat keeps a
 // stable started_at instead of advancing it every tick.
 const STARTED_AT = new Date().toISOString();
+const LEASE_OWNER = `channel:${process.pid}:${STARTED_AT}`;
 
 function registerChannel(port, { logMissing = true } = {}) {
   // Re-derive each call: the parent session file may not have existed at module
@@ -221,6 +223,17 @@ function registerChannel(port, { logMissing = true } = {}) {
         harness: siblings.length ? 'opencode' : (bridge && bridge.session_id === SESSION_ID ? 'opencode' : undefined),
         started_at: STARTED_AT,
       });
+      const harness = siblings.length ? 'opencode' : (bridge && bridge.session_id === SESSION_ID ? 'opencode' : 'claudecode');
+      upsertSessionFact({
+        canonical_id: row.session_id,
+        harness,
+        locator: { raw_session_id: harness === 'claudecode' ? (process.env.CLAUDE_CODE_SESSION_ID || row.session_id) : row.session_id },
+        continuation_key: harness === 'claudecode' ? row.session_id : null,
+        name: row.name || null,
+        status: row.status || null,
+        observed_at: new Date().toISOString(),
+      });
+      renewEndpointLease({ canonical_id: row.session_id, owner_token: LEASE_OWNER, host: HOST, port, pid: process.pid, harness });
     }
     writeChannelsRegistry(reg);
   });
@@ -259,6 +272,7 @@ function stopWatchingOpencodeBridges() {
 
 function unregisterChannel() {
   try {
+    releaseEndpointLeases(LEASE_OWNER);
     withChannelLock(() => {
       const reg = readChannelsRegistry();
       const before = reg.channels.length;

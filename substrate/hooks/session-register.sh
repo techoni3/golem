@@ -259,6 +259,14 @@ upsert_sessions() {
 if command -v jq >/dev/null 2>&1; then
   with_lock "$PROJECTS_JSON.lock" upsert_projects || true
   with_lock "$SESSIONS_JSON.lock" upsert_sessions || true
+  # Additive canonical authority. The legacy view above remains for older
+  # installs/readers; all new presence decisions consume this fact instead.
+  FACT_WRITER="$SCRIPT_DIR/../lib/session-facts-write.js"
+  [ -f "$FACT_WRITER" ] || FACT_WRITER="$SCRIPT_DIR/../../lib/session-facts-write.js"
+  if [ -f "$FACT_WRITER" ] && command -v node >/dev/null 2>&1 && [ -n "$SESSION_ID" ]; then
+    _fact="$(jq -cn --arg id "$SESSION_ID" --arg raw "$RAW_SESSION_ID" --arg h "$HARNESS" --arg p "$ROOT" --arg n "$SESSION_NAME" --arg m "$MODEL" --arg at "$NOW" '{canonical_id:$id,harness:$h,locator:{raw_session_id:(if $raw=="" then $id else $raw end)},continuation_key:$id,project_path:$p,name:(if $n=="" then null else $n end),model:(if $m=="" then null else $m end),status:"idle",observed_at:$at}')"
+    node "$FACT_WRITER" "$_fact" >/dev/null 2>&1 || true
+  fi
 fi
 
 # --- project-scoped substrate sync-on-register -----------------------------
