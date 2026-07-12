@@ -68,6 +68,11 @@ function Sidebar({ route, setRoute }) {
           const active = route.kind === 'project' && route.id === p.id;
           const live = window.Store.getProjectAliveSessions(p).length;
           const href = window.Router.buildHref({ kind: 'project', id: p.id, tab: 'agents' });
+          const ageDays = p.last_activity_at ? Math.floor((Date.now() - p.last_activity_at) / DAY) : null;
+          const freshness = buckets.archived.includes(p) ? 'archived'
+            : buckets.stale.includes(p) ? 'stale'
+            : live === 0 ? 'offline'
+            : null;
           return (
             <div className="sidebar-project-row" key={p.id}>
             <a href={href} className={`sidebar-link ${active ? 'active' : ''}`}
@@ -79,6 +84,7 @@ function Sidebar({ route, setRoute }) {
                 }}/>
               </span>
               <span>{p.name}</span>
+              {label === 'Pinned' && freshness && <span className={`sidebar-freshness ${freshness}`} title={ageDays == null ? 'No recorded activity' : `Last activity ${ageDays}d ago`}>{freshness}{ageDays != null ? ` · ${ageDays}d` : ''}</span>}
               <span className="sidebar-link-count">{live}</span>
             </a>
             <button className={`sidebar-pin ${pinnedIds.includes(p.id) ? 'active' : ''}`} onClick={() => togglePin(p.id)}

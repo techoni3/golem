@@ -90,22 +90,43 @@ function ConnectionPill({ status }) {
 }
 
 function DrawerBackdrop({ open, onClose }) {
-  return <div className={`drawer-backdrop ${open ? 'open' : ''}`} onClick={onClose} aria-hidden="true"/>;
+  if (!open) return null;
+  return <div className="drawer-backdrop open" onClick={onClose} aria-hidden="true"/>;
 }
 
 function DrawerPanel({ open, onClose, label = 'Details', className = '', children, ...props }) {
   const ref = React.useRef(null);
+  const closeRef = React.useRef(onClose);
+  closeRef.current = onClose;
   React.useEffect(() => {
     if (!open) return;
     const previous = document.activeElement;
+    const focusKey = previous?.getAttribute?.('data-focus-key');
+    const background = [...document.querySelectorAll('.app > .sidebar, .app > .main')];
+    background.forEach((node) => { node.inert = true; node.setAttribute('aria-hidden', 'true'); });
     ref.current?.focus();
-    const onKey = (event) => { if (event.key === 'Escape') onClose?.(); };
+    const onKey = (event) => {
+      if (event.key === 'Escape') { event.preventDefault(); closeRef.current?.(); return; }
+      if (event.key !== 'Tab') return;
+      const focusable = [...(ref.current?.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') || [])]
+        .filter((node) => !node.hidden && node.getAttribute('aria-hidden') !== 'true');
+      if (!focusable.length) { event.preventDefault(); ref.current?.focus(); return; }
+      const first = focusable[0], last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === ref.current)) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
     document.addEventListener('keydown', onKey);
-    return () => { document.removeEventListener('keydown', onKey); previous?.focus?.(); };
-  }, [open, onClose]);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      background.forEach((node) => { node.inert = false; node.removeAttribute('aria-hidden'); });
+      const target = previous?.isConnected ? previous : (focusKey ? document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`) : null);
+      target?.focus?.();
+    };
+  }, [open]);
+  if (!open) return null;
   return (
-    <aside ref={ref} className={`drawer ${open ? 'open' : ''}${className ? ` ${className}` : ''}`}
-      role="dialog" aria-modal="true" aria-label={label} aria-hidden={!open} tabIndex={-1} {...props}>
+    <aside ref={ref} className={`drawer open${className ? ` ${className}` : ''}`}
+      role="dialog" aria-modal="true" aria-label={label} tabIndex={-1} {...props}>
       {children}
     </aside>
   );
@@ -216,6 +237,7 @@ function AgentCard({ session, name, queueCount = 0, setRoute, showControls = fal
   return (
     <div
       className={`agent-card native-session-card ${working ? 'busy' : 'idle'} status-${statusKind} ${compact ? 'compact' : ''} cc-clickable`}
+      data-focus-key={s.session_id ? `agent:${s.session_id}` : undefined}
       onClick={openPeek}
       role="button"
       tabIndex={0}
