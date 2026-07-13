@@ -6,6 +6,7 @@ import { upsertSessionFact } from './lib/session-facts.js';
 export default function golem(pi) {
   const home = golemHome();
   let canonicalId;
+  let pendingPickup = [];
   function record(ctx, event, status, observations = {}) {
     const id = ctx.sessionManager.getSessionId();
     canonicalId = id;
@@ -18,7 +19,13 @@ export default function golem(pi) {
   }
   pi.on('session_start', (event, ctx) => record(ctx, 'session_start', 'idle', { reason: event.reason }));
   pi.on('session_info_changed', (event, ctx) => record(ctx, 'session_info_changed', ctx.isIdle() ? 'idle' : 'active', { name: event.name }));
-  pi.on('agent_start', (_event, ctx) => record(ctx, 'agent_start', 'active'));
+  pi.on('agent_start', (_event, ctx) => {
+    record(ctx, 'agent_start', 'active');
+    for (const { root, name } of pendingPickup) {
+      try { fs.mkdirSync(path.join(root, 'acks'), { recursive: true }); fs.renameSync(path.join(root, 'processing', name), path.join(root, 'acks', name)); } catch {}
+    }
+    pendingPickup = [];
+  });
   pi.on('agent_settled', (_event, ctx) => record(ctx, 'agent_settled', 'idle'));
   pi.on('tool_call', (event, ctx) => record(ctx, 'tool_call', 'active', { tool_name: event.toolName, tool_call_id: event.toolCallId }));
   pi.on('session_shutdown', (event, ctx) => record(ctx, 'session_shutdown', 'ended', { reason: event.reason }));
@@ -36,8 +43,7 @@ export default function golem(pi) {
         fs.mkdirSync(path.dirname(processing), { recursive: true }); if (!item.claimed) fs.renameSync(source, processing);
         const value = JSON.parse(fs.readFileSync(processing, 'utf8'));
         if (typeof value?.text !== 'string') throw new Error('invalid text');
-        messages.push(value); fs.mkdirSync(path.join(root, 'acks'), { recursive: true });
-        fs.renameSync(processing, path.join(root, 'acks', name));
+        messages.push(value); pendingPickup.push({ root, name });
       } catch {
         try { fs.mkdirSync(path.join(root, 'dead-letter'), { recursive: true }); fs.renameSync(processing, path.join(root, 'dead-letter', name)); } catch {}
       }

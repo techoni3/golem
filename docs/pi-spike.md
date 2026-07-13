@@ -47,5 +47,11 @@ orphaned `processing/` entries before new pending work. Dashboard pickup
 settlement uses an exclusive filesystem lease directory per ack; a second
 dashboard cannot settle concurrently and may take over only after lease expiry.
 
+Ack ownership is now one atomically linked lease file—there is no empty-lock
+window. Stale takeover verifies the claimed inode before unlinking and only the
+contender that exclusively links its replacement proceeds. Pi retains accepted
+messages in `processing/` until the subsequent observable `agent_start`; a
+crash before that event therefore replays rather than falsely acknowledging.
+
 The journey test proves rendering is isolated and portable, records the runtime
 probe result, and refuses to infer Tier A from the existence of an in-process API.
