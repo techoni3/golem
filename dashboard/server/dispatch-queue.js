@@ -28,7 +28,7 @@
 
 import { loadConfig } from '../../lib/golem-config.js';
 import fs from 'node:fs';
-import { claimPiPickupAcks, enqueuePiBrief } from '../../lib/pi-inbox.js';
+import { checkpointPiPickupAck, claimPiPickupAcks, enqueuePiBrief } from '../../lib/pi-inbox.js';
 
 const TICK_MS = 5_000;
 const COOLDOWN_MS = 60_000;
@@ -47,6 +47,7 @@ export function initDispatchDrainer({
   // cooldown check so we never deliver twice to a session within 60s.
   const lastDeliveredAt = new Map();
   const waveHoldLogged = new Set();
+  const piPublishing = new Set();
   let timer = null;
   let stopped = false;
 
@@ -164,11 +165,12 @@ export function initDispatchDrainer({
     let pending;
     for (const ack of claimPiPickupAcks()) {
       try {
-        const meta = ack.value?.metadata || {};
-        if (meta.queue_id) tracker.markQueueDelivered(meta.queue_id, { envelope_id: meta.envelope_id || null });
-        if (meta.envelope_id) tracker.markEnvelopeDelivery(meta.envelope_id, { error: null });
-        if (meta.passive_lease_id) tracker.commitPassiveDelta(ack.value.metadata.session_id, meta.passive_lease_id);
-        if (meta.ticket_id) tracker.markCommentDispatchesDeliveredForTicket(meta.ticket_id, meta.session_id);
+        const meta = ack.value?.metadata || {}; const settled = ack.value.settled || {};
+        const step = (name, fn) => { if (!settled[name]) { fn(); settled[name] = true; ack.value.settled = settled; checkpointPiPickupAck(ack.file, ack.value); } };
+        if (meta.queue_id) step('queue', () => tracker.markQueueDelivered(meta.queue_id, { envelope_id: meta.envelope_id || null }));
+        if (meta.envelope_id) step('envelope', () => tracker.markEnvelopeDelivery(meta.envelope_id, { error: null }));
+        if (meta.passive_lease_id) step('passive', () => tracker.commitPassiveDelta(meta.session_id, meta.passive_lease_id));
+        if (meta.ticket_id) step('comments', () => tracker.markCommentDispatchesDeliveredForTicket(meta.ticket_id, meta.session_id));
         fs.unlinkSync(ack.file);
       } catch (err) { console.error('[dispatch-drainer] Pi pickup settlement failed:', err); }
     }
@@ -272,6 +274,11 @@ export function initDispatchDrainer({
         }
       }
       if (!row) continue;
+      if (isPi) {
+        if (piPublishing.has(row.id)) continue;
+        if (row.status !== 'publishing' && !tracker.claimQueuePublishing(row.id)) continue;
+        piPublishing.add(row.id);
+      }
       try {
         const ticket = tracker.getTicket(row.ticket_id);
         if (!ticket) {
@@ -327,7 +334,7 @@ export function initDispatchDrainer({
         let pushResult;
         try {
           pushResult = isPi
-            ? enqueuePiBrief(sessionId, briefString, { queue_id: row.id, envelope_id: row.envelope_id || null, ticket_id: ticket.id, session_id: sessionId, passive_lease_id: passive?.lease_id || null })
+            ? enqueuePiBrief(sessionId, briefString, { queue_id: row.id, envelope_id: row.envelope_id || null, ticket_id: ticket.id, session_id: sessionId, passive_lease_id: passive?.lease_id || null }, { messageId: row.id })
             : await pushBrief(briefString, sessionId, { envelope_id: row.envelope_id || undefined, sender_session_id: null, target_session_id: sessionId });
         } catch (err) {
           pushResult = { ok: false, error: String(err?.message ?? err) };
@@ -337,7 +344,7 @@ export function initDispatchDrainer({
         // writes: their failure must not replay context that already landed.
         const passiveCommitted = !!pushResult?.ok;
         try {
-          if (pushResult.queued) tracker.markQueueNextTurn(row.id);
+          if (pushResult.queued) { tracker.markQueueNextTurn(row.id); piPublishing.delete(row.id); }
           else {
             tracker.markQueueDelivered(row.id, { error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}`, envelope_id: row.envelope_id || null });
             if (row.envelope_id) tracker.markEnvelopeDelivery(row.envelope_id, { error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}` });
@@ -374,6 +381,7 @@ export function initDispatchDrainer({
         queueChanged = true;
         lastDeliveredAt.set(sessionId, Date.now());
       } catch (err) {
+        if (isPi) piPublishing.delete(row.id);
         console.error(`[dispatch-drainer] delivery for ${row.id} failed:`, err);
       }
     }

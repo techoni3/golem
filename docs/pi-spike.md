@@ -29,5 +29,12 @@ messages to `acks/`; only the dashboard’s subsequent ack settlement marks the
 queue, envelope, passive lease, and comment dispatch delivered. Malformed files
 are preserved under `dead-letter/`.
 
+Queue publication is claimed atomically before filesystem publication and uses
+the queue id as the message filename. Replays therefore resolve to the same
+file, while overlapping ticks cannot publish twice or cancel after publication.
+Ack claims survive restarts; settlement checkpoints each idempotent stage in the
+claim file and deletes it only after queue, envelope, passive, and comment facts
+all complete. Malformed claims are quarantined for inspection.
+
 The journey test proves rendering is isolated and portable, records the runtime
 probe result, and refuses to infer Tier A from the existence of an in-process API.

@@ -861,9 +861,9 @@ WHERE state_changed_at IS NULL`).run();
       markQueueDeliveredRow: db.prepare(
         "UPDATE dispatch_queue SET status = 'delivered', delivered_at = @delivered_at, last_error = @last_error, resolved_at = @resolved_at WHERE id = @id AND status IN ('pending','next_turn')"
       ),
-      markQueueNextTurnRow: db.prepare("UPDATE dispatch_queue SET status = 'next_turn' WHERE id = @id AND status = 'pending'"),
+      markQueueNextTurnRow: db.prepare("UPDATE dispatch_queue SET status = 'next_turn' WHERE id = @id AND status IN ('pending','publishing')"),
       listPendingDispatches: db.prepare(
-        "SELECT * FROM dispatch_queue WHERE status = 'pending' ORDER BY created_at ASC"
+        "SELECT * FROM dispatch_queue WHERE status IN ('pending','publishing') ORDER BY created_at ASC"
       ),
       listPendingForSession: db.prepare(
         "SELECT * FROM dispatch_queue WHERE session_id = ? AND status IN ('pending','next_turn') ORDER BY created_at ASC"
