@@ -314,7 +314,8 @@ export function initDispatchDrainer({
 
         // Durable-first: setDispatched BEFORE pushBrief (crash between →
         // ticket assigned, not lost).
-        const assigned = tracker.setDispatched(ticket.id, { session_id: sessionId, actor: 'golem-drainer' });
+        let assigned = ticket;
+        if (!isPi) assigned = tracker.setDispatched(ticket.id, { session_id: sessionId, actor: 'golem-drainer' });
         if (assigned.revoked_session_id) {
           try { await pushBrief(`Dispatch revoked for ${assigned.display_id || assigned.id}: ${assigned.title || ''}\n\nReason: queued dispatch delivered to another session. Stand down unless you receive a new dispatch.`, assigned.revoked_session_id); } catch { /* best-effort */ }
         }
@@ -348,7 +349,13 @@ export function initDispatchDrainer({
         // writes: their failure must not replay context that already landed.
         const passiveCommitted = !!pushResult?.ok;
         try {
-          if (pushResult.queued) tracker.markQueueNextTurn(row.id, { ownerToken: publishingOwner });
+          if (pushResult.queued) {
+            assigned = tracker.setDispatched(ticket.id, { session_id: sessionId, actor: 'golem-drainer' });
+            if (assigned.revoked_session_id) {
+              try { await pushBrief(`Dispatch revoked for ${assigned.display_id || assigned.id}: ${assigned.title || ''}\n\nReason: queued dispatch delivered to another session. Stand down unless you receive a new dispatch.`, assigned.revoked_session_id); } catch { /* best-effort */ }
+            }
+            tracker.markQueueNextTurn(row.id, { ownerToken: publishingOwner });
+          }
           else if (isPi) tracker.releaseQueuePublishing(row.id, { ownerToken: publishingOwner });
           else {
             tracker.markQueueDelivered(row.id, { error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}`, envelope_id: row.envelope_id || null });

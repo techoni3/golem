@@ -58,5 +58,11 @@ owner-matched TrackerDB publishing lease back to pending. Non-owners cannot
 release it, and the same dashboard process can retry immediately without
 waiting for lease expiry.
 
+For Pi, `setDispatched` (and therefore `dispatched_at`) is deferred until the
+deterministic inbox publication is accepted. A failed generation can retry on
+the next tick without mistaking its own timestamp for a superseding dispatch;
+a genuinely newer redispatch still has a later timestamp and cancels the old
+queue generation through the existing stale-row guard.
+
 The journey test proves rendering is isolated and portable, records the runtime
 probe result, and refuses to infer Tier A from the existence of an in-process API.
