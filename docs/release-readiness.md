@@ -39,3 +39,7 @@ are in the README support matrix.
 - Substrate lint emitted three existing orphan-skill warnings for
   `get-consult`, `journaling`, and `provide-consult`; enforcement and tests
   still passed.
+- The working tree and this report commit pass `git diff --check`. Running it
+  across the complete umbrella range reports trailing spaces embedded in
+  generated Vite vendor assets; these are build output, not source or a
+  release-behavior failure.
