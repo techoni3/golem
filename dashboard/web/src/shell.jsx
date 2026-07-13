@@ -2,7 +2,9 @@
 
 function Sidebar({ route, setRoute }) {
   useStore();
-  const [includeStale, setIncludeStale] = React.useState(false);
+  const [pinnedIds, setPinnedIds] = React.useState(() => {
+    try { return JSON.parse(localStorage.getItem('golem.sidebar.pinnedProjects') || '[]'); } catch { return []; }
+  });
   const projects = window.Store.getState().projects;
   const activeCount = window.Store.getNativeSessions().length;
   // TKT-0107: bucket by last_activity_at instead of the binary stale flag.
@@ -31,10 +33,15 @@ function Sidebar({ route, setRoute }) {
     active.sort(sortFn); recent.sort(sortFn); stale.sort(sortFn); archived.sort(sortFn);
     return { active, recent, stale, archived };
   }, [projects, now]);
-  const visibleProjects = includeStale
-    ? [...buckets.active, ...buckets.recent, ...buckets.stale, ...buckets.archived]
-    : [...buckets.active, ...buckets.recent, ...buckets.stale];
+  const pinned = projects.filter((p) => pinnedIds.includes(p.id));
+  const recentCompact = [...buckets.active, ...buckets.recent].filter((p) => !pinnedIds.includes(p.id)).slice(0, 5);
+  const visibleProjects = [...pinned, ...recentCompact];
   const projectCount = visibleProjects.length;
+  const togglePin = (id) => {
+    const next = pinnedIds.includes(id) ? pinnedIds.filter((x) => x !== id) : [...pinnedIds, id];
+    setPinnedIds(next);
+    localStorage.setItem('golem.sidebar.pinnedProjects', JSON.stringify(next));
+  };
 
   const items = [
     { id: 'dashboard', label: 'Dashboard', icon: Icon.Dashboard },
@@ -61,13 +68,15 @@ function Sidebar({ route, setRoute }) {
           const active = route.kind === 'project' && route.id === p.id;
           const live = window.Store.getProjectAliveSessions(p).length;
           const href = window.Router.buildHref({ kind: 'project', id: p.id, tab: 'agents' });
+          const ageDays = p.last_activity_at ? Math.floor((Date.now() - p.last_activity_at) / DAY) : null;
+          const freshness = buckets.archived.includes(p) ? 'archived'
+            : buckets.stale.includes(p) ? 'stale'
+            : live === 0 ? 'offline'
+            : null;
           return (
-            <a
-              key={p.id}
-              href={href}
-              className={`sidebar-link ${active ? 'active' : ''}`}
-              onClick={(e) => { e.preventDefault(); setRoute({ kind: 'project', id: p.id, tab: 'agents' }); }}
-            >
+            <div className="sidebar-project-row" key={p.id}>
+            <a href={href} className={`sidebar-link ${active ? 'active' : ''}`}
+              onClick={(e) => { e.preventDefault(); setRoute({ kind: 'project', id: p.id, tab: 'agents' }); }}>
               <span className="sidebar-link-icon" style={{ color: p.color }}>
                 <span style={{
                   width: 8, height: 8, borderRadius: 2, background: p.color, display: 'inline-block',
@@ -75,8 +84,12 @@ function Sidebar({ route, setRoute }) {
                 }}/>
               </span>
               <span>{p.name}</span>
+              {label === 'Pinned' && freshness && <span className={`sidebar-freshness ${freshness}`} title={ageDays == null ? 'No recorded activity' : `Last activity ${ageDays}d ago`}>{freshness}{ageDays != null ? ` · ${ageDays}d` : ''}</span>}
               <span className="sidebar-link-count">{live}</span>
             </a>
+            <button className={`sidebar-pin ${pinnedIds.includes(p.id) ? 'active' : ''}`} onClick={() => togglePin(p.id)}
+              aria-label={`${pinnedIds.includes(p.id) ? 'Unpin' : 'Pin'} ${p.name}`} title={`${pinnedIds.includes(p.id) ? 'Unpin' : 'Pin'} project`}>★</button>
+            </div>
           );
         })}
       </div>
@@ -118,14 +131,6 @@ function Sidebar({ route, setRoute }) {
       <div className="sidebar-section">
         <div className="sidebar-section-label">Projects</div>
         <nav className="sidebar-nav">
-          <label className="sidebar-stale-toggle">
-            <input
-              type="checkbox"
-              checked={includeStale}
-              onChange={(e) => setIncludeStale(e.target.checked)}
-            />
-            Include stale
-          </label>
           {visibleProjects.length === 0 && (
             <div style={{ padding: '8px 8px 0', fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>
               no projects discovered
@@ -134,10 +139,11 @@ function Sidebar({ route, setRoute }) {
           {/* TKT-0107: bucketed groups by 7/30/90-day activeness. Each bucket
               renders as its own labeled section; live sessions bubble to the
               top of their bucket. */}
-          {renderBucket('Active', buckets.active, 'bucket-active')}
-          {renderBucket('Recent', buckets.recent, 'bucket-recent')}
-          {renderBucket('Stale', buckets.stale, 'bucket-stale')}
-          {includeStale && renderBucket('Archived', buckets.archived, 'bucket-archived')}
+          {renderBucket('Pinned', pinned, 'bucket-pinned')}
+          {renderBucket('Recent', recentCompact, 'bucket-recent')}
+          <a href="/projects" className="sidebar-see-all" onClick={(e) => { e.preventDefault(); setRoute({ kind: 'projects' }); }}>
+            See all projects <span className="tnum">{projects.length}</span>
+          </a>
         </nav>
       </div>
 

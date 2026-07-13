@@ -50,13 +50,6 @@ function CeoChatDrawer({ open, sessionId, onClose }) {
     if (open && sessionId) setActiveSessionId(sessionId);
   }, [open, sessionId]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e) => { if (e.key === 'Escape') onClose && onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
-
   const pushToast = (text, kind = 'ok') => {
     setToast({ text, kind, id: Math.random() });
     setTimeout(() => setToast(null), 3000);
@@ -93,8 +86,8 @@ function CeoChatDrawer({ open, sessionId, onClose }) {
 
   return (
     <>
-      <div className={`drawer-backdrop ${open ? 'open' : ''}`} onClick={() => onClose && onClose()}/>
-      <aside className={`drawer ${open ? 'open' : ''} drawer-ceo`}>
+      <DrawerBackdrop open={open} onClose={onClose}/>
+      <DrawerPanel open={open} onClose={onClose} label="Session conversation" className="drawer-ceo">
         <div className="drawer-header">
           <div className="drawer-title-row">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -156,7 +149,7 @@ function CeoChatDrawer({ open, sessionId, onClose }) {
         {toast && (
           <div className={`orch-toast ${toast.kind} drawer-toast`} key={toast.id}>{toast.text}</div>
         )}
-      </aside>
+      </DrawerPanel>
     </>
   );
 }

@@ -23,7 +23,9 @@ import { golemHome, dashboardJsonPath, journalDirFor, sessionsJsonPath } from '.
 import { createRole, deleteRole, getRole, listRoleCards, pushRoleBriefDirect, roleChangeBrief, roleMission, setSessionRole, updateRoleMeta, writeRoleCard } from '../../lib/session-role.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
-const WEB_ROOT = path.resolve(__dirname, '..', 'web');
+const WEB_SOURCE_ROOT = path.resolve(__dirname, '..', 'web');
+const WEB_DIST_ROOT = path.resolve(__dirname, '..', 'dist');
+const WEB_ROOT = fs.existsSync(path.join(WEB_DIST_ROOT, 'index.html')) ? WEB_DIST_ROOT : WEB_SOURCE_ROOT;
 // The tracker genre templates live OUTSIDE dashboard/, in the substrate
 // source tree at substrate/skills/tracker/templates/ (TKT-0574 — plugin/ is
 // now a generated render of substrate/, not the SoT). Resolve the repo root
@@ -517,6 +519,7 @@ async function main() {
 
   function enrichSessionRows(rows, channels = []) {
     const channelIds = new Set((channels || []).map((c) => c.session_id).filter(Boolean));
+    const channelById = new Map((channels || []).filter((c) => c.session_id).map((c) => [c.session_id, c]));
     const pendingBySession = tracker.countPendingDispatchesBySession();
     const unackedBySession = new Map();
     for (const warning of tracker.activeUnackedWarnings()) {
@@ -529,6 +532,7 @@ async function main() {
       role: s.role ?? null,
       harness: s.harness ?? 'claudecode',
       reachable: channelIds.has(s.session_id),
+      endpoint_health: channelById.get(s.session_id)?.endpoint_health ?? (s.fact_observed_at ? 'unreachable' : (s.endpoint_health ?? 'legacy')),
       pending_count: pendingBySession.get(s.session_id) ?? 0,
       current_in_progress_ticket: tracker.currentInProgressTicketForSession(s.session_id),
       has_unacked_dispatch: (unackedBySession.get(s.session_id) ?? []).length > 0,
@@ -648,7 +652,9 @@ async function main() {
   // and streams.
   function trackerSnapshot() {
     return {
-      tickets: tracker.listTickets({}),
+      // The client owns the archived visibility toggle/search. Include those
+      // rows in the canonical snapshot so toggling never depends on a refetch.
+      tickets: tracker.listTickets({ includeArchived: true }),
       streams: listAllStreams(),
     };
   }
@@ -1510,18 +1516,20 @@ async function main() {
 
     const existing = ticketRef;
     if (!sessionId) return reply.code(400).send({ error: 'session_id is required' });
+    const nativeTarget = state.nativeSessions().find((s) => s.session_id === sessionId);
+    const isPi = nativeTarget?.harness === 'pi';
 
     // 'when_idle': queue for delivery on idle unless the target is already idle
     // (in which case fall through to the immediate 'now' path — no queue row).
-    if (mode === 'when_idle') {
-      const target = state.nativeSessions().find((s) => s.session_id === sessionId);
+    if (mode === 'when_idle' || isPi) {
+      const target = nativeTarget;
       // TKT-0369: only fall through to the immediate path when the target is
       // idle AND actually reachable — an idle session with a dead channel MCP
       // must queue (the row delivers when the channel re-registers), not burn
       // on an immediate push that cannot succeed.
       let hasChannel = false;
       try { hasChannel = (await listChannels()).some((c) => c.session_id === sessionId); } catch { /* treat as unreachable */ }
-      const isIdle = !!target && target.alive && target.status === 'idle' && hasChannel;
+      const isIdle = !isPi && !!target && target.alive && target.status === 'idle' && hasChannel;
       if (!isIdle) {
         const envelope = tracker.createDispatchEnvelope(id, { session_id: sessionId, actor: senderId || 'human', sender_id: senderId });
         const briefString = buildDispatchBrief(existing, note, workspace, envelope.id);
@@ -1568,7 +1576,7 @@ async function main() {
       // writes so their failures cannot release delivered passive context.
       passiveCommitted = !!channelResult?.ok;
       if (channelResult && channelResult.ok) {
-        chat.record('user', 'brief', briefString, { session_id: sessionId });
+        chat.record('user', 'brief', briefString, { session_id: sessionId, delivery: channelResult.queued ? 'next_turn' : 'push' });
       } else {
         const detail = channelResult?.error || `status ${channelResult?.status ?? '?'}`;
         chat.record('system', 'error', `dispatch of ${existing.display_id || id} to ${sessionId} — channel ${detail} (ticket assigned; session will pick it up on resume)`);
@@ -1596,9 +1604,10 @@ async function main() {
     // existing callers (MCP ticket_dispatch, older UI) are untouched. The
     // when_idle path that fell through (target was already idle) adds the
     // queued:false / delivered:true hints the plan specifies.
-    const delivered = !!channelResult?.ok;
-    return { ok: delivered, assignment: { ok: true, ticket }, queued: false, delivered, envelope_id: envelope.id, ticket,
-      delivery: { ok: delivered, status: channelResult?.status ?? 0, error: delivered ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`) }, channel: channelResult };
+    const delivered = !!channelResult?.ok && !channelResult?.queued;
+    const queued = !!channelResult?.queued;
+    return { ok: delivered || queued, assignment: { ok: true, ticket }, queued, delivered, envelope_id: envelope.id, ticket,
+      delivery: { ok: delivered || queued, queued, mode: queued ? 'next_turn' : 'push', status: channelResult?.status ?? 0, error: delivered || queued ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`) }, channel: channelResult };
   });
 
   // GOL-421: channel acknowledgements/replies are correlated to an envelope and
@@ -1849,6 +1858,10 @@ async function main() {
       if (!s.alive) continue;
       if (wanted != null && s.project_id !== wanted) continue;
       const ch = channelBySession.get(s.session_id);
+      // Once a harness has adopted canonical facts, an authenticated healthy
+      // endpoint lease is part of dispatchability. Legacy rows retain the
+      // queue-while-unreachable compatibility behavior during migration.
+      if (s.fact_observed_at && !ch) continue;
       const team = teamBySession.get(s.session_id);
       // TKT-0369: an alive session whose channel MCP died must NOT silently
       // vanish from the picker — it stays listed with reachable:false so the UI

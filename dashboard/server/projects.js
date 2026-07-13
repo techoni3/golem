@@ -88,7 +88,9 @@ async function getLastActivityAt({ workspaceDir, projectId, tracker, nativeSessi
   // 1. live session heartbeat
   if (Array.isArray(nativeSessions)) {
     for (const s of nativeSessions) {
-      const t = s?.last_seen_at ?? 0;
+      if (s?.project_id !== projectId || s?.alive === false) continue;
+      const raw = s?.last_seen_at ?? s?.updated_at ?? 0;
+      const t = typeof raw === 'number' ? raw : Date.parse(raw);
       if (t > best) best = t;
     }
   }

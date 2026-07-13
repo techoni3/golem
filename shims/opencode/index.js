@@ -39,6 +39,7 @@ import { appendFileSync, mkdirSync, existsSync, readFileSync, writeFileSync, ren
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import os from "node:os";
+import { upsertSessionFact } from "../../lib/session-facts.js";
 
 const SHIM_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SHIM_DIR, "..", ".."); // shims/opencode → repo root
@@ -242,6 +243,7 @@ function registerBridge({ sessionID, cwd, status, port, name, model }) {
       writeJson(BRIDGES_REGISTRY, reg);
     });
     logLine("registered", `${sessionID} port=${port}`);
+    publishCanonical(sessionID, { cwd, status, name, model, port });
     return true;
   } catch (e) {
     logErr("bridge register", e);
@@ -300,6 +302,7 @@ function updateBridge({ sessionID, cwd, status, port, name, model, insert = true
       }
       writeJson(BRIDGES_REGISTRY, reg);
     });
+    publishCanonical(sessionID, { cwd, status, name, model, port });
     return true;
   } catch (e) {
     logErr("bridge update", e);
@@ -318,6 +321,19 @@ function unregisterBridges() {
   } catch (e) {
     logErr("bridge unregister", e);
   }
+}
+
+function publishCanonical(sessionID, { cwd, status, name, model, port }) {
+  upsertSessionFact({
+    canonical_id: sessionID,
+    harness: "opencode",
+    locator: { raw_session_id: sessionID },
+    continuation_key: sessionID,
+    project_path: cwd || null,
+    name: name || null,
+    status: status || null,
+    model: model || null,
+  });
 }
 
 function unregisterBridge(sessionID) {

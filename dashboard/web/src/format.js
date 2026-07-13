@@ -13,7 +13,9 @@
 
   function fmtTimeAgo(t) {
     if (!t) return '';
-    const d = (Date.now() - t) / 1000;
+    const stamp = typeof t === 'number' ? t : Date.parse(t);
+    if (!Number.isFinite(stamp)) return '';
+    const d = (Date.now() - stamp) / 1000;
     if (d < 0) return 'now';
     if (d < 60) return `${Math.floor(d)}s ago`;
     if (d < 3600) return `${Math.floor(d / 60)}m ago`;
@@ -90,17 +92,9 @@
     mdConfigured = true;
   }
 
-  // Legacy plain-text fallback, used only before the esm.sh marked module has
-  // resolved on first paint. Mirrors the old htmlBody behaviour exactly:
-  // HTML-first → unchanged; otherwise wrap blank-line blocks in <p>, newlines
-  // → <br/>. Unsanitized, but only fires briefly before the module lands.
-  function legacyHtmlBody(text) {
-    if (!text) return '';
-    if (/^\s*<[a-zA-Z][^>]*>/.test(text)) return text;
-    return text
-      .split(/\n\n+/)
-      .map((p) => `<p>${p.trim().replace(/\n/g, '<br/>')}</p>`)
-      .join('');
+  function escapedTextBody(text) {
+    return String(text || '').split(/\n\n+/)
+      .map((p) => `<p>${escMd(p.trim()).replace(/\n/g, '<br/>')}</p>`).join('');
   }
 
   /**
@@ -119,17 +113,16 @@
     if (!text) return '';
     // HTML-first body (legacy house-style): sanitize only, skip marked.
     if (/^\s*<[a-zA-Z][^>]*>/.test(text)) {
-      return window.DOMPurify ? window.DOMPurify.sanitize(text, SANITIZE_CFG) : text;
+      return window.DOMPurify ? window.DOMPurify.sanitize(text, SANITIZE_CFG) : escapedTextBody(text);
     }
     // Markdown body: parse + sanitize.
     if (window.marked && window.DOMPurify) {
       ensureMdConfigured();
       return window.DOMPurify.sanitize(window.marked.parse(text), SANITIZE_CFG);
     }
-    // marked/DOMPurify not yet loaded (esm.sh module still resolving on first
-    // paint) — fall back to the legacy renderer so the UI never blanks;
-    // subsequent renders use the full pipeline once the module has landed.
-    return legacyHtmlBody(text);
+    // Fail closed: without the sanitizer, render escaped text only. Never pass
+    // legacy HTML or parser output to dangerouslySetInnerHTML unsanitized.
+    return escapedTextBody(text);
   }
 
   // Backwards-compat alias: the local bodyHtml() in td-annotate.jsx routes

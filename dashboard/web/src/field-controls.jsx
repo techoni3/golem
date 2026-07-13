@@ -15,6 +15,7 @@ const PS_STATE_DOT = {
   done: 'var(--status-active)',
   archived: 'var(--status-active)',
 };
+window.PS_STATE_DOT = PS_STATE_DOT;
 
 const PS_CHECK = (
   <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
@@ -171,3 +172,4 @@ const PopSelect = function PopSelect({ value, options, onChange, placeholder = '
     </>
   );
 };
+window.PopSelect = PopSelect;

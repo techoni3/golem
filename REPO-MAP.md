@@ -1,12 +1,12 @@
 # REPO-MAP.md
-> Last verified: 2026-07-11 @ ac34521 — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-13 @ 6234e1d — maintained via golem:docs-maintenance.
 ## Directory structure
 - `substrate/` — plugin source of truth.
 - `plugin/` — generated CC render; never hand-edit.
 - `cli/` — thin `golem` command entry point.
 - `lib/` — runtime, role, compiler, lint, LSP helpers.
 - `dashboard/server/` — Fastify API and `tracker.db` owner.
-- `dashboard/web/` — no-bundler React globals.
+- `dashboard/web/` → `dashboard/dist/` — Vite-built React UI served as a pinned production artifact.
 - `mcp/channel/` — per-session HTTP/MCP channel.
 - `shims/opencode/` — maps events into hook/session registries.
 - `docs/architectures/` — versioned standalone architecture field guides.
@@ -25,6 +25,7 @@
 ### `dashboard/server/native-sessions.js`
 - Merges hook-written `sessions.json` with harness registries.
 - Hooks/shims own registration; dashboard may materialize bus status into existing rows.
+- `lib/session-facts.js` owns identity/freshness; endpoint leases replace PID-only reachability.
 ### `substrate/hooks/*.sh`
 - SessionStart registers, journals, and contextualizes; prompts add passive deltas.
 ### `substrate/instructions/`
@@ -39,11 +40,9 @@
 ## Data flow
 Hooks/shims write `~/.golem/`; dashboard owns `tracker.db`. Envelope health derives from facts. Passive slots land on real turns or successful envelopes; subscription digests are quiet by default.
 
-Visual deep dive: [session architecture](docs/architectures/session_architecture_5_0_16.html). Current OpenCode/Claude Code control plane, delivery, passive observation, health, and closure flows.
-
 ## Constraints & gotchas
-- Claude installs from `~/.golem/renders/cc-plugin` but runs cached plugin bytes; sync + update + `/reload-plugins` after edits.
-- Dashboard `.jsx` files are globals; duplicates shadow by load order.
+- Claude runs cached render bytes; sync + update + `/reload-plugins` after edits.
+- Dashboard `.jsx` files publish globals; `web/src/entry.jsx` preserves dependency order while Vite bundles browser dependencies locally.
 - `plugin/` is a render target, not the source of truth; hand edits there are overwritten.
 - Worktree builders self-check; manager/planner reconciles.
 
@@ -51,6 +50,6 @@ Visual deep dive: [session architecture](docs/architectures/session_architecture
 | Task | Files | Verify with |
 |------|-------|-------------|
 | Skill/plugin | `substrate/`, `plugin/` | `golem sync --target cc --out ./plugin --check` |
-| Dashboard | `dashboard/server/`, `dashboard/web/` | smoke/check scripts |
+| Dashboard | `dashboard/server/`, `dashboard/web/` | `npm run dashboard:build`, isolated browser journey |
 | Sessions | `substrate/hooks/`, shims | fresh session |
 | Instructions | `substrate/instructions/`, `lib/compiler/` | temp-HOME sync smoke |

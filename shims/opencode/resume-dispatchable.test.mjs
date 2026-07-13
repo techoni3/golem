@@ -18,6 +18,7 @@ const shimModule = await import(shimUrl);
 assert.deepEqual(Object.keys(shimModule), ['default'], 'OpenCode plugin module exposes only its callable plugin export');
 const { default: opencodeShim } = shimModule;
 const { readNativeSessions } = await import(nativeUrl);
+const { renewEndpointLease } = await import(pathToFileURL(path.resolve('lib/session-facts.js')).href + `?t=${Date.now()}`);
 
 const resumed = {
   id: 'ses_resume_dispatchable',
@@ -93,8 +94,9 @@ fs.writeFileSync(path.join(process.env.GOLEM_HOME, 'channels.json'), JSON.string
     started_at: new Date().toISOString(),
   }],
 }, null, 2));
+renewEndpointLease({ canonical_id: resumed.id, owner_token: 'journey-channel', host: '127.0.0.1', port: 12345 });
 
-const native = await readNativeSessions(() => true);
+const native = await readNativeSessions(() => true, [{ session_id: resumed.id, endpoint_health: 'healthy', expires_at: new Date(Date.now() + 30_000).toISOString() }]);
 const live = native.find((s) => s.session_id === resumed.id);
 assert.ok(live, 'dashboard native-session discovery sees resumed opencode session');
 assert.equal(live.alive, true);

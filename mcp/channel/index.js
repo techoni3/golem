@@ -31,6 +31,7 @@ import {
 import * as tracker from './tracker-client.js';
 import { bridgeEndpointForParent, resolveCallerSessionId, sessionsForParent } from './identity.js';
 import { SESSION_ROLES, pushRoleBriefDirect, setSessionRole } from '../../lib/session-role.js';
+import { releaseEndpointLeases, renewEndpointLease, upsertSessionFact } from '../../lib/session-facts.js';
 
 const VERSION = '0.1.0';
 // Port selection (multi-CEO safe by default):
@@ -182,6 +183,7 @@ function writeChannelsRegistry(reg) {
 // Captured once at module load so the periodic re-register heartbeat keeps a
 // stable started_at instead of advancing it every tick.
 const STARTED_AT = new Date().toISOString();
+const LEASE_OWNER = crypto.randomBytes(32).toString('base64url');
 
 function registerChannel(port, { logMissing = true } = {}) {
   // Re-derive each call: the parent session file may not have existed at module
@@ -221,6 +223,17 @@ function registerChannel(port, { logMissing = true } = {}) {
         harness: siblings.length ? 'opencode' : (bridge && bridge.session_id === SESSION_ID ? 'opencode' : undefined),
         started_at: STARTED_AT,
       });
+      const harness = siblings.length ? 'opencode' : (bridge && bridge.session_id === SESSION_ID ? 'opencode' : 'claudecode');
+      upsertSessionFact({
+        canonical_id: row.session_id,
+        harness,
+        locator: { raw_session_id: harness === 'claudecode' ? (process.env.CLAUDE_CODE_SESSION_ID || row.session_id) : row.session_id },
+        continuation_key: harness === 'claudecode' ? row.session_id : null,
+        name: row.name || null,
+        status: row.status || null,
+        observed_at: new Date().toISOString(),
+      });
+      renewEndpointLease({ canonical_id: row.session_id, owner_token: LEASE_OWNER, host: HOST, port, pid: process.pid, harness });
     }
     writeChannelsRegistry(reg);
   });
@@ -259,6 +272,7 @@ function stopWatchingOpencodeBridges() {
 
 function unregisterChannel() {
   try {
+    releaseEndpointLeases(LEASE_OWNER);
     withChannelLock(() => {
       const reg = readChannelsRegistry();
       const before = reg.channels.length;
@@ -1227,7 +1241,14 @@ const server = http.createServer(async (req, res) => {
   try {
     // GET /healthz — smoke endpoint
     if (method === 'GET' && path === '/healthz') {
-      return sendJson(res, 200, { ok: true, version: VERSION });
+      const canonicalId = url.searchParams.get('session_id');
+      const ownerToken = url.searchParams.get('owner_token');
+      const ownedIds = new Set(sessionsForParent({ home: tracker.golemHome() }).map((row) => row.session_id));
+      if (SESSION_ID) ownedIds.add(SESSION_ID);
+      if (!canonicalId || ownerToken !== LEASE_OWNER || !ownedIds.has(canonicalId)) {
+        return sendJson(res, 403, { ok: false, error: 'lease identity mismatch' });
+      }
+      return sendJson(res, 200, { ok: true, version: VERSION, canonical_id: canonicalId, owner_token: LEASE_OWNER });
     }
 
     // GET /events — SSE stream of CEO acks
@@ -1465,6 +1486,10 @@ process.on('exit', (code) => {
   try { process.stderr.write(`[golem-channel] exit code=${code}\n`); } catch { /* stderr gone */ }
 });
 
+// SDK 1.29.0's StdioServerTransport does not translate stdin EOF into
+// transport.onclose. Observe EOF directly so a host disappearing without a
+// signal cannot leave the HTTP channel registered as a zombie.
+process.stdin.once('end', () => shutdown(0, 'mcp stdin closed by host'));
 await mcp.connect(new StdioServerTransport());
 // TKT-0369: if the host closes the MCP stdio transport without killing us, the
 // HTTP server would keep this process alive as a ZOMBIE channel — registered in

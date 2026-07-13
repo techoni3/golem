@@ -89,6 +89,80 @@ function ConnectionPill({ status }) {
   );
 }
 
+function DrawerBackdrop({ open, onClose }) {
+  if (!open) return null;
+  return <div className="drawer-backdrop open" onClick={onClose} aria-hidden="true"/>;
+}
+
+// One modal authority for every right drawer. Entries are ordered by mount,
+// so only the top owns keyboard handling while background inertness derives
+// from stack depth rather than any individual drawer's cleanup timing.
+const DRAWER_STACK = [];
+function syncDrawerBackground() {
+  const inert = DRAWER_STACK.length > 0;
+  document.querySelectorAll('.app > .sidebar, .app > .main').forEach((node) => {
+    node.inert = inert;
+    if (inert) node.setAttribute('aria-hidden', 'true');
+    else node.removeAttribute('aria-hidden');
+  });
+  const top = drawerTop();
+  DRAWER_STACK.forEach((entry) => {
+    const panel = entry.ref.current;
+    if (!panel) return;
+    const isTop = entry === top;
+    panel.inert = !isTop;
+    panel.setAttribute('aria-hidden', isTop ? 'false' : 'true');
+    if (isTop) panel.setAttribute('aria-modal', 'true');
+    else panel.removeAttribute('aria-modal');
+    panel.dataset.modalTop = isTop ? 'true' : 'false';
+  });
+}
+function drawerTop() { return DRAWER_STACK[DRAWER_STACK.length - 1] || null; }
+
+function DrawerPanel({ open, onClose, label = 'Details', className = '', children, ...props }) {
+  const ref = React.useRef(null);
+  const closeRef = React.useRef(onClose);
+  closeRef.current = onClose;
+  React.useEffect(() => {
+    if (!open) return;
+    const previous = document.activeElement;
+    const focusKey = previous?.getAttribute?.('data-focus-key');
+    const entry = { ref, previous, focusKey };
+    DRAWER_STACK.push(entry);
+    syncDrawerBackground();
+    ref.current?.focus();
+    const onKey = (event) => {
+      if (drawerTop() !== entry) return;
+      if (event.key === 'Escape') { event.preventDefault(); closeRef.current?.(); return; }
+      if (event.key !== 'Tab') return;
+      const focusable = [...(ref.current?.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') || [])]
+        .filter((node) => !node.hidden && node.getAttribute('aria-hidden') !== 'true');
+      if (!focusable.length) { event.preventDefault(); ref.current?.focus(); return; }
+      const first = focusable[0], last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === ref.current)) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      const index = DRAWER_STACK.indexOf(entry);
+      if (index >= 0) DRAWER_STACK.splice(index, 1);
+      syncDrawerBackground();
+      const target = previous?.isConnected ? previous : (focusKey ? document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`) : null);
+      if (index >= DRAWER_STACK.length) (target || drawerTop()?.ref?.current)?.focus?.();
+    };
+  }, [open]);
+  if (!open) return null;
+  return (
+    <aside ref={ref} className={`drawer open${className ? ` ${className}` : ''}`}
+      role="dialog" aria-label={label} tabIndex={-1} {...props}>
+      {children}
+    </aside>
+  );
+}
+window.DrawerBackdrop = DrawerBackdrop;
+window.DrawerPanel = DrawerPanel;
+
 // v4: PLAN.md progress — a compact "N/M" bar that expands to the flat
 // checkbox-item list on click. Renders nothing when the project has no plan.
 // `color` themes the fill bar to match the project.
@@ -135,17 +209,10 @@ function sessionStatusKind(s) {
 function HarnessIcon({ harness }) {
   const h = harness || 'claudecode';
   const cls = h === 'opencode' ? 'opencode' : h === 'claudecode' ? 'claudecode' : 'other';
-  const base = window.ModelProviders?.iconBase;
-  const src = h === 'opencode'
-    ? base && `${base}opencode.svg`
-    : h === 'claudecode'
-      ? base && `${base}claudecode-color.svg`
-      : null;
+  const initials = h === 'opencode' ? 'OC' : h === 'claudecode' ? 'CC' : h.slice(0, 2).toUpperCase();
   return (
     <span className={`agent-harness-icon ${cls}`} title={`harness: ${h}`} aria-label={`harness ${h}`}>
-      {src ? <img src={src} alt="" loading="lazy"/> : (
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="2"/><path d="M8 12h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
-      )}
+      <span aria-hidden="true">{initials}</span>
     </span>
   );
 }
@@ -155,7 +222,7 @@ function ModelPill({ model }) {
   const provider = window.ModelProviders?.providerForModel?.(model);
   return (
     <span className="agent-model-pill" title={provider ? `${provider.label}: ${model}` : model}>
-      {provider?.iconSrc ? <span className="agent-model-icon"><img src={provider.iconSrc} alt="" loading="lazy"/></span> : null}<span>{model}</span>
+      <span className="agent-model-icon" aria-hidden="true">{provider?.initials || 'AI'}</span><span>{model}</span>
     </span>
   );
 }
@@ -199,6 +266,7 @@ function AgentCard({ session, name, queueCount = 0, setRoute, showControls = fal
   return (
     <div
       className={`agent-card native-session-card ${working ? 'busy' : 'idle'} status-${statusKind} ${compact ? 'compact' : ''} cc-clickable`}
+      data-focus-key={s.session_id ? `agent:${s.session_id}` : undefined}
       onClick={openPeek}
       role="button"
       tabIndex={0}

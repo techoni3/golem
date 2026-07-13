@@ -167,10 +167,8 @@ export function createState() {
 
   async function refreshNativeSessions() {
     try {
-      const [sessions, chans] = await Promise.all([
-        readNativeSessions(registeredIdForPath),
-        readChannels().catch(() => channels),
-      ]);
+      const chans = await readChannels().catch(() => []);
+      const sessions = await readNativeSessions(registeredIdForPath, chans);
       nativeSessions = sessions;
       channels = Array.isArray(chans) ? chans : [];
       // TKT-0266: persist durable session-name labels. Keyed off nativeSessions

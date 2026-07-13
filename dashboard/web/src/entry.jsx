@@ -1,0 +1,62 @@
+// Production entrypoint. The dashboard's existing global component contract is
+// retained while Vite resolves, transforms, and locks every runtime dependency.
+import * as React from 'react';
+import * as ReactDOM from 'react-dom';
+import * as ReactDOMClient from 'react-dom/client';
+import * as dnd from '@dnd-kit/core';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
+
+window.React = React;
+window.ReactDOM = ReactDOM;
+window.ReactDOMClient = ReactDOMClient;
+window.__reactReady = true;
+window.__dndkit = dnd;
+window.__dndkitReady = true;
+window.marked = marked;
+window.DOMPurify = DOMPurify;
+window.__markdownReady = true;
+
+let mermaid;
+window.runMermaid = async (nodes) => {
+  if (!nodes?.length) return;
+  try {
+    if (!mermaid) {
+      mermaid = (await import('mermaid')).default;
+      mermaid.initialize({ startOnLoad: false });
+    }
+    await mermaid.run({ nodes, suppressErrors: true });
+  } catch (error) {
+    console.error('mermaid lazy-load/render failed', error);
+  }
+};
+
+// These files intentionally publish globals. Sequential imports preserve the
+// former script ordering while moving transformation from browsers to Vite.
+await import('./api.js');
+await import('./store.js');
+await import('./format.js');
+await import('./phase-data.js');
+await import('./model-providers.js');
+await import('./router.js');
+await import('./icons.jsx');
+await import('./atoms.jsx');
+await import('./shell.jsx');
+await import('./dashboard.jsx');
+await import('./streams-panel.jsx');
+await import('./project-view.jsx');
+await import('./tracker-board.jsx');
+await import('./specs-board.jsx');
+await import('./ct-draft.js');
+await import('./field-controls.jsx');
+await import('./create-ticket-drawer.jsx');
+await import('./td-annotate.jsx');
+await import('./ticket-drawer.jsx');
+await import('./other-pages.jsx');
+await import('./communication-drawer.jsx');
+await import('./settings-page.jsx');
+await import('./tweaks.jsx');
+await import('./drawer-ceo.jsx');
+await import('./native-session-drawer.jsx');
+await import('./ideas-drawer.jsx');
+await import('./app.jsx');

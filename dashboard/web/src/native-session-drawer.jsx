@@ -18,13 +18,6 @@ function NativeSessionDrawer({ open, sessionId, onClose }) {
   }, [open, sessionId]);
 
   React.useEffect(() => {
-    if (!open) return;
-    const onKey = (e) => { if (e.key === 'Escape') onClose && onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
-
-  React.useEffect(() => {
     if (!open || !sessionId) return;
     const id = setInterval(() => {
       const s = window.Store.getNativeSessionById(sessionId);
@@ -54,8 +47,8 @@ function NativeSessionDrawer({ open, sessionId, onClose }) {
   if (!sessionId) {
     return (
       <>
-        <div className={`drawer-backdrop ${open ? 'open' : ''}`} onClick={onClose}/>
-        <aside className={`drawer ${open ? 'open' : ''}`}/>
+        <DrawerBackdrop open={open} onClose={onClose}/>
+        <DrawerPanel open={open} onClose={onClose} label="Agent details"/>
       </>
     );
   }
@@ -89,19 +82,23 @@ function NativeSessionDrawer({ open, sessionId, onClose }) {
   const pendingCount = Number(s?.pending_count || queue.length || 0);
 
   const metaRows = [
+    ['name', s?.name || '—', false],
+    ['harness', s?.harness || 'claudecode', true],
     ['cwd', s?.cwd || '—', true],
     ['pid', s?.pid != null ? String(s.pid) : '—', true],
     ['session_id', sessionId, true],
     ['project', s?.project_id || '—', true],
     ['started', s?.started_at ? window.SubstrateFmt.fmtTimeAgo(s.started_at) : '—', false],
-    ['updated', s?.updated_at ? window.SubstrateFmt.fmtTimeAgo(s.updated_at) : '—', false],
+    ['last seen', s?.last_seen_at || s?.updated_at ? window.SubstrateFmt.fmtTimeAgo(s.last_seen_at || s.updated_at) : 'unknown', false],
+    ['process', s?.alive ? 'alive' : 'not alive', false],
+    ['endpoint', s?.reachable === true ? 'healthy' : s?.reachable === false ? 'unreachable' : 'unknown', false],
     ['transcript', peek?.transcript_path || (loaded ? 'not found' : '…'), true],
   ];
 
   return (
     <>
-      <div className={`drawer-backdrop ${open ? 'open' : ''}`} onClick={onClose}/>
-      <aside className={`drawer ${open ? 'open' : ''}`}>
+      <DrawerBackdrop open={open} onClose={onClose}/>
+      <DrawerPanel open={open} onClose={onClose} label={`Agent details: ${title}`}>
         <div className="drawer-header">
           <div className="drawer-title-row">
             <span className={`orch-dot ${dotClass}`} style={{ flexShrink: 0 }}/>
@@ -198,7 +195,7 @@ function NativeSessionDrawer({ open, sessionId, onClose }) {
             </>
           )}
         </div>
-      </aside>
+      </DrawerPanel>
     </>
   );
 }

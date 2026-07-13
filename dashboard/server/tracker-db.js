@@ -710,6 +710,8 @@ WHERE state_changed_at IS NULL`).run();
     // NULL: it predates envelopes and remains visible/monitorable as legacy.
     const dqCols13 = db.prepare('PRAGMA table_info(dispatch_queue)').all().map((c) => c.name);
     if (!dqCols13.includes('envelope_id')) db.exec('ALTER TABLE dispatch_queue ADD COLUMN envelope_id TEXT');
+    if (!dqCols13.includes('publishing_owner')) db.exec('ALTER TABLE dispatch_queue ADD COLUMN publishing_owner TEXT');
+    if (!dqCols13.includes('publishing_expires_at')) db.exec('ALTER TABLE dispatch_queue ADD COLUMN publishing_expires_at TEXT');
     // GOL-421 additive facts/links. Keep old columns and rows intact; the old
     // status is compatibility display data, never the source of core delivery
     // or acknowledgement truth.
@@ -849,7 +851,7 @@ WHERE state_changed_at IS NULL`).run();
         "UPDATE dispatch_queue SET status = 'cancelled', resolved_at = @resolved_at WHERE ticket_id = @ticket_id AND status = 'pending'"
       ),
       getPendingForTicket: db.prepare(
-        "SELECT * FROM dispatch_queue WHERE ticket_id = ? AND status = 'pending'"
+        "SELECT * FROM dispatch_queue WHERE ticket_id = ? AND status IN ('pending','next_turn')"
       ),
       getQueueRow: db.prepare('SELECT * FROM dispatch_queue WHERE id = ?'),
       cancelQueueRow: db.prepare(
@@ -859,19 +861,22 @@ WHERE state_changed_at IS NULL`).run();
         "UPDATE dispatch_queue SET status = 'expired', last_error = @last_error, resolved_at = @resolved_at WHERE id = @id AND status = 'pending'"
       ),
       markQueueDeliveredRow: db.prepare(
-        "UPDATE dispatch_queue SET status = 'delivered', delivered_at = @delivered_at, last_error = @last_error, resolved_at = @resolved_at WHERE id = @id AND status = 'pending'"
+        "UPDATE dispatch_queue SET status = 'delivered', delivered_at = @delivered_at, last_error = @last_error, resolved_at = @resolved_at WHERE id = @id AND status IN ('pending','next_turn')"
       ),
+      markQueueNextTurnRow: db.prepare("UPDATE dispatch_queue SET status = 'next_turn', publishing_owner = NULL, publishing_expires_at = NULL WHERE id = @id AND status = 'publishing' AND publishing_owner = @owner"),
+      claimQueuePublishingRow: db.prepare("UPDATE dispatch_queue SET status = 'publishing', publishing_owner = @owner, publishing_expires_at = @expires WHERE id = @id AND (status = 'pending' OR (status = 'publishing' AND publishing_expires_at < @now))"),
+      releaseQueuePublishingRow: db.prepare("UPDATE dispatch_queue SET status = 'pending', publishing_owner = NULL, publishing_expires_at = NULL WHERE id = @id AND status = 'publishing' AND publishing_owner = @owner"),
       listPendingDispatches: db.prepare(
-        "SELECT * FROM dispatch_queue WHERE status = 'pending' ORDER BY created_at ASC"
+        "SELECT * FROM dispatch_queue WHERE status IN ('pending','publishing') ORDER BY created_at ASC"
       ),
       listPendingForSession: db.prepare(
-        "SELECT * FROM dispatch_queue WHERE session_id = ? AND status = 'pending' ORDER BY created_at ASC"
+        "SELECT * FROM dispatch_queue WHERE session_id = ? AND status IN ('pending','next_turn') ORDER BY created_at ASC"
       ),
       countPendingForSession: db.prepare(
-        "SELECT COUNT(*) AS n FROM dispatch_queue WHERE session_id = ? AND status = 'pending'"
+        "SELECT COUNT(*) AS n FROM dispatch_queue WHERE session_id = ? AND status IN ('pending','next_turn')"
       ),
       countPendingBySession: db.prepare(
-        "SELECT session_id, COUNT(*) AS n FROM dispatch_queue WHERE status = 'pending' GROUP BY session_id"
+        "SELECT session_id, COUNT(*) AS n FROM dispatch_queue WHERE status IN ('pending','next_turn') GROUP BY session_id"
       ),
       currentInProgressForSession: db.prepare(
         "SELECT id, display_id, title FROM tickets WHERE state = 'in_progress' AND (assignee = ? OR dispatched_to = ?) ORDER BY state_changed_at DESC, updated_at DESC, seq DESC LIMIT 1"
@@ -2136,13 +2141,13 @@ WHERE state_changed_at IS NULL`).run();
       return row ? api.getTicket(row.id) : null;
     },
 
-    // TKT-0107: maximum updated_at across all tickets for a project. Powers
-    // the composite last_activity_at signal in the sidebar ordering.
+    // Maximum user-work recency for a project. Archived rows are excluded:
+    // archive sweeps are maintenance and must not make dormant projects recent.
     // Returns 0 when the project has no tickets.
     maxTicketUpdatedAt(projectId) {
       if (!projectId) return 0;
       const row = db.prepare(
-        'SELECT MAX(updated_at) AS m FROM tickets WHERE project_id = ?'
+        "SELECT MAX(updated_at) AS m FROM tickets WHERE project_id = ? AND state != 'archived'"
       ).get(projectId);
       if (!row?.m) return 0;
       // updated_at is stored as ISO text; parse to ms.
@@ -2820,7 +2825,7 @@ WHERE state_changed_at IS NULL`).run();
     markQueueDelivered(queueId, { error = null, envelope_id = null } = {}) {
       const row = stmts.getQueueRow.get(queueId);
       if (!row) throw new Error(`markQueueDelivered: queue row '${queueId}' not found`);
-      if (row.status !== 'pending') return row;
+      if (!['pending', 'next_turn'].includes(row.status)) return row;
       const ts = now();
       const txn = db.transaction(() => {
         stmts.markQueueDeliveredRow.run({
@@ -2836,6 +2841,25 @@ WHERE state_changed_at IS NULL`).run();
         return stmts.getQueueRow.get(queueId);
       });
       return txn();
+    },
+
+    markQueueNextTurn(queueId, { ownerToken } = {}) {
+      const row = stmts.getQueueRow.get(queueId);
+      if (!row) throw new Error(`markQueueNextTurn: queue row '${queueId}' not found`);
+      if (!ownerToken) throw new Error('markQueueNextTurn: ownerToken is required');
+      stmts.markQueueNextTurnRow.run({ id: queueId, owner: ownerToken });
+      return stmts.getQueueRow.get(queueId);
+    },
+
+    claimQueuePublishing(queueId, { ownerToken, leaseMs = 30_000, nowMs = Date.now() } = {}) {
+      if (!ownerToken) throw new Error('claimQueuePublishing: ownerToken is required');
+      const result = stmts.claimQueuePublishingRow.run({ id: queueId, owner: ownerToken, now: new Date(nowMs).toISOString(), expires: new Date(nowMs + leaseMs).toISOString() });
+      return result.changes === 1;
+    },
+
+    releaseQueuePublishing(queueId, { ownerToken } = {}) {
+      if (!ownerToken) throw new Error('releaseQueuePublishing: ownerToken is required');
+      return stmts.releaseQueuePublishingRow.run({ id: queueId, owner: ownerToken }).changes === 1;
     },
 
     markDispatchDeliveryAttempted(ticketId, { session_id, actor = 'human', error = null, envelope_id = null } = {}) {

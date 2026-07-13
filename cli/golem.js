@@ -26,6 +26,8 @@ import { lintSubstrate, formatLintResult } from '../lib/substrate-lint.js';
 import * as compiler from '../lib/compiler/engine.js';
 import * as ccAdapter from '../lib/compiler/adapters/cc.js';
 import * as ocAdapter from '../lib/compiler/adapters/opencode.js';
+import * as codexAdapter from '../lib/compiler/adapters/codex.js';
+import * as piAdapter from '../lib/compiler/adapters/pi.js';
 import { isHarnessEnabled, loadConfig, saveConfig } from '../lib/golem-config.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -592,8 +594,8 @@ async function cmdMigrateHome(args) {
   log(`  (or restore from backup: tar -xzf ${backupPath} -C ${home})`);
 }
 
-const ADAPTERS = { cc: ccAdapter };
-const KNOWN_TARGETS = ['cc', 'cc-marketplace', 'opencode'];
+const ADAPTERS = { cc: ccAdapter, codex: codexAdapter, pi: piAdapter };
+const KNOWN_TARGETS = ['cc', 'cc-marketplace', 'opencode', 'codex', 'pi'];
 
 /** Resolve the opencode binary: PATH first, then the default install location. */
 function resolveOpencodeBin() {
@@ -636,7 +638,7 @@ function optionValue(args, name) {
 
 function normalizeTarget(target) {
   if (target === 'claudecode') return 'cc';
-  if (target === 'cc' || target === 'cc-marketplace' || target === 'opencode') return target;
+  if (KNOWN_TARGETS.includes(target)) return target;
   fatal(2, `Unknown sync target/harness: ${target} (known: ${KNOWN_TARGETS.join(', ')}, claudecode)`);
 }
 
@@ -774,6 +776,9 @@ async function cmdSync(args) {
   if (target === 'cc') {
     ccAdapter.syncMcpChannelDeps({ repoRoot: GOLEM_ROOT, outDir });
   }
+  if (target === 'codex') {
+    ccAdapter.syncMcpChannelDeps({ repoRoot: GOLEM_ROOT, outDir: join(outDir, 'plugins', 'golem') });
+  }
   if (target === 'cc-marketplace') {
     ccAdapter.ensureMarketplacePluginLink({ ccPluginDir: renderDirFor('cc'), marketplaceOutDir: outDir });
   }
@@ -892,6 +897,20 @@ async function cmdSyncCheckAll({ quiet = false } = {}) {
   say(`global cc-marketplace: ${marketplaceOut}`);
   if (!quiet) printDrift(marketplace);
   drift = drift || !marketplace.clean;
+
+  const codexOut = renderDirFor('codex');
+  const codex = compiler.checkDrift({ target: 'codex', outDir: codexOut, items: planForTarget('codex') });
+  if (!quiet) log('');
+  say(`global codex: ${codexOut}`);
+  if (!quiet) printDrift(codex);
+  drift = drift || !codex.clean;
+
+  const piOut = renderDirFor('pi');
+  const pi = compiler.checkDrift({ target: 'pi', outDir: piOut, items: planForTarget('pi') });
+  if (!quiet) log('');
+  say(`global pi: ${piOut}`);
+  if (!quiet) printDrift(pi);
+  drift = drift || !pi.clean;
 
   if (isHarnessEnabled('opencode')) {
     const root = substrateRoot();

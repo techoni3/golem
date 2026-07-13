@@ -23,6 +23,9 @@ const sessionID = 'ses_gol_424_opencode';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let dashboard;
 let channel;
+let dashboardResult;
+let channelResult;
+let channelStderr = '';
 
 async function port() {
   const server = createServer();
@@ -41,6 +44,39 @@ async function eventually(check, message) {
   throw new Error(`${message}: ${error?.message || error || 'timed out'}`);
 }
 
+function childResult(child) {
+  return new Promise((resolve) => {
+    child.once('error', (error) => resolve({ code: null, signal: null, error }));
+    child.once('close', (code, signal) => resolve({ code, signal, error: null }));
+  });
+}
+
+async function stopChild(child, result, name) {
+  if (!child || !result) return;
+  if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+  let stopped;
+  try {
+    stopped = await withTimeout(result, 5_000, `${name} did not exit after SIGTERM`);
+  } catch {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    stopped = await withTimeout(result, 5_000, `${name} did not exit after SIGKILL`);
+  }
+  if (stopped.error) throw stopped.error;
+}
+
+async function withTimeout(promise, timeoutMs, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    timer.unref();
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function dashboardUrl() {
   const file = path.join(home, 'dashboard.json');
   return eventually(() => {
@@ -50,13 +86,13 @@ async function dashboardUrl() {
   }, 'temporary dashboard did not self-register');
 }
 
-async function channelUrl() {
+async function channelRegistration() {
   const file = path.join(home, 'channels.json');
   return eventually(() => {
     const row = JSON.parse(fs.readFileSync(file, 'utf8')).channels.find((entry) => entry.session_id === sessionID);
     assert.ok(row?.host && row?.port);
-    return `http://${row.host}:${row.port}`;
-  }, 'OpenCode channel did not register');
+    return row;
+  }, `OpenCode channel did not register; stderr: ${channelStderr || '(none)'}`);
 }
 
 async function passiveClaim(base, id) {
@@ -79,6 +115,7 @@ try {
     env: { ...process.env, GOLEM_HOME: home, GOLEM_TRACKER_DB: dbPath, PORT: String(dashboardPort), HOST: '127.0.0.1', GOLEM_PROJECTS_ROOT: path.join(dir, 'projects'), GOLEM_IDEAS_ROOT: path.join(dir, 'ideas') },
     stdio: 'ignore',
   });
+  dashboardResult = childResult(dashboard);
   const base = await dashboardUrl();
   await eventually(async () => assert.ok((await fetch(`${base}/api/health`)).ok), 'temporary dashboard did not become healthy');
 
@@ -114,9 +151,15 @@ try {
   channel = spawn(process.execPath, [channelServer], {
     cwd: repo,
     env: { ...process.env, GOLEM_HOME: home, GOLEM_DASHBOARD_URL: base, GOLEM_CEO_SESSION_ID: '', CLAUDE_CODE_SESSION_ID: '', GOLEM_CHANNEL_PORT: '0', GOLEM_CHANNEL_HEARTBEAT_MS: '50' },
-    stdio: 'ignore',
+    stdio: ['pipe', 'ignore', 'pipe'],
   });
-  await channelUrl();
+  channelResult = childResult(channel);
+  channel.stderr.on('data', (chunk) => {
+    channelStderr = `${channelStderr}${chunk}`.slice(-65_536);
+  });
+  const registeredChannel = await channelRegistration();
+  assert.equal(registeredChannel.pid, channel.pid, 'live fixture channel registers before dashboard dispatch');
+  assert.equal(channel.exitCode, null, 'fixture keeps MCP stdin open during the HTTP journey');
 
   let tracker = openTrackerDb(dbPath);
   const ticket = tracker.createTicket({ project_id: 'smoketests-000000', kind: 'work-item', title: 'SMOKE GOL-424 OpenCode prompt', body: '', created_by: 'human', assignee: sessionID });
@@ -177,10 +220,23 @@ try {
     method: 'POST', headers: { 'X-Golem-Caller-Session': sessionID, 'Content-Type': 'application/json' }, body: JSON.stringify({ lease_id: replay.lease_id }),
   });
 
-  console.log('PASS GOL-424 OpenCode passive message + actionable journey');
+  channel.stdin.end();
+  const eofShutdown = await withTimeout(channelResult, 5_000, `channel survived MCP stdin EOF; stderr: ${channelStderr || '(none)'}`);
+  assert.equal(eofShutdown.error, null, 'channel process closes cleanly after MCP stdin EOF');
+  assert.equal(eofShutdown.code, 0, 'MCP stdin EOF shuts down the channel with exit code 0');
+  assert.equal(eofShutdown.signal, null, 'MCP stdin EOF shuts down without an external signal');
+  assert.match(channelStderr, /shutdown \(mcp stdin closed by host\)/, 'runtime shutdown reports MCP stdin EOF');
+  await eventually(() => {
+    const channels = JSON.parse(fs.readFileSync(path.join(home, 'channels.json'), 'utf8')).channels;
+    assert.equal(channels.some((entry) => entry.pid === registeredChannel.pid), false);
+  }, 'MCP stdin EOF did not unregister the channel');
+
 } finally {
-  try { dashboard?.kill('SIGTERM'); } catch {}
-  try { channel?.kill('SIGTERM'); } catch {}
-  await sleep(100);
+  if (channel?.stdin && !channel.stdin.destroyed) channel.stdin.end();
+  await stopChild(channel, channelResult, 'channel');
+  await stopChild(dashboard, dashboardResult, 'dashboard');
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  assert.equal(fs.existsSync(dir), false, 'isolated OpenCode fixture removes its temporary home and database');
 }
+
+console.log('PASS GOL-424 OpenCode passive message + actionable journey');

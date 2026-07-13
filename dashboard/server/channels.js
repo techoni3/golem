@@ -5,6 +5,7 @@
 
 import fs from 'node:fs/promises';
 import { channelsJsonPath } from '../../lib/golem-home.js';
+import { readEndpointLeases } from '../../lib/session-facts.js';
 
 const CHANNELS_REGISTRY = channelsJsonPath();
 
@@ -37,8 +38,24 @@ async function readRegistry(file, listKey) {
 
 /** Return live channel registrations with a computed `url`. */
 export async function readChannels() {
+  const leases = readEndpointLeases();
+  const healthy = (await Promise.all(leases.map(async (lease) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 300);
+    try {
+      const query = new URLSearchParams({ session_id: lease.canonical_id, owner_token: lease.owner_token });
+      const response = await fetch(`http://${lease.host}:${lease.port}/healthz?${query}`, { signal: controller.signal });
+      const body = response.ok ? await response.json() : null;
+      return response.ok && body?.canonical_id === lease.canonical_id && body?.owner_token === lease.owner_token
+        ? { ...lease, session_id: lease.canonical_id, url: `http://${lease.host}:${lease.port}`, endpoint_health: 'healthy' }
+        : null;
+    } catch { return null; } finally { clearTimeout(timer); }
+  }))).filter(Boolean);
   const channels = await readRegistry(CHANNELS_REGISTRY, 'channels');
-  return channels
+  const canonicalIds = new Set(leases.map((lease) => lease.canonical_id));
+  const legacy = channels
+    .filter((c) => !canonicalIds.has(c.session_id))
     .filter((c) => pidAlive(c.pid))
-    .map((c) => ({ ...c, url: `http://${c.host}:${c.port}` }));
+    .map((c) => ({ ...c, url: `http://${c.host}:${c.port}`, endpoint_health: 'legacy-pid-only' }));
+  return [...healthy, ...legacy];
 }

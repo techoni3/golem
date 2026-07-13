@@ -58,7 +58,12 @@
   const parseRoute = (path, query) => {
     const p = normalizePath(path);
     if (p === '/' || p === '/dashboard') return { kind: 'dashboard' };
-    if (p === '/tracker') return { kind: 'tracker', view: query.view || null };
+    if (p === '/tracker') return {
+      kind: 'tracker', view: query.view || null,
+      project: query.project || '', kindFilter: query.kind || '',
+      assignee: query.assignee || '', q: query.q || '',
+      archived: query.archived === '1', needsAnswer: query.needsAnswer === '1',
+    };
     if (p === '/specs') return { kind: 'specs' };
     if (p === '/projects') return { kind: 'projects' };
     if (p === '/agents') return { kind: 'agents' };
@@ -88,6 +93,12 @@
       case 'tracker': {
         const q = {};
         if (route.view) q.view = route.view;
+        if (route.project) q.project = route.project;
+        if (route.kindFilter) q.kind = route.kindFilter;
+        if (route.assignee) q.assignee = route.assignee;
+        if (route.q) q.q = route.q;
+        if (route.archived) q.archived = '1';
+        if (route.needsAnswer) q.needsAnswer = '1';
         return `/tracker${stringifyQuery(q)}`;
       }
       case 'projects': return '/projects';
