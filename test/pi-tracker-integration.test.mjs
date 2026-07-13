@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { openTrackerDb } from '../dashboard/server/tracker-db.js';
-import { enqueuePiBrief } from '../lib/pi-inbox.js';
+import { claimPiPickupAcks, completePiPickupAck, enqueuePiBrief } from '../lib/pi-inbox.js';
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'golem-pi-db-')); const dbPath = path.join(temp, 'tracker.db');
 const facts = path.join(temp, 'session-facts.json'); fs.writeFileSync(facts, JSON.stringify({ version: 1, facts: [{ canonical_id: 'pi-real', harness: 'pi' }] }));
@@ -20,5 +20,13 @@ try {
   const pending = path.join(temp, 'pi-inbox', 'pi-real', 'pending', `${row.id}.json`); const processing = path.join(temp, 'pi-inbox', 'pi-real', 'processing', `${row.id}.json`); fs.mkdirSync(path.dirname(processing)); fs.renameSync(pending, processing);
   const replay = enqueuePiBrief('pi-real', 'different', { queue_id: row.id }, { home: temp, file: facts, messageId: row.id });
   assert.equal(replay.replay, true); assert.equal(fs.existsSync(pending), false, 'consumer move cannot permit recreation'); assert.equal(first.message_id, replay.message_id);
+  // Crash after canonical creation but before pending link restores the link.
+  const crash = enqueuePiBrief('pi-real', 'crash', {}, { home: temp, file: facts, messageId: 'crash-link' }); fs.unlinkSync(path.join(temp, 'pi-inbox', 'pi-real', 'pending', 'crash-link.json'));
+  assert.equal(enqueuePiBrief('pi-real', 'crash', {}, { home: temp, file: facts, messageId: 'crash-link' }).replay, true); assert.ok(fs.existsSync(path.join(temp, 'pi-inbox', 'pi-real', 'pending', 'crash-link.json'))); assert.ok(crash.path);
+  // Two dashboards cannot own one live ack; stale lease is recoverable.
+  const ackDir = path.join(temp, 'pi-inbox', 'pi-real', 'acks'); fs.mkdirSync(ackDir, { recursive: true }); fs.writeFileSync(path.join(ackDir, 'ack.json'), JSON.stringify({ metadata: {} }));
+  const ackA = claimPiPickupAcks({ home: temp, ownerToken: 'dash-a', nowMs: 1000, leaseMs: 100 }); assert.equal(ackA.length, 1);
+  assert.equal(claimPiPickupAcks({ home: temp, ownerToken: 'dash-b', nowMs: 1050, leaseMs: 100 }).length, 0);
+  const ackB = claimPiPickupAcks({ home: temp, ownerToken: 'dash-b', nowMs: 1200, leaseMs: 100 }); assert.equal(ackB.length, 1); completePiPickupAck(ackB[0]);
   console.log('Pi TrackerDB owner lease + no-replace publication integration passed');
 } finally { a.close(); b.close(); fs.rmSync(temp, { recursive: true, force: true }); }

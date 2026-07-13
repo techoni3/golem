@@ -26,10 +26,10 @@ try {
   // Every acknowledged enqueue owns a distinct linked file; a second producer
   // cannot write an inode that the consumer has renamed/unlinked.
   const concurrent = enqueuePiBrief('pi-session-uuid', 'concurrent', {}, { home: env.GOLEM_HOME, file: path.join(env.GOLEM_HOME, 'session-facts.json'), messageId: 'q2' }); assert.equal(concurrent.queued, true); assert.equal(fs.readdirSync(path.join(inboxDir, 'pending')).length, 2);
+  fs.mkdirSync(path.join(inboxDir, 'processing'), { recursive: true }); fs.renameSync(path.join(inboxDir, 'pending', 'q2.json'), path.join(inboxDir, 'processing', 'q2.json'));
   assert.match(handlers.input({ text: 'next turn' }, ctx).text, /production queued brief/); assert.equal(fs.readdirSync(path.join(inboxDir, 'acks')).length, 2);
-  const q1Ack = fs.readdirSync(path.join(inboxDir, 'acks')).find((x) => x.startsWith('q1.')); fs.renameSync(path.join(inboxDir, 'acks', q1Ack), path.join(inboxDir, 'acks', `${q1Ack}.claim.stale`));
   fs.writeFileSync(path.join(inboxDir, 'acks', 'malformed.json'), '{');
-  await drainer.tick(); assert.equal(commentsDelivered, false); assert.ok(fs.readdirSync(path.join(inboxDir, 'acks')).some((x) => x.includes('.claim.'))); assert.ok(fs.existsSync(path.join(inboxDir, 'acks', 'malformed')));
+  await drainer.tick(); assert.equal(commentsDelivered, false); assert.ok(fs.existsSync(path.join(inboxDir, 'acks', '.claims'))); assert.ok(fs.existsSync(path.join(inboxDir, 'acks', 'malformed')));
   await drainer.tick(); drainer.close(); assert.equal(queueStatus, 'delivered'); assert.equal(envelopeDelivered, true); assert.equal(commentsDelivered, true); assert.equal(passiveDelivered, true);
   const native = spawnSync('pi', ['--version'], { env, encoding: 'utf8' });
   console.log(`pi native ${native.status === 0 ? `present: ${native.stdout.trim()}` : 'absent'}; node ${process.version}; delivery Tier B (no live idle endpoint proven)`);

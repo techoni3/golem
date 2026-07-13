@@ -29,7 +29,7 @@
 import { loadConfig } from '../../lib/golem-config.js';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import { checkpointPiPickupAck, claimPiPickupAcks, enqueuePiBrief } from '../../lib/pi-inbox.js';
+import { checkpointPiPickupAck, claimPiPickupAcks, completePiPickupAck, enqueuePiBrief } from '../../lib/pi-inbox.js';
 
 const TICK_MS = 5_000;
 const COOLDOWN_MS = 60_000;
@@ -50,6 +50,7 @@ export function initDispatchDrainer({
   const waveHoldLogged = new Set();
   const piPublishing = new Set();
   const publishingOwner = crypto.randomUUID();
+  const ackOwner = crypto.randomUUID();
   let timer = null;
   let stopped = false;
 
@@ -165,7 +166,7 @@ export function initDispatchDrainer({
   async function tick() {
     if (stopped) return;
     let pending;
-    for (const ack of claimPiPickupAcks()) {
+    for (const ack of claimPiPickupAcks({ ownerToken: ackOwner })) {
       try {
         const meta = ack.value?.metadata || {}; const settled = ack.value.settled || {};
         const step = (name, fn) => { if (!settled[name]) { fn(); settled[name] = true; ack.value.settled = settled; checkpointPiPickupAck(ack.file, ack.value); } };
@@ -173,7 +174,7 @@ export function initDispatchDrainer({
         if (meta.envelope_id) step('envelope', () => tracker.markEnvelopeDelivery(meta.envelope_id, { error: null }));
         if (meta.passive_lease_id) step('passive', () => tracker.commitPassiveDelta(meta.session_id, meta.passive_lease_id));
         if (meta.ticket_id) step('comments', () => tracker.markCommentDispatchesDeliveredForTicket(meta.ticket_id, meta.session_id));
-        fs.unlinkSync(ack.file);
+        completePiPickupAck(ack);
       } catch (err) { console.error('[dispatch-drainer] Pi pickup settlement failed:', err); }
     }
     try {

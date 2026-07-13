@@ -25,11 +25,15 @@ export default function golem(pi) {
   pi.on('input', (_event, ctx) => {
     const id = canonicalId || ctx.sessionManager.getSessionId();
     const root = path.join(home, 'pi-inbox', id); const pending = path.join(root, 'pending');
-    const messages = [];
-    for (const name of fs.existsSync(pending) ? fs.readdirSync(pending).sort() : []) {
-      const source = path.join(pending, name); const processing = path.join(root, 'processing', name);
+    const messages = []; const processingDir = path.join(root, 'processing');
+    const work = [
+      ...(fs.existsSync(processingDir) ? fs.readdirSync(processingDir).sort().map((name) => ({ name, source: path.join(processingDir, name), claimed: true })) : []),
+      ...(fs.existsSync(pending) ? fs.readdirSync(pending).sort().map((name) => ({ name, source: path.join(pending, name), claimed: false })) : []),
+    ];
+    for (const item of work) {
+      const { name, source } = item; const processing = path.join(root, 'processing', name);
       try {
-        fs.mkdirSync(path.dirname(processing), { recursive: true }); fs.renameSync(source, processing);
+        fs.mkdirSync(path.dirname(processing), { recursive: true }); if (!item.claimed) fs.renameSync(source, processing);
         const value = JSON.parse(fs.readFileSync(processing, 'utf8'));
         if (typeof value?.text !== 'string') throw new Error('invalid text');
         messages.push(value); fs.mkdirSync(path.join(root, 'acks'), { recursive: true });

@@ -41,5 +41,11 @@ Ack claims survive restarts; settlement checkpoints each idempotent stage in the
 claim file and deletes it only after queue, envelope, passive, and comment facts
 all complete. Malformed claims are quarantined for inspection.
 
+Crash recovery also repairs a missing pending link from the immutable canonical
+file unless that message is verifiably processing or acknowledged. Pi drains
+orphaned `processing/` entries before new pending work. Dashboard pickup
+settlement uses an exclusive filesystem lease directory per ack; a second
+dashboard cannot settle concurrently and may take over only after lease expiry.
+
 The journey test proves rendering is isolated and portable, records the runtime
 probe result, and refuses to infer Tier A from the existence of an in-process API.
