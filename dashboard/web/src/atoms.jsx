@@ -105,6 +105,17 @@ function syncDrawerBackground() {
     if (inert) node.setAttribute('aria-hidden', 'true');
     else node.removeAttribute('aria-hidden');
   });
+  const top = drawerTop();
+  DRAWER_STACK.forEach((entry) => {
+    const panel = entry.ref.current;
+    if (!panel) return;
+    const isTop = entry === top;
+    panel.inert = !isTop;
+    panel.setAttribute('aria-hidden', isTop ? 'false' : 'true');
+    if (isTop) panel.setAttribute('aria-modal', 'true');
+    else panel.removeAttribute('aria-modal');
+    panel.dataset.modalTop = isTop ? 'true' : 'false';
+  });
 }
 function drawerTop() { return DRAWER_STACK[DRAWER_STACK.length - 1] || null; }
 
@@ -144,7 +155,7 @@ function DrawerPanel({ open, onClose, label = 'Details', className = '', childre
   if (!open) return null;
   return (
     <aside ref={ref} className={`drawer open${className ? ` ${className}` : ''}`}
-      role="dialog" aria-modal="true" aria-label={label} tabIndex={-1} {...props}>
+      role="dialog" aria-label={label} tabIndex={-1} {...props}>
       {children}
     </aside>
   );
