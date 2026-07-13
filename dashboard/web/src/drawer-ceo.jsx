@@ -50,13 +50,6 @@ function CeoChatDrawer({ open, sessionId, onClose }) {
     if (open && sessionId) setActiveSessionId(sessionId);
   }, [open, sessionId]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e) => { if (e.key === 'Escape') onClose && onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
-
   const pushToast = (text, kind = 'ok') => {
     setToast({ text, kind, id: Math.random() });
     setTimeout(() => setToast(null), 3000);

@@ -94,6 +94,20 @@ function DrawerBackdrop({ open, onClose }) {
   return <div className="drawer-backdrop open" onClick={onClose} aria-hidden="true"/>;
 }
 
+// One modal authority for every right drawer. Entries are ordered by mount,
+// so only the top owns keyboard handling while background inertness derives
+// from stack depth rather than any individual drawer's cleanup timing.
+const DRAWER_STACK = [];
+function syncDrawerBackground() {
+  const inert = DRAWER_STACK.length > 0;
+  document.querySelectorAll('.app > .sidebar, .app > .main').forEach((node) => {
+    node.inert = inert;
+    if (inert) node.setAttribute('aria-hidden', 'true');
+    else node.removeAttribute('aria-hidden');
+  });
+}
+function drawerTop() { return DRAWER_STACK[DRAWER_STACK.length - 1] || null; }
+
 function DrawerPanel({ open, onClose, label = 'Details', className = '', children, ...props }) {
   const ref = React.useRef(null);
   const closeRef = React.useRef(onClose);
@@ -102,10 +116,12 @@ function DrawerPanel({ open, onClose, label = 'Details', className = '', childre
     if (!open) return;
     const previous = document.activeElement;
     const focusKey = previous?.getAttribute?.('data-focus-key');
-    const background = [...document.querySelectorAll('.app > .sidebar, .app > .main')];
-    background.forEach((node) => { node.inert = true; node.setAttribute('aria-hidden', 'true'); });
+    const entry = { ref, previous, focusKey };
+    DRAWER_STACK.push(entry);
+    syncDrawerBackground();
     ref.current?.focus();
     const onKey = (event) => {
+      if (drawerTop() !== entry) return;
       if (event.key === 'Escape') { event.preventDefault(); closeRef.current?.(); return; }
       if (event.key !== 'Tab') return;
       const focusable = [...(ref.current?.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') || [])]
@@ -118,9 +134,11 @@ function DrawerPanel({ open, onClose, label = 'Details', className = '', childre
     document.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('keydown', onKey);
-      background.forEach((node) => { node.inert = false; node.removeAttribute('aria-hidden'); });
+      const index = DRAWER_STACK.indexOf(entry);
+      if (index >= 0) DRAWER_STACK.splice(index, 1);
+      syncDrawerBackground();
       const target = previous?.isConnected ? previous : (focusKey ? document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`) : null);
-      target?.focus?.();
+      if (index >= DRAWER_STACK.length) (target || drawerTop()?.ref?.current)?.focus?.();
     };
   }, [open]);
   if (!open) return null;

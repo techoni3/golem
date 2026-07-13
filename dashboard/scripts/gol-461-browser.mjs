@@ -164,6 +164,17 @@ try {
   await page.waitForSelector('[role="dialog"]');
   const agentText = await page.locator('[role="dialog"]').innerText();
   for (const fact of ['session_id', 'harness', 'last seen', 'endpoint', 'Fixture Builder']) ok(agentText.toLowerCase().includes(fact.toLowerCase()), `agent detail shows canonical ${fact} fact`);
+  await page.evaluate((id) => window.Router.openTicket(id), hostile.id);
+  await page.waitForFunction(() => document.querySelectorAll('[role="dialog"]').length === 2);
+  ok(await page.locator('.app > .main[inert]').count() === 1, 'nested drawers keep the background inert');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.querySelectorAll('[role="dialog"]').length === 1);
+  ok((await page.locator('[role="dialog"]').getAttribute('aria-label')).startsWith('Agent details'), 'one Escape closes only the top drawer');
+  ok(await page.locator('.app > .main[inert]').count() === 1, 'lower drawer remains modal and background stays inert');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
+  ok(await page.locator('.app > .main[inert]').count() === 0, 'second Escape releases background inertness');
+  ok(await page.evaluate(() => document.activeElement?.classList.contains('native-session-card')), 'nested stack restores the original opener after the lower closes');
 
   // Move the seeded session from busy to idle and require the drainer to POST
   // the queued envelope to its isolated fake channel, then remove the queue row.
@@ -173,9 +184,6 @@ try {
   ok(delivered.some((entry) => entry.url === '/brief'), 'queued envelope is delivered when the agent becomes idle');
   const remainingQueue = await json(`/api/dispatch-queue?session=idle-fixture-session`);
   ok(remainingQueue.length === 0, 'delivered idle envelope is consumed from the durable queue');
-  await page.keyboard.press('Escape');
-  await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
-  ok(await page.evaluate(() => document.activeElement?.classList.contains('native-session-card')), 'drawer restores focus to its opener');
 
   const distFiles = [];
   const walk = (dir) => { for (const name of readdirSync(dir)) { const file = path.join(dir, name); statSync(file).isDirectory() ? walk(file) : distFiles.push(file); } };

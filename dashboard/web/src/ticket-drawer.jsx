@@ -171,14 +171,6 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
     return () => { cancelled = true; };
   }, [open, ticketId]);
 
-  // Esc closes (→ App pops the ?ticket overlay via onClose).
-  React.useEffect(() => {
-    if (!open) return;
-    const onKey = (e) => { if (e.key === 'Escape') onClose && onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
-
   // Fetch dispatchable sessions + streams for the ticket's project.
   const projectId = ticket?.project_id || null;
   React.useEffect(() => {
