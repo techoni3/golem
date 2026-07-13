@@ -710,6 +710,8 @@ WHERE state_changed_at IS NULL`).run();
     // NULL: it predates envelopes and remains visible/monitorable as legacy.
     const dqCols13 = db.prepare('PRAGMA table_info(dispatch_queue)').all().map((c) => c.name);
     if (!dqCols13.includes('envelope_id')) db.exec('ALTER TABLE dispatch_queue ADD COLUMN envelope_id TEXT');
+    if (!dqCols13.includes('publishing_owner')) db.exec('ALTER TABLE dispatch_queue ADD COLUMN publishing_owner TEXT');
+    if (!dqCols13.includes('publishing_expires_at')) db.exec('ALTER TABLE dispatch_queue ADD COLUMN publishing_expires_at TEXT');
     // GOL-421 additive facts/links. Keep old columns and rows intact; the old
     // status is compatibility display data, never the source of core delivery
     // or acknowledgement truth.
@@ -861,7 +863,8 @@ WHERE state_changed_at IS NULL`).run();
       markQueueDeliveredRow: db.prepare(
         "UPDATE dispatch_queue SET status = 'delivered', delivered_at = @delivered_at, last_error = @last_error, resolved_at = @resolved_at WHERE id = @id AND status IN ('pending','next_turn')"
       ),
-      markQueueNextTurnRow: db.prepare("UPDATE dispatch_queue SET status = 'next_turn' WHERE id = @id AND status IN ('pending','publishing')"),
+      markQueueNextTurnRow: db.prepare("UPDATE dispatch_queue SET status = 'next_turn', publishing_owner = NULL, publishing_expires_at = NULL WHERE id = @id AND status = 'publishing' AND publishing_owner = @owner"),
+      claimQueuePublishingRow: db.prepare("UPDATE dispatch_queue SET status = 'publishing', publishing_owner = @owner, publishing_expires_at = @expires WHERE id = @id AND (status = 'pending' OR (status = 'publishing' AND publishing_expires_at < @now))"),
       listPendingDispatches: db.prepare(
         "SELECT * FROM dispatch_queue WHERE status IN ('pending','publishing') ORDER BY created_at ASC"
       ),
@@ -2839,11 +2842,18 @@ WHERE state_changed_at IS NULL`).run();
       return txn();
     },
 
-    markQueueNextTurn(queueId) {
+    markQueueNextTurn(queueId, { ownerToken } = {}) {
       const row = stmts.getQueueRow.get(queueId);
       if (!row) throw new Error(`markQueueNextTurn: queue row '${queueId}' not found`);
-      stmts.markQueueNextTurnRow.run({ id: queueId });
+      if (!ownerToken) throw new Error('markQueueNextTurn: ownerToken is required');
+      stmts.markQueueNextTurnRow.run({ id: queueId, owner: ownerToken });
       return stmts.getQueueRow.get(queueId);
+    },
+
+    claimQueuePublishing(queueId, { ownerToken, leaseMs = 30_000, nowMs = Date.now() } = {}) {
+      if (!ownerToken) throw new Error('claimQueuePublishing: ownerToken is required');
+      const result = stmts.claimQueuePublishingRow.run({ id: queueId, owner: ownerToken, now: new Date(nowMs).toISOString(), expires: new Date(nowMs + leaseMs).toISOString() });
+      return result.changes === 1;
     },
 
     markDispatchDeliveryAttempted(ticketId, { session_id, actor = 'human', error = null, envelope_id = null } = {}) {

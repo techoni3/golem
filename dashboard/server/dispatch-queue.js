@@ -28,6 +28,7 @@
 
 import { loadConfig } from '../../lib/golem-config.js';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { checkpointPiPickupAck, claimPiPickupAcks, enqueuePiBrief } from '../../lib/pi-inbox.js';
 
 const TICK_MS = 5_000;
@@ -48,6 +49,7 @@ export function initDispatchDrainer({
   const lastDeliveredAt = new Map();
   const waveHoldLogged = new Set();
   const piPublishing = new Set();
+  const publishingOwner = crypto.randomUUID();
   let timer = null;
   let stopped = false;
 
@@ -276,7 +278,7 @@ export function initDispatchDrainer({
       if (!row) continue;
       if (isPi) {
         if (piPublishing.has(row.id)) continue;
-        if (row.status !== 'publishing' && !tracker.claimQueuePublishing(row.id)) continue;
+        if (!tracker.claimQueuePublishing(row.id, { ownerToken: publishingOwner })) continue;
         piPublishing.add(row.id);
       }
       try {
@@ -344,7 +346,7 @@ export function initDispatchDrainer({
         // writes: their failure must not replay context that already landed.
         const passiveCommitted = !!pushResult?.ok;
         try {
-          if (pushResult.queued) { tracker.markQueueNextTurn(row.id); piPublishing.delete(row.id); }
+          if (pushResult.queued) { tracker.markQueueNextTurn(row.id, { ownerToken: publishingOwner }); piPublishing.delete(row.id); }
           else {
             tracker.markQueueDelivered(row.id, { error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}`, envelope_id: row.envelope_id || null });
             if (row.envelope_id) tracker.markEnvelopeDelivery(row.envelope_id, { error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}` });

@@ -32,6 +32,11 @@ are preserved under `dead-letter/`.
 Queue publication is claimed atomically before filesystem publication and uses
 the queue id as the message filename. Replays therefore resolve to the same
 file, while overlapping ticks cannot publish twice or cancel after publication.
+The TrackerDB claim is a compare-and-swap lease with an owner token; only that
+owner can advance to `next_turn`, and another dashboard process can recover only
+after expiry. Publication uses an exclusive hard-link into an immutable
+`published/` store, then links into `pending/`; moving the consumer link cannot
+make a retry recreate it.
 Ack claims survive restarts; settlement checkpoints each idempotent stage in the
 claim file and deletes it only after queue, envelope, passive, and comment facts
 all complete. Malformed claims are quarantined for inspection.
