@@ -6,6 +6,16 @@ push-capable plugin/channel surface; OpenCode supports rendered agents, skills, 
 configuration. The npm package is `@laveesingh/golem`; the rendered harness
 plugin remains named `golem`.
 
+## Harness support matrix
+
+| Harness | Tier | Delivery and requirements |
+| --- | --- | --- |
+| Claude Code | Tier A | Push-capable plugin and per-session channel. Render and install the workspace plugin; Node.js 20+ is required. |
+| OpenCode | Tier A | Rendered agents, skills, hooks, and MCP bridge support addressed push while `golemc` is running. Run `golem sync --target opencode`; Node.js 20+ is required. |
+| Codex CLI | Tier B | Pull only: lifecycle facts, skills, subagents, and MCP tools are supported after the generated plugin is installed and its hooks are trusted. Dispatch is queued for explicit MCP pull, never reported as push or next-turn delivery; App Server is out of scope. Node.js 20+ is required. |
+| Pi | Tier B | Pickup semantics: dispatch is durably queued, injected on the next user input, and acknowledged only when agent processing starts. There is no advertised live-idle push. Run `golem sync --target pi`; Pi requires Node.js 22.19+. |
+| Gemini CLI | Unsupported | No adapter or release contract is shipped. Golem makes no compatibility claim until a separately designed and mechanically verified adapter exists. |
+
 ## Install and render
 
 ```sh
