@@ -277,11 +277,6 @@ export function initDispatchDrainer({
         }
       }
       if (!row) continue;
-      if (isPi) {
-        if (piPublishing.has(row.id)) continue;
-        if (!tracker.claimQueuePublishing(row.id, { ownerToken: publishingOwner })) continue;
-        piPublishing.add(row.id);
-      }
       try {
         const ticket = tracker.getTicket(row.ticket_id);
         if (!ticket) {
@@ -309,6 +304,12 @@ export function initDispatchDrainer({
             if (refreshed) broadcastWS({ type: 'ticket-updated', ticket: refreshed });
             continue;
           }
+        }
+
+        if (isPi) {
+          if (piPublishing.has(row.id)) continue;
+          if (!tracker.claimQueuePublishing(row.id, { ownerToken: publishingOwner })) continue;
+          piPublishing.add(row.id);
         }
 
         // Durable-first: setDispatched BEFORE pushBrief (crash between →
@@ -347,7 +348,8 @@ export function initDispatchDrainer({
         // writes: their failure must not replay context that already landed.
         const passiveCommitted = !!pushResult?.ok;
         try {
-          if (pushResult.queued) { tracker.markQueueNextTurn(row.id, { ownerToken: publishingOwner }); piPublishing.delete(row.id); }
+          if (pushResult.queued) tracker.markQueueNextTurn(row.id, { ownerToken: publishingOwner });
+          else if (isPi) tracker.releaseQueuePublishing(row.id, { ownerToken: publishingOwner });
           else {
             tracker.markQueueDelivered(row.id, { error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}`, envelope_id: row.envelope_id || null });
             if (row.envelope_id) tracker.markEnvelopeDelivery(row.envelope_id, { error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}` });
@@ -384,8 +386,10 @@ export function initDispatchDrainer({
         queueChanged = true;
         lastDeliveredAt.set(sessionId, Date.now());
       } catch (err) {
-        if (isPi) piPublishing.delete(row.id);
+        if (isPi) { try { tracker.releaseQueuePublishing(row.id, { ownerToken: publishingOwner }); } catch {} }
         console.error(`[dispatch-drainer] delivery for ${row.id} failed:`, err);
+      } finally {
+        if (isPi) piPublishing.delete(row.id);
       }
     }
     let digestChanged = false;

@@ -865,6 +865,7 @@ WHERE state_changed_at IS NULL`).run();
       ),
       markQueueNextTurnRow: db.prepare("UPDATE dispatch_queue SET status = 'next_turn', publishing_owner = NULL, publishing_expires_at = NULL WHERE id = @id AND status = 'publishing' AND publishing_owner = @owner"),
       claimQueuePublishingRow: db.prepare("UPDATE dispatch_queue SET status = 'publishing', publishing_owner = @owner, publishing_expires_at = @expires WHERE id = @id AND (status = 'pending' OR (status = 'publishing' AND publishing_expires_at < @now))"),
+      releaseQueuePublishingRow: db.prepare("UPDATE dispatch_queue SET status = 'pending', publishing_owner = NULL, publishing_expires_at = NULL WHERE id = @id AND status = 'publishing' AND publishing_owner = @owner"),
       listPendingDispatches: db.prepare(
         "SELECT * FROM dispatch_queue WHERE status IN ('pending','publishing') ORDER BY created_at ASC"
       ),
@@ -2854,6 +2855,11 @@ WHERE state_changed_at IS NULL`).run();
       if (!ownerToken) throw new Error('claimQueuePublishing: ownerToken is required');
       const result = stmts.claimQueuePublishingRow.run({ id: queueId, owner: ownerToken, now: new Date(nowMs).toISOString(), expires: new Date(nowMs + leaseMs).toISOString() });
       return result.changes === 1;
+    },
+
+    releaseQueuePublishing(queueId, { ownerToken } = {}) {
+      if (!ownerToken) throw new Error('releaseQueuePublishing: ownerToken is required');
+      return stmts.releaseQueuePublishingRow.run({ id: queueId, owner: ownerToken }).changes === 1;
     },
 
     markDispatchDeliveryAttempted(ticketId, { session_id, actor = 'human', error = null, envelope_id = null } = {}) {

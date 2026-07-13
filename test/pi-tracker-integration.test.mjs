@@ -11,6 +11,8 @@ try {
   const ticket = a.createTicket({ project_id: 'test-000000', title: 'Pi CAS', created_by: 'test' });
   const row = a.queueDispatch(ticket.id, { session_id: 'pi-real' });
   assert.equal(a.claimQueuePublishing(row.id, { ownerToken: 'owner-a', nowMs: 1000, leaseMs: 100 }), true);
+  assert.equal(b.releaseQueuePublishing(row.id, { ownerToken: 'owner-b' }), false); assert.equal(a.releaseQueuePublishing(row.id, { ownerToken: 'owner-a' }), true);
+  assert.equal(a.claimQueuePublishing(row.id, { ownerToken: 'owner-a', nowMs: 1000, leaseMs: 100 }), true, 'same-process transient failure is immediately retryable');
   assert.equal(b.claimQueuePublishing(row.id, { ownerToken: 'owner-b', nowMs: 1050, leaseMs: 100 }), false, 'second drainer cannot overlap live owner');
   assert.equal(b.claimQueuePublishing(row.id, { ownerToken: 'owner-b', nowMs: 1200, leaseMs: 100 }), true, 'stale owner is recoverable');
   a.markQueueNextTurn(row.id, { ownerToken: 'owner-a' }); assert.equal(a.listPendingDispatches()[0].status, 'publishing', 'non-owner cannot settle');

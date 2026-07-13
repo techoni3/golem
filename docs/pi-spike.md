@@ -53,5 +53,10 @@ contender that exclusively links its replacement proceeds. Pi retains accepted
 messages in `processing/` until the subsequent observable `agent_start`; a
 crash before that event therefore replays rather than falsely acknowledging.
 
+Any publication failure releases both the process-local guard and the
+owner-matched TrackerDB publishing lease back to pending. Non-owners cannot
+release it, and the same dashboard process can retry immediately without
+waiting for lease expiry.
+
 The journey test proves rendering is isolated and portable, records the runtime
 probe result, and refuses to infer Tier A from the existence of an in-process API.
