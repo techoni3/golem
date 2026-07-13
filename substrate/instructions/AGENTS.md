@@ -24,7 +24,7 @@ Channel kind `role_assign` (dashboard/CLI role picker) is **identity only**. Ack
 ## Spine (feature-sized+)
 
 1. Size the request. Feature work gets a tracker ticket or spec; tiny work does not.
-2. Manager front door when a live manager exists; explicit user/session targets always override.
+2. The current session owns coordination. Prefer focused in-process agents; do not route work to another live session unless the user explicitly requests that hand-off.
 3. Subscribe before waiting: `ticket/<display_id>` or `spec/<display_id>/tree` — quiet next-turn interest, never a model wake-up; do not poll.
 4. One writer per checkout. Parallel builders need one orchestrator-directed worktree each. Read-only recon may fan out.
 5. Advance by phase, not vibes. If a transition rejects, add the missing artifact or stay put.
@@ -32,9 +32,9 @@ Channel kind `role_assign` (dashboard/CLI role picker) is **identity only**. Ack
 7. Mechanical evidence only before `review` / `built` / `verified` / `done`.
 8. If repo structure changed → `golem:docs-maintenance` in the same session.
 
-Canonical pipeline: idea → manager intake → planner design + fan-out → manager dispatch → builder implement → explorer verify → manager reconcile/close.
+Canonical pipeline: idea → current-session intake → in-process recon/implementation/review as needed → current-session reconcile/close.
 
-Two invariants: (a) manager owns ALL build dispatch — planner never dispatches builds; (b) planner owns design + decomposition — manager never authors/decomposes specs.
+Two invariants: (a) the current session retains orchestration and reconciliation; (b) in-process agents receive one scoped task, return one result, and never dispatch work to live sessions.
 
 ## Ownership
 
@@ -59,37 +59,34 @@ Two invariants: (a) manager owns ALL build dispatch — planner never dispatches
 
 Role cards only point here; SOPs live in these skills alone.
 
-## Delegation ladder (hard)
+## Delegation ladder (temporary: in-process only)
 
 Before doing work that is not trivially yours:
 
-1. **Live roled session** for that lane (Team roster / `sessions_dispatchable`) → dispatch or hand off to the least-loaded match.
-2. **Live compatible session** (same capability, different label) → dispatch.
-3. **In-process role-mapped agent** → spawn and note it on the ticket:
+1. **In-process role-mapped agent** → spawn and note it on the ticket:
    - recon → `researcher`
    - implement one ticket → `worker`
    - fresh-eyes review → `reviewer`
-4. **In-process general** → last resort only; never when a role-mapped option exists.
-5. **Your own role lane** with no better peer → act after loading your role skill.
-6. **Trivial glue** (one-liner / pure chat) → act without ceremony.
+2. **In-process general** → last resort only; never when a role-mapped option exists.
+3. **Current session** → handle planning, coordination, consultation, or work with no dedicated persona after loading the applicable role skill.
+4. **Trivial glue** (one-liner / pure chat) → act without ceremony.
 
-**Never** take another role's lane when a higher tier is available. Do not explore when an idle explorer exists. Do not plan when an idle planner exists. Do not build when an idle builder exists. Do not dispatch builds if you are not the manager.
+Cross-session delegation is temporarily disabled by default. Do not discover peers or call `sessions_dispatchable`, `ticket_dispatch`, `consult_request`, or `session_notify` to hand off work unless the user explicitly asks for a live-session hand-off or names the target session. An inbound `ticket_dispatch` is still valid work for the receiving session.
 
 ### Tool triggers (names only — schemas live on MCP)
 
-- Need peers or before any dispatch → `sessions_dispatchable` (Team roster at session start is a snapshot; re-check before dispatch).
 - Find/claim work → `ticket_list` / `ticket_get` / `ticket_update`.
-- Hand work to a live session → `ticket_dispatch`.
+- Explicit user-requested live-session hand-off → `sessions_dispatchable`, then `ticket_dispatch`.
 - Evidence and progress → `ticket_comment`.
 
-## Agent map
+## In-process agent map
 
-| Live role | In-process counterpart |
-|-----------|------------------------|
-| explorer | researcher (recon); reviewer (fresh-eyes review) |
-| builder | worker |
-| manager | none — live only or act if you are the manager |
-| planner | none — live only or act if you are the planner |
+| Task | Agent |
+|------|-------|
+| codebase/topic recon | `researcher` |
+| one scoped implementation ticket | `worker` |
+| fresh-context diff or PR review | `reviewer` |
+| planning, coordination, consultation | current session |
 
 ## Done Means Evidence
 
