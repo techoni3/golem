@@ -209,10 +209,12 @@ function sessionStatusKind(s) {
 function HarnessIcon({ harness }) {
   const h = harness || 'claudecode';
   const cls = h === 'opencode' ? 'opencode' : h === 'claudecode' ? 'claudecode' : 'other';
-  const initials = h === 'opencode' ? 'OC' : h === 'claudecode' ? 'CC' : h.slice(0, 2).toUpperCase();
+  const icon = window.ModelProviders?.harnessForId?.(h);
   return (
-    <span className={`agent-harness-icon ${cls}`} title={`harness: ${h}`} aria-label={`harness ${h}`}>
-      <span aria-hidden="true">{initials}</span>
+    <span className={`agent-harness-icon ${cls}`} role="img" title={`harness: ${icon?.label || h}`} aria-label={`harness ${icon?.label || h}`}>
+      {icon?.iconSrc ? <img src={icon.iconSrc} alt=""/> : (
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="2"/><path d="M8 12h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+      )}
     </span>
   );
 }
@@ -222,7 +224,7 @@ function ModelPill({ model }) {
   const provider = window.ModelProviders?.providerForModel?.(model);
   return (
     <span className="agent-model-pill" title={provider ? `${provider.label}: ${model}` : model}>
-      <span className="agent-model-icon" aria-hidden="true">{provider?.initials || 'AI'}</span><span>{model}</span>
+      {provider?.iconSrc && <span className={`agent-model-icon provider-${provider.id}`} aria-hidden="true"><img src={provider.iconSrc} alt=""/></span>}<span>{model}</span>
     </span>
   );
 }
@@ -247,6 +249,7 @@ function AgentCard({ session, name, queueCount = 0, setRoute, showControls = fal
   const needsRevival = pendingCount > 0 && (statusKind === 'dead' || !hasChannel);
   const projectLabel = project?.name || s.project_id || 'unregistered project';
   const fallbackProject = project || { glyph: '?', color: 'var(--text-3)' };
+  const lastSeen = window.Store.getSessionLastSeen?.(s) || 0;
 
   const openPeek = () => {
     if (s.session_id) window.openNativeSessionDrawer(s.session_id);
@@ -330,7 +333,7 @@ function AgentCard({ session, name, queueCount = 0, setRoute, showControls = fal
             disabled={!s.session_id}
           />
         </label>
-        {s.updated_at && <span className="agent-card-seen mono" title="last updated">seen {window.SubstrateFmt?.fmtTimeAgo?.(s.updated_at) || ''}</span>}
+        {lastSeen > 0 && <span className="agent-card-seen mono" title="last seen">seen {window.SubstrateFmt?.fmtTimeAgo?.(lastSeen) || ''}</span>}
         {roleToast && <div className="orch-toast err cc-toast" key={roleToast.id}>{roleToast.msg}</div>}
       </div>
 

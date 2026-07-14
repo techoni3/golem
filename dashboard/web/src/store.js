@@ -396,7 +396,11 @@
   }
 
   function sessionRecency(s) {
-    return s?.updated_at ?? s?.started_at ?? 0;
+    for (const raw of [s?.last_seen_at, s?.fact_observed_at, s?.updated_at, s?.started_at]) {
+      const stamp = typeof raw === 'number' ? raw : Date.parse(raw);
+      if (Number.isFinite(stamp)) return stamp;
+    }
+    return 0;
   }
 
   function sortSessionsByRecency(rows) {
@@ -423,6 +427,7 @@
       sessionId ? (state.nativeSessions.find((s) => s.session_id === sessionId) ?? null) : null,
     getChat: () => state.chat,
     getChatForSession,
+    getSessionLastSeen: sessionRecency,
     sortSessionsByRecency,
     getNativeSessions: () => sortSessionsByRecency(state.nativeSessions),
     getChannels: () => state.channels,
@@ -436,7 +441,8 @@
     getProjectSessions: (project) => {
       if (!project) return [];
       const ids = new Set([project.project_id, project.id].filter(Boolean));
-      return sortSessionsByRecency(state.nativeSessions.filter((s) => s.project_id && ids.has(s.project_id)));
+      return sortSessionsByRecency(state.nativeSessions.filter((s) =>
+        s.alive === true && s.status === 'idle' && s.project_id && ids.has(s.project_id)));
     },
     // v4: alive native sessions belonging to a project.
     getProjectAliveSessions: (project) => {
