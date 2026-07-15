@@ -8,6 +8,9 @@
 //   dashboard    Start the admin dashboard (node dashboard/server/index.js).
 //   dashboard:restart
 //                Stop and restart the admin dashboard detached.
+//   codex-supervisor
+//                Run one managed, headless Codex App Server lifecycle process.
+//   codex        Open one managed interactive Codex TUI.
 //   doctor       Sanity-check the environment.
 //   status       Dashboard health + canonical URL.
 //   help         Show this message.
@@ -29,6 +32,7 @@ import * as ocAdapter from '../lib/compiler/adapters/opencode.js';
 import * as codexAdapter from '../lib/compiler/adapters/codex.js';
 import * as piAdapter from '../lib/compiler/adapters/pi.js';
 import { isHarnessEnabled, loadConfig, saveConfig } from '../lib/golem-config.js';
+import { CodexSupervisor, readCodexSupervisor } from '../lib/codex-supervisor.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -137,6 +141,223 @@ async function cmdStatus(args) {
     log(`  not reachable (${probe.error})`);
     log(`  start it with: golem dashboard`);
   }
+}
+
+function publicSupervisorRecord(record) {
+  if (!record) return null;
+  const { owner_token: _ownerToken, ...health } = record.health ?? {};
+  return { ...record, health };
+}
+
+async function cmdCodexSupervisor(args) {
+  const [subcommand = 'help', ...rest] = args;
+  if (subcommand === 'help' || subcommand === '--help' || subcommand === '-h') {
+    log(`Usage: golem codex-supervisor run --session <canonical-id> [--cwd <dir>]
+       golem codex-supervisor approvals --session <canonical-id> [--id <approval-id>] [--decision approve|decline|cancel]
+
+Runs a Golem-owned, headless Codex App Server supervisor in the foreground.
+It is version/schema-gated and exposes typed tracker delivery when its bound
+MCP is active and the thread is idle. The approvals command is local-only:
+list pending redacted requests, inspect one live request with --id, then make
+an explicit one-off decision. Stop a running supervisor with Ctrl-C.`);
+    return;
+  }
+  if (subcommand === 'approvals') {
+    let canonicalId = null;
+    let approvalId = null;
+    let decision = null;
+    for (let index = 0; index < rest.length; index += 1) {
+      const arg = rest[index];
+      if (arg === '--session') canonicalId = rest[++index] ?? null;
+      else if (arg.startsWith('--session=')) canonicalId = arg.slice('--session='.length);
+      else if (arg === '--id') approvalId = rest[++index] ?? null;
+      else if (arg.startsWith('--id=')) approvalId = arg.slice('--id='.length);
+      else if (arg === '--decision') decision = rest[++index] ?? null;
+      else if (arg.startsWith('--decision=')) decision = arg.slice('--decision='.length);
+      else fatal(2, `unknown codex-supervisor approvals option: ${arg}`);
+    }
+    if (!canonicalId) fatal(2, 'codex-supervisor approvals requires --session <canonical-id>');
+    if (decision && !approvalId) fatal(2, 'codex-supervisor approvals --decision requires --id <approval-id>');
+    if (decision && !['approve', 'decline', 'cancel'].includes(decision)) fatal(2, 'approval decision must be approve, decline, or cancel');
+    const record = readCodexSupervisor(canonicalId);
+    if (!record?.health?.owner_token || !record.health.host || !record.health.port) {
+      fatal(1, `managed Codex supervisor ${canonicalId} has no live owner-authenticated loopback endpoint`);
+    }
+    if (!['127.0.0.1', '::1', 'localhost'].includes(record.health.host)) {
+      fatal(1, 'refusing approval operation: supervisor endpoint is not loopback');
+    }
+    const suffix = approvalId
+      ? `/approvals/${encodeURIComponent(approvalId)}${decision ? '/decision' : ''}`
+      : '/approvals';
+    const response = await fetch(`http://${record.health.host}:${record.health.port}${suffix}`, {
+      method: decision ? 'POST' : 'GET',
+      headers: {
+        'content-type': 'application/json',
+        'x-golem-target-session': canonicalId,
+        'x-golem-endpoint-owner': record.health.owner_token,
+      },
+      body: decision ? JSON.stringify({ decision }) : undefined,
+    });
+    const text = await response.text();
+    if (!response.ok) fatal(1, `approval operation failed (${response.status}): ${text}`);
+    log(text || '{}');
+    return;
+  }
+  if (subcommand !== 'run') fatal(2, `Unknown codex-supervisor command: ${subcommand}`);
+  let canonicalId = null;
+  let cwd = process.cwd();
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === '--session') canonicalId = rest[++index] ?? null;
+    else if (arg.startsWith('--session=')) canonicalId = arg.slice('--session='.length);
+    else if (arg === '--cwd') cwd = rest[++index] ?? null;
+    else if (arg.startsWith('--cwd=')) cwd = arg.slice('--cwd='.length);
+    else fatal(2, `unknown codex-supervisor option: ${arg}`);
+  }
+  if (!canonicalId) fatal(2, 'codex-supervisor run requires --session <canonical-id>');
+  if (!cwd) fatal(2, 'codex-supervisor run requires a non-empty --cwd');
+  const supervisor = new CodexSupervisor({ canonicalId, cwd });
+  const record = await supervisor.start();
+  log(JSON.stringify({ ok: true, supervisor: publicSupervisorRecord(record) }, null, 2));
+  let unexpectedExit = null;
+  await new Promise((resolve) => {
+    const stop = () => resolve();
+    supervisor.once('dead', ({ error }) => { unexpectedExit = error; resolve(); });
+    process.once('SIGINT', stop);
+    process.once('SIGTERM', stop);
+  });
+  await supervisor.stop();
+  if (unexpectedExit) throw unexpectedExit;
+}
+
+function codexTuiHelp() {
+  log(`Usage: golem codex [--session <canonical-id>] [--cwd <dir>] [-- <codex args...>]
+
+Open a normal interactive Codex TUI backed by one Golem-owned, private App
+Server. With no flags it uses the current directory and creates one canonical
+tracker session. The TUI owns normal Codex model, sandbox, and approval options.
+
+Wrapper options:
+  --session <canonical-id>  Reuse a chosen tracker canonical id.
+  --cwd <dir>               Run the App Server and TUI in this directory.
+
+All other Codex arguments are passed through. --remote and -C/--cd are
+reserved: Golem owns the private Unix socket and canonical project directory.
+When an explicit --session has a stored thread, Golem launches native
+\`codex resume <thread-id>\` through that same private bridge.`);
+}
+
+function isReservedCodexTuiArgument(arg) {
+  return arg === '--remote' || arg.startsWith('--remote=')
+    || arg === '--remote-auth-token-env' || arg.startsWith('--remote-auth-token-env=')
+    || arg === '--cd' || arg.startsWith('--cd=')
+    || arg === '-C' || arg.startsWith('-C=') || (arg.startsWith('-C') && arg.length > 2);
+}
+
+function reservedCodexTuiArgumentMessage(arg) {
+  if (arg === '--remote' || arg.startsWith('--remote=')) {
+    return 'golem codex owns --remote; remove it and let Golem create the private Unix socket';
+  }
+  if (arg === '--remote-auth-token-env' || arg.startsWith('--remote-auth-token-env=')) {
+    return 'golem codex uses a private Unix socket and does not accept remote authentication options';
+  }
+  return 'golem codex owns the working directory; use wrapper --cwd before -- and do not pass -C/--cd';
+}
+
+async function cmdCodex(args) {
+  if (args.includes('--help') || args.includes('-h')) {
+    codexTuiHelp();
+    return;
+  }
+  let canonicalId = null;
+  let cwd = process.cwd();
+  const passthrough = [];
+  let passthroughOnly = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === '--') {
+      passthroughOnly = true;
+      continue;
+    }
+    if (isReservedCodexTuiArgument(arg)) fatal(2, reservedCodexTuiArgumentMessage(arg));
+    if (passthroughOnly) {
+      passthrough.push(arg);
+      continue;
+    }
+    if (arg === '--session') canonicalId = args[++index] ?? null;
+    else if (arg.startsWith('--session=')) canonicalId = arg.slice('--session='.length);
+    else if (arg === '--cwd') cwd = args[++index] ?? null;
+    else if (arg.startsWith('--cwd=')) cwd = arg.slice('--cwd='.length);
+    else passthrough.push(arg);
+  }
+  if (!cwd) fatal(2, 'golem codex requires a non-empty --cwd');
+  if (canonicalId != null && !canonicalId.trim()) fatal(2, 'golem codex requires a non-empty --session');
+
+  const supervisor = new CodexSupervisor({
+    ...(canonicalId ? { canonicalId: canonicalId.trim() } : {}),
+    cwd,
+    mode: 'tui',
+  });
+  await supervisor.start();
+  const remote = supervisor.tuiBridge?.remoteUrl;
+  if (!remote) {
+    await supervisor.stop().catch(() => {});
+    throw new Error('managed Codex TUI bridge did not expose a private Unix socket');
+  }
+
+  // OpenAI documents remote mode for `codex resume`. When a caller names the
+  // same canonical session again, use that native lifecycle rather than
+  // starting a fresh thread and silently overwriting the durable mapping.
+  const resumeThreadId = canonicalId ? supervisor.threadId : null;
+  const launchArgs = ['--remote', remote];
+  if (resumeThreadId) launchArgs.push('resume', resumeThreadId);
+  launchArgs.push(...passthrough);
+  const tui = spawn('codex', launchArgs, {
+    cwd: supervisor.cwd,
+    env: process.env,
+    stdio: 'inherit',
+  });
+  let stopped = false;
+  const stop = async () => {
+    if (stopped) return;
+    stopped = true;
+    await supervisor.stop().catch((error) => err(`golem codex cleanup failed: ${error.message}`));
+  };
+  const onSigint = () => {
+    // SIGINT is intentionally for the foreground TUI's active turn. Terminal
+    // delivery reaches that child too; do not stop the bridge merely because a
+    // human interrupted generation. TUI exit remains the cleanup boundary.
+  };
+  const onSigterm = () => {
+    if (tui.exitCode === null) tui.kill('SIGTERM');
+    void stop();
+  };
+  process.on('SIGINT', onSigint);
+  process.once('SIGTERM', onSigterm);
+  let exitCode = 0;
+  try {
+    await new Promise((resolve) => {
+      tui.once('error', (error) => {
+        err(`golem codex could not start the TUI: ${error.message}`);
+        exitCode = 1;
+        resolve();
+      });
+      tui.once('exit', (code) => {
+        exitCode = Number.isInteger(code) ? code : 1;
+        resolve();
+      });
+      supervisor.once('dead', () => {
+        if (tui.exitCode === null) tui.kill('SIGTERM');
+        exitCode = exitCode || 1;
+        resolve();
+      });
+    });
+  } finally {
+    process.off('SIGINT', onSigint);
+    process.off('SIGTERM', onSigterm);
+    await stop();
+  }
+  if (exitCode) process.exitCode = exitCode;
 }
 
 function readSessionsRegistry() {
@@ -362,7 +583,7 @@ async function cmdRole(args) {
     fatal(2, e.message);
   }
   const updated = setSessionRole(target.session_id, role, { by: 'human:cli' });
-  if (role) await pushRoleBriefDirect(updated.session_id, role, updated);
+  const activation = role ? await pushRoleBriefDirect(updated.session_id, role, updated) : null;
   log(JSON.stringify({
     ok: true,
     session_id: updated.session_id,
@@ -370,6 +591,7 @@ async function cmdRole(args) {
     role: updated.role,
     role_updated_at: updated.role_updated_at,
     role_updated_by: updated.role_updated_by,
+    activation,
   }, null, 2));
 }
 
@@ -1245,6 +1467,12 @@ Run:
                        --public binds 0.0.0.0 (LAN-reachable, no auth).
   dashboard:restart [--public] [npm-start-args…]
                        Stop the running dashboard and restart it detached.
+  codex-supervisor run --session <canonical-id> [--cwd <dir>]
+                       Run a version-gated, headless Codex App Server lifecycle
+                       supervisor with typed delivery while idle and MCP-bound.
+  codex [--session <canonical-id>] [--cwd <dir>] [-- <codex args...>]
+                       Open a normal interactive Codex TUI through Golem's
+                       private App Server bridge; no flags are required.
   role <role|clear> [--session <id-or-name>]
                          Set or clear a session role (${SESSION_ROLES.join(', ')}).
   sessions dedup [--apply]
@@ -1319,6 +1547,12 @@ async function main() {
       break;
     case 'dashboard:restart':
       await cmdDashboardRestart(rest);
+      break;
+    case 'codex-supervisor':
+      await cmdCodexSupervisor(rest);
+      break;
+    case 'codex':
+      await cmdCodex(rest);
       break;
     case 'role':
       await cmdRole(rest);

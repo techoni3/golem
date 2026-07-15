@@ -149,7 +149,7 @@ function AgentsPage({ setRoute }) {
       <div className="page-header agents-page-header">
         <div>
           <h1 className="page-title">Agents</h1>
-          <div className="page-subtitle">{alive.length} native Claude Code session{alive.length === 1 ? '' : 's'} online.</div>
+          <div className="page-subtitle">{alive.length} native Golem session{alive.length === 1 ? '' : 's'} online.</div>
         </div>
         <CommunicationHealthIndicator
           health={communicationHealth}
@@ -162,7 +162,7 @@ function AgentsPage({ setRoute }) {
       {alive.length === 0 && orphans.length === 0 ? (
         <EmptyCard
           label="no native sessions online"
-          hint={<>Start a <span className="mono">claude</span> session to bring agents online.</>}
+          hint={<>Start a supported Golem harness session to bring agents online.</>}
         />
       ) : (
         <>

@@ -249,9 +249,8 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
     const s = window.Store.getNativeSessionById?.(pendingDispatch.session_id);
     return !s || !s.alive;
   })();
-  // TKT-0369: target alive but its channel MCP is down — the row is held pending
-  // (delivers when the channel re-registers). Surfaced on the ⏳ line so the user
-  // knows WHY delivery waits (and that /reload-plugins in that session fixes it).
+  // TKT-0369: a live target without its harness integration is held pending
+  // until the delivery endpoint becomes reachable again.
   const pendingTargetUnreachable = (() => {
     if (!pendingDispatch || pendingTargetOffline) return false;
     const d = dispatchable.find((s) => s.session_id === pendingDispatch.session_id);
@@ -646,7 +645,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                 {isQuestion && (
                   <span
                     className="pill td-answer-badge"
-                    title="This is a question-kind ticket assigned to you. The asker (usually a Claude session) is blocked until you post an answer in the composer below. You can post just the answer, or post + re-dispatch the question back to a live session."
+                    title="This is a question-kind ticket assigned to you. The asking session is blocked until you post an answer in the composer below. You can post just the answer, or post + re-dispatch the question back to a live session."
                   >
                     ❓ needs answer
                   </span>
@@ -800,7 +799,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                         <span className="td-dispatch-pending-icon">⏳</span>
                         Queued for {pendingLabel} · {tdAgo(pendingDispatch.created_at)} · waiting for idle
                         {pendingTargetOffline && <span className="td-dispatch-pending-offline"> · session offline</span>}
-                        {pendingTargetUnreachable && <span className="td-dispatch-pending-offline"> · channel down (mcp disconnected — /reload-plugins in that session restores it)</span>}
+                        {pendingTargetUnreachable && <span className="td-dispatch-pending-offline"> · delivery integration down (reconnect the target harness integration)</span>}
                       </span>
                       <button className="orch-btn small ghost td-dispatch-cancel"
                         onClick={onCancelDispatch}
@@ -866,7 +865,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                       <button className="orch-btn small td-dispatch-go"
                         onClick={onDispatch}
                         disabled={dispatching || !dispatchSession || dispatchable.length === 0}
-                        title={dispatchable.length === 0 ? 'No live session in this project — start one with `cd <project> && claude`' : (dispatchMode === 'when_idle' ? 'Queue the dispatch until the target session is idle' : 'Dispatch to the selected session')}>
+                        title={dispatchable.length === 0 ? 'No live Golem session in this project — start a supported harness session' : (dispatchMode === 'when_idle' ? 'Queue the dispatch until the target session is idle' : 'Dispatch to the selected session')}>
                         {dispatching ? '…' : (dispatchMode === 'when_idle' ? 'Queue' : 'Dispatch')}
                       </button>
                     </div>

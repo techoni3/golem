@@ -28,12 +28,17 @@ writeFileSync(path.join(home, 'projects.json'), JSON.stringify({ projects: [
 // no process/channel evidence and must never become dispatchable.
 const worker = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
 const now = new Date().toISOString();
+const waitingRecent = new Date(Date.now() - 15_000).toISOString();
 const idleOlder = new Date(Date.now() - 60_000).toISOString();
 const idleNewer = new Date(Date.now() - 30_000).toISOString();
+const legacyRecent = new Date(Date.now() - 45_000).toISOString();
 const sessionRows = [
   { session_id: 'idle-fixture-session', project_id: alphaId, project_path: alpha, pid: worker.pid, hook_ppid: worker.pid, status: 'busy', name: 'Fixture Builder', harness: 'opencode', model: 'gpt-5.6-fixture', updated_at: now, last_seen_at: now },
+  { session_id: 'waiting-fixture-session', project_id: alphaId, project_path: alpha, pid: worker.pid, hook_ppid: worker.pid, status: 'waiting', name: 'Waiting Reviewer', harness: 'opencode', model: 'gpt-5.6-fixture', updated_at: waitingRecent, last_seen_at: waitingRecent },
   { session_id: 'idle-older-session', project_id: alphaId, project_path: alpha, pid: worker.pid, hook_ppid: worker.pid, status: 'idle', name: 'Idle Older', harness: 'codex', model: 'claude-fixture', updated_at: idleOlder, last_seen_at: idleOlder },
   { session_id: 'idle-newer-session', project_id: alphaId, project_path: alpha, pid: worker.pid, hook_ppid: worker.pid, status: 'idle', name: 'Idle Newer', harness: 'opencode', model: 'gpt-5.6-fixture', updated_at: idleNewer, last_seen_at: idleNewer },
+  { session_id: 'legacy-fixture-session', project_id: alphaId, project_path: alpha, pid: worker.pid, hook_ppid: worker.pid, status: 'legacy', name: 'Legacy Status', harness: 'codex', model: 'claude-fixture', updated_at: legacyRecent, last_seen_at: legacyRecent },
+  { session_id: 'cross-project-session', project_id: betaId, project_path: beta, pid: worker.pid, hook_ppid: worker.pid, status: 'busy', name: 'Beta Builder', harness: 'opencode', model: 'gpt-5.6-fixture', updated_at: now, last_seen_at: now },
   { session_id: 'stale-fixture-session', project_id: alphaId, project_path: alpha, pid: 2147483647, hook_ppid: 2147483647, status: 'idle', name: 'Stale Ghost', harness: 'claudecode', updated_at: '2020-01-01T00:00:00.000Z' },
 ] ;
 writeFileSync(path.join(home, 'sessions.json'), JSON.stringify({ sessions: sessionRows }));
@@ -47,8 +52,11 @@ await new Promise((resolve) => channelServer.listen(0, '127.0.0.1', resolve));
 const channelPort = channelServer.address().port;
 writeFileSync(path.join(home, 'channels.json'), JSON.stringify({ channels: [
   { session_id: 'idle-fixture-session', pid: worker.pid, host: '127.0.0.1', port: channelPort, harness: 'opencode', updated_at: now },
+  { session_id: 'waiting-fixture-session', pid: worker.pid, host: '127.0.0.1', port: channelPort, harness: 'opencode', updated_at: waitingRecent },
   { session_id: 'idle-older-session', pid: worker.pid, host: '127.0.0.1', port: channelPort, harness: 'codex', updated_at: idleOlder },
   { session_id: 'idle-newer-session', pid: worker.pid, host: '127.0.0.1', port: channelPort, harness: 'opencode', updated_at: idleNewer },
+  { session_id: 'legacy-fixture-session', pid: worker.pid, host: '127.0.0.1', port: channelPort, harness: 'codex', updated_at: legacyRecent },
+  { session_id: 'cross-project-session', pid: worker.pid, host: '127.0.0.1', port: channelPort, harness: 'opencode', updated_at: now },
 ] }));
 
 const socket = net.createServer();
@@ -165,8 +173,13 @@ try {
   ok(true, 'sidebar project switch updates the route');
   const projectSessions = page.locator('.pv-section').filter({ hasText: 'Sessions in this project' }).locator('.native-session-card');
   const projectSessionNames = await projectSessions.locator('.agent-card-name').allTextContents();
-  ok(projectSessionNames.length === 2 && projectSessionNames[0] === 'Idle Newer' && projectSessionNames[1] === 'Idle Older', 'project sessions show only idle alive rows ordered by last seen descending');
-  ok(!projectSessionNames.includes('Fixture Builder') && !projectSessionNames.includes('Stale Ghost'), 'project sessions exclude busy and dead rows');
+  ok(await page.locator('.project-hero-meta').getByText('5 live sessions', { exact: true }).count() === 1 && projectSessionNames.length === 5, 'project hero count matches five alive project-session cards');
+  ok(projectSessionNames.join('|') === 'Fixture Builder|Waiting Reviewer|Idle Newer|Legacy Status|Idle Older', 'project sessions include busy, waiting, idle, and legacy alive rows in last-seen order');
+  const busyStatus = await projectSessions.filter({ hasText: 'Fixture Builder' }).locator('.agent-status-badge').innerText();
+  const waitingStatus = await projectSessions.filter({ hasText: 'Waiting Reviewer' }).locator('.agent-status-badge').innerText();
+  ok(busyStatus.trim().toLowerCase() === 'working', 'busy project card visibly renders Working');
+  ok(waitingStatus.trim().toLowerCase() === 'waiting', 'waiting project card visibly renders Waiting');
+  ok(!projectSessionNames.includes('Stale Ghost') && !projectSessionNames.includes('Beta Builder'), 'project sessions exclude dead and cross-project rows');
   const selectorNames = await page.evaluate((projectId) => {
     const state = window.Store.getState();
     state.nativeSessions.push(
@@ -181,9 +194,11 @@ try {
   ok(!selectorNames.includes('Selector Dead'), 'project session selector rejects an explicit alive false row');
   ok(selectorNames.indexOf('Fallback Newer') < selectorNames.indexOf('Fallback Older'), 'project session ordering falls back past invalid last-seen values');
   const projectIconImages = projectSessions.locator('.agent-harness-icon img, .agent-model-icon img');
-  ok(await projectIconImages.count() === 4 && await projectIconImages.evaluateAll((images) => images.every((image) => image.complete && image.naturalWidth > 0 && (image.src.startsWith('data:image/svg+xml') || new URL(image.src).origin === location.origin))), 'agent cards render bundled harness and model SVG icons');
+  const projectHarnessImages = projectSessions.locator('.agent-harness-icon img');
+  const projectModelImages = projectSessions.locator('.agent-model-icon img');
+  ok(await projectHarnessImages.count() === 5 && await projectModelImages.count() === 5 && await projectIconImages.evaluateAll((images) => images.every((image) => image.complete && image.naturalWidth > 0 && (image.src.startsWith('data:image/svg+xml') || new URL(image.src).origin === location.origin))), 'five project cards render bundled harness and model SVG icons');
   const harnessIcons = projectSessions.locator('.agent-harness-icon[role="img"]');
-  ok(await harnessIcons.count() === 2 && await harnessIcons.evaluateAll((icons) => icons.every((icon) => icon.getAttribute('aria-label')?.startsWith('harness ') && !icon.querySelector(':scope > span'))), 'harness SVG icons retain accessible names without text-initial fallbacks');
+  ok(await harnessIcons.count() === 5 && await harnessIcons.evaluateAll((icons) => icons.every((icon) => icon.getAttribute('aria-label')?.startsWith('harness ') && !icon.querySelector(':scope > span'))), 'five harness SVG icons retain accessible names without text-initial fallbacks');
   await page.goto(`${base}/agents`, { waitUntil: 'networkidle' });
   const agentCard = page.locator('.native-session-card').filter({ hasText: 'Fixture Builder' });
   await agentCard.focus();

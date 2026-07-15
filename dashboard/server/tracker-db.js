@@ -2693,11 +2693,42 @@ WHERE state_changed_at IS NULL`).run();
 
     communicationHealth,
 
-    createNotificationEnvelope({ project_id = null, sender_id, recipient_session_id, payload = '' } = {}) {
-      if (!sender_id || !recipient_session_id) throw new Error('createNotificationEnvelope: sender and recipient are required');
+    // Non-ticket control messages use the same immutable envelope identity as a
+    // dispatch. This is especially important for managed Codex: its typed
+    // adapter accepts only an envelope and never a free-form channel route.
+    // Keep the allowed vocabulary narrow so this table does not become a
+    // generic, unaudited message bus.
+    createControlEnvelope({ project_id = null, sender_id, recipient_session_id, kind = 'session_notify', payload = '' } = {}) {
+      const allowedKinds = new Set([
+        'session_notify',
+        'consult_request',
+        'consult_reply',
+        'consult_status',
+        'subscription_digest',
+        'gate_resolution',
+      ]);
+      if (!sender_id || !recipient_session_id) throw new Error('createControlEnvelope: sender and recipient are required');
+      if (!allowedKinds.has(kind)) throw new Error(`createControlEnvelope: unsupported control kind '${kind}'`);
+      const body = payload && typeof payload === 'object' && !Array.isArray(payload)
+        ? { ...payload, content: String(payload.content ?? '') }
+        : { content: String(payload) };
       const row = { id: crypto.randomUUID(), root_id: null, parent_id: null, ticket_id: null, project_id,
         sender_id, reply_to_session_id: sender_id, recipient_session_id, sender_session_id: sender_id,
-        target_session_id: recipient_session_id, kind: 'session_notify', payload: JSON.stringify({ content: String(payload) }),
+        target_session_id: recipient_session_id, kind, payload: JSON.stringify(body),
+        status: 'pending', ack_deadline_at: null, created_at: now() };
+      row.root_id = row.id;
+      stmts.insertEnvelope.run(row);
+      return stmts.getEnvelope.get(row.id);
+    },
+
+    createNotificationEnvelope({ project_id = null, sender_id, recipient_session_id, payload = '' } = {}) {
+      if (!sender_id || !recipient_session_id) throw new Error('createNotificationEnvelope: sender and recipient are required');
+      const body = payload && typeof payload === 'object' && !Array.isArray(payload)
+        ? { ...payload, content: String(payload.content ?? '') }
+        : { content: String(payload) };
+      const row = { id: crypto.randomUUID(), root_id: null, parent_id: null, ticket_id: null, project_id,
+        sender_id, reply_to_session_id: sender_id, recipient_session_id, sender_session_id: sender_id,
+        target_session_id: recipient_session_id, kind: 'session_notify', payload: JSON.stringify(body),
         status: 'pending', ack_deadline_at: null, created_at: now() };
       row.root_id = row.id;
       stmts.insertEnvelope.run(row);

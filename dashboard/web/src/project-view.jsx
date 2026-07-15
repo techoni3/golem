@@ -335,7 +335,7 @@ function ProjectSessions({ sessions, setRoute, projectId, ...shell }) {
     <PVSection {...shell} title="Sessions in this project" count={sessions.length}>
       {sessions.length === 0 ? (
         <div className="pv-quiet-line">
-          no idle, live session in this project.
+          no live session in this project.
         </div>
       ) : (
         <div className="native-sessions project-native-sessions">

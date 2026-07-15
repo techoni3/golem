@@ -60,3 +60,31 @@ Useful subscriptions:
 ## Harness Normalization
 
 Claude Code hooks and the opencode shim both normalize into the same script stdin shape: `session_id`, `cwd`, `harness`, optional tool fields, and raw payload. Codex's adapter records only documented hook fields through the canonical locked session-fact writer and marks delivery `pull` with `push: false`; it never parses unstable transcripts. `SubagentStop` records the child observation without changing the parent session's status. The scripts derive project identity from the cwd, write the hook journal, and forward to the bus. Adapters must remain non-blocking and fail-open.
+
+GOL-473–477 add a distinct, Golem-owned Codex App Server path for managed
+headless sessions and the private `golem codex` TUI. `lib/codex-supervisor.js` writes the durable thread/process
+recovery map, then starts a required Golem MCP child with a supervisor-owned
+canonical actor binding. Once the pinned App Server handshake, MCP status
+check, authenticated loopback typed `/brief` adapter, and idle thread are all
+valid, the health lease is `delivery_ready:true`. Dashboard dispatch sends a
+durable envelope to that typed endpoint; acceptance is persisted before exactly
+one `turn/start`, and retries reuse the saved mapping. A process loss or stop
+releases the lease and writes a terminal fact before dashboard refreshes. An
+ambiguous in-flight delivery stays recovery-pending rather than being replayed.
+The same envelope path carries managed-Codex notifications, consults,
+subscription digests, and gate resolutions; CC/OC retain their generic
+route-specific channel events. Role activation and interrupt/halt are visibly
+gated for managed Codex instead of being injected into an in-flight App Server
+turn. Schema-known App Server approvals remain pending until an owner-authenticated
+local operator makes a one-off decision; only a redacted correlation record is
+durable, and stop/restart fails unresolved approvals closed. The managed TUI
+instead receives App Server approval requests natively through a single private
+Unix-WebSocket bridge; it is the only logical App Server client, and tracker
+injection waits for its idle canonical thread. Managed Codex display identity
+comes from thread lifecycle/name notifications (with Codex's session index as
+an upgrade fallback), and activity comes from thread-status plus turn lifecycle
+notifications. The authenticated live health response closes routing immediately
+when that thread becomes active or waiting; the canonical supervisor row shadows
+the duplicate raw hook row for the same thread. This changes only managed Codex
+delivery; ordinary Codex hooks remain pull-only, and CC/OC generic channel
+behavior is unchanged.

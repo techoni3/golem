@@ -13,7 +13,7 @@
 // /api/channel/health, but is no longer used for brief routing.
 
 import { CONFIG } from './config.js';
-import { readChannels } from './channels.js';
+import { isChannelDeliveryReady, readChannels } from './channels.js';
 
 const DEFAULT_TIMEOUT_MS = 5000;
 
@@ -27,10 +27,10 @@ async function resolveBaseUrl(sessionId) {
         error: `no channel registered for session ${sessionId}`,
       };
     }
-    return { baseUrl: ch.url };
+    return { baseUrl: ch.url, channel: ch };
   }
   if (channels.length === 1) {
-    return { baseUrl: channels[0].url };
+    return { baseUrl: channels[0].url, channel: channels[0] };
   }
   if (channels.length === 0) {
     // Legacy fallback to the static config — useful when GOLEM_CHANNEL_PORT
@@ -45,13 +45,32 @@ async function resolveBaseUrl(sessionId) {
 }
 
 async function forward(method, pathSuffix, body, sessionId, metadata = null) {
-  const { baseUrl, error } = await resolveBaseUrl(sessionId);
+  const { baseUrl, error, channel } = await resolveBaseUrl(sessionId);
   if (!baseUrl) {
     return { ok: false, status: 0, body: '', error: error ?? 'no channel available' };
+  }
+  // A managed Codex row remains discoverable while its supervisor is busy or
+  // recovering, but is not a direct-delivery target until its typed adapter
+  // says it is ready. CC/OC registrations intentionally keep their legacy
+  // channel-presence behaviour through isChannelDeliveryReady().
+  if (!isChannelDeliveryReady(channel)) {
+    return { ok: false, status: 503, body: '', error: 'managed Codex target is not delivery-ready', target: baseUrl };
   }
   const url = `${baseUrl.replace(/\/$/, '')}${pathSuffix}`;
   const headers = { 'X-Sender': 'dashboard' };
   if (sessionId) headers['X-Golem-Target-Session'] = sessionId;
+  // GOL-474: the managed Codex App Server is a typed target adapter, not a
+  // generic channel notification endpoint. Its supervisor exposes only a
+  // durable envelope route and requires the current private lease credential.
+  if (channel?.kind === 'codex-supervisor') {
+    if (pathSuffix !== '/brief' || !metadata?.envelope_id) {
+      return { ok: false, status: 400, body: '', error: 'managed Codex delivery requires a durable /brief envelope', target: baseUrl };
+    }
+    if (!channel.owner_token) {
+      return { ok: false, status: 503, body: '', error: 'managed Codex delivery lease has no owner credential', target: baseUrl };
+    }
+    headers['X-Golem-Endpoint-Owner'] = channel.owner_token;
+  }
   let bodyToSend = undefined;
   if (body !== undefined && body !== null) {
     if (typeof body === 'string') {
@@ -82,16 +101,59 @@ export async function pushBrief(body, sessionId, metadata = null) {
   return forward('POST', '/brief', payload, sessionId, metadata);
 }
 
+// A non-ticket control is durable before it is sent. Managed Codex receives
+// that envelope only through its typed /brief adapter; CC/OC intentionally
+// retain their established route-specific channel events (consult, gate, etc).
+// `legacy` is ignored for a Codex target, never smuggled through /brief.
+export async function pushControlEnvelope({ envelope, content, legacy } = {}, sessionId) {
+  if (!envelope?.id || !envelope?.sender_session_id || !envelope?.target_session_id) {
+    return { ok: false, status: 400, body: '', error: 'durable control envelope is missing canonical sender, target, or id' };
+  }
+  const { channel } = await resolveBaseUrl(sessionId);
+  const metadata = {
+    envelope_id: envelope.id,
+    sender_session_id: envelope.sender_session_id,
+    target_session_id: envelope.target_session_id,
+  };
+  if (channel?.kind === 'codex-supervisor') return pushBrief(content, sessionId, metadata);
+  if (!legacy?.path) return { ok: false, status: 400, body: '', error: 'legacy control route is required for a non-Codex target' };
+  return forward('POST', legacy.path, legacy.body, sessionId);
+}
+
+async function managedCodexControlGate(sessionId, control) {
+  const { channel } = await resolveBaseUrl(sessionId);
+  if (channel?.kind !== 'codex-supervisor') return null;
+  const remediation = control === 'role'
+    ? 'The role registry remains saved; activate work with an explicit ticket dispatch, or restart the managed supervisor before its next dispatch.'
+    : control === 'interrupt'
+      ? 'Wait for the current durable envelope to complete, then send an explicit follow-up dispatch; for an emergency stop, stop the owning supervisor process and recover it before redelivery.'
+      : 'Stop the owning managed supervisor process for an emergency halt, then inspect/recover its durable inbox before starting it again.';
+  return {
+    ok: false,
+    gated: true,
+    status: 409,
+    body: '',
+    target: channel.url,
+    error: `managed Codex ${control} is gated: generic channel control cannot be injected safely into a live App Server turn. ${remediation}`,
+  };
+}
+
 /** Role identity only — channel kind role_assign, never a work brief. */
 export async function pushRoleAssign(body, sessionId) {
+  const gate = await managedCodexControlGate(sessionId, 'role');
+  if (gate) return gate;
   return forward('POST', '/role', body, sessionId);
 }
 
 export async function pushInterrupt(body, sessionId) {
+  const gate = await managedCodexControlGate(sessionId, 'interrupt');
+  if (gate) return gate;
   return forward('POST', '/interrupt', body, sessionId);
 }
 
 export async function pushHalt(body, sessionId) {
+  const gate = await managedCodexControlGate(sessionId, 'halt');
+  if (gate) return gate;
   return forward('POST', '/halt', body ?? 'halt requested by dashboard', sessionId);
 }
 

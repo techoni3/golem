@@ -2,7 +2,7 @@
 //
 // Backed by REST snapshot + WebSocket deltas. v4 surface:
 //   - projects with PLAN.md progress + milestone feeds
-//   - native Claude Code sessions
+//   - native Golem harness sessions
 //   - live channel registrations
 //   - cross-project tracker.db tickets + streams + comments
 //   - chat messages
@@ -26,7 +26,7 @@
     roles: { ...ROLES_FALLBACK },
     columns: ['triage', 'open', 'in-progress', 'review', 'blocked', 'done'],
     serverTime: null,
-    // v4: all native Claude Code sessions (not just substrated/golem ones).
+    // v4: all native sessions normalized by Golem.
     nativeSessions: [],
     // v4: live channel registrations keyed by CEO session_id.
     channels: [],
@@ -436,13 +436,13 @@
     getChannelForSession: (sessionId) =>
       sessionId ? (state.channels.find((c) => c.session_id === sessionId) ?? null) : null,
     getRecentMilestones: () => state.recentMilestones,
-    // Native Claude Code sessions whose derived contract project_id maps to this
+    // Native Golem sessions whose derived contract project_id maps to this
     // dashboard project.
     getProjectSessions: (project) => {
       if (!project) return [];
       const ids = new Set([project.project_id, project.id].filter(Boolean));
       return sortSessionsByRecency(state.nativeSessions.filter((s) =>
-        s.alive === true && s.status === 'idle' && s.project_id && ids.has(s.project_id)));
+        s.alive === true && s.project_id && ids.has(s.project_id)));
     },
     // v4: alive native sessions belonging to a project.
     getProjectAliveSessions: (project) => {
@@ -450,7 +450,7 @@
       const ids = new Set([project.project_id, project.id].filter(Boolean));
       return sortSessionsByRecency(state.nativeSessions.filter((s) => s.alive && s.project_id && ids.has(s.project_id)));
     },
-    // v4: count of ALL alive native Claude Code sessions on the machine.
+    // v4: count of all alive native Golem sessions on the machine.
     getAliveSessionCount: () => state.nativeSessions.filter((s) => s.alive).length,
     getWorkingSessionCount: () => state.nativeSessions.filter((s) => s.alive && s.status === 'busy').length,
   };

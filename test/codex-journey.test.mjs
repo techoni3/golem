@@ -10,8 +10,10 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'golem-codex-'));
 const home = path.join(temp, 'home');
 const state = path.join(temp, 'state');
 const env = { ...process.env, HOME: home, GOLEM_HOME: state, XDG_CONFIG_HOME: path.join(temp, 'xdg') };
-async function mcpInitialize(server) {
-  const child = spawn(process.execPath, [server], { env: { ...env, GOLEM_CEO_SESSION_ID: 'codex-mcp-test' }, stdio: ['pipe', 'pipe', 'pipe'] });
+async function mcpInitialize(transport, plugin) {
+  const childEnv = { ...env, ...(transport.env ?? {}) };
+  for (const key of ['GOLEM_CEO_SESSION_ID', 'CLAUDE_CODE_SESSION_ID', 'OPENCODE_SESSION_ID', 'CODEX_SESSION_ID', 'CODEX_THREAD_ID', 'PI_SESSION_ID']) delete childEnv[key];
+  const child = spawn(transport.command, transport.args, { cwd: path.resolve(plugin, transport.cwd), env: childEnv, stdio: ['pipe', 'pipe', 'pipe'] });
   const exited = new Promise((resolve) => child.once('exit', resolve));
   const replies = [];
   let errors = '';
@@ -47,6 +49,10 @@ try {
   assert.equal(caps.push_delivery, false);
   const hooks = JSON.parse(fs.readFileSync(path.join(plugin, 'hooks/hooks.json'))).hooks;
   assert.deepEqual(Object.keys(hooks), ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PreCompact', 'PostCompact', 'SubagentStop', 'Stop']);
+  const mcp = JSON.parse(fs.readFileSync(path.join(plugin, '.mcp.json')));
+  assert.deepEqual(mcp.golem, { command: 'node', args: ['mcp/channel/index.js'], cwd: '.' });
+  assert.doesNotMatch(JSON.stringify(mcp), /PLUGIN_ROOT/);
+  await mcpInitialize(mcp.golem, plugin);
   const payload = { session_id: 'codex-test', cwd: repo, hook_event_name: 'SessionStart', source: 'resume', model: 'test' };
   execFileSync(process.execPath, [path.join(plugin, 'hooks/hook.mjs'), 'session-start'], { env, input: JSON.stringify(payload) });
   const fact = JSON.parse(fs.readFileSync(path.join(state, 'session-facts.json'))).facts[0];
@@ -67,8 +73,7 @@ try {
     const listed = spawnSync('codex', ['plugin', 'marketplace', 'list'], { env, encoding: 'utf8' });
     assert.equal(listed.status, 0, listed.stderr);
     assert.match(listed.stdout, /golem-workspace|golem-codex-/);
-    await mcpInitialize(path.join(plugin, 'mcp', 'channel', 'index.js'));
-    console.log(`codex native present: ${native.stdout.trim()}; plugin installed/enabled; bundled MCP initialized and tools/list called`);
+    console.log(`codex native present: ${native.stdout.trim()}; plugin installed/enabled`);
   } else console.log('codex native absent: structural journey only');
-  console.log('codex temp-home journey passed');
+  console.log('codex temp-home journey passed; emitted identity-free MCP initialized and tools/list called');
 } finally { fs.rmSync(temp, { recursive: true, force: true }); }

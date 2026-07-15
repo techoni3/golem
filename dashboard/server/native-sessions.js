@@ -42,12 +42,14 @@ import {
   resolveProjectRoot,
 } from './project-id.js';
 import { channelsJsonPath, golemHome, sessionsJsonPath } from '../../lib/golem-home.js';
+import { readCodexSupervisors } from '../../lib/codex-supervisor.js';
 import { readSessionFacts } from '../../lib/session-facts.js';
 
 const HOME = os.homedir();
 const SESSIONS_DIR = path.join(HOME, '.claude', 'sessions');
 const OPENCODE_BRIDGES_REGISTRY = path.join(golemHome(), 'opencode-bridges.json');
 const CHANNELS_REGISTRY = channelsJsonPath();
+const CODEX_SESSION_INDEX = path.join(process.env.CODEX_HOME || path.join(HOME, '.codex'), 'session_index.jsonl');
 
 // Non-CC harness sessions (opencode, TKT-0577) self-register into
 // ~/.golem/sessions.json but have no `claude agents` row, no ~/.claude/sessions
@@ -71,6 +73,53 @@ function pidAlive(pid) {
     // EPERM: pid exists but owned by another user — treat as alive.
     return err && err.code === 'EPERM';
   }
+}
+
+async function readCodexThreadNames() {
+  try {
+    const raw = await fs.readFile(CODEX_SESSION_INDEX, 'utf8');
+    const names = new Map();
+    // Codex 0.144.4 owns this append-only index and resolves the latest entry
+    // for each thread id. Mirror that exact rule as a fail-open dashboard
+    // fallback so already-running managed sessions gain their real TUI name
+    // before they are restarted onto the protocol notification fix.
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue;
+      let entry;
+      try { entry = JSON.parse(line); } catch { continue; }
+      if (typeof entry?.id !== 'string') continue;
+      const name = typeof entry.thread_name === 'string' ? entry.thread_name.trim() : '';
+      if (name) names.set(entry.id, name); else names.delete(entry.id);
+    }
+    return names;
+  } catch {
+    return new Map();
+  }
+}
+
+function readCodexSupervisorRows() {
+  try { return readCodexSupervisors(); } catch { return []; }
+}
+
+function managedCodexPresentation(record, endpoint, fallbackStatus, fallbackWaitingFor) {
+  if (!record) return { status: fallbackStatus, waiting_for: fallbackWaitingFor };
+  // A ready typed lease is stricter than a hook fact: it proves the canonical
+  // TUI is connected, MCP-bound, thread-bound, and has no active turn.
+  if (endpoint?.delivery_ready === true) return { status: 'idle', waiting_for: null };
+  if (['dead', 'failed', 'stopped'].includes(record.health?.state)) {
+    return { status: 'error', waiting_for: null };
+  }
+  const flags = Array.isArray(record.thread_status?.activeFlags) ? record.thread_status.activeFlags : [];
+  if (flags.includes('waitingOnApproval')) return { status: 'waiting', waiting_for: 'approval' };
+  if (flags.includes('waitingOnUserInput')) return { status: 'waiting', waiting_for: 'user input' };
+  if (record.thread_status?.type === 'active') return { status: 'busy', waiting_for: null };
+  if (record.thread_status?.type === 'systemError') return { status: 'error', waiting_for: null };
+  if (record.thread_status?.type === 'idle') return { status: 'idle', waiting_for: null };
+  const turnState = record.turn?.state;
+  if (turnState === 'busy' || turnState === 'starting') return { status: 'busy', waiting_for: null };
+  if (turnState === 'recovery_pending' || turnState === 'failed') return { status: 'error', waiting_for: null };
+  if (turnState === 'idle') return { status: 'idle', waiting_for: null };
+  return { status: fallbackStatus, waiting_for: fallbackWaitingFor };
 }
 
 // Run `claude agents --json`. Resolves to a parsed array, or null when the CLI
@@ -386,12 +435,13 @@ export function dedupeNativeSessions(rows) {
  * @returns {Promise<Array<object>>}
  */
 export async function readNativeSessions(registeredIdLookup, verifiedChannels = []) {
-  const [cliRaw, registryRaw, golemRaw, opencodeBridges, liveChannelSessionIds] = await Promise.all([
+  const [cliRaw, registryRaw, golemRaw, opencodeBridges, liveChannelSessionIds, codexThreadNames] = await Promise.all([
     runClaudeAgentsJson(),
     readRegistrySessions(),
     readGolemRegistrySessions(),
     readOpencodeBridges(),
     readLiveChannelSessionIds(),
+    readCodexThreadNames(),
   ]);
 
   const cliRows = Array.isArray(cliRaw) ? cliRaw.map(normalizeCli).filter(Boolean) : [];
@@ -400,15 +450,35 @@ export async function readNativeSessions(registeredIdLookup, verifiedChannels = 
   const merged = mergeSources(cliRows, registryRows, filteredGolemRows);
   const facts = readSessionFacts();
   const verifiedBySession = new Map(verifiedChannels.filter((channel) => channel.endpoint_health === 'healthy').map((channel) => [channel.session_id, channel]));
+  const supervisors = readCodexSupervisorRows();
+  const supervisorByCanonical = new Map(supervisors.map((row) => [row.canonical_id, row]));
+  const managedOwnerByRawThread = new Map(supervisors
+    .filter((row) => row.thread_id && verifiedBySession.get(row.canonical_id)?.kind === 'codex-supervisor')
+    .map((row) => [row.thread_id, row.canonical_id]));
   const mergedById = new Map(merged.filter((row) => row.session_id).map((row) => [row.session_id, row]));
   for (const fact of facts) {
+    // A managed TUI also emits ordinary Codex hook facts under the raw thread
+    // id. When its canonical supervisor lease is healthy, that raw row is the
+    // same actor—not a second session—and must not become a phantom card.
+    if (fact.harness === 'codex'
+      && fact.canonical_id === fact.locator?.raw_session_id
+      && managedOwnerByRawThread.has(fact.canonical_id)) continue;
     const previous = mergedById.get(fact.canonical_id) || {};
+    const supervisor = supervisorByCanonical.get(fact.canonical_id);
+    const rawThreadId = fact.locator?.raw_session_id;
+    const presentation = managedCodexPresentation(
+      supervisor,
+      verifiedBySession.get(fact.canonical_id),
+      fact.status ?? previous.status ?? null,
+      fact.waiting_for ?? previous.waiting_for ?? null,
+    );
     mergedById.set(fact.canonical_id, {
       ...previous,
       session_id: fact.canonical_id,
       cwd: fact.project_path ?? previous.cwd ?? null,
-      name: fact.name ?? previous.name ?? null,
-      status: fact.status ?? previous.status ?? null,
+      name: fact.name ?? supervisor?.thread_name ?? codexThreadNames.get(rawThreadId) ?? previous.name ?? null,
+      status: presentation.status,
+      waiting_for: presentation.waiting_for,
       model: fact.model ?? previous.model ?? null,
       harness: fact.harness,
       updated_at: msFromIso(fact.observed_at),
@@ -429,13 +499,21 @@ export async function readNativeSessions(registeredIdLookup, verifiedChannels = 
     const bridge = harness === 'opencode' ? opencodeBridges.get(s.session_id) : null;
     const bridgePid = Number(bridge?.opencode_pid || bridge?.pid) || null;
     const factFresh = !s._fact || (s.updated_at && Date.now() - s.updated_at < GOLEM_SESSION_RECENT_MS);
+    // A managed Codex supervisor writes an explicit terminal fact when its
+    // process dies or stops. Recency alone must never resurrect that fact into
+    // a live actor while a later supervisor has not yet recovered it.
+    const factTerminal = !!s._fact
+      && ['dead', 'stopped', 'failed'].includes(String(s._fact.status || '').toLowerCase());
     const verifiedEndpoint = verifiedBySession.get(s.session_id);
-    const alive = harness === 'opencode'
-      ? !!(!s.ended_at && factFresh && (verifiedEndpoint || (!s._fact && liveChannelSessionIds.has(s.session_id) && (bridge
+    const managedCodexHealthy = harness === 'codex' && verifiedEndpoint?.kind === 'codex-supervisor';
+    const alive = managedCodexHealthy
+      ? !s.ended_at
+      : harness === 'opencode'
+      ? !!(!factTerminal && !s.ended_at && factFresh && (verifiedEndpoint || (!s._fact && liveChannelSessionIds.has(s.session_id) && (bridge
         ? pidAlive(bridgePid)
         : (s.updated_at && (Date.now() - s.updated_at) < GOLEM_SESSION_RECENT_MS)))))
       : (isNonCc || isGolemRegistryCc
-        ? !!(!s.ended_at && s.updated_at && (Date.now() - s.updated_at) < GOLEM_SESSION_RECENT_MS)
+        ? !!(!factTerminal && !s.ended_at && s.updated_at && (Date.now() - s.updated_at) < GOLEM_SESSION_RECENT_MS)
         : pidAlive(s.pid));
     // Drop dead sessions whose only evidence is a stale registry/golem file.
     // Keep a CLI-sourced row even if pid-check disagrees (CLI just listed it

@@ -585,7 +585,7 @@ const discard = () => {
               disabled with a hint. */}
           {!canDispatch && projectId && (
             <div className="ct-dispatch-hint">
-              No live session in this project — start one with <span className="mono">cd &lt;project&gt; &amp;&amp; claude</span> to use Save &amp; Dispatch.
+              No live Golem session in this project — start a supported harness session to use Save &amp; Dispatch.
             </div>
           )}
 

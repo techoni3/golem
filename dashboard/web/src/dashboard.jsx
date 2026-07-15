@@ -1,5 +1,5 @@
 // Command-center home (v4). Three zones:
-//   1. SESSIONS RAIL  — every native Claude Code session: status, what it's
+//   1. SESSIONS RAIL  — every native Golem session: status, what it's
 //      stuck on, and per-session controls (brief composer + interrupt/halt
 //      when a live channel exists for that session).
 //   2. WORK ZONE      — project cards reworked around PLAN.md progress and the
@@ -48,8 +48,8 @@ function Dashboard({ setRoute }) {
           </div>
           {sessions.length === 0 ? (
             <EmptyCard
-              label="no Claude Code sessions running"
-              hint={<>This rail lists every live <span className="mono">claude</span> session on the machine. Start one with <span className="mono">cd any-repo &amp;&amp; claude</span>.</>}
+              label="no Golem sessions running"
+              hint={<>This rail lists live sessions from supported Golem harnesses. Start a supported harness in a project to bring it online.</>}
             />
           ) : (
             <div className="cc-session-list">

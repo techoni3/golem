@@ -30,6 +30,7 @@ import { loadConfig } from '../../lib/golem-config.js';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { checkpointPiPickupAck, claimPiPickupAcks, completePiPickupAck, enqueuePiBrief } from '../../lib/pi-inbox.js';
+import { isChannelDeliveryReady } from './channels.js';
 
 const TICK_MS = 5_000;
 const COOLDOWN_MS = 60_000;
@@ -40,10 +41,15 @@ export function initDispatchDrainer({
   state,
   chat,
   pushBrief,
+  pushControlEnvelope,
   buildDispatchBrief,
   broadcastWS,
   listChannels,
 }) {
+  // Older isolated drainer journeys provide only pushBrief. Production passes
+  // the typed control adapter; the fallback preserves their legacy generic
+  // subscription behavior without altering CC/OC delivery.
+  const deliverControl = pushControlEnvelope ?? (({ content }, sessionId) => pushBrief(content, sessionId));
   // session_id → ts(ms) of the most recent successful delivery. Used by the
   // cooldown check so we never deliver twice to a session within 60s.
   const lastDeliveredAt = new Map();
@@ -193,7 +199,15 @@ export function initDispatchDrainer({
     // per tick so a transient readChannels failure makes everyone wait one tick
     // (safe), not burn.
     let channelIds = new Set();
-    try { channelIds = new Set((await listChannels()).map((c) => c.session_id)); } catch { /* transient → everyone waits a tick */ }
+    try {
+      // A managed Codex supervisor can keep a healthy loopback lease while it
+      // is busy/recovering. Treat delivery_ready:false exactly like an absent
+      // channel here so a queued envelope is held, never burned on a 409.
+      // Legacy CC/OC rows remain eligible by their established presence rule.
+      channelIds = new Set((await listChannels())
+        .filter((channel) => isChannelDeliveryReady(channel))
+        .map((channel) => channel.session_id));
+    } catch { /* transient → everyone waits a tick */ }
     const byId = new Map();
     for (const s of sessions) if (s.session_id) byId.set(s.session_id, s);
 
@@ -427,12 +441,30 @@ export function initDispatchDrainer({
           .filter((d) => d.to_seq > d.from_seq && (d.events.length > 0 || d.truncated));
         if (!digests.length) continue;
         const brief = digestBrief(sessionId, digests);
+        const envelope = tracker.createControlEnvelope({
+          sender_id: 'golem-drainer',
+          recipient_session_id: sessionId,
+          kind: 'subscription_digest',
+          payload: {
+            content: brief,
+            topics: digests.map((digest) => digest.subscription.topic),
+            from_seq: Math.min(...digests.map((digest) => digest.from_seq + 1)),
+            to_seq: Math.max(...digests.map((digest) => digest.to_seq)),
+          },
+        });
         let pushResult;
         try {
-          pushResult = await pushBrief(brief, sessionId);
+          pushResult = await deliverControl({
+            envelope,
+            content: brief,
+            legacy: { path: '/brief', body: brief },
+          }, sessionId);
         } catch (err) {
           pushResult = { ok: false, error: String(err?.message ?? err) };
         }
+        tracker.markEnvelopeDelivery(envelope.id, {
+          error: pushResult?.ok ? null : (pushResult?.error || `status ${pushResult?.status ?? '?'}`),
+        });
         if (!pushResult?.ok) {
           const detail = pushResult?.error || `status ${pushResult?.status ?? '?'}`;
           chat.record('system', 'error', `subscription digest to ${sessionId} failed — channel ${detail}`, { session_id: sessionId });

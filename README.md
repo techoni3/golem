@@ -75,7 +75,7 @@ intent.
 | --- | --- | --- |
 | Claude Code | Tier A | Rendered plugin with agents, skills, hooks, MCP tools, lifecycle facts, and addressed push for sessions launched as channel consumers. A plain `claude` session can use tracker tools and pull work but does not consume pushed channel notifications. |
 | OpenCode | Tier A | Rendered agents, skills, and instructions plus a managed MCP entry and runtime shim. While the OpenCode process and shim bridge are live, addressed work is injected with the OpenCode SDK. |
-| Codex CLI | Tier B | Rendered skills, documented lifecycle hooks (including observation of native `SubagentStop`), marketplace metadata, and a bundled MCP server. The adapter does not render Golem AGENTS.md or worker/reviewer/researcher definitions. Dispatch is explicit pull only and is never reported as pushed or next-turn delivered. App Server is out of scope. |
+| Codex CLI | Tier B for an ordinary TUI; Tier A for Golem-managed App Server modes | Rendered skills, documented lifecycle hooks (including observation of native `SubagentStop`), marketplace metadata, and a bundled MCP server. The adapter does not render Golem AGENTS.md or worker/reviewer/researcher definitions. An ordinary `codex` TUI remains explicit pull only and is never reported as pushed. A version-gated headless supervisor and private `golem codex` TUI bridge receive durable ticket/control envelopes only while their bound MCP is active and canonical thread is idle. |
 | Pi | Tier B | Portable rendered extension, lifecycle facts, and durable next-input pickup. Queued work is added to the next real user input and acknowledged when agent processing starts. There is no advertised live-idle push. |
 | Gemini CLI | Unsupported | No adapter or release contract is shipped. |
 
@@ -283,7 +283,7 @@ Golem `file://` entries from `plugin`, then re-run sync and restart OpenCode.
 The shim creates the live loopback bridge used for Tier A addressed delivery.
 `golemc` launches Claude Code, not OpenCode.
 
-### Codex CLI: Tier B, pull only
+### Ordinary Codex CLI: Tier B, pull only
 
 Render the Codex marketplace, add it, and install/enable its `golem` plugin:
 
@@ -310,6 +310,60 @@ generated Codex plugin does not provide. Ordinary Codex CLI has no documented
 out-of-band turn injection or queued next-turn pickup API, and its CLI does not
 expose a generic MCP tool-call command. A dashboard dispatch can therefore be
 queued for pull but is never reported as pushed or next-turn delivered.
+
+### Managed Codex App Server: Tier A
+
+This foreground mode is a separate, Golem-owned headless harness. It is gated
+to the pinned Codex CLI/schema pair and owns exactly one canonical App Server
+thread:
+
+```sh
+golem codex-supervisor run --session <canonical-id> --cwd <project-path>
+```
+
+While its bound MCP is active and the thread is idle, the tracker can deliver
+tickets plus notifications, consults, subscription digests, and gate
+resolutions as durable typed envelopes. Codex can dispatch to live Codex,
+Claude Code, and OpenCode sessions through the normal tracker tools. Role
+activation and interrupt/halt are intentionally shown as actionable managed
+Codex gates rather than injected into a live turn.
+
+App Server approval is never automatic. An authorized local operator lists the
+redacted pending requests, inspects one live request, then makes an explicit
+one-off decision:
+
+```sh
+golem codex-supervisor approvals --session <canonical-id>
+golem codex-supervisor approvals --session <canonical-id> --id <approval-id>
+golem codex-supervisor approvals --session <canonical-id> --id <approval-id> --decision approve
+```
+
+Stopping or restarting the supervisor fails pending approvals closed. Do not
+replay a recovery-pending envelope; create a new explicit dispatch after
+reviewing the supervisor record. A Codex version or schema fingerprint change
+is a hard stop until the contract is reviewed and the Codex journeys pass.
+
+### Managed Codex TUI: Tier A
+
+For a normal interactive terminal that shares the exact tracker-delivery
+thread, run this from the project directory:
+
+```sh
+golem codex
+```
+
+It creates a canonical session, runs a pinned App Server on stdio, and launches
+the normal Codex TUI through one private Unix-socket WebSocket bridge. The TUI
+remains the sole App Server client: it owns model, sandbox, approvals, and
+normal turns; Golem verifies its bound MCP only after TUI initialization and
+injects a durable tracker turn only when that canonical thread is idle. A
+dashboard dispatch with `when_idle` stays queued while a human turn is active.
+Use `--session <canonical-id>` or `--cwd <path>` for advanced targeting, and
+place ordinary Codex arguments after `--`. A stored explicit session resumes
+its recorded thread through native `codex resume`; it is never silently
+replaced. Do not pass `--remote` or `-C`/`--cd`; Golem reserves the bridge and
+canonical working directory. TUI exit, SIGTERM, or App Server loss removes the
+lease, App Server, and socket; Ctrl-C belongs to the TUI's active turn.
 
 ### Pi: Tier B, next-input pickup
 

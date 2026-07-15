@@ -1,6 +1,36 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+/**
+ * A managed Codex supervisor launches one private MCP child for one canonical
+ * Golem session. Unlike the shared OpenCode server, there is no trusted shim
+ * invocation boundary carrying a per-call id. Its process environment is the
+ * binding. Keep the marker separate from GOLEM_CEO_SESSION_ID: ordinary CC
+ * launchers also set that variable and must retain their existing behaviour.
+ */
+export function managedCodexBinding(env = process.env) {
+  if (env.GOLEM_MANAGED_CODEX_BOUND !== '1') return { enabled: false, sessionId: null };
+  const sessionId = typeof env.GOLEM_MANAGED_CODEX_BOUND_SESSION_ID === 'string'
+    ? env.GOLEM_MANAGED_CODEX_BOUND_SESSION_ID.trim()
+    : '';
+  if (!sessionId) {
+    return {
+      enabled: true,
+      sessionId: null,
+      error: 'golem: managed Codex MCP has no supervisor-owned canonical session binding; refusing the tool call.',
+    };
+  }
+  const ambient = typeof env.GOLEM_CEO_SESSION_ID === 'string' ? env.GOLEM_CEO_SESSION_ID.trim() : '';
+  if (ambient && ambient !== sessionId) {
+    return {
+      enabled: true,
+      sessionId: null,
+      error: 'golem: managed Codex MCP binding conflicts with GOLEM_CEO_SESSION_ID; refusing the tool call.',
+    };
+  }
+  return { enabled: true, sessionId };
+}
+
 function pidAlive(pid) {
   if (!pid || Number(pid) <= 0) return false;
   try {

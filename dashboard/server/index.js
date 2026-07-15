@@ -9,11 +9,11 @@ import websocket from '@fastify/websocket';
 import { CONFIG } from './config.js';
 import { createState } from './state.js';
 import { roleMetaMap } from './roles.js';
-import { pushBrief, pushRoleAssign, pushInterrupt, pushHalt, pushGateVerdict, channelHealth, listChannels } from './brief.js';
+import { pushBrief, pushRoleAssign, pushInterrupt, pushHalt, pushControlEnvelope, channelHealth, listChannels } from './brief.js';
 import { createChat } from './chat.js';
 import { readNativeSessionPeek } from './native-session-peek.js';
 import { openTrackerDb } from './tracker-db.js';
-import { readChannels } from './channels.js';
+import { isChannelDeliveryReady, readChannels } from './channels.js';
 import { applyGateVerdict, createGate } from './projects.js';
 import { listIdeas, createIdea, popIdea, readIdea } from './ideas.js';
 import { initDispatchDrainer } from './dispatch-queue.js';
@@ -406,7 +406,37 @@ function gateVerdictFromText(text) {
   return null;
 }
 
-async function notifyGateResolved(comment, patchBody) {
+async function deliverControlEnvelope(tracker, {
+  project_id = null,
+  sender_id,
+  recipient_session_id,
+  kind,
+  content,
+  metadata = {},
+  legacy,
+} = {}) {
+  const envelope = tracker.createControlEnvelope({
+    project_id,
+    sender_id,
+    recipient_session_id,
+    kind,
+    payload: { content, ...metadata },
+  });
+  let delivery;
+  try {
+    delivery = await pushControlEnvelope({ envelope, content, legacy }, recipient_session_id);
+    tracker.markEnvelopeDelivery(envelope.id, {
+      error: delivery.ok ? null : (delivery.error || `status ${delivery.status}`),
+    });
+  } catch (error) {
+    const message = String(error?.message ?? error);
+    tracker.markEnvelopeDelivery(envelope.id, { error: message });
+    delivery = { ok: false, status: 0, error: message };
+  }
+  return { envelope, delivery };
+}
+
+async function notifyGateResolved(tracker, comment, patchBody) {
   const gateId = gateIdFromBlock(comment?.block_id);
   if (!gateId || comment?.status !== 'resolved') return null;
   const sessionId = gateRaiserFromComment(comment);
@@ -414,11 +444,22 @@ async function notifyGateResolved(comment, patchBody) {
   const explicitText = String(patchBody || '').trim();
   const note = explicitText || `Gate ${gateId} resolved.`;
   const verdict = explicitText ? gateVerdictFromText(explicitText) : null;
-  const result = verdict
-    ? await pushGateVerdict(gateId, verdict, note, sessionId)
-    : await pushBrief(`Gate ${gateId} resolved.\n\n${note}`, sessionId);
-  if (!result.ok) console.warn(`[gates] resolve notification for ${gateId} to ${sessionId} failed: ${result.error || result.status}`);
-  return { ...result, gate_id: gateId, session_id: sessionId, verdict: verdict || 'brief' };
+  const content = verdict
+    ? `GATE ${verdict.toUpperCase()} — ${gateId}\n\n${note}`
+    : `Gate ${gateId} resolved.\n\n${note}`;
+  const { envelope, delivery } = await deliverControlEnvelope(tracker, {
+    project_id: comment?.project_id ?? null,
+    sender_id: 'human:dashboard',
+    recipient_session_id: sessionId,
+    kind: 'gate_resolution',
+    content,
+    metadata: { gate_id: gateId, verdict: verdict || 'brief' },
+    legacy: verdict
+      ? { path: `/gates/${encodeURIComponent(gateId)}/${verdict}`, body: note }
+      : { path: '/brief', body: content },
+  });
+  if (!delivery.ok) console.warn(`[gates] resolve notification for ${gateId} to ${sessionId} failed: ${delivery.error || delivery.status}`);
+  return { ...delivery, envelope_id: envelope.id, gate_id: gateId, session_id: sessionId, verdict: verdict || 'brief' };
 }
 
 async function main() {
@@ -531,7 +572,7 @@ async function main() {
       ...s,
       role: s.role ?? null,
       harness: s.harness ?? 'claudecode',
-      reachable: channelIds.has(s.session_id),
+      reachable: channelIds.has(s.session_id) && isChannelDeliveryReady(channelById.get(s.session_id)),
       endpoint_health: channelById.get(s.session_id)?.endpoint_health ?? (s.fact_observed_at ? 'unreachable' : (s.endpoint_health ?? 'legacy')),
       pending_count: pendingBySession.get(s.session_id) ?? 0,
       current_in_progress_ticket: tracker.currentInProgressTicketForSession(s.session_id),
@@ -812,23 +853,51 @@ async function main() {
   });
   fastify.post('/api/messages/notify', async (req, reply) => {
     const b = req.body ?? {};
+    if (!b.sender_id || !b.session_id) return reply.code(400).send({ error: 'notification sender_id and session_id are required' });
     try {
-      const envelope = tracker.createNotificationEnvelope({ project_id: b.project_id ?? null, sender_id: b.sender_id, recipient_session_id: b.session_id, payload: b.text });
-      const passive = appendPassiveDelta(tracker, envelope.recipient_session_id, String(b.text || ''));
-      let delivery;
+      const passive = appendPassiveDelta(tracker, b.session_id, String(b.text || ''));
       let passiveCommitted = false;
       try {
-        delivery = await pushBrief(passive.brief, envelope.recipient_session_id, {
-          envelope_id: envelope.id, sender_session_id: envelope.sender_id, target_session_id: envelope.recipient_session_id,
+        const result = await deliverControlEnvelope(tracker, {
+          project_id: b.project_id ?? null,
+          sender_id: b.sender_id,
+          recipient_session_id: b.session_id,
+          kind: 'session_notify',
+          content: passive.brief,
+          metadata: { notification_text: String(b.text || '') },
+          legacy: { path: '/brief', body: passive.brief },
         });
         // Decide from the delivery opportunity before durable bookkeeping: a
         // bookkeeping failure must not replay context that already reached it.
-        passiveCommitted = !!delivery?.ok;
-        tracker.markEnvelopeDelivery(envelope.id, { error: delivery.ok ? null : (delivery.error || `status ${delivery.status}`) });
+        passiveCommitted = !!result.delivery?.ok;
+        return { ok: !!result.delivery?.ok, envelope_id: result.envelope.id, delivery: result.delivery };
       } finally {
-        settlePassiveDelta(tracker, envelope.recipient_session_id, passive.claim, passiveCommitted);
+        settlePassiveDelta(tracker, b.session_id, passive.claim, passiveCommitted);
       }
-      return { ok: !!delivery.ok, envelope_id: envelope.id, delivery };
+    } catch (err) {
+      return reply.code(400).send({ error: String(err?.message ?? err) });
+    }
+  });
+  fastify.post('/api/messages/control', async (req, reply) => {
+    const b = req.body ?? {};
+    const legacy = b.legacy && typeof b.legacy === 'object' ? b.legacy : null;
+    const permittedLegacyPaths = new Set(['/brief', '/consult', '/consult/reply']);
+    const gatePath = typeof legacy?.path === 'string'
+      && /^\/gates\/[A-Za-z0-9._-]+\/(approve|deny|cancel)$/.test(legacy.path);
+    if (!legacy || (typeof legacy.path !== 'string') || (!permittedLegacyPaths.has(legacy.path) && !gatePath)) {
+      return reply.code(400).send({ error: 'control delivery requires a supported legacy route' });
+    }
+    try {
+      const result = await deliverControlEnvelope(tracker, {
+        project_id: b.project_id ?? null,
+        sender_id: b.sender_id,
+        recipient_session_id: b.session_id,
+        kind: b.kind,
+        content: String(b.content || ''),
+        metadata: b.metadata && typeof b.metadata === 'object' ? b.metadata : {},
+        legacy: { path: legacy.path, body: legacy.body },
+      });
+      return { ok: !!result.delivery?.ok, envelope_id: result.envelope.id, delivery: result.delivery };
     } catch (err) {
       return reply.code(400).send({ error: String(err?.message ?? err) });
     }
@@ -840,7 +909,7 @@ async function main() {
     const result = await pushInterrupt(body, sessionId);
     if (!result.ok) {
       noteForwardFailure('interrupt', result);
-      return reply.code(502).send(result);
+      return reply.code(result.status || 502).send(result);
     }
     return result;
   });
@@ -851,7 +920,7 @@ async function main() {
     const result = await pushHalt(body, sessionId);
     if (!result.ok) {
       noteForwardFailure('halt', result);
-      return reply.code(502).send(result);
+      return reply.code(result.status || 502).send(result);
     }
     return result;
   });
@@ -1198,7 +1267,7 @@ async function main() {
       const before = tracker.getComment(cid);
       const comment = tracker.updateComment(id, cid, patch);
       if (before?.status !== 'resolved' && comment.status === 'resolved' && gateIdFromBlock(comment.block_id)) {
-        await notifyGateResolved(comment, patch.body || b.resolution || b.verdict || '');
+        await notifyGateResolved(tracker, comment, patch.body || b.resolution || b.verdict || '');
       }
       broadcastWS({ type: 'ticket-comment-updated', ticket_id: id, comment });
       const ticket = tracker.getTicket(id);
@@ -1451,7 +1520,7 @@ async function main() {
     const revival = deadSessionRevival(ticketRef, { minAgeMinutes: b.min_age_minutes ?? b.minAgeMinutes });
     if (!revival.eligible) return reply.code(409).send({ error: `revival_not_eligible:${revival.reason}`, revival });
     const live = state.nativeSessions().find((s) => s.session_id === sessionId);
-    const hasChannel = state.channels().some((c) => c.session_id === sessionId);
+    const hasChannel = state.channels().some((c) => c.session_id === sessionId && isChannelDeliveryReady(c));
     if (!live || !live.alive || !hasChannel) return reply.code(400).send({ error: 'target session is not live/reachable' });
     try {
       if (revival.pending_dispatch?.id) {
@@ -1528,7 +1597,7 @@ async function main() {
       // must queue (the row delivers when the channel re-registers), not burn
       // on an immediate push that cannot succeed.
       let hasChannel = false;
-      try { hasChannel = (await listChannels()).some((c) => c.session_id === sessionId); } catch { /* treat as unreachable */ }
+      try { hasChannel = (await listChannels()).some((c) => c.session_id === sessionId && isChannelDeliveryReady(c)); } catch { /* treat as unreachable */ }
       const isIdle = !isPi && !!target && target.alive && target.status === 'idle' && hasChannel;
       if (!isIdle) {
         const envelope = tracker.createDispatchEnvelope(id, { session_id: sessionId, actor: senderId || 'human', sender_id: senderId });
@@ -1861,7 +1930,7 @@ async function main() {
       // Once a harness has adopted canonical facts, an authenticated healthy
       // endpoint lease is part of dispatchability. Legacy rows retain the
       // queue-while-unreachable compatibility behavior during migration.
-      if (s.fact_observed_at && !ch) continue;
+      if (s.fact_observed_at && (!ch || !isChannelDeliveryReady(ch))) continue;
       const team = teamBySession.get(s.session_id);
       // TKT-0369: an alive session whose channel MCP died must NOT silently
       // vanish from the picker — it stays listed with reachable:false so the UI
@@ -1877,7 +1946,7 @@ async function main() {
         role_mission: s.role ? roleMission(s.role) : null,
         harness: s.harness ?? 'claudecode',
         project_id: s.project_id ?? null,
-        reachable: !!ch,
+        reachable: isChannelDeliveryReady(ch),
         current_in_progress_ticket: tracker.currentInProgressTicketForSession(s.session_id),
         channel_url: ch ? (ch.url ?? (ch.host && ch.port ? `http://${ch.host}:${ch.port}` : null)) : null,
         started_at: s.started_at ?? null,
@@ -1990,10 +2059,13 @@ async function main() {
       const row = setSessionRole(id, role, { by: 'human:dashboard' });
       const text = `session role ${role ?? 'cleared'} for ${row.name || row.session_id || id}`;
       chat.record('system', 'session_role', text, { session_id: row.session_id || id });
-      await pushRoleBriefDirect(id, role, row);
+      const activation = await pushRoleBriefDirect(id, role, row);
+      if (activation.gated) {
+        chat.record('system', 'warning', activation.error, { session_id: row.session_id || id });
+      }
       if (typeof state.refreshNativeSessions === 'function') await state.refreshNativeSessions();
       broadcastWS({ type: 'native-sessions-update', native_sessions: enrichSessionRows(state.nativeSessions(), state.channels()), channels: state.channels() });
-      return { ok: true, session: row };
+      return { ok: true, session: row, activation };
     } catch (err) {
       const msg = String(err?.message ?? err);
       const code = /not found/i.test(msg) ? 404 : 400;
@@ -2220,6 +2292,7 @@ async function main() {
     state,
     chat,
     pushBrief,
+    pushControlEnvelope,
     buildDispatchBrief,
     broadcastWS,
     listChannels,
