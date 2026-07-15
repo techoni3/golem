@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Golem Agent Card Directions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500;9..144,650;9..144,800&family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Newsreader:opsz,wght@6..72,300;6..72,400;6..72,500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #080a0d;
+    --ink-2: #0c0f14;
+    --panel: #10141a;
+    --panel-2: #151a22;
+    --panel-3: #1a202a;
+    --line: #28303c;
+    --line-soft: #1b212a;
+    --fg: #f3f5f7;
+    --fg-2: #b7bdc7;
+    --fg-3: #747d8b;
+    --fg-4: #4b5360;
+    --green: #4ade80;
+    --green-rgb: 74, 222, 128;
+    --blue: #60a5fa;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --violet: #b394ff;
+    --cyan: #43c6f0;
+    --radius: 14px;
+    --max: 1720px;
+    --ui: "Geist", sans-serif;
+    --mono: "JetBrains Mono", monospace;
+    --display: "Fraunces", serif;
+    --body: "Newsreader", serif;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 24px; }
+  body {
+    margin: 0;
+    color: var(--fg);
+    background:
+      radial-gradient(900px 560px at 74% -5%, rgba(74, 222, 128, .07), transparent 65%),
+      radial-gradient(750px 500px at 4% 18%, rgba(96, 165, 250, .055), transparent 65%),
+      var(--ink);
+    font: 18px/1.58 var(--body);
+    -webkit-font-smoothing: antialiased;
+  }
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(rgba(125, 145, 170, .026) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(125, 145, 170, .026) 1px, transparent 1px);
+    background-size: 40px 40px;
+    mask-image: linear-gradient(to bottom, #000, transparent 76%);
+  }
+  button { font: inherit; }
+  ::selection { background: rgba(74, 222, 128, .27); color: #fff; }
+
+  .shell {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: 278px minmax(0, 1fr);
+    max-width: var(--max);
+    margin: 0 auto;
+  }
+  .toc {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    padding: 32px 24px;
+    border-right: 1px solid var(--line-soft);
+    overflow-y: auto;
+  }
+  .brand { font: 800 22px/1.05 var(--display); letter-spacing: -.4px; }
+  .brand i { color: var(--green); font-style: normal; }
+  .doc-meta {
+    margin-top: 8px;
+    color: var(--fg-4);
+    font: 500 9px/1.6 var(--mono);
+    text-transform: uppercase;
+    letter-spacing: .14em;
+  }
+  .toc ol { list-style: none; margin: 28px 0 0; padding: 0; counter-reset: sections; }
+  .toc a {
+    position: relative;
+    display: block;
+    padding: 7px 0 7px 30px;
+    color: var(--fg-3);
+    text-decoration: none;
+    font: 400 13px/1.3 var(--ui);
+    transition: color .16s ease;
+  }
+  .toc a::before {
+    counter-increment: sections;
+    content: counter(sections, decimal-leading-zero);
+    position: absolute;
+    left: 0;
+    top: 9px;
+    color: var(--fg-4);
+    font: 500 9px/1 var(--mono);
+  }
+  .toc a:hover, .toc a.active { color: var(--fg); }
+  .toc a.active::before { color: var(--green); }
+  .toc-note {
+    margin-top: 28px;
+    padding-top: 18px;
+    border-top: 1px solid var(--line-soft);
+    color: var(--fg-4);
+    font: 400 10px/1.65 var(--mono);
+  }
+  .live-key { display: grid; gap: 7px; margin-top: 20px; }
+  .key-row { display: flex; align-items: center; gap: 8px; color: var(--fg-3); font: 10px var(--mono); }
+  .key-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 9px rgba(74,222,128,.65); }
+  .key-dot.wait { background: var(--amber); box-shadow: none; }
+  .key-dot.off { background: var(--fg-4); box-shadow: none; }
+
+  main { min-width: 0; padding-bottom: 120px; }
+  .hero, section { padding: 56px clamp(28px, 5vw, 82px); border-bottom: 1px solid var(--line-soft); }
+  .hero { padding-top: 84px; padding-bottom: 62px; }
+  .kicker {
+    margin-bottom: 14px;
+    color: var(--green);
+    font: 500 10px/1.2 var(--mono);
+    text-transform: uppercase;
+    letter-spacing: .22em;
+  }
+  h1, h2, h3 { font-family: var(--display); color: var(--fg); }
+  h1 { max-width: 1050px; margin: 0; font-size: clamp(43px, 6vw, 78px); line-height: .98; letter-spacing: -2.2px; }
+  h1 span { display: block; color: var(--green); font-weight: 300; font-style: italic; }
+  h2 { margin: 0; font-size: clamp(34px, 4vw, 49px); line-height: 1.03; letter-spacing: -1px; }
+  h3 { margin: 0; font-size: 22px; line-height: 1.1; }
+  .hero-copy { max-width: 900px; margin: 24px 0 0; color: var(--fg-2); font-size: 21px; line-height: 1.5; }
+  .hero-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); max-width: 800px; margin-top: 42px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: rgba(16,20,26,.7); }
+  .hero-stat { padding: 16px 19px; border-right: 1px solid var(--line); }
+  .hero-stat:last-child { border-right: 0; }
+  .hero-stat b { display: block; color: var(--fg); font: 600 22px/1 var(--display); }
+  .hero-stat span { display: block; margin-top: 7px; color: var(--fg-4); font: 500 9px/1.2 var(--mono); text-transform: uppercase; letter-spacing: .12em; }
+
+  .section-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 370px); gap: 48px; align-items: end; margin-bottom: 28px; }
+  .section-summary { color: var(--fg-3); font-size: 16px; line-height: 1.45; }
+  .section-summary strong { color: var(--fg-2); font-weight: 500; }
+  .concept-meta { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 17px; }
+  .tag { padding: 4px 8px; border: 1px solid var(--line); border-radius: 99px; color: var(--fg-3); background: rgba(255,255,255,.015); font: 500 9px/1 var(--mono); text-transform: uppercase; letter-spacing: .08em; }
+  .tag.best { border-color: rgba(74,222,128,.34); color: var(--green); background: rgba(74,222,128,.055); }
+
+  .showcase {
+    position: relative;
+    min-height: 530px;
+    padding: clamp(20px, 4vw, 48px);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background:
+      radial-gradient(700px 350px at 50% 0%, rgba(255,255,255,.035), transparent 70%),
+      linear-gradient(180deg, #0e1218, #0a0d11);
+    overflow: hidden;
+  }
+  .showcase::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image: radial-gradient(circle, rgba(140,155,180,.19) .7px, transparent .8px);
+    background-size: 18px 18px;
+    mask-image: linear-gradient(to bottom, rgba(0,0,0,.55), transparent 92%);
+  }
+  .specimen-label {
+    position: absolute;
+    top: 14px;
+    left: 16px;
+    color: var(--fg-4);
+    font: 500 8px/1 var(--mono);
+    text-transform: uppercase;
+    letter-spacing: .17em;
+  }
+  .canvas-grid { position: relative; z-index: 1; display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(250px, .55fr); gap: 24px; align-items: center; min-height: 435px; }
+  .support-stack { display: grid; gap: 12px; }
+  .micro-note { padding: 14px 15px; border: 1px solid var(--line-soft); border-radius: 9px; background: rgba(15,19,25,.84); }
+  .micro-note b { display: block; margin-bottom: 5px; color: var(--fg-2); font: 500 10px var(--mono); text-transform: uppercase; letter-spacing: .09em; }
+  .micro-note p { margin: 0; color: var(--fg-3); font: 12px/1.5 var(--ui); }
+  .state-strip { display: flex; gap: 7px; flex-wrap: wrap; }
+  .state-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 5px; color: var(--fg-3); background: var(--panel); font: 500 9px/1 var(--mono); text-transform: uppercase; }
+  .state-chip i { width: 5px; height: 5px; border-radius: 50%; background: var(--green); }
+  .state-chip.waiting i { background: var(--amber); }
+  .state-chip.idle i { background: var(--fg-3); }
+  .state-chip.offline i { background: var(--red); }
+  .select-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 10px 14px;
+    border: 1px solid rgba(74,222,128,.3);
+    border-radius: 6px;
+    color: var(--green);
+    background: rgba(74,222,128,.055);
+    cursor: pointer;
+    font: 500 10px/1 var(--mono);
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    transition: .16s ease;
+  }
+  .select-btn:hover { border-color: var(--green); background: rgba(74,222,128,.1); }
+  .select-btn.selected { color: var(--ink); background: var(--green); border-color: var(--green); }
+  .selection-dock {
+    position: fixed;
+    z-index: 10;
+    right: 22px;
+    bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    max-width: calc(100vw - 44px);
+    padding: 9px 11px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--fg-3);
+    background: rgba(12,15,20,.92);
+    backdrop-filter: blur(16px);
+    box-shadow: 0 15px 45px rgba(0,0,0,.45);
+    font: 500 10px/1 var(--mono);
+    transform: translateY(100px);
+    opacity: 0;
+    transition: .24s ease;
+  }
+  .selection-dock.visible { transform: none; opacity: 1; }
+  .selection-list { color: var(--fg); }
+
+  /* Shared card language */
+  .ui-card { position: relative; color: var(--fg); font-family: var(--ui); }
+  .mono { font-family: var(--mono); }
+  .dot-live { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 9px rgba(74,222,128,.72); }
+  .status-text { color: var(--green); font: 600 9px/1 var(--mono); text-transform: uppercase; letter-spacing: .1em; }
+  .project-glyph, .agent-glyph { display: grid; place-items: center; flex: 0 0 auto; font-family: var(--mono); font-weight: 600; }
+  .project-glyph { width: 34px; height: 34px; border: 1px solid rgba(74,222,128,.27); border-radius: 6px; color: var(--green); background: rgba(74,222,128,.08); font-size: 12px; }
+  .agent-glyph { width: 54px; height: 54px; border: 1px solid rgba(179,148,255,.33); border-radius: 9px; color: var(--violet); background: rgba(179,148,255,.09); font-size: 16px; }
+  .mini-icon { display: inline-grid; place-items: center; width: 18px; height: 18px; border: 1px solid var(--line); border-radius: 4px; color: var(--fg-2); background: var(--panel-3); font: 600 8px var(--mono); }
+  .ticket-code { color: var(--green); font-family: var(--mono); }
+
+  /* 01 Mission Briefing */
+  .brief-card { max-width: 690px; margin: 0 auto; border: 1px solid #2c3541; border-radius: 8px; background: linear-gradient(145deg, #12171e, #0e1217); box-shadow: 0 20px 60px rgba(0,0,0,.36); overflow: hidden; }
+  .brief-rail { height: 3px; background: linear-gradient(90deg, var(--green) 0 42%, rgba(74,222,128,.12) 42% 100%); box-shadow: 0 0 20px rgba(74,222,128,.25); }
+  .brief-top { display: flex; align-items: center; gap: 12px; padding: 18px 20px 15px; }
+  .brief-identity { min-width: 0; flex: 1; }
+  .brief-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 16px; font-weight: 650; letter-spacing: -.02em; }
+  .brief-sub { display: flex; align-items: center; gap: 7px; margin-top: 4px; color: var(--fg-3); font: 10px var(--mono); }
+  .brief-status { display: flex; align-items: center; gap: 7px; padding: 7px 9px; border: 1px solid rgba(74,222,128,.22); border-radius: 5px; background: rgba(74,222,128,.06); }
+  .brief-mission { margin: 0 20px 18px; border: 1px solid rgba(74,222,128,.2); border-radius: 6px; background: rgba(74,222,128,.035); overflow: hidden; }
+  .brief-mission-head { display: flex; justify-content: space-between; padding: 8px 11px; border-bottom: 1px solid rgba(74,222,128,.13); color: var(--green); font: 500 8px var(--mono); text-transform: uppercase; letter-spacing: .16em; }
+  .brief-mission-body { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: start; padding: 13px 12px 15px; }
+  .brief-mission-id { padding-top: 2px; font: 600 12px var(--mono); color: var(--green); }
+  .brief-mission-title { font-size: 15px; line-height: 1.35; font-weight: 550; }
+  .brief-foot { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--line-soft); background: rgba(0,0,0,.12); }
+  .brief-stat { padding: 11px 14px; border-right: 1px solid var(--line-soft); }
+  .brief-stat:last-child { border: 0; }
+  .brief-stat span { display: block; color: var(--fg-4); font: 500 8px var(--mono); text-transform: uppercase; letter-spacing: .1em; }
+  .brief-stat b { display: block; margin-top: 4px; color: var(--fg-2); font: 500 10px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* 02 Operator Dossier */
+  .dossier-card { max-width: 650px; margin: 0 auto; display: grid; grid-template-columns: 170px minmax(0,1fr); border: 1px solid #303846; border-radius: 7px; background: #11161c; box-shadow: 0 22px 60px rgba(0,0,0,.38); overflow: hidden; }
+  .dossier-id { position: relative; display: flex; flex-direction: column; justify-content: space-between; min-height: 340px; padding: 22px; border-right: 1px solid var(--line); background: linear-gradient(165deg, rgba(179,148,255,.12), rgba(13,17,23,.25) 56%); overflow: hidden; }
+  .dossier-id::after { content: "SOL"; position: absolute; left: -11px; bottom: 18px; color: rgba(179,148,255,.055); font: 800 82px/1 var(--display); letter-spacing: -7px; }
+  .dossier-avatar { position: relative; z-index: 1; display: grid; place-items: center; width: 82px; height: 82px; border: 1px solid rgba(179,148,255,.38); border-radius: 13px; color: var(--violet); background: rgba(179,148,255,.09); font: 600 21px var(--mono); box-shadow: inset 0 0 30px rgba(179,148,255,.05); }
+  .dossier-avatar i { position: absolute; right: -4px; bottom: -4px; width: 15px; height: 15px; border: 3px solid #11161c; border-radius: 50%; background: var(--green); }
+  .id-code { position: relative; z-index: 1; color: var(--fg-4); font: 500 8px/1.6 var(--mono); text-transform: uppercase; letter-spacing: .12em; }
+  .id-code b { display: block; color: var(--violet); font-size: 10px; }
+  .dossier-main { padding: 22px 24px; }
+  .dossier-eyebrow { color: var(--violet); font: 500 9px var(--mono); text-transform: uppercase; letter-spacing: .17em; }
+  .dossier-name { margin-top: 6px; font: 650 25px/1.05 var(--display); letter-spacing: -.5px; }
+  .dossier-role { display: flex; align-items: center; justify-content: space-between; margin-top: 7px; color: var(--fg-3); font: 10px var(--mono); }
+  .dossier-role b { color: var(--fg-2); font-weight: 500; }
+  .dossier-rule { height: 1px; margin: 18px 0; background: var(--line-soft); }
+  .dossier-mission-label { color: var(--fg-4); font: 500 8px var(--mono); text-transform: uppercase; letter-spacing: .13em; }
+  .dossier-ticket { margin-top: 7px; font-size: 14px; line-height: 1.38; }
+  .dossier-ticket b { color: var(--green); font: 600 11px var(--mono); }
+  .dossier-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 20px; margin-top: 22px; }
+  .field span { display: block; color: var(--fg-4); font: 500 8px var(--mono); text-transform: uppercase; letter-spacing: .1em; }
+  .field b { display: flex; align-items: center; gap: 6px; margin-top: 4px; color: var(--fg-2); font: 500 10px var(--mono); }
+
+  /* 03 Telemetry Matrix */
+  .matrix-card { max-width: 720px; margin: 0 auto; border: 1px solid #313947; border-radius: 5px; background: #0f1318; box-shadow: 0 20px 55px rgba(0,0,0,.4); overflow: hidden; }
+  .matrix-head { display: flex; align-items: center; gap: 11px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .matrix-name { min-width: 0; flex: 1; }
+  .matrix-name b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
+  .matrix-name span { display: block; margin-top: 2px; color: var(--fg-4); font: 8px var(--mono); }
+  .matrix-state { display: flex; align-items: center; gap: 7px; color: var(--green); font: 600 9px var(--mono); }
+  .matrix-grid { display: grid; grid-template-columns: repeat(4, 1fr); }
+  .matrix-cell { min-width: 0; padding: 13px 15px; border-right: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
+  .matrix-cell:nth-child(4n) { border-right: 0; }
+  .matrix-cell span { display: block; color: var(--fg-4); font: 500 8px var(--mono); text-transform: uppercase; letter-spacing: .12em; }
+  .matrix-cell b { display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: 7px; color: var(--fg-2); font: 500 10px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .matrix-mission { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 14px 16px; }
+  .matrix-mission-label { color: var(--green); font: 500 8px var(--mono); text-transform: uppercase; letter-spacing: .12em; }
+  .matrix-mission-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+  .matrix-open { color: var(--fg-4); font: 500 9px var(--mono); }
+  .matrix-signal { height: 24px; margin-top: 3px; display: flex; align-items: end; gap: 2px; }
+  .matrix-signal i { display: block; width: 3px; background: rgba(74,222,128,.42); }
+  .matrix-signal i:nth-child(1) { height: 7px; } .matrix-signal i:nth-child(2) { height: 15px; }
+  .matrix-signal i:nth-child(3) { height: 10px; } .matrix-signal i:nth-child(4) { height: 20px; }
+  .matrix-signal i:nth-child(5) { height: 13px; } .matrix-signal i:nth-child(6) { height: 18px; }
+
+  /* 04 Signal Trace */
+  .trace-card { max-width: 650px; margin: 0 auto; display: grid; grid-template-columns: 210px minmax(0,1fr); border: 1px solid #303846; border-radius: 9px; background: #10141a; box-shadow: 0 20px 55px rgba(0,0,0,.38); overflow: hidden; }
+  .trace-summary { padding: 21px; border-right: 1px solid var(--line); background: linear-gradient(180deg, rgba(74,222,128,.045), transparent 64%); }
+  .trace-agent { display: flex; align-items: center; gap: 11px; }
+  .trace-agent b { display: block; font-size: 15px; }
+  .trace-agent span { display: block; margin-top: 3px; color: var(--fg-3); font: 9px var(--mono); }
+  .trace-current { margin-top: 28px; }
+  .trace-current label { color: var(--fg-4); font: 500 8px var(--mono); text-transform: uppercase; letter-spacing: .12em; }
+  .trace-current p { margin: 8px 0 0; color: var(--fg-2); font: 13px/1.4 var(--ui); }
+  .trace-current p b { display: block; margin-bottom: 3px; color: var(--green); font: 600 10px var(--mono); }
+  .trace-seen { margin-top: 26px; color: var(--fg-4); font: 9px var(--mono); }
+  .trace-flow { padding: 24px 24px 20px; }
+  .trace-title { margin-bottom: 18px; color: var(--fg-4); font: 500 8px var(--mono); text-transform: uppercase; letter-spacing: .14em; }
+  .trace-node { position: relative; display: grid; grid-template-columns: 17px minmax(0,1fr) auto; gap: 10px; min-height: 58px; }
+  .trace-node::after { content: ""; position: absolute; left: 5px; top: 13px; bottom: -2px; width: 1px; background: var(--line); }
+  .trace-node:last-child::after { display: none; }
+  .trace-point { position: relative; z-index: 1; width: 11px; height: 11px; border: 2px solid var(--green); border-radius: 50%; background: #10141a; box-shadow: 0 0 9px rgba(74,222,128,.3); }
+  .trace-point.dim { border-color: var(--fg-4); box-shadow: none; }
+  .trace-label b { display: block; color: var(--fg-2); font: 500 11px var(--mono); }
+  .trace-label span { display: block; margin-top: 4px; color: var(--fg-4); font: 9px/1.4 var(--mono); }
+  .trace-value { color: var(--green); font: 500 8px var(--mono); text-transform: uppercase; }
+  .trace-value.dim { color: var(--fg-4); }
+
+  /* 05 Routing Node */
+  .routing-card { width: 100%; max-width: 760px; min-height: 380px; margin: 0 auto; position: relative; border: 1px solid #2d3541; border-radius: 11px; background: radial-gradient(circle at 50% 48%, rgba(74,222,128,.05), transparent 35%), #0d1116; box-shadow: 0 20px 60px rgba(0,0,0,.4); overflow: hidden; }
+  .routing-card svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .route-line { fill: none; stroke: #2c3541; stroke-width: 1; stroke-dasharray: 4 4; }
+  .route-line.live { stroke: rgba(74,222,128,.52); stroke-dasharray: none; }
+  .route-node { position: absolute; min-width: 130px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 6px; background: #131820; box-shadow: 0 10px 30px rgba(0,0,0,.24); }
+  .route-node label { display: block; color: var(--fg-4); font: 500 8px var(--mono); text-transform: uppercase; letter-spacing: .12em; }
+  .route-node b { display: block; margin-top: 5px; color: var(--fg-2); font: 500 10px var(--mono); }
+  .route-project { left: 6%; top: 13%; }
+  .route-ticket { right: 5%; top: 13%; width: 190px; }
+  .route-channel { left: 7%; bottom: 12%; }
+  .route-model { right: 7%; bottom: 12%; }
+  .route-core { position: absolute; left: 50%; top: 50%; width: 178px; min-height: 126px; transform: translate(-50%,-50%); display: grid; place-items: center; padding: 19px; border: 1px solid rgba(74,222,128,.36); border-radius: 50%; text-align: center; background: radial-gradient(circle, rgba(74,222,128,.11), #11161c 70%); box-shadow: 0 0 0 9px rgba(74,222,128,.025), 0 0 40px rgba(74,222,128,.07); }
+  .route-core .dot-live { margin: 0 auto 9px; }
+  .route-core b { display: block; font-size: 15px; }
+  .route-core span { display: block; margin-top: 5px; color: var(--green); font: 500 9px var(--mono); text-transform: uppercase; letter-spacing: .1em; }
+
+  /* 06 Progressive Command Deck */
+  .deck-card { max-width: 690px; margin: 0 auto; border: 1px solid #313a47; border-radius: 10px; background: #10151b; box-shadow: 0 20px 60px rgba(0,0,0,.4); overflow: hidden; }
+  .deck-summary { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 12px; align-items: center; padding: 17px 18px; }
+  .deck-name b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 15px; }
+  .deck-name span { display: block; margin-top: 3px; color: var(--fg-3); font: 9px var(--mono); }
+  .deck-status { display: flex; align-items: center; gap: 7px; color: var(--green); font: 600 9px var(--mono); }
+  .deck-mission { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 11px; align-items: center; padding: 12px 18px; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); background: rgba(74,222,128,.035); }
+  .deck-mission label { color: var(--fg-4); font: 500 8px var(--mono); text-transform: uppercase; letter-spacing: .12em; }
+  .deck-mission b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; font-weight: 500; }
+  .deck-mission span { color: var(--green); font: 600 10px var(--mono); }
+  .deck-meta { display: flex; flex-wrap: wrap; gap: 6px; padding: 11px 18px; }
+  .deck-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 7px; border: 1px solid var(--line); border-radius: 4px; color: var(--fg-3); background: var(--panel-2); font: 500 8px var(--mono); }
+  .command-bay { padding: 15px 18px 17px; border-top: 1px solid var(--line); background: #0c1015; }
+  .command-label { display: flex; justify-content: space-between; margin-bottom: 8px; color: var(--fg-4); font: 500 8px var(--mono); text-transform: uppercase; letter-spacing: .12em; }
+  .command-label span:last-child { text-transform: none; letter-spacing: 0; }
+  .command-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; }
+  .command-input { min-width: 0; padding: 10px 11px; border: 1px solid var(--line); border-radius: 5px; color: var(--fg-2); background: var(--panel); font: 10px var(--mono); }
+  .send-btn { padding: 0 15px; border: 1px solid rgba(74,222,128,.3); border-radius: 5px; color: var(--green); background: rgba(74,222,128,.07); font: 600 9px var(--mono); text-transform: uppercase; }
+  .command-actions { display: flex; gap: 7px; margin-top: 9px; }
+  .command-actions button { padding: 6px 9px; border: 1px solid var(--line); border-radius: 4px; color: var(--fg-3); background: transparent; font: 500 8px var(--mono); text-transform: uppercase; }
+  .command-actions .danger { margin-left: auto; color: var(--red); border-color: rgba(248,113,113,.24); }
+
+  .decision-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 26px; }
+  .decision-card { padding: 18px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
+  .decision-card .num { color: var(--green); font: 500 9px var(--mono); }
+  .decision-card h3 { margin-top: 12px; font-size: 20px; }
+  .decision-card p { margin: 8px 0 0; color: var(--fg-3); font-size: 14px; line-height: 1.45; }
+  .recommendation { margin-top: 24px; padding: 20px 22px; border-left: 3px solid var(--green); border-radius: 0 8px 8px 0; background: linear-gradient(90deg, rgba(74,222,128,.07), transparent); }
+  .recommendation b { color: var(--green); font: 500 10px var(--mono); text-transform: uppercase; letter-spacing: .12em; }
+  .recommendation p { margin: 7px 0 0; color: var(--fg-2); font-size: 16px; }
+
+  @media (max-width: 1120px) {
+    .shell { grid-template-columns: 1fr; }
+    .toc { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--line-soft); }
+    .toc ol { display: flex; flex-wrap: wrap; gap: 0 18px; }
+    .toc-note, .live-key { display: none; }
+    .canvas-grid { grid-template-columns: 1fr; }
+    .support-stack { grid-template-columns: 1fr 1fr; }
+    .select-btn { grid-column: 1 / -1; }
+  }
+  @media (max-width: 760px) {
+    .hero, section { padding: 42px 18px; }
+    .hero { padding-top: 56px; }
+    .hero-stats { grid-template-columns: 1fr; }
+    .hero-stat { border-right: 0; border-bottom: 1px solid var(--line); }
+    .hero-stat:last-child { border-bottom: 0; }
+    .section-head { grid-template-columns: 1fr; gap: 16px; }
+    .showcase { padding: 48px 12px 18px; }
+    .support-stack { grid-template-columns: 1fr; }
+    .dossier-card, .trace-card { grid-template-columns: 1fr; }
+    .dossier-id { min-height: 150px; border-right: 0; border-bottom: 1px solid var(--line); }
+    .dossier-id::after { left: auto; right: 10px; }
+    .trace-summary { border-right: 0; border-bottom: 1px solid var(--line); }
+    .matrix-grid { grid-template-columns: repeat(2, 1fr); }
+    .matrix-cell:nth-child(2n) { border-right: 0; }
+    .matrix-mission { grid-template-columns: 1fr; }
+    .routing-card { min-height: 560px; }
+    .routing-card svg { display: none; }
+    .route-node { left: 18px; right: 18px; width: auto; }
+    .route-project { top: 20px; } .route-ticket { top: 102px; }
+    .route-channel { top: 386px; bottom: auto; } .route-model { top: 468px; bottom: auto; }
+    .route-core { top: 50%; }
+    .decision-grid { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="shell">
+  <nav class="toc" aria-label="Design directions">
+    <div class="brand">Agent cards<i>.</i></div>
+    <div class="doc-meta">Design canvas / July 2026</div>
+    <ol>
+      <li><a href="#premise">Design premise</a></li>
+      <li><a href="#briefing">Mission Briefing</a></li>
+      <li><a href="#dossier">Operator Dossier</a></li>
+      <li><a href="#matrix">Telemetry Matrix</a></li>
+      <li><a href="#trace">Signal Trace</a></li>
+      <li><a href="#routing">Routing Node</a></li>
+      <li><a href="#deck">Command Deck</a></li>
+      <li><a href="#decision">Choose a direction</a></li>
+    </ol>
+    <div class="toc-note">All concepts use the same session story. Nothing here changes the live dashboard. Shortlist one or combine the strongest parts.</div>
+    <div class="live-key" aria-label="Status legend">
+      <div class="key-row"><i class="key-dot"></i> working now</div>
+      <div class="key-row"><i class="key-dot wait"></i> waiting for input</div>
+      <div class="key-row"><i class="key-dot off"></i> idle or offline</div>
+    </div>
+  </nav>
+
+  <main>
+    <header class="hero" id="top">
+      <div class="kicker">Golem / interface study / GOL-465</div>
+      <h1>An agent card should feel alive<span>before you click it.</span></h1>
+      <p class="hero-copy">Six high-fidelity directions for turning a flat session summary into an operational object: clear identity, immediate state, visible purpose, and deliberate control.</p>
+      <div class="hero-stats" aria-label="Design constraints">
+        <div class="hero-stat"><b>06</b><span>Distinct directions</span></div>
+        <div class="hero-stat"><b>01</b><span>Shared data story</span></div>
+        <div class="hero-stat"><b>00</b><span>Production changes</span></div>
+      </div>
+    </header>
+
+    <section id="premise">
+      <div class="section-head">
+        <div>
+          <div class="kicker">01 / The design problem</div>
+          <h2>Give the eye a first answer.</h2>
+        </div>
+        <div class="section-summary">The current card asks every field to speak at once. These directions each answer one primary question first, then let the rest of the data support it.</div>
+      </div>
+      <div class="decision-grid">
+        <article class="decision-card"><span class="num">01 / IDENTITY</span><h3>Who is this?</h3><p>Name, role, harness, and project establish an operator rather than a generic process.</p></article>
+        <article class="decision-card"><span class="num">02 / STATE</span><h3>What is happening?</h3><p>Working, waiting, idle, unreachable, and dead should be recognizable without reading a chip row.</p></article>
+        <article class="decision-card"><span class="num">03 / PURPOSE</span><h3>Why is it here?</h3><p>The current ticket or waiting reason deserves more weight than model metadata.</p></article>
+      </div>
+    </section>
+
+    <section id="briefing">
+      <div class="section-head">
+        <div>
+          <div class="kicker">02 / Direction A</div>
+          <h2>Mission Briefing</h2>
+          <div class="concept-meta"><span class="tag best">Strong default</span><span class="tag">Mission first</span><span class="tag">Medium density</span></div>
+        </div>
+        <div class="section-summary"><strong>Lead with what the agent is doing.</strong> A status rail and objective panel make the active ticket the visual center of gravity.</div>
+      </div>
+      <div class="showcase">
+        <span class="specimen-label">Primary specimen / working</span>
+        <div class="canvas-grid">
+          <article class="ui-card brief-card">
+            <div class="brief-rail"></div>
+            <div class="brief-top">
+              <div class="project-glyph">GO</div>
+              <div class="brief-identity"><div class="brief-name">Golem open-source readiness overhaul</div><div class="brief-sub"><span>sol:planner</span><span>/</span><span>golem</span><span class="mini-icon">OC</span></div></div>
+              <div class="brief-status"><i class="dot-live"></i><span class="status-text">Working</span></div>
+            </div>
+            <div class="brief-mission">
+              <div class="brief-mission-head"><span>Current objective</span><span>active now</span></div>
+              <div class="brief-mission-body"><div class="brief-mission-id">GOL-465</div><div class="brief-mission-title">Explore agent card design directions</div></div>
+            </div>
+            <div class="brief-foot">
+              <div class="brief-stat"><span>Role</span><b>planner</b></div>
+              <div class="brief-stat"><span>Model</span><b>gpt-5.6-sol</b></div>
+              <div class="brief-stat"><span>Last signal</span><b>just now</b></div>
+            </div>
+          </article>
+          <aside class="support-stack">
+            <div class="micro-note"><b>Best at</b><p>Answering "what is this agent doing?" in project and command views.</p></div>
+            <div class="micro-note"><b>Watch for</b><p>Idle cards need a meaningful standing-by treatment so the objective panel does not feel empty.</p></div>
+            <div class="state-strip"><span class="state-chip"><i></i>working</span><span class="state-chip waiting"><i></i>waiting</span><span class="state-chip idle"><i></i>idle</span></div>
+            <button class="select-btn" type="button" data-choice="Mission Briefing">Shortlist this direction</button>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section id="dossier">
+      <div class="section-head">
+        <div>
+          <div class="kicker">03 / Direction B</div>
+          <h2>Operator Dossier</h2>
+          <div class="concept-meta"><span class="tag">Identity first</span><span class="tag">Expressive</span><span class="tag">Role-led teams</span></div>
+        </div>
+        <div class="section-summary"><strong>Make the agent a recognizable operator.</strong> A technical identity plate uses role, call sign, and live presence to create character without becoming playful.</div>
+      </div>
+      <div class="showcase">
+        <span class="specimen-label">Primary specimen / identified operator</span>
+        <div class="canvas-grid">
+          <article class="ui-card dossier-card">
+            <div class="dossier-id">
+              <div class="dossier-avatar">SOL<i></i></div>
+              <div class="id-code"><b>OP-PLN-04</b>registered operator<br>channel reachable</div>
+            </div>
+            <div class="dossier-main">
+              <div class="dossier-eyebrow">Active operator</div>
+              <div class="dossier-name">sol:planner</div>
+              <div class="dossier-role"><b>Planning agent</b><span class="status-text">Working now</span></div>
+              <div class="dossier-rule"></div>
+              <div class="dossier-mission-label">Assigned mission</div>
+              <div class="dossier-ticket"><b>GOL-465</b><br>Explore agent card design directions</div>
+              <div class="dossier-fields">
+                <div class="field"><span>Project</span><b><i class="mini-icon">GO</i> golem</b></div>
+                <div class="field"><span>Harness</span><b><i class="mini-icon">OC</i> OpenCode</b></div>
+                <div class="field"><span>Model</span><b>gpt-5.6-sol</b></div>
+                <div class="field"><span>Last seen</span><b>just now</b></div>
+              </div>
+            </div>
+          </article>
+          <aside class="support-stack">
+            <div class="micro-note"><b>Best at</b><p>Making planners, builders, reviewers, and researchers distinct at a glance.</p></div>
+            <div class="micro-note"><b>Watch for</b><p>Roleless sessions lose the strongest visual ingredient and need a neutral identity system.</p></div>
+            <div class="state-strip"><span class="state-chip"><i></i>working</span><span class="state-chip waiting"><i></i>waiting</span><span class="state-chip offline"><i></i>offline</span></div>
+            <button class="select-btn" type="button" data-choice="Operator Dossier">Shortlist this direction</button>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section id="matrix">
+      <div class="section-head">
+        <div>
+          <div class="kicker">04 / Direction C</div>
+          <h2>Telemetry Matrix</h2>
+          <div class="concept-meta"><span class="tag">Scan first</span><span class="tag">Highest density</span><span class="tag">Roster view</span></div>
+        </div>
+        <div class="section-summary"><strong>Treat each card like an instrument panel.</strong> Stable labeled cells make many sessions fast to compare while the mission stays on one clean rail.</div>
+      </div>
+      <div class="showcase">
+        <span class="specimen-label">Primary specimen / dense operational scan</span>
+        <div class="canvas-grid">
+          <article class="ui-card matrix-card">
+            <div class="matrix-head">
+              <div class="project-glyph">GO</div>
+              <div class="matrix-name"><b>Golem open-source readiness overhaul</b><span>ses_0a7b...WVnITD</span></div>
+              <div class="matrix-state"><i class="dot-live"></i> WORKING</div>
+            </div>
+            <div class="matrix-grid">
+              <div class="matrix-cell"><span>Operator</span><b>sol:planner</b></div>
+              <div class="matrix-cell"><span>Project</span><b>golem</b></div>
+              <div class="matrix-cell"><span>Harness</span><b><i class="mini-icon">OC</i> OpenCode</b></div>
+              <div class="matrix-cell"><span>Signal</span><div class="matrix-signal" aria-label="Recent live signal"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+              <div class="matrix-cell"><span>Role</span><b>planner</b></div>
+              <div class="matrix-cell"><span>Model</span><b>gpt-5.6-sol</b></div>
+              <div class="matrix-cell"><span>Queue</span><b>0 dispatches</b></div>
+              <div class="matrix-cell"><span>Last seen</span><b>just now</b></div>
+            </div>
+            <div class="matrix-mission"><div class="matrix-mission-label">Current work</div><div class="matrix-mission-title"><span class="ticket-code">GOL-465</span> &middot; Explore agent card design directions</div><div class="matrix-open">OPEN &rarr;</div></div>
+          </article>
+          <aside class="support-stack">
+            <div class="micro-note"><b>Best at</b><p>Comparing a large roster where every value should stay in the same visual position.</p></div>
+            <div class="micro-note"><b>Watch for</b><p>The signal bars must remain a presence indicator, not imply token or throughput data we do not have.</p></div>
+            <div class="state-strip"><span class="state-chip"><i></i>working</span><span class="state-chip waiting"><i></i>waiting</span><span class="state-chip idle"><i></i>idle</span></div>
+            <button class="select-btn" type="button" data-choice="Telemetry Matrix">Shortlist this direction</button>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section id="trace">
+      <div class="section-head">
+        <div>
+          <div class="kicker">05 / Direction D</div>
+          <h2>Signal Trace</h2>
+          <div class="concept-meta"><span class="tag">State first</span><span class="tag">Diagnostic</span><span class="tag">Exception-friendly</span></div>
+        </div>
+        <div class="section-summary"><strong>Show the path from assignment to reachability.</strong> A vertical state trace turns waiting, queue, and channel problems into readable operational conditions.</div>
+      </div>
+      <div class="showcase">
+        <span class="specimen-label">Primary specimen / session state path</span>
+        <div class="canvas-grid">
+          <article class="ui-card trace-card">
+            <div class="trace-summary">
+              <div class="trace-agent"><div class="agent-glyph" style="width:44px;height:44px;font-size:12px">SOL</div><div><b>sol:planner</b><span>golem / OpenCode</span></div></div>
+              <div class="trace-current"><label>Current assignment</label><p><b>GOL-465</b>Explore agent card design directions</p></div>
+              <div class="trace-seen">last signal / just now</div>
+            </div>
+            <div class="trace-flow">
+              <div class="trace-title">Live state trace</div>
+              <div class="trace-node"><i class="trace-point"></i><div class="trace-label"><b>Session alive</b><span>Native process reporting</span></div><span class="trace-value">yes</span></div>
+              <div class="trace-node"><i class="trace-point"></i><div class="trace-label"><b>Channel reachable</b><span>Briefs and interrupts available</span></div><span class="trace-value">live</span></div>
+              <div class="trace-node"><i class="trace-point"></i><div class="trace-label"><b>Working</b><span>Planner role / active ticket</span></div><span class="trace-value">now</span></div>
+              <div class="trace-node"><i class="trace-point dim"></i><div class="trace-label"><b>Dispatch queue</b><span>No pending envelopes</span></div><span class="trace-value dim">0</span></div>
+            </div>
+          </article>
+          <aside class="support-stack">
+            <div class="micro-note"><b>Best at</b><p>Diagnosing waiting, unreachable, queued, revival-needed, and unacknowledged states.</p></div>
+            <div class="micro-note"><b>Watch for</b><p>This is a snapshot of conditions, not an event history. The language must avoid implying chronology.</p></div>
+            <div class="state-strip"><span class="state-chip"><i></i>healthy</span><span class="state-chip waiting"><i></i>waiting</span><span class="state-chip offline"><i></i>fault</span></div>
+            <button class="select-btn" type="button" data-choice="Signal Trace">Shortlist this direction</button>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section id="routing">
+      <div class="section-head">
+        <div>
+          <div class="kicker">06 / Direction E</div>
+          <h2>Routing Node</h2>
+          <div class="concept-meta"><span class="tag">Relationship first</span><span class="tag">Most distinctive</span><span class="tag">Wide canvas</span></div>
+        </div>
+        <div class="section-summary"><strong>Make the session the center of a live system.</strong> Project, ticket, model, and channel become connected ports rather than an undifferentiated metadata list.</div>
+      </div>
+      <div class="showcase">
+        <span class="specimen-label">Primary specimen / connected system node</span>
+        <div class="canvas-grid">
+          <article class="ui-card routing-card">
+            <svg viewBox="0 0 760 380" preserveAspectRatio="none" aria-hidden="true">
+              <path class="route-line live" d="M178,80 C280,80 270,160 330,178"/>
+              <path class="route-line live" d="M580,92 C490,92 500,155 430,178"/>
+              <path class="route-line live" d="M180,310 C260,310 280,235 330,210"/>
+              <path class="route-line" d="M580,310 C500,310 480,240 430,210"/>
+            </svg>
+            <div class="route-node route-project"><label>Project</label><b>GO / golem</b></div>
+            <div class="route-node route-ticket"><label>Current ticket</label><b><span class="ticket-code">GOL-465</span> / card directions</b></div>
+            <div class="route-node route-channel"><label>Channel</label><b style="color:var(--green)">reachable / live</b></div>
+            <div class="route-node route-model"><label>Runtime</label><b>OpenCode / gpt-5.6-sol</b></div>
+            <div class="route-core"><div><i class="dot-live"></i><b>sol:planner</b><span>working now</span></div></div>
+          </article>
+          <aside class="support-stack">
+            <div class="micro-note"><b>Best at</b><p>Explaining how project, work, runtime, and communication connect around one session.</p></div>
+            <div class="micro-note"><b>Watch for</b><p>Needs horizontal space and disciplined connector use; otherwise it becomes a diagram instead of a card.</p></div>
+            <div class="state-strip"><span class="state-chip"><i></i>linked</span><span class="state-chip waiting"><i></i>held</span><span class="state-chip offline"><i></i>broken link</span></div>
+            <button class="select-btn" type="button" data-choice="Routing Node">Shortlist this direction</button>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section id="deck">
+      <div class="section-head">
+        <div>
+          <div class="kicker">07 / Direction F</div>
+          <h2>Progressive Command Deck</h2>
+          <div class="concept-meta"><span class="tag best">Best hybrid</span><span class="tag">Action first</span><span class="tag">Command center</span></div>
+        </div>
+        <div class="section-summary"><strong>Separate reading from operating.</strong> A calm summary deck stays scannable while a visually distinct command bay holds brief, interrupt, and halt actions.</div>
+      </div>
+      <div class="showcase">
+        <span class="specimen-label">Primary specimen / summary plus command bay</span>
+        <div class="canvas-grid">
+          <article class="ui-card deck-card">
+            <div class="deck-summary">
+              <div class="project-glyph">GO</div>
+              <div class="deck-name"><b>Golem open-source readiness overhaul</b><span>sol:planner / golem</span></div>
+              <div class="deck-status"><i class="dot-live"></i> WORKING</div>
+            </div>
+            <div class="deck-mission"><label>Current</label><b>Explore agent card design directions</b><span>GOL-465</span></div>
+            <div class="deck-meta"><span class="deck-chip">planner</span><span class="deck-chip"><i class="mini-icon">OC</i> OpenCode</span><span class="deck-chip">gpt-5.6-sol</span><span class="deck-chip">seen now</span></div>
+            <div class="command-bay">
+              <div class="command-label"><span>Command channel</span><span>connected</span></div>
+              <div class="command-row"><div class="command-input">Send a brief to sol:planner...</div><button class="send-btn" type="button">Send</button></div>
+              <div class="command-actions"><button type="button">Interrupt</button><button type="button">Open details</button><button class="danger" type="button">Halt</button></div>
+            </div>
+          </article>
+          <aside class="support-stack">
+            <div class="micro-note"><b>Best at</b><p>Serving both roster and command-center contexts with a dedicated, semantically clear control zone.</p></div>
+            <div class="micro-note"><b>Watch for</b><p>Production needs a deliberate rule for when the command bay is expanded, collapsed, or absent.</p></div>
+            <div class="state-strip"><span class="state-chip"><i></i>working</span><span class="state-chip waiting"><i></i>waiting</span><span class="state-chip idle"><i></i>idle</span></div>
+            <button class="select-btn" type="button" data-choice="Progressive Command Deck">Shortlist this direction</button>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section id="decision">
+      <div class="section-head">
+        <div>
+          <div class="kicker">08 / Selection guide</div>
+          <h2>Choose the behavior, then the skin.</h2>
+        </div>
+        <div class="section-summary">Every direction is feasible with current data. The important choice is what the card should answer first in its most common context.</div>
+      </div>
+      <div class="decision-grid">
+        <article class="decision-card"><span class="num">BEST DEFAULT</span><h3>Mission Briefing</h3><p>Strongest balance of scan speed, character, and purpose without changing interaction complexity.</p></article>
+        <article class="decision-card"><span class="num">BEST FOR SCALE</span><h3>Telemetry Matrix</h3><p>Best when the Agents page needs to compare many live sessions in a stable grid.</p></article>
+        <article class="decision-card"><span class="num">BEST FOR CONTROL</span><h3>Command Deck</h3><p>Best when the card must remain a true control surface rather than only a navigation summary.</p></article>
+      </div>
+      <div class="recommendation"><b>My recommendation</b><p>Use <strong>Mission Briefing</strong> as the card shell, borrow the <strong>Operator Dossier</strong> identity treatment for role-bearing sessions, and use the <strong>Command Deck</strong> as an expanded variant only where controls are available.</p></div>
+    </section>
+  </main>
+</div>
+
+<div class="selection-dock" role="status" aria-live="polite"><span>SHORTLIST</span><span class="selection-list"></span></div>
+
+<script>
+  const choices = new Set();
+  const dock = document.querySelector('.selection-dock');
+  const list = document.querySelector('.selection-list');
+  document.querySelectorAll('.select-btn').forEach((button) => {
+    button.addEventListener('click', () => {
+      const choice = button.dataset.choice;
+      if (choices.has(choice)) {
+        choices.delete(choice);
+        button.classList.remove('selected');
+        button.textContent = 'Shortlist this direction';
+      } else {
+        choices.add(choice);
+        button.classList.add('selected');
+        button.textContent = 'Shortlisted';
+      }
+      list.textContent = [...choices].join(' + ');
+      dock.classList.toggle('visible', choices.size > 0);
+    });
+  });
+
+  const links = [...document.querySelectorAll('.toc a')];
+  const sections = links.map((link) => document.querySelector(link.getAttribute('href'))).filter(Boolean);
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      links.forEach((link) => link.classList.toggle('active', link.getAttribute('href') === '#' + entry.target.id));
+    });
+  }, { rootMargin: '-20% 0px -70% 0px' });
+  sections.forEach((section) => observer.observe(section));
+</script>
+</body>
+</html>
