@@ -4,12 +4,15 @@
 // never pollute a real project's board or its per-project ticket numbering.
 // Archive them in a finally block; never create scratch tickets in a real project.
 export const SMOKE_PROJECT = 'smoketests-000000';
-const API = 'http://dashboard.golem.localhost:7420';
+const DEFAULT_API = 'http://dashboard.golem.localhost:7420';
+// Isolated browser journeys set this to their temporary dashboard. Existing
+// smokes keep using the shared local dashboard without any call-site changes.
+const apiBase = () => process.env.GOLEM_SMOKE_API || DEFAULT_API;
 
 // Create a scratch ticket in the smoke project. `fields` overrides defaults
 // (kind, body, assignee, parent_id, etc.); the title is SMOKE-prefixed.
 export async function createScratchTicket(fields = {}) {
-  const res = await fetch(`${API}/api/tickets`, {
+  const res = await fetch(`${apiBase()}/api/tickets`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -26,7 +29,7 @@ export async function createScratchTicket(fields = {}) {
 
 // Archive a scratch ticket (best-effort — a no-op on an already-archived ticket).
 export async function archiveTicket(id) {
-  await fetch(`${API}/api/tickets/${encodeURIComponent(id)}`, {
+  await fetch(`${apiBase()}/api/tickets/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ state: 'archived', actor: 'smoke' }),

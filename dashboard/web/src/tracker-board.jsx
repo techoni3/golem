@@ -77,6 +77,23 @@ function stalenessInfo(updated_at) {
   return { text: `${days}d`, aged };
 }
 
+// Board order is deliberately a presentation concern: `rank` remains available
+// to the move API and no API/list ordering changes. Every TicketColumns caller
+// (Tracker and Specs) gets the same most-recently-updated-first ordering.
+function compareTicketUpdatedAtDesc(a, b) {
+  const aUpdatedAt = Date.parse(a?.updated_at || '');
+  const bUpdatedAt = Date.parse(b?.updated_at || '');
+  const aValid = Number.isFinite(aUpdatedAt);
+  const bValid = Number.isFinite(bUpdatedAt);
+
+  if (aValid && bValid && aUpdatedAt !== bUpdatedAt) return bUpdatedAt - aUpdatedAt;
+  if (aValid !== bValid) return aValid ? -1 : 1;
+
+  // IDs are required and unique for persisted cards; they keep equal or
+  // malformed timestamps deterministic instead of inheriting fetch order.
+  return String(a?.id || '').localeCompare(String(b?.id || ''));
+}
+
 function TrackerBoard({ view, route = {} }) {
   useStore();
   const projects = window.Store.getProjects();
@@ -322,20 +339,11 @@ function TicketColumns({ cols, tickets, projectByContract, resolveAssignee }) {
       onDragStart={onDragStart} onDragEnd={onDragEnd}>
       <div className="kanban tracker-kanban" style={{ gridTemplateColumns: `repeat(${cols.length}, minmax(220px, 1fr))` }}>
         {cols.map((c) => {
-          let colTickets = visibleTickets.filter((t) => t.state === c.id);
-          // TKT-0266: Done/Archived columns render in reverse-chronological
-          // order (most recently completed first). Other columns keep their
-          // rank/fetch order so drag-reordering semantics stay untouched.
-          // Sort key: done_at desc → state_changed_at desc → updated_at desc.
-          if (c.id === 'done' || c.id === 'archived') {
-            colTickets = colTickets.slice().sort((a, b) => {
-              const ta = Date.parse(a.done_at || a.state_changed_at || a.updated_at);
-              const tb = Date.parse(b.done_at || b.state_changed_at || b.updated_at);
-              if (!Number.isFinite(ta)) return 1;
-              if (!Number.isFinite(tb)) return -1;
-              return tb - ta; // desc
-            });
-          }
+          // Keep rank persistence and drag/drop semantics untouched: cards are
+          // only ordered for display, by their authoritative updated_at value.
+          const colTickets = visibleTickets
+            .filter((t) => t.state === c.id)
+            .sort(compareTicketUpdatedAtDesc);
           return (
             <ColumnDrop key={c.id} id={c.id} label={c.label} color={c.color} count={colTickets.length}>
               {colTickets.length === 0 && <div className="empty">empty</div>}
