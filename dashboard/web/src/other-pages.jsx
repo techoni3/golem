@@ -344,6 +344,9 @@ function LegacyNativeCardUnused({ session, name, queueCount = 0 }) {
   const working = session.status === 'busy' || session.status === 'waiting';
   const registered = session.registered || !!window.Store.getProjectByContractId(session.project_id);
   const pendingCount = Number(session.pending_count || queueCount || 0);
+  const channelUnavailable = session.channel_present === false
+    || (session.channel_present === true && ['unreachable', 'unverified', 'unhealthy'].includes(session.endpoint_health))
+    || (session.channel_present == null && session.reachable === false);
   const currentTicket = session.current_in_progress_ticket;
   const unackedWarnings = session.active_unacked_dispatches || [];
   const pathLabel = compactPath(session.cwd);
@@ -409,7 +412,7 @@ function LegacyNativeCardUnused({ session, name, queueCount = 0 }) {
           current: {currentTicket.display_id || currentTicket.id} · {currentTicket.title}
         </a>
       )}
-      {session.reachable === false && session.alive && (
+      {channelUnavailable && session.alive && (
         <div className="native-session-nochannel" title="live session with no golem channel registered — dispatches can queue, but briefs/interrupts cannot be delivered now">
           <span className="cc-nochannel-dot"/>
           no channel — dispatches queue until reachable

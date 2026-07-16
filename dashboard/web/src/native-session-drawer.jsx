@@ -80,6 +80,16 @@ function NativeSessionDrawer({ open, sessionId, onClose }) {
   const loaded = !!peek;
   const currentTicket = s?.current_in_progress_ticket ?? null;
   const pendingCount = Number(s?.pending_count || queue.length || 0);
+  const channelUnavailable = s?.channel_present === false
+    || (s?.channel_present === true && ['unreachable', 'unverified', 'unhealthy'].includes(s?.endpoint_health))
+    || (s?.channel_present == null && s?.reachable === false);
+  const endpointLabel = s?.endpoint_health
+    ?? (s?.reachable === true ? 'healthy' : s?.reachable === false ? 'unreachable' : 'unknown');
+  const deliveryLabel = s?.delivery_ready === true
+    ? 'ready'
+    : s?.delivery_reason
+      ? `not ready · ${s.delivery_reason}`
+      : s?.reachable === false ? 'not ready' : 'unknown';
 
   const metaRows = [
     ['name', s?.name || '—', false],
@@ -91,7 +101,8 @@ function NativeSessionDrawer({ open, sessionId, onClose }) {
     ['started', s?.started_at ? window.SubstrateFmt.fmtTimeAgo(s.started_at) : '—', false],
     ['last seen', s?.last_seen_at || s?.updated_at ? window.SubstrateFmt.fmtTimeAgo(s.last_seen_at || s.updated_at) : 'unknown', false],
     ['process', s?.alive ? 'alive' : 'not alive', false],
-    ['endpoint', s?.reachable === true ? 'healthy' : s?.reachable === false ? 'unreachable' : 'unknown', false],
+    ['endpoint', endpointLabel, false],
+    ['delivery', deliveryLabel, false],
     ['transcript', peek?.transcript_path || (loaded ? 'not found' : '…'), true],
   ];
 
@@ -113,7 +124,7 @@ function NativeSessionDrawer({ open, sessionId, onClose }) {
                   : registered
                     ? <><span>·</span><span>{s?.project_id || ''}</span></>
                     : <><span>·</span><span style={{ color: 'var(--status-blocked)' }}>unregistered</span></>}
-                {s?.alive && s.reachable === false && <><span>·</span><span className="nsd-nochannel">no channel</span></>}
+                {s?.alive && channelUnavailable && <><span>·</span><span className="nsd-nochannel">no channel</span></>}
               </div>
             </div>
             <button className="drawer-close" onClick={onClose}><Icon.Close/></button>

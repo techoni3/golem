@@ -44,6 +44,16 @@ const sessionRows = [
 writeFileSync(path.join(home, 'sessions.json'), JSON.stringify({ sessions: sessionRows }));
 const delivered = [];
 const channelServer = http.createServer((req, res) => {
+  const requestUrl = new URL(req.url, 'http://127.0.0.1');
+  if (requestUrl.pathname === '/healthz') {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({
+      canonical_id: requestUrl.searchParams.get('session_id'),
+      owner_token: requestUrl.searchParams.get('owner_token'),
+      delivery_ready: false,
+    }));
+    return;
+  }
   let body = '';
   req.on('data', (chunk) => { body += chunk; });
   req.on('end', () => { delivered.push({ url: req.url, body }); res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}'); });
@@ -55,9 +65,18 @@ writeFileSync(path.join(home, 'channels.json'), JSON.stringify({ channels: [
   { session_id: 'waiting-fixture-session', pid: worker.pid, host: '127.0.0.1', port: channelPort, harness: 'opencode', updated_at: waitingRecent },
   { session_id: 'idle-older-session', pid: worker.pid, host: '127.0.0.1', port: channelPort, harness: 'codex', updated_at: idleOlder },
   { session_id: 'idle-newer-session', pid: worker.pid, host: '127.0.0.1', port: channelPort, harness: 'opencode', updated_at: idleNewer },
-  { session_id: 'legacy-fixture-session', pid: worker.pid, host: '127.0.0.1', port: channelPort, harness: 'codex', updated_at: legacyRecent },
   { session_id: 'cross-project-session', pid: worker.pid, host: '127.0.0.1', port: channelPort, harness: 'opencode', updated_at: now },
 ] }));
+writeFileSync(path.join(home, 'session-facts.json'), JSON.stringify({ version: 1, facts: [{
+  canonical_id: 'healthy-working-session', harness: 'codex', revision: 1,
+  observed_at: now, status: 'busy', name: 'Healthy Working Codex', model: 'gpt-5.6-fixture',
+  project_path: alpha, locator: { raw_session_id: 'healthy-working-session' },
+}] }));
+writeFileSync(path.join(home, 'endpoint-leases.json'), JSON.stringify({ version: 1, leases: [{
+  canonical_id: 'healthy-working-session', owner_token: 'browser-fixture-owner',
+  host: '127.0.0.1', port: channelPort, harness: 'codex', kind: 'codex-supervisor',
+  renewed_at: now, expires_at: new Date(Date.now() + 60_000).toISOString(),
+}] }));
 
 const socket = net.createServer();
 await new Promise((resolve) => socket.listen(0, '127.0.0.1', resolve));
@@ -95,6 +114,10 @@ try {
   const dispatchable = await json(`/api/sessions/dispatchable?project=${encodeURIComponent(alphaId)}`);
   ok(!dispatchable.some((s) => s.session_id === 'stale-fixture-session'), 'stale session is not dispatchable');
   ok(dispatchable.some((s) => s.session_id === 'idle-fixture-session'), 'live fixture session exposes canonical agent facts');
+  const healthyWorking = dispatchable.find((s) => s.session_id === 'healthy-working-session');
+  ok(healthyWorking?.channel_present === true && healthyWorking?.endpoint_health === 'healthy' && healthyWorking?.delivery_ready === false && healthyWorking?.delivery_reason === 'busy' && healthyWorking?.reachable === false, 'healthy working managed Codex remains dispatchable with distinct channel and delivery facts');
+  const missingChannel = dispatchable.find((s) => s.session_id === 'legacy-fixture-session');
+  ok(missingChannel?.channel_present === false && missingChannel?.delivery_reason === 'missing_channel' && missingChannel?.reachable === false, 'genuine missing-channel fixture retains unreachable compatibility facts');
   const queued = await json(`/api/tickets/${hostile.id}/dispatch`, { method: 'POST', body: JSON.stringify({ session_id: 'idle-fixture-session', mode: 'when_idle' }) });
   ok(queued.queued === true || queued.pending === true || queued.mode === 'when_idle', 'busy-session dispatch is durably queued for idle delivery');
 
@@ -108,6 +131,17 @@ try {
   await page.waitForSelector('[role="dialog"]');
   ok(await page.locator('.drawer-ticket[role="dialog"][aria-modal="true"]:visible').count() === 1, 'shared accessible drawer renders as a modal dialog');
   ok(await page.locator('.app > .main[inert][aria-hidden="true"]').count() === 1, 'open drawer makes background inert');
+  const dispatchPicker = page.locator('.td-prop-dispatch').filter({ has: page.locator('.td-prop-label', { hasText: 'Dispatch to' }) }).locator('.ps-trigger');
+  await dispatchPicker.click();
+  const healthyWorkingOption = page.locator('.ps-option').filter({ hasText: 'Healthy Working Codex' });
+  ok((await healthyWorkingOption.innerText()).includes('working · will queue'), 'dispatch picker labels a healthy busy target as working and queueable');
+  await healthyWorkingOption.click();
+  await page.waitForFunction(() => [...document.querySelectorAll('.td-dispatch-mode-btn.active')].some((button) => button.textContent === 'When idle'));
+  ok(await page.locator('.td-dispatch-mode-btn.active').filter({ hasText: 'When idle' }).count() >= 1, 'healthy busy target defaults dispatch to when idle');
+  await dispatchPicker.click();
+  const missingChannelOption = page.locator('.ps-option').filter({ hasText: 'Legacy Status' });
+  ok((await missingChannelOption.innerText()).includes('unreachable · will queue'), 'dispatch picker keeps genuine missing-channel target unreachable');
+  await page.keyboard.press('Escape');
   const stateControl = page.locator('.td-prop').filter({ has: page.locator('.td-prop-label', { hasText: 'State' }) }).locator('.ps-trigger');
   await stateControl.click();
   await page.locator('.ps-option').filter({ hasText: 'in_progress' }).click();
@@ -173,12 +207,14 @@ try {
   ok(true, 'sidebar project switch updates the route');
   const projectSessions = page.locator('.pv-section').filter({ hasText: 'Sessions in this project' }).locator('.native-session-card');
   const projectSessionNames = await projectSessions.locator('.agent-card-name').allTextContents();
-  ok(await page.locator('.project-hero-meta').getByText('5 live sessions', { exact: true }).count() === 1 && projectSessionNames.length === 5, 'project hero count matches five alive project-session cards');
-  ok(projectSessionNames.join('|') === 'Fixture Builder|Waiting Reviewer|Idle Newer|Legacy Status|Idle Older', 'project sessions include busy, waiting, idle, and legacy alive rows in last-seen order');
+  ok(await page.locator('.project-hero-meta').getByText('6 live sessions', { exact: true }).count() === 1 && projectSessionNames.length === 6, 'project hero count matches six alive project-session cards');
+  ok(projectSessionNames.join('|') === 'Fixture Builder|Healthy Working Codex|Waiting Reviewer|Idle Newer|Legacy Status|Idle Older', 'project sessions include healthy busy, missing-channel, waiting, idle, and legacy rows in last-seen order');
   const busyStatus = await projectSessions.filter({ hasText: 'Fixture Builder' }).locator('.agent-status-badge').innerText();
   const waitingStatus = await projectSessions.filter({ hasText: 'Waiting Reviewer' }).locator('.agent-status-badge').innerText();
   ok(busyStatus.trim().toLowerCase() === 'working', 'busy project card visibly renders Working');
   ok(waitingStatus.trim().toLowerCase() === 'waiting', 'waiting project card visibly renders Waiting');
+  ok(await projectSessions.filter({ hasText: 'Healthy Working Codex' }).locator('.native-session-nochannel').count() === 0, 'healthy working card never renders a no-channel warning');
+  ok(await projectSessions.filter({ hasText: 'Legacy Status' }).locator('.native-session-nochannel').count() === 1, 'genuine missing-channel card retains the warning');
   ok(!projectSessionNames.includes('Stale Ghost') && !projectSessionNames.includes('Beta Builder'), 'project sessions exclude dead and cross-project rows');
   const selectorNames = await page.evaluate((projectId) => {
     const state = window.Store.getState();
@@ -196,16 +232,17 @@ try {
   const projectIconImages = projectSessions.locator('.agent-harness-icon img, .agent-model-icon img');
   const projectHarnessImages = projectSessions.locator('.agent-harness-icon img');
   const projectModelImages = projectSessions.locator('.agent-model-icon img');
-  ok(await projectHarnessImages.count() === 5 && await projectModelImages.count() === 5 && await projectIconImages.evaluateAll((images) => images.every((image) => image.complete && image.naturalWidth > 0 && (image.src.startsWith('data:image/svg+xml') || new URL(image.src).origin === location.origin))), 'five project cards render bundled harness and model SVG icons');
+  ok(await projectHarnessImages.count() === 6 && await projectModelImages.count() === 6 && await projectIconImages.evaluateAll((images) => images.every((image) => image.complete && image.naturalWidth > 0 && (image.src.startsWith('data:image/svg+xml') || new URL(image.src).origin === location.origin))), 'six project cards render bundled harness and model SVG icons');
   const harnessIcons = projectSessions.locator('.agent-harness-icon[role="img"]');
-  ok(await harnessIcons.count() === 5 && await harnessIcons.evaluateAll((icons) => icons.every((icon) => icon.getAttribute('aria-label')?.startsWith('harness ') && !icon.querySelector(':scope > span'))), 'five harness SVG icons retain accessible names without text-initial fallbacks');
+  ok(await harnessIcons.count() === 6 && await harnessIcons.evaluateAll((icons) => icons.every((icon) => icon.getAttribute('aria-label')?.startsWith('harness ') && !icon.querySelector(':scope > span'))), 'six harness SVG icons retain accessible names without text-initial fallbacks');
   await page.goto(`${base}/agents`, { waitUntil: 'networkidle' });
-  const agentCard = page.locator('.native-session-card').filter({ hasText: 'Fixture Builder' });
+  const agentCard = page.locator('.native-session-card').filter({ hasText: 'Healthy Working Codex' });
   await agentCard.focus();
   await page.keyboard.press('Enter');
   await page.waitForSelector('[role="dialog"]');
   const agentText = await page.locator('[role="dialog"]').innerText();
-  for (const fact of ['session_id', 'harness', 'last seen', 'endpoint', 'Fixture Builder']) ok(agentText.toLowerCase().includes(fact.toLowerCase()), `agent detail shows canonical ${fact} fact`);
+  for (const fact of ['session_id', 'harness', 'last seen', 'endpoint', 'delivery', 'Healthy Working Codex']) ok(agentText.toLowerCase().includes(fact.toLowerCase()), `agent detail shows canonical ${fact} fact`);
+  ok(agentText.toLowerCase().includes('healthy') && !agentText.toLowerCase().includes('no channel'), 'healthy working drawer shows a healthy endpoint without a missing-channel badge');
   await page.evaluate((id) => window.Router.openTicket(id), hostile.id);
   await page.waitForFunction(() => document.querySelectorAll('[role="dialog"]').length === 2);
   ok(await page.locator('.app > .main[inert]').count() === 1, 'nested drawers keep the background inert');

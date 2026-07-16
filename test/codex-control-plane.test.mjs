@@ -5,6 +5,7 @@ import { createServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import WebSocket from 'ws';
 
 // GOL-476 is one control-plane journey: real dashboard + SQLite and a real
 // managed App Server supervisor deliver every supported non-ticket control as
@@ -106,6 +107,33 @@ async function awaitControl(supervisor, envelopeId, label) {
     return delivery?.state === 'completed' && record.health?.delivery_ready ? delivery : null;
   }, `${label} controlled turn completion`, 75_000);
   assert.equal(completed.turn_id, started.turn_id);
+}
+
+async function waitForNativeSessionWs(base, sessionId, predicate, label) {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(base.replace(/^http/, 'ws') + '/ws');
+    const timer = setTimeout(() => {
+      try { ws.close(); } catch { /* ignore */ }
+      reject(new Error(`${label} timed out`));
+    }, 15_000);
+    const finish = (result, error = null) => {
+      clearTimeout(timer);
+      try { ws.close(); } catch { /* ignore */ }
+      if (error) reject(error); else resolve(result);
+    };
+    ws.on('message', (data) => {
+      let message;
+      try { message = JSON.parse(data.toString()); } catch { return; }
+      const rows = message.type === 'snapshot'
+        ? message.payload?.native_sessions
+        : message.type === 'native-sessions-update'
+          ? message.native_sessions
+          : null;
+      const row = Array.isArray(rows) ? rows.find((candidate) => candidate.session_id === sessionId) : null;
+      if (row && predicate(row)) finish(row);
+    });
+    ws.on('error', (error) => finish(null, error));
+  });
 }
 
 function approvalHeaders(record) {
@@ -225,6 +253,39 @@ try {
   // not delivery-ready. The failed durable envelope is never injected later.
   supervisor.noteThreadStatus({ threadId: first.thread_id, status: { type: 'active', activeFlags: [] } });
   await waitFor(() => readCodexSupervisor(sessionId)?.health?.delivery_ready === false, 'busy managed Codex delivery gate');
+  const assertBusyDeliveryFacts = (row, surface) => {
+    assert.equal(row.status, 'busy', `${surface} retains the active session status`);
+    assert.equal(row.channel_present, true, `${surface} distinguishes a present channel`);
+    assert.equal(row.endpoint_health, 'healthy', `${surface} retains authenticated endpoint health`);
+    assert.equal(row.delivery_ready, false, `${surface} reports immediate delivery as unavailable`);
+    assert.equal(row.delivery_reason, 'busy', `${surface} reports active delivery as busy rather than channel loss`);
+    assert.equal(row.reachable, false, `${surface} keeps reachable as the immediate-delivery compatibility alias`);
+  };
+  const busyNative = await waitFor(async () => {
+    const rows = await (await fetch(`${dashboard.base}/api/native-sessions`)).json();
+    const row = rows.find((candidate) => candidate.session_id === sessionId);
+    return row?.status === 'busy' && row.delivery_ready === false ? row : null;
+  }, 'managed Codex busy native-session facts');
+  assertBusyDeliveryFacts(busyNative, 'native REST');
+  const busySnapshot = await waitFor(async () => {
+    const snapshot = await (await fetch(`${dashboard.base}/api/snapshot`)).json();
+    const row = snapshot.native_sessions?.find((candidate) => candidate.session_id === sessionId);
+    return row?.status === 'busy' && row.delivery_ready === false ? row : null;
+  }, 'managed Codex busy snapshot facts');
+  assertBusyDeliveryFacts(busySnapshot, 'snapshot');
+  const busyWs = await waitForNativeSessionWs(
+    dashboard.base,
+    sessionId,
+    (row) => row.status === 'busy' && row.delivery_ready === false,
+    'managed Codex busy WebSocket facts',
+  );
+  assertBusyDeliveryFacts(busyWs, 'WebSocket');
+  const busyDispatchable = await waitFor(async () => {
+    const rows = await (await fetch(`${dashboard.base}/api/sessions/dispatchable?project=${encodeURIComponent(first.project_id)}`)).json();
+    const row = rows.find((candidate) => candidate.session_id === sessionId);
+    return row?.delivery_ready === false ? row : null;
+  }, 'managed Codex busy dispatchable target');
+  assertBusyDeliveryFacts(busyDispatchable, 'dispatchable REST');
   const beforeBusyRoleDeliveries = readCodexSupervisor(sessionId).inbox.deliveries.length;
   const busyRole = await post(dashboard.base, `/api/sessions/${encodeURIComponent(sessionId)}/role`, { role: 'builder' });
   assert.equal(busyRole.response.status, 200, busyRole.text);
@@ -236,6 +297,13 @@ try {
   assert.equal(readCodexSupervisor(sessionId).inbox.deliveries.length, beforeBusyRoleDeliveries, 'busy role activation is never injected mid-turn');
   supervisor.noteThreadStatus({ threadId: first.thread_id, status: { type: 'idle' } });
   await waitFor(() => readCodexSupervisor(sessionId)?.health?.delivery_ready === true, 'managed Codex gate restored after synthetic busy boundary');
+  const idleNative = await waitFor(async () => {
+    const rows = await (await fetch(`${dashboard.base}/api/native-sessions`)).json();
+    const row = rows.find((candidate) => candidate.session_id === sessionId);
+    return row?.delivery_ready === true ? row : null;
+  }, 'managed Codex native-session delivery restored');
+  assert.equal(idleNative.delivery_reason, 'ready');
+  assert.equal(idleNative.reachable, true);
 
   // A live OpenCode channel retains the legacy /role transport even though
   // the dashboard now allocates the same durable role_assign envelope first.
@@ -319,7 +387,7 @@ try {
   }, 'permission decline stays fail-closed because the App Server schema has no deny result');
   supervisor.rpc.send = originalSend;
 
-  console.log('GOL-482 Codex control-plane journey passed: durable typed role assignment, saved busy-role warning, legacy OpenCode /role, gated interrupt/halt, and owner-mediated approvals.');
+  console.log('GOL-482/GOL-498 Codex control-plane journey passed: typed controls, busy channel-presence/delivery facts across REST/snapshot/WebSocket/dispatchable rows, saved busy-role warning, legacy OpenCode /role, gated interrupt/halt, and owner-mediated approvals.');
 } finally {
   await new Promise((resolve) => legacyRoleChannel?.server.close(resolve) ?? resolve());
   await supervisor?.stop({ deleteThread: true }).catch(() => {});

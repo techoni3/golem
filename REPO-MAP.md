@@ -1,24 +1,23 @@
 # REPO-MAP.md
-> Last verified: 2026-07-16 @ cb3c409 — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-17 @ 1b24230 — maintained via golem:docs-maintenance.
 ## Directory structure
-- `substrate/` — plugin source of truth; design labs are isolated until chosen.
+- `substrate/` — plugin source; design labs stay isolated.
 - `plugin/` — generated CC render; never hand-edit.
-- `cli/` — thin `golem` command entry point.
+- `cli/` — `golem` command entry point.
 - `lib/` — runtime, role, compiler, and managed-harness helpers.
-- `dashboard/server/` — Fastify API and `tracker.db` owner.
-- `dashboard/web/` → `dashboard/dist/` — pinned React production artifact.
-- `mcp/channel/` — per-session HTTP/MCP channel.
-- `shims/opencode/` — maps events into hook/session registries.
+- `dashboard/server/` — Fastify API and tracker owner.
+- `dashboard/web/` → `dashboard/dist/` — React production artifact.
+- `mcp/channel/` — channel server.
+- `shims/opencode/` — maps events into registries.
 - `test/` — journey tests.
 
 ## Key modules & entry points
 ### `dashboard/server/index.js`
-- Registers REST/WS; project names resolve only when unique; fact changes rebroadcast.
-- Invariant: agents use HTTP/MCP, never direct DB writes.
+- Registers REST/WS; uniquely resolves project names; agents use HTTP/MCP, never direct DB writes.
 ### `tracker-db.js` + `phase-machine.js` + `team-assist.js`
 - Phase is source of truth; `state` derives from it; assists suggest but never dispatch.
 ### `dashboard/server/native-sessions.js`
-- Merges registries with facts; Codex owns managed thread name/status/model while `session-facts.js` owns freshness/leases. A healthy lease collapses its raw hook duplicate.
+- Merges registries with facts; Codex owns thread name/status/model and `session-facts.js` owns freshness/leases. A healthy lease collapses its raw hook duplicate.
 ### `lib/codex-supervisor.js` + `lib/codex-tui-bridge.js` + `lib/codex-app-server-contract.js`
 - Pinned stdio App Server owner; its private one-TUI bridge preserves native approvals while typed delivery targets only an idle canonical thread.
 ### `substrate/hooks/*.sh`
@@ -27,12 +26,12 @@
 - Exposes briefs, roles, replies, consults, gates, and tracker tools; CC readiness requires initialized, eligible Channels.
 
 ## Data flow
-Hooks/shims write `~/.golem/`; dashboard owns envelopes and routes only readiness-qualified endpoints. Managed Codex uses durable typed turns; CC/OC retain `/role`.
+Hooks/shims write `~/.golem/`; dashboard owns envelopes and routes qualified endpoints. Managed Codex uses durable typed turns; CC/OC retain `/role`. A healthy channel may be busy/not-ready: native and dispatchable rows separate channel presence from delivery readiness, and busy/waiting rows remain queueable.
 
 ## Constraints & gotchas
 - Claude runs cached render bytes; sync + update + `/reload-plugins` after edits.
 - `plugin/` is a render target, not the source of truth; hand edits there are overwritten.
-- Ordinary remote Codex TUIs are Tier B pull-only; `golem codex` is the private managed bridge. Raw role/interrupt/halt stay gated.
+- Ordinary Codex TUIs are Tier B pull-only; `golem codex` is private. Raw role/interrupt/halt stay gated.
 
 ## Common tasks
 | Task | Files | Verify with |

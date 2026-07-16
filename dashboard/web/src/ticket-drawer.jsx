@@ -215,10 +215,20 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
       if (s.session_id) liveStatus.set(s.session_id, s.status ?? null);
     }
     return dispatchable.map((s) => {
-      // TKT-0369: an alive session whose channel MCP died stays in the picker
-      // (reachable:false) — force a grey dot + an explanatory hint so the user
-      // knows an immediate push can't reach it (queue instead).
-      if (s.reachable === false) {
+      const status = liveStatus.get(s.session_id) ?? s.status ?? null;
+      const deliveryReady = s.delivery_ready ?? s.reachable !== false;
+      const deliveryReason = s.delivery_reason ?? null;
+      // A healthy managed Codex target may be busy/waiting with its direct
+      // typed delivery gate closed. Keep its live status visible and make the
+      // safe when-idle queue explicit; only actual channel loss is unreachable.
+      if (!deliveryReady && (deliveryReason === 'busy' || deliveryReason === 'waiting')) {
+        const hintStatus = deliveryReason === 'busy' ? 'working' : 'waiting';
+        const dot = deliveryReason === 'busy' ? 'var(--status-running)' : 'var(--status-review)';
+        let hint = `${hintStatus} · will queue`;
+        if (s.pending_count > 0) hint += ` · ${s.pending_count} queued`;
+        return { value: s.session_id, label: s.label, dot, hint };
+      }
+      if (!deliveryReady) {
         let hint = 'unreachable · will queue';
         if (s.pending_count > 0) hint += ` · ${s.pending_count} queued`;
         // TKT-0369 consult cns-9082c5 V1: --text-2 (not --text-3) so the dot
@@ -226,7 +236,6 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
         // color carrier for status, so it needs to pop while staying "neutral".
         return { value: s.session_id, label: s.label, dot: 'var(--text-2)', hint };
       }
-      const status = liveStatus.get(s.session_id) ?? s.status ?? null;
       const dot = status === 'idle' ? 'var(--status-active)'
         : status === 'busy' ? 'var(--status-running)'
         : status === 'waiting' ? 'var(--status-review)'
@@ -249,12 +258,14 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
     const s = window.Store.getNativeSessionById?.(pendingDispatch.session_id);
     return !s || !s.alive;
   })();
-  // TKT-0369: a live target without its harness integration is held pending
-  // until the delivery endpoint becomes reachable again.
+  // A live target without a healthy integration is held pending until that
+  // integration returns. Busy/waiting delivery holds are normal queue state.
   const pendingTargetUnreachable = (() => {
     if (!pendingDispatch || pendingTargetOffline) return false;
     const d = dispatchable.find((s) => s.session_id === pendingDispatch.session_id);
-    return !!d && d.reachable === false;
+    return !!d && (d.channel_present === false
+      || (d.channel_present === true && ['unreachable', 'unverified', 'unhealthy'].includes(d.endpoint_health))
+      || (d.channel_present == null && d.reachable === false));
   })();
   const pendingLabel = pendingDispatch
     ? (labelBySession.get(pendingDispatch.session_id)
@@ -841,12 +852,12 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                         // Default the mode from the selected target's live
                         // status: idle → Now, busy/waiting → When idle (the
                         // user can override via the toggle below). TKT-0369: an
-                        // unreachable target defaults to When-idle even when
-                        // its live status is idle — an immediate push can't land.
+                        // Any target without immediate delivery defaults to
+                        // When-idle even when its live status is idle.
                         const sel = dispatchable.find((s) => s.session_id === v);
                         const liveSt = nativeSessionsNow.find((s) => s.session_id === v)?.status ?? null;
                         const st = sel ? (liveSt ?? sel.status ?? null) : null;
-                        setDispatchMode(sel && sel.reachable === false ? 'when_idle' : (st === 'idle' ? 'now' : 'when_idle'));
+                        setDispatchMode(sel && (sel.delivery_ready === false || (sel.delivery_ready == null && sel.reachable === false)) ? 'when_idle' : (st === 'idle' ? 'now' : 'when_idle'));
                       }}
                     />
                     <div className="td-dispatch-actions">
@@ -1271,7 +1282,7 @@ function QuestionReturn({
           </option>
           {dispatchable.map((s) => (
             <option key={s.session_id} value={s.session_id}>
-              {s.label}{s.session_id === asker ? ' (asker)' : ''}{s.reachable === false ? ' (unreachable)' : ''}
+              {s.label}{s.session_id === asker ? ' (asker)' : ''}{s.delivery_ready === false && (s.delivery_reason === 'busy' || s.delivery_reason === 'waiting') ? ' (will queue)' : (s.delivery_ready === false || (s.delivery_ready == null && s.reachable === false)) ? ' (unreachable)' : ''}
             </option>
           ))}
         </select>

@@ -246,7 +246,10 @@ function AgentCard({ session, name, queueCount = 0, setRoute, showControls = fal
   const currentTicket = s.current_in_progress_ticket;
   const pendingCount = Number(s.pending_count || queueCount || 0);
   const unackedWarnings = s.active_unacked_dispatches || [];
-  const needsRevival = pendingCount > 0 && (statusKind === 'dead' || !hasChannel);
+  const channelUnavailable = s.channel_present === false
+    || (s.channel_present === true && ['unreachable', 'unverified', 'unhealthy'].includes(s.endpoint_health))
+    || (s.channel_present == null && s.reachable === false);
+  const needsRevival = pendingCount > 0 && (statusKind === 'dead' || channelUnavailable);
   const projectLabel = project?.name || s.project_id || 'unregistered project';
   const fallbackProject = project || { glyph: '?', color: 'var(--text-3)' };
   const lastSeen = window.Store.getSessionLastSeen?.(s) || 0;
@@ -350,7 +353,7 @@ function AgentCard({ session, name, queueCount = 0, setRoute, showControls = fal
         {roleToast && <div className="orch-toast err cc-toast" key={roleToast.id}>{roleToast.msg}</div>}
       </div>
 
-      {!showControls && s.reachable === false && s.alive && (
+      {!showControls && channelUnavailable && s.alive && (
         <div className="native-session-nochannel" title="live session with no golem channel registered — dispatches can queue, but briefs/interrupts cannot be delivered now">
           <span className="cc-nochannel-dot"/>no channel — dispatches queue until reachable
         </div>

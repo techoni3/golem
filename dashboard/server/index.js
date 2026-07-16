@@ -572,8 +572,46 @@ async function main() {
     };
   }
 
+  const NORMALIZED_DELIVERY_REASONS = new Set([
+    'ready', 'busy', 'waiting', 'missing_channel', 'endpoint_unhealthy', 'not_ready',
+  ]);
+
+  function deriveSessionDelivery(session, channel) {
+    const channel_present = !!channel;
+    const endpoint_health = channel?.endpoint_health
+      ?? (session.fact_observed_at ? 'unreachable' : (session.endpoint_health ?? 'legacy'));
+    const delivery_ready = isChannelDeliveryReady(channel);
+    const endpointUnhealthy = endpoint_health === 'unreachable'
+      || endpoint_health === 'unverified'
+      || endpoint_health === 'unhealthy';
+    const publishedReason = typeof channel?.delivery_reason === 'string'
+      ? channel.delivery_reason
+      : channel?.consumer_reason;
+    const normalizedReason = NORMALIZED_DELIVERY_REASONS.has(publishedReason)
+      ? publishedReason
+      : null;
+    const delivery_reason = delivery_ready ? 'ready'
+      : !channel_present ? 'missing_channel'
+      : endpointUnhealthy ? 'endpoint_unhealthy'
+      : session.status === 'waiting' ? 'waiting'
+      : session.status === 'busy' ? 'busy'
+      : normalizedReason ?? 'not_ready';
+    return {
+      channel_present,
+      endpoint_health,
+      delivery_ready,
+      delivery_reason,
+      // Existing routing callers use reachable for immediate eligibility. Keep
+      // that meaning while exposing endpoint presence separately above.
+      reachable: delivery_ready,
+    };
+  }
+
+  function hasAuthenticatedHealthyChannel(session) {
+    return session.channel_present === true && session.endpoint_health === 'healthy';
+  }
+
   function enrichSessionRows(rows, channels = []) {
-    const channelIds = new Set((channels || []).map((c) => c.session_id).filter(Boolean));
     const channelById = new Map((channels || []).filter((c) => c.session_id).map((c) => [c.session_id, c]));
     const pendingBySession = tracker.countPendingDispatchesBySession();
     const unackedBySession = new Map();
@@ -582,18 +620,20 @@ async function main() {
       arr.push(warning);
       unackedBySession.set(warning.session_id, arr);
     }
-    return (rows || []).map((s) => ({
-      ...s,
-      role: s.role ?? null,
-      harness: s.harness ?? 'claudecode',
-      reachable: channelIds.has(s.session_id) && isChannelDeliveryReady(channelById.get(s.session_id)),
-      endpoint_health: channelById.get(s.session_id)?.endpoint_health ?? (s.fact_observed_at ? 'unreachable' : (s.endpoint_health ?? 'legacy')),
-      pending_count: pendingBySession.get(s.session_id) ?? 0,
-      current_in_progress_ticket: tracker.currentInProgressTicketForSession(s.session_id),
-      has_unacked_dispatch: (unackedBySession.get(s.session_id) ?? []).length > 0,
-      active_unacked_dispatches: unackedBySession.get(s.session_id) ?? [],
-      project_id: s.project_id ?? null,
-    }));
+    return (rows || []).map((s) => {
+      const delivery = deriveSessionDelivery(s, channelById.get(s.session_id));
+      return {
+        ...s,
+        role: s.role ?? null,
+        harness: s.harness ?? 'claudecode',
+        ...delivery,
+        pending_count: pendingBySession.get(s.session_id) ?? 0,
+        current_in_progress_ticket: tracker.currentInProgressTicketForSession(s.session_id),
+        has_unacked_dispatch: (unackedBySession.get(s.session_id) ?? []).length > 0,
+        active_unacked_dispatches: unackedBySession.get(s.session_id) ?? [],
+        project_id: s.project_id ?? null,
+      };
+    });
   }
 
   function slimTicket(ticket) {
@@ -1915,9 +1955,11 @@ async function main() {
 
   // GET /api/sessions/dispatchable — live native sessions in a project (alive,
   // matching the requested contract project_id). Channel presence is an
-  // ANNOTATION, not a filter (TKT-0369): an alive session whose channel MCP
-  // died stays listed with reachable:false so the UI can offer durable
-  // when-idle queueing (delivered when the channel re-registers). `project`
+  // ANNOTATION, not a filter (TKT-0369): an alive legacy session whose channel
+  // MCP died stays listed with reachable:false so the UI can offer durable
+  // when-idle queueing (delivered when the channel re-registers). Fact-backed
+  // rows still require an authenticated healthy endpoint, but not immediate
+  // delivery readiness: healthy busy/waiting targets are queueable. `project`
   // omitted → all dispatchable sessions (each annotated with its project_id).
   fastify.get('/api/sessions/dispatchable', async (req) => {
     const wanted = req.query?.project != null ? resolveProjectId(req.query.project) : null;
@@ -1933,18 +1975,17 @@ async function main() {
     }
     const channelBySession = new Map();
     for (const c of channels) if (c.session_id) channelBySession.set(c.session_id, c);
-    const pendingBySession = tracker.countPendingDispatchesBySession();
     const teamBySession = new Map(buildTeamRows(wanted, { channels, aliveOnly: true }).map((row) => [row.session_id, row]));
 
     const out = [];
-    for (const s of state.nativeSessions()) {
+    for (const s of enrichSessionRows(state.nativeSessions(), channels)) {
       if (!s.alive) continue;
       if (wanted != null && s.project_id !== wanted) continue;
       const ch = channelBySession.get(s.session_id);
       // Once a harness has adopted canonical facts, an authenticated healthy
       // endpoint lease is part of dispatchability. Legacy rows retain the
       // queue-while-unreachable compatibility behavior during migration.
-      if (s.fact_observed_at && (!ch || !isChannelDeliveryReady(ch))) continue;
+      if (s.fact_observed_at && !hasAuthenticatedHealthyChannel(s)) continue;
       const team = teamBySession.get(s.session_id);
       // TKT-0369: an alive session whose channel MCP died must NOT silently
       // vanish from the picker — it stays listed with reachable:false so the UI
@@ -1952,6 +1993,7 @@ async function main() {
       // re-registers, e.g. after /reload-plugins). Channel presence is now an
       // annotation, not a filter.
       out.push({
+        ...s,
         session_id: s.session_id,
         name: s.name ?? null,
         label: s.name || `session ${String(s.session_id ?? '').slice(0, 8)}`,
@@ -1960,19 +2002,18 @@ async function main() {
         role_mission: s.role ? roleMission(s.role) : null,
         harness: s.harness ?? 'claudecode',
         project_id: s.project_id ?? null,
-        reachable: isChannelDeliveryReady(ch),
         current_in_progress_ticket: tracker.currentInProgressTicketForSession(s.session_id),
         channel_url: ch ? (ch.url ?? (ch.host && ch.port ? `http://${ch.host}:${ch.port}` : null)) : null,
         started_at: s.started_at ?? null,
         updated_at: s.updated_at ?? null,
         // TKT-0245: count of pending queued dispatches for this session, so the
         // picker can show "working · 1 queued".
-        pending_count: pendingBySession.get(s.session_id) ?? 0,
+        pending_count: s.pending_count ?? 0,
         role_meta: team?.role_meta ?? null,
         in_progress_tickets: team?.in_progress_tickets ?? [],
         workload: team?.workload ?? {
           in_progress_tickets: [],
-          pending_count: pendingBySession.get(s.session_id) ?? 0,
+          pending_count: s.pending_count ?? 0,
           last_active: s.updated_at ?? s.started_at ?? null,
         },
       });

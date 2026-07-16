@@ -129,8 +129,10 @@ recovery policy resolves it.
 the pinned App Server is live, the required MCP is active with the canonical
 binding, the typed endpoint lease is current, and the thread is idle with no
 in-flight envelope. Busy, failed, stopped, or recovery-pending sessions remain
-visible as facts but are not dispatch targets. This wave preserves the existing
-raw CC/OC channel behavior unchanged.
+visible as facts but are never immediate-delivery targets. A busy or waiting
+session with an authenticated healthy endpoint remains selectable for a safe
+`when_idle` queue; missing or unhealthy endpoints do not pass that canonical
+channel gate. This preserves the existing raw CC/OC channel behavior unchanged.
 
 For the lifecycle primitive only, run it in the foreground:
 
