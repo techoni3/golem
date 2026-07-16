@@ -516,6 +516,482 @@
     .calm-meta { display: flex; align-items: center; gap: 6px; margin-top: 15px; padding-top: 11px; border-top: 1px solid var(--line-soft); overflow: hidden; }
     .calm-meta .channel-chip { margin-left: auto; }
 
+    /* ================================================================== */
+    /* Identity round — orb, portrait/passport, and role-led families     */
+    /* ================================================================== */
+    .identity-variant {
+      --identity: #45d483;
+      --identity-2: #6de6b1;
+      --identity-soft: rgba(69,212,131,.12);
+      --identity-faint: rgba(69,212,131,.045);
+      min-height: 270px;
+      border-color: color-mix(in oklab, var(--identity) 40%, var(--line));
+      background: #0c1118;
+      isolation: isolate;
+    }
+    .identity-variant.state-waiting {
+      --identity: #f2b84b; --identity-2: #f8d48b;
+      --identity-soft: rgba(242,184,75,.12); --identity-faint: rgba(242,184,75,.045);
+    }
+    .identity-variant.state-idle {
+      --identity: #73a8db; --identity-2: #a6c9e8;
+      --identity-soft: rgba(115,168,219,.12); --identity-faint: rgba(115,168,219,.045);
+    }
+    .identity-variant.state-offline {
+      --identity: #ff7272; --identity-2: #ffaaaa;
+      --identity-soft: rgba(255,114,114,.11); --identity-faint: rgba(255,114,114,.04);
+    }
+    .identity-status {
+      display: inline-flex; align-items: center; gap: 6px; color: var(--identity);
+      font: 680 8px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase;
+    }
+    .identity-status .icon { width: 11px; height: 11px; }
+    .identity-footer {
+      position: absolute; z-index: 5; left: 12px; right: 12px; bottom: 11px;
+      display: flex; align-items: center; gap: 6px; min-width: 0;
+    }
+    .identity-footer .seen { margin-left: auto; }
+    .identity-name {
+      min-width: 0; max-width: 100%; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      font: 760 15px/1.1 var(--display); letter-spacing: -.025em;
+    }
+    .identity-sigil {
+      display: grid; place-items: center; color: var(--identity);
+      border: 1px solid color-mix(in oklab, var(--identity) 42%, transparent);
+      background: var(--identity-soft);
+    }
+    .identity-sigil .icon { width: 28px; height: 28px; }
+
+    /* O1 — Ummon pulse: a speaking intelligence in a radiant sphere */
+    .concept-orb-ummon {
+      min-height: 302px;
+      background:
+        radial-gradient(circle at 50% 42%, var(--identity-soft), transparent 35%),
+        radial-gradient(circle at 50% 42%, rgba(167,154,255,.06), transparent 58%),
+        #0a0f16;
+    }
+    .ummon-top { position: absolute; z-index: 5; left: 12px; right: 12px; top: 11px; display: flex; align-items: center; gap: 7px; }
+    .ummon-top .project-chip { margin-left: auto; }
+    .ummon-orb {
+      position: absolute; z-index: 2; left: 50%; top: 43%; width: 150px; height: 150px;
+      transform: translate(-50%,-50%); display: grid; place-items: center;
+      border: 1px solid color-mix(in oklab, var(--identity) 58%, transparent); border-radius: 50%;
+      background:
+        radial-gradient(circle at 36% 28%, rgba(255,255,255,.18), transparent 10%),
+        radial-gradient(circle at 48% 45%, var(--identity-soft), #0d1720 66%, #080d13 100%);
+      box-shadow: inset -18px -22px 40px rgba(0,0,0,.4), inset 9px 10px 25px rgba(255,255,255,.025), 0 0 42px var(--identity-soft);
+    }
+    .ummon-orb::before, .ummon-orb::after {
+      content: ""; position: absolute; inset: -18px; border: 1px solid color-mix(in oklab, var(--identity) 24%, transparent);
+      border-radius: 50%; opacity: .45;
+    }
+    .ummon-orb::after { inset: -39px; opacity: .18; }
+    .state-working .ummon-orb::before { animation: ummon-radiate 2.7s ease-out infinite; }
+    .state-working .ummon-orb::after { animation: ummon-radiate 2.7s 1.3s ease-out infinite; }
+    .state-waiting .ummon-orb::before { animation: ummon-radiate 4.5s ease-out infinite; }
+    .state-offline .ummon-orb { border-style: dashed; filter: saturate(.55); }
+    .ummon-voice { display: flex; align-items: center; justify-content: center; gap: 4px; width: 68px; height: 42px; }
+    .ummon-voice i { display: block; width: 3px; height: 8px; border-radius: 4px; background: var(--identity); opacity: .8; }
+    .state-working .ummon-voice i:nth-child(1) { animation: voice 1.1s -.3s ease-in-out infinite; }
+    .state-working .ummon-voice i:nth-child(2) { animation: voice 1.1s -.7s ease-in-out infinite; }
+    .state-working .ummon-voice i:nth-child(3) { animation: voice 1.1s -.1s ease-in-out infinite; }
+    .state-working .ummon-voice i:nth-child(4) { animation: voice 1.1s -.55s ease-in-out infinite; }
+    .state-working .ummon-voice i:nth-child(5) { animation: voice 1.1s -.85s ease-in-out infinite; }
+    .ummon-label { position: absolute; z-index: 4; left: 50%; top: calc(43% + 88px); width: 220px; transform: translateX(-50%); text-align: center; }
+    .ummon-label .identity-name { font-size: 13px; }
+    .ummon-label .seen { display: block; margin-top: 5px; }
+
+    /* O2 — event horizon: identity as gravity and motion */
+    .concept-orb-horizon {
+      min-height: 302px;
+      background:
+        linear-gradient(rgba(101,184,255,.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(101,184,255,.025) 1px, transparent 1px),
+        radial-gradient(circle at 50% 43%, var(--identity-faint), transparent 45%), #090d13;
+      background-size: 20px 20px, 20px 20px, auto, auto;
+    }
+    .horizon-orb {
+      position: absolute; z-index: 2; left: 50%; top: 43%; width: 126px; height: 126px; transform: translate(-50%,-50%);
+      display: grid; place-items: center; border: 1px solid color-mix(in oklab, var(--identity) 30%, transparent); border-radius: 50%;
+      background: radial-gradient(circle at 42% 34%, #1b2430 0, #080b10 47%, #020304 73%);
+      box-shadow: 0 0 24px var(--identity-soft), inset -10px -12px 25px #000;
+    }
+    .horizon-orb::before {
+      content: ""; position: absolute; width: 190px; height: 58px; border: 2px solid var(--identity); border-left-color: transparent;
+      border-right-color: color-mix(in oklab, var(--identity) 20%, transparent); border-radius: 50%;
+      transform: rotate(-18deg); filter: drop-shadow(0 0 8px var(--identity));
+    }
+    .horizon-orb::after {
+      content: ""; position: absolute; width: 162px; height: 162px; border: 1px dashed color-mix(in oklab, var(--identity) 34%, transparent);
+      border-radius: 50%;
+    }
+    .state-working .horizon-orb::before { animation: horizon-spin 4.6s linear infinite; }
+    .state-working .horizon-orb::after { animation: gear-turn-back 12s linear infinite; }
+    .state-waiting .horizon-orb::before { animation: horizon-spin 9s linear infinite; }
+    .horizon-core { position: relative; z-index: 2; text-align: center; color: var(--identity); }
+    .horizon-core b { display: block; font: 780 16px/1 var(--mono); letter-spacing: -.08em; }
+    .horizon-core span { display: block; margin-top: 5px; font: 650 7px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+    .horizon-model { position: absolute; left: 12px; top: 12px; z-index: 5; }
+    .horizon-project { position: absolute; right: 12px; top: 12px; z-index: 5; }
+    .horizon-name { position: absolute; z-index: 4; left: 50%; top: calc(43% + 82px); width: 230px; transform: translateX(-50%); text-align: center; }
+
+    /* O3 — living core: a morphing biological/algorithmic membrane */
+    .concept-orb-living {
+      min-height: 302px;
+      background: radial-gradient(ellipse at 50% 42%, var(--identity-soft), transparent 42%), #0a0f16;
+    }
+    .living-shell {
+      position: absolute; z-index: 2; left: 50%; top: 43%; width: 154px; height: 154px; transform: translate(-50%,-50%);
+      display: grid; place-items: center;
+    }
+    .living-blob {
+      position: absolute; inset: 8px;
+      border: 1px solid color-mix(in oklab, var(--identity) 55%, transparent);
+      border-radius: 58% 42% 63% 37% / 44% 61% 39% 56%;
+      background:
+        radial-gradient(circle at 35% 28%, rgba(255,255,255,.18), transparent 12%),
+        conic-gradient(from 120deg, var(--identity-soft), rgba(167,154,255,.1), var(--identity-faint), var(--identity-soft));
+      box-shadow: inset 12px 8px 30px rgba(255,255,255,.025), inset -18px -20px 35px rgba(0,0,0,.34), 0 0 35px var(--identity-soft);
+    }
+    .living-blob::after {
+      content: ""; position: absolute; inset: 18px; border: 1px solid color-mix(in oklab, var(--identity) 24%, transparent);
+      border-radius: inherit; background: rgba(5,8,12,.42);
+    }
+    .state-working .living-blob { animation: living-morph 6s ease-in-out infinite alternate, living-turn 18s linear infinite; }
+    .state-waiting .living-blob { animation: living-morph 10s ease-in-out infinite alternate; }
+    .state-offline .living-blob { border-radius: 42% 16% 58% 22%; filter: saturate(.5); }
+    .living-mark { position: relative; z-index: 3; color: var(--identity); }
+    .living-mark .icon { width: 36px; height: 36px; }
+    .living-data { position: absolute; z-index: 5; left: 12px; right: 12px; top: 11px; display: flex; align-items: center; gap: 7px; }
+    .living-data .project-chip { margin-left: auto; }
+    .living-name { position: absolute; z-index: 4; left: 50%; top: calc(43% + 86px); width: 240px; transform: translateX(-50%); text-align: center; }
+
+    /* O4 — gyroscope: the agent as a stable core inside changing frames */
+    .concept-orb-gyro {
+      min-height: 302px;
+      background: radial-gradient(circle at 50% 42%, var(--identity-faint), transparent 48%), #090e15;
+    }
+    .gyro {
+      position: absolute; z-index: 2; left: 50%; top: 43%; width: 172px; height: 172px; transform: translate(-50%,-50%);
+      display: grid; place-items: center; perspective: 500px;
+    }
+    .gyro-ring { position: absolute; inset: 12px; border: 1px solid color-mix(in oklab, var(--identity) 55%, transparent); border-radius: 50%; }
+    .gyro-ring.a { transform: rotateX(67deg); }
+    .gyro-ring.b { transform: rotateY(67deg); }
+    .gyro-ring.c { transform: rotate(45deg) scale(.78); border-style: dashed; }
+    .state-working .gyro-ring.a { animation: gyro-a 5.5s linear infinite; }
+    .state-working .gyro-ring.b { animation: gyro-b 6.7s linear infinite reverse; }
+    .state-working .gyro-ring.c { animation: gear-turn 8s linear infinite; }
+    .state-waiting .gyro-ring.c { animation: gear-turn 14s linear infinite; }
+    .gyro-core {
+      position: relative; z-index: 2; width: 72px; height: 72px; display: grid; place-items: center;
+      border: 1px solid var(--identity); border-radius: 50%; color: var(--identity);
+      background: radial-gradient(circle, var(--identity-soft), #0d131b 72%); box-shadow: 0 0 22px var(--identity-soft);
+      font: 760 15px/1 var(--mono);
+    }
+    .gyro-top { position: absolute; z-index: 5; left: 12px; right: 12px; top: 11px; display: flex; align-items: center; }
+    .gyro-top .project-chip { margin-left: auto; }
+    .gyro-name { position: absolute; z-index: 4; left: 50%; top: calc(43% + 90px); width: 240px; transform: translateX(-50%); text-align: center; }
+
+    /* O5 — thought bubble: cognition and speech become visible */
+    .concept-orb-thought {
+      min-height: 302px;
+      background: radial-gradient(ellipse at 50% 40%, rgba(167,154,255,.09), transparent 48%), #0b0f17;
+    }
+    .thought-orb {
+      position: absolute; z-index: 2; left: 50%; top: 41%; width: 184px; height: 126px; transform: translate(-50%,-50%);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      border: 1px solid color-mix(in oklab, var(--identity) 48%, transparent); border-radius: 52% 48% 54% 46% / 59% 58% 42% 41%;
+      background:
+        linear-gradient(135deg, rgba(255,255,255,.055), transparent 38%),
+        radial-gradient(circle at 50% 48%, var(--identity-soft), #101721 75%);
+      box-shadow: 0 0 36px var(--identity-soft), inset 8px 9px 24px rgba(255,255,255,.025);
+    }
+    .thought-orb::before, .thought-orb::after {
+      content: ""; position: absolute; border: 1px solid color-mix(in oklab, var(--identity) 40%, transparent);
+      border-radius: 50%; background: #0e141d;
+    }
+    .thought-orb::before { width: 18px; height: 18px; left: 28px; bottom: -18px; }
+    .thought-orb::after { width: 8px; height: 8px; left: 17px; bottom: -31px; }
+    .thought-quote { color: var(--identity); font: 760 28px/.8 Georgia, serif; opacity: .8; }
+    .thought-wave { display: flex; align-items: center; gap: 3px; height: 26px; margin-top: 5px; }
+    .thought-wave i { width: 3px; height: 7px; border-radius: 3px; background: var(--identity); }
+    .state-working .thought-wave i { animation: voice 1.4s ease-in-out infinite; }
+    .state-working .thought-wave i:nth-child(2) { animation-delay: -.9s; }
+    .state-working .thought-wave i:nth-child(3) { animation-delay: -.45s; }
+    .state-working .thought-wave i:nth-child(4) { animation-delay: -.75s; }
+    .state-working .thought-wave i:nth-child(5) { animation-delay: -.2s; }
+    .thought-title { color: var(--text); font: 700 9px/1 var(--mono); }
+    .thought-top { position: absolute; z-index: 5; left: 12px; right: 12px; top: 11px; display: flex; align-items: center; gap: 7px; }
+    .thought-top .project-chip { margin-left: auto; }
+    .thought-name { position: absolute; z-index: 4; left: 50%; top: calc(41% + 86px); width: 245px; transform: translateX(-50%); text-align: center; }
+
+    /* O6 — phase lens: a glass instrument with a scanning presence */
+    .concept-orb-lens {
+      min-height: 302px;
+      background:
+        linear-gradient(rgba(101,184,255,.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(101,184,255,.03) 1px, transparent 1px),
+        radial-gradient(circle at 50% 42%, var(--identity-soft), transparent 44%), #091019;
+      background-size: 18px 18px, 18px 18px, auto, auto;
+    }
+    .phase-lens {
+      position: absolute; z-index: 2; left: 50%; top: 42%; width: 152px; height: 152px; transform: translate(-50%,-50%);
+      display: grid; place-items: center; overflow: hidden;
+      border: 1px solid color-mix(in oklab, var(--identity) 56%, transparent); border-radius: 50%;
+      background:
+        repeating-linear-gradient(0deg, transparent 0 8px, color-mix(in oklab, var(--identity) 9%, transparent) 8px 9px),
+        radial-gradient(circle at 35% 24%, rgba(255,255,255,.16), transparent 13%),
+        linear-gradient(145deg, rgba(101,184,255,.08), var(--identity-faint) 48%, rgba(4,8,13,.62));
+      box-shadow: inset 12px 12px 24px rgba(255,255,255,.025), inset -18px -18px 32px rgba(0,0,0,.32), 0 0 30px var(--identity-soft);
+    }
+    .phase-lens::before {
+      content: ""; position: absolute; left: 0; right: 0; top: -20px; height: 34px;
+      background: linear-gradient(transparent, color-mix(in oklab, var(--identity) 35%, transparent), transparent);
+      opacity: .7;
+    }
+    .state-working .phase-lens::before { animation: phase-scan 2.8s linear infinite; }
+    .state-waiting .phase-lens::before { animation: phase-scan 6s linear infinite; }
+    .lens-cross { position: absolute; inset: 18px; border: 1px dashed color-mix(in oklab, var(--identity) 24%, transparent); border-radius: 50%; }
+    .lens-cross::before, .lens-cross::after { content: ""; position: absolute; background: color-mix(in oklab, var(--identity) 20%, transparent); }
+    .lens-cross::before { left: 50%; top: -18px; bottom: -18px; width: 1px; }
+    .lens-cross::after { top: 50%; left: -18px; right: -18px; height: 1px; }
+    .lens-mark { position: relative; z-index: 3; text-align: center; color: var(--identity); }
+    .lens-mark .icon { width: 31px; height: 31px; }
+    .lens-mark span { display: block; margin-top: 7px; font: 680 7px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+    .lens-top { position: absolute; z-index: 5; left: 12px; right: 12px; top: 11px; display: flex; align-items: center; gap: 7px; }
+    .lens-top .project-chip { margin-left: auto; }
+    .lens-name { position: absolute; z-index: 4; left: 50%; top: calc(42% + 90px); width: 240px; transform: translateX(-50%); text-align: center; }
+
+    /* O7 — swarm mind: many processes, one identity */
+    .concept-orb-swarm {
+      min-height: 302px;
+      background: radial-gradient(circle at 50% 42%, var(--identity-soft), transparent 46%), #090e14;
+    }
+    .swarm {
+      position: absolute; z-index: 2; left: 50%; top: 42%; width: 178px; height: 178px; transform: translate(-50%,-50%);
+      display: grid; place-items: center;
+    }
+    .swarm-core {
+      position: relative; z-index: 3; width: 84px; height: 84px; display: grid; place-items: center;
+      border: 1px solid var(--identity); border-radius: 50%; color: var(--identity);
+      background: radial-gradient(circle, var(--identity-soft), #0d141d 72%); box-shadow: 0 0 28px var(--identity-soft);
+    }
+    .swarm-core .icon { width: 30px; height: 30px; }
+    .swarm-particle { position: absolute; left: 50%; top: 50%; width: 5px; height: 5px; margin: -2px; border-radius: 50%; background: var(--identity); box-shadow: 0 0 8px var(--identity); }
+    .swarm-particle.p1 { transform: translate(75px, 0); }
+    .swarm-particle.p2 { transform: translate(53px, 53px); }
+    .swarm-particle.p3 { transform: translate(0, 76px); }
+    .swarm-particle.p4 { transform: translate(-54px, 54px); }
+    .swarm-particle.p5 { transform: translate(-76px, 0); }
+    .swarm-particle.p6 { transform: translate(-53px, -53px); }
+    .swarm-particle.p7 { transform: translate(0, -76px); }
+    .swarm-particle.p8 { transform: translate(53px, -53px); }
+    .swarm-orbit { position: absolute; inset: 11px; border: 1px dotted color-mix(in oklab, var(--identity) 32%, transparent); border-radius: 50%; }
+    .state-working .swarm { animation: swarm-turn 16s linear infinite; }
+    .state-working .swarm-core { animation: swarm-counter 16s linear infinite; }
+    .state-waiting .swarm { animation: swarm-turn 30s linear infinite; }
+    .state-offline .swarm-particle:nth-of-type(even) { opacity: .18; }
+    .swarm-top { position: absolute; z-index: 5; left: 12px; right: 12px; top: 11px; display: flex; align-items: center; gap: 7px; }
+    .swarm-top .project-chip { margin-left: auto; }
+    .swarm-name { position: absolute; z-index: 4; left: 50%; top: calc(42% + 92px); width: 240px; transform: translateX(-50%); text-align: center; }
+
+    /* Passport identity family */
+    .identity-passport { min-height: 248px; }
+    .portrait-ring {
+      position: relative; display: grid; place-items: center; width: 78px; height: 78px; border-radius: 50%;
+      border: 1px solid var(--identity); color: var(--identity); background: var(--identity-soft);
+      box-shadow: 0 0 0 5px var(--identity-faint), 0 0 24px var(--identity-soft);
+    }
+    .portrait-ring::after {
+      content: ""; position: absolute; width: 12px; height: 12px; right: 1px; bottom: 5px;
+      border: 3px solid #0d131b; border-radius: 50%; background: var(--identity);
+    }
+    .portrait-ring .icon { width: 35px; height: 35px; }
+    .passport-meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; margin-top: 16px; }
+    .passport-meta-grid .value { display: flex; align-items: center; gap: 6px; margin-top: 5px; min-width: 0; }
+
+    .concept-pass-model { display: grid; grid-template-columns: 114px minmax(0,1fr); }
+    .pass-model-portrait {
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+      padding: 15px 11px; border-right: 1px solid var(--line);
+      background: radial-gradient(circle at 50% 35%, rgba(167,154,255,.14), transparent 55%), #0b1118;
+    }
+    .pass-model-portrait .portrait-ring { --identity: var(--model); --identity-soft: rgba(167,154,255,.1); --identity-faint: rgba(167,154,255,.04); }
+    .pass-model-portrait b { color: var(--model); font: 650 8px/1.3 var(--mono); text-align: center; }
+    .pass-model-main { position: relative; padding: 17px 52px 14px 15px; }
+    .pass-model-main .identity-name { font-size: 20px; }
+    .pass-model-main .mh-chip { margin-top: 8px; }
+
+    .concept-pass-harness { display: grid; grid-template-columns: minmax(0,1fr) 114px; }
+    .pass-harness-main { position: relative; padding: 17px 14px; }
+    .pass-harness-main .identity-name { padding-right: 43px; font-size: 20px; }
+    .pass-harness-main .project-corner { top: 14px; right: 14px; }
+    .pass-harness-portrait {
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+      padding: 15px 11px; border-left: 1px solid var(--line);
+      background: radial-gradient(circle at 50% 35%, rgba(101,184,255,.13), transparent 55%), #0b1118;
+    }
+    .harness-frame {
+      position: relative; display: grid; place-items: center; width: 76px; height: 76px;
+      border: 1px solid rgba(101,184,255,.48); border-radius: 17px; color: #83b8ff;
+      background: rgba(101,184,255,.08); box-shadow: 0 0 0 5px rgba(101,184,255,.025);
+    }
+    .harness-frame .icon { width: 36px; height: 36px; }
+    .harness-frame::after { content: ""; position: absolute; width: 9px; height: 9px; right: 4px; bottom: 5px; border: 3px solid #0d131b; border-radius: 50%; background: var(--identity); }
+    .pass-harness-portrait b { color: #83b8ff; font: 650 8px/1.3 var(--mono); text-align: center; }
+
+    .concept-pass-holo {
+      min-height: 252px; padding: 16px;
+      background:
+        linear-gradient(115deg, rgba(101,184,255,.04), rgba(167,154,255,.08) 43%, rgba(69,212,131,.04) 68%, transparent),
+        #0c121a;
+    }
+    .concept-pass-holo::before {
+      content: ""; position: absolute; inset: 0; pointer-events: none;
+      background: linear-gradient(105deg, transparent 25%, rgba(255,255,255,.045) 42%, transparent 58%);
+      transform: translateX(-60%);
+    }
+    .state-working.concept-pass-holo::before { animation: holo-sweep 6s ease-in-out infinite; }
+    .holo-watermark {
+      position: absolute; right: 14px; bottom: 7px; color: rgba(167,154,255,.055);
+      font: 850 72px/1 var(--display); letter-spacing: -.08em; pointer-events: none;
+    }
+    .holo-head { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 12px; align-items: center; }
+    .holo-avatar {
+      width: 58px; height: 58px; display: grid; place-items: center; border: 1px solid rgba(167,154,255,.42);
+      clip-path: polygon(25% 0, 75% 0, 100% 25%, 100% 75%, 75% 100%, 25% 100%, 0 75%, 0 25%);
+      color: var(--model); background: rgba(167,154,255,.09);
+    }
+    .holo-avatar .icon { width: 29px; height: 29px; }
+    .holo-head .identity-name { font-size: 19px; }
+    .holo-fields { display: grid; grid-template-columns: 1fr 1.2fr .82fr .98fr; margin-top: 17px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .holo-field { min-width: 0; padding: 10px 8px; border-right: 1px solid var(--line-soft); }
+    .holo-field:last-child { border-right: 0; }
+    .holo-field .value { margin-top: 6px; }
+    .holo-field .role-control { max-width: 100%; padding-left: 5px; }
+    .holo-field .role-control select { min-width: 58px; font-size: 8px; }
+
+    .concept-pass-stamp { display: grid; grid-template-columns: minmax(0,1fr) 132px; min-height: 248px; }
+    .stamp-main { position: relative; padding: 18px 15px; }
+    .stamp-main::after {
+      content: "VERIFIED"; position: absolute; left: 17px; bottom: 18px; transform: rotate(-7deg);
+      padding: 6px 9px; border: 2px solid color-mix(in oklab, var(--identity) 44%, transparent); border-radius: 4px;
+      color: color-mix(in oklab, var(--identity) 64%, transparent); font: 780 12px/1 var(--mono); letter-spacing: .12em;
+    }
+    .stamp-main .identity-name { font-size: 20px; }
+    .stamp-main .mh-chip { margin-top: 8px; }
+    .stamp-seal {
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 11px;
+      border-left: 1px dashed var(--line); background: var(--identity-faint);
+    }
+    .seal-circle {
+      width: 82px; height: 82px; display: grid; place-items: center; border: 2px double var(--identity); border-radius: 50%;
+      color: var(--identity); box-shadow: inset 0 0 0 5px var(--identity-faint); text-align: center;
+    }
+    .seal-circle .icon { width: 27px; height: 27px; }
+    .seal-circle b { display: block; margin-top: 4px; font: 700 7px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+
+    /* Role-led identity family */
+    .identity-role { min-height: 246px; --role-color: var(--role); }
+    .role-led-select .role-control { border-color: color-mix(in oklab, var(--role-color) 40%, transparent); color: var(--role-color); }
+
+    .concept-role-totem { display: grid; grid-template-columns: 102px minmax(0,1fr); }
+    .totem {
+      position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+      padding: 13px 9px; border-right: 1px solid color-mix(in oklab, var(--role-color) 30%, transparent);
+      background: linear-gradient(180deg, rgba(83,201,235,.11), rgba(83,201,235,.025));
+    }
+    .totem::before, .totem::after { content: ""; position: absolute; left: 50%; width: 1px; height: 27px; background: color-mix(in oklab, var(--role-color) 32%, transparent); }
+    .totem::before { top: 9px; } .totem::after { bottom: 9px; }
+    .totem-glyph {
+      position: relative; z-index: 2; width: 62px; height: 62px; display: grid; place-items: center;
+      border: 1px solid color-mix(in oklab, var(--role-color) 48%, transparent);
+      clip-path: polygon(50% 0, 92% 23%, 92% 72%, 50% 100%, 8% 72%, 8% 23%);
+      color: var(--role-color); background: rgba(83,201,235,.09);
+    }
+    .totem-glyph .icon { width: 28px; height: 28px; }
+    .totem .label { color: var(--role-color); }
+    .totem .role-control { max-width: 84px; padding-left: 6px; }
+    .totem .role-control select { min-width: 58px; font-size: 8px; }
+    .totem-main { position: relative; padding: 17px 52px 14px 15px; }
+    .totem-main .identity-name { font-size: 19px; }
+    .totem-main .mh-chip { margin-top: 8px; }
+    .totem-work { margin-top: 22px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
+
+    .concept-role-banner { padding: 0; }
+    .role-banner {
+      display: flex; align-items: center; gap: 9px; padding: 10px 12px;
+      border-bottom: 1px solid color-mix(in oklab, var(--role-color) 30%, transparent);
+      background: linear-gradient(90deg, rgba(83,201,235,.15), rgba(83,201,235,.035));
+    }
+    .role-banner-mark { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid rgba(83,201,235,.38); border-radius: 8px; color: var(--role-color); }
+    .role-banner .label { color: var(--role-color); }
+    .role-banner .role-control { margin-left: auto; }
+    .role-banner-main { position: relative; padding: 17px 54px 15px 14px; }
+    .role-banner-main .identity-name { font-size: 20px; }
+    .role-banner-main .mh-chip { margin-top: 8px; }
+    .role-banner-actions { display: flex; align-items: center; gap: 7px; margin-top: 21px; padding-top: 11px; border-top: 1px solid var(--line-soft); }
+
+    .concept-role-constellation {
+      min-height: 286px; background: radial-gradient(circle at 50% 43%, rgba(83,201,235,.09), transparent 43%), #091019;
+    }
+    .role-constellation {
+      position: absolute; z-index: 2; left: 50%; top: 43%; width: 188px; height: 188px; transform: translate(-50%,-50%);
+    }
+    .role-constellation svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+    .role-link { stroke: rgba(83,201,235,.25); stroke-width: 1; stroke-dasharray: 3 4; fill: none; }
+    .role-core {
+      position: absolute; left: 50%; top: 50%; width: 92px; height: 92px; transform: translate(-50%,-50%);
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px;
+      border: 1px solid rgba(83,201,235,.45); border-radius: 50%; color: var(--role-color);
+      background: radial-gradient(circle, rgba(83,201,235,.12), #0d151e 72%); box-shadow: 0 0 26px rgba(83,201,235,.09);
+    }
+    .role-core .icon { width: 27px; height: 27px; }
+    .role-node { position: absolute; z-index: 3; }
+    .role-node.model { left: -26px; top: 12px; }
+    .role-node.project { right: -26px; top: 12px; }
+    .role-node.ticket { left: -24px; bottom: 14px; }
+    .role-node.channel { right: -24px; bottom: 14px; }
+    .constellation-name { position: absolute; z-index: 4; left: 50%; top: calc(43% + 105px); width: 250px; transform: translateX(-50%); text-align: center; }
+
+    .concept-role-seal { display: grid; grid-template-columns: 128px minmax(0,1fr); }
+    .role-seal-panel {
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+      padding: 14px 10px; border-right: 1px solid rgba(83,201,235,.25); background: rgba(83,201,235,.035);
+    }
+    .role-seal {
+      position: relative; width: 88px; height: 88px; display: grid; place-items: center;
+      border: 1px solid rgba(83,201,235,.55); border-radius: 50%; color: var(--role-color);
+      box-shadow: inset 0 0 0 5px rgba(83,201,235,.035), inset 0 0 0 7px rgba(83,201,235,.18);
+    }
+    .role-seal::before { content: "ROLE • IDENTITY •"; position: absolute; font: 600 6px/1 var(--mono); letter-spacing: .12em; transform: translateY(-33px); }
+    .role-seal .icon { width: 31px; height: 31px; }
+    .role-seal-main { position: relative; padding: 17px 52px 14px 15px; }
+    .role-seal-main .identity-name { font-size: 19px; }
+    .role-seal-main .mh-chip { margin-top: 8px; }
+    .role-seal-work { display: flex; align-items: center; gap: 7px; margin-top: 20px; padding-top: 11px; border-top: 1px solid var(--line-soft); }
+
+    @keyframes ummon-radiate {
+      0% { transform: scale(.84); opacity: 0; }
+      20% { opacity: .6; }
+      100% { transform: scale(1.28); opacity: 0; }
+    }
+    @keyframes voice { 0%,100% { height: 7px; opacity: .5; } 50% { height: 29px; opacity: 1; } }
+    @keyframes horizon-spin { to { transform: rotate(342deg); } }
+    @keyframes living-morph {
+      0% { border-radius: 58% 42% 63% 37% / 44% 61% 39% 56%; }
+      50% { border-radius: 39% 61% 38% 62% / 57% 36% 64% 43%; }
+      100% { border-radius: 67% 33% 48% 52% / 35% 55% 45% 65%; }
+    }
+    @keyframes living-turn { to { transform: rotate(360deg); } }
+    @keyframes gyro-a { to { transform: rotateX(67deg) rotateZ(360deg); } }
+    @keyframes gyro-b { to { transform: rotateY(67deg) rotateZ(360deg); } }
+    @keyframes phase-scan { from { transform: translateY(-25px); } to { transform: translateY(190px); } }
+    @keyframes swarm-turn { to { transform: translate(-50%,-50%) rotate(360deg); } }
+    @keyframes swarm-counter { to { transform: rotate(-360deg); } }
+    @keyframes holo-sweep { 0%,25% { transform: translateX(-75%); } 70%,100% { transform: translateX(85%); } }
+
     .drawer-backdrop {
       position: fixed; z-index: 80; inset: 0; border: 0; padding: 0;
       background: rgba(3,5,8,.68); opacity: 0; pointer-events: none; transition: opacity .18s ease;
@@ -585,6 +1061,33 @@
       .concept-orbital { min-height: 300px; }
       .concept-strip { grid-template-columns: auto minmax(0,1fr); }
       .strip-actions { grid-column: 1 / -1; flex-wrap: wrap; padding-top: 7px; border-top: 1px solid var(--line-soft); }
+      .group-heading { grid-template-columns: auto minmax(0,1fr); align-items: start; }
+      .group-count { grid-column: 2; }
+      .identity-footer { flex-wrap: wrap; }
+      .identity-footer .seen { width: 100%; margin-left: 0; }
+      .concept-pass-model { grid-template-columns: 92px minmax(0,1fr); }
+      .concept-pass-harness { grid-template-columns: minmax(0,1fr) 92px; }
+      .pass-model-portrait, .pass-harness-portrait { padding-left: 7px; padding-right: 7px; }
+      .portrait-ring, .harness-frame { width: 62px; height: 62px; }
+      .passport-meta-grid { grid-template-columns: 1fr; gap: 8px; }
+      .holo-fields { grid-template-columns: 1fr 1fr; }
+      .holo-field:nth-child(2) { border-right: 0; }
+      .holo-field:nth-child(-n+2) { border-bottom: 1px solid var(--line-soft); }
+      .concept-pass-stamp { grid-template-columns: minmax(0,1fr) 104px; }
+      .seal-circle { width: 70px; height: 70px; }
+      .concept-role-totem { grid-template-columns: 84px minmax(0,1fr); }
+      .totem-glyph { width: 52px; height: 52px; }
+      .concept-role-seal { grid-template-columns: 102px minmax(0,1fr); }
+      .role-seal { width: 72px; height: 72px; }
+      .role-seal::before { display: none; }
+      .concept-role-constellation { min-height: 330px; }
+      .role-constellation { top: 43%; width: 280px; height: 210px; }
+      .role-constellation svg { display: none; }
+      .role-node.model { left: 0; top: 0; }
+      .role-node.project { right: 0; top: 0; }
+      .role-node.ticket { left: 14px; bottom: 0; }
+      .role-node.channel { right: 14px; bottom: 0; }
+      .constellation-name { top: calc(43% + 118px); }
     }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition-duration: .001ms !important; }
@@ -668,6 +1171,21 @@
       };
 
       var options = [
+        { id: "orb-ummon", group: "orb", letter: "O1", name: "Ummon pulse", thesis: "A speaking sphere radiates thought in concentric waves; activity becomes presence rather than a status dot.", benefit: "The clearest sense of an intelligent identity that is currently thinking.", cost: "Animation and glow need disciplined performance limits.", risk: "A strong literary presence can feel theatrical in dense fleet views." },
+        { id: "orb-horizon", group: "orb", letter: "O2", name: "Event horizon", thesis: "A dark core bends a luminous orbit around itself, suggesting gravity, focus, and accumulated context.", benefit: "Working, waiting, and offline states read naturally through orbital speed and stability.", cost: "The black core carries less explicit personality than portrait-led ideas.", risk: "The metaphor may imply danger or failure when the agent is healthy." },
+        { id: "orb-living", group: "orb", letter: "O3", name: "Living core", thesis: "A softly shape-shifting membrane makes the agent feel adaptive, organic, and continuously recomposing.", benefit: "The most direct expression of a non-static digital being.", cost: "Morphing geometry is harder to make crisp at very small sizes.", risk: "Organic motion can feel decorative unless tightly linked to state." },
+        { id: "orb-gyro", group: "orb", letter: "O4", name: "Gyroscopic self", thesis: "A stable identity core sits inside rotating frames, separating who the agent is from what it is processing.", benefit: "Communicates persistence through task and state changes.", cost: "Multiple rings add visual machinery around a simple identity.", risk: "Can read as a loading indicator if the name is too quiet." },
+        { id: "orb-thought", group: "orb", letter: "O5", name: "Thought bubble", thesis: "The orb becomes a literal cognitive bubble with a visible voice rhythm and a small trail of thought.", benefit: "Friendly, communicative, and immediately legible as an active mind.", cost: "More whimsical than the rest of Golem’s operational language.", risk: "The speech metaphor may overpromise conversational availability." },
+        { id: "orb-lens", group: "orb", letter: "O6", name: "Phase lens", thesis: "A glass instrument scans and refracts the agent’s runtime, presenting identity as an observable signal.", benefit: "Feels precise and operational while remaining distinctly alive.", cost: "More technological than personal.", risk: "Fine scan lines need contrast tuning across displays." },
+        { id: "orb-swarm", group: "orb", letter: "O7", name: "Swarm mind", thesis: "Many orbiting particles resolve into one core, expressing tools, sub-processes, and memories as a single self.", benefit: "Makes a complex agent feel coherent without hiding its multiplicity.", cost: "Uses the most motion and the largest visual footprint.", risk: "Particles can become noise when many cards animate together." },
+        { id: "pass-model", group: "passport-new", letter: "P1", name: "Model portrait", thesis: "The model mark becomes the display picture while the session name remains the durable identity.", benefit: "Instantly reveals the intelligence family behind the agent.", cost: "Model changes can make the same session appear to become someone else.", risk: "Provider branding may overpower the agent’s own name." },
+        { id: "pass-harness", group: "passport-new", letter: "P2", name: "Harness portrait", thesis: "The harness becomes the display picture and live endpoint ring, treating the execution environment as the agent’s body.", benefit: "Strongly connects reachability and control capability to identity.", cost: "Agents on the same harness look more alike.", risk: "Users may confuse harness health with the agent’s cognitive state." },
+        { id: "pass-holo", group: "passport-new", letter: "P3", name: "Holographic credential", thesis: "A translucent credential card treats the agent as a signed, live identity with inspectable fields.", benefit: "Premium identity feel while preserving dense operational metadata.", cost: "More visual material and subtle effects than a normal card.", risk: "Holographic treatment can become ornamental if overused." },
+        { id: "pass-stamp", group: "passport-new", letter: "P4", name: "Verified operator", thesis: "A restrained identity document uses a seal and verification stamp to signal role, runtime, and reachability.", benefit: "Feels authoritative and durable with relatively little motion.", cost: "Less expressive than the orb family.", risk: "Verification language may imply security guarantees the card does not provide." },
+        { id: "role-totem", group: "role-new", letter: "R1", name: "Role totem", thesis: "Role becomes a sculptural vertical identity totem, with one editable control anchored inside it.", benefit: "The role has one canonical place and gives the agent a recognizable silhouette.", cost: "Consumes horizontal space for a single attribute.", risk: "Role changes can make the same agent feel visually discontinuous." },
+        { id: "role-banner", group: "role-new", letter: "R2", name: "Role banner", thesis: "A colored role banner crowns the identity and turns reassignment into an explicit mode change.", benefit: "Fastest role scanning across a team grid.", cost: "The banner adds height and strong color.", risk: "Role may overshadow status and current work." },
+        { id: "role-constellation", group: "role-new", letter: "R3", name: "Role constellation", thesis: "Role sits at the center of model, project, work, and communication nodes as the organizing identity.", benefit: "Shows how role changes the agent’s relationship to the rest of the system.", cost: "Diagrammatic and spatially expensive.", risk: "The connections may imply fixed dependencies." },
+        { id: "role-seal", group: "role-new", letter: "R4", name: "Role seal", thesis: "A compact role seal acts like an insignia beside a conventional identity and work surface.", benefit: "Adds identity without abandoning familiar card ergonomics.", cost: "The seal is less immediately editable than a banner.", risk: "Insignia language can feel hierarchical or ceremonial." },
         { id: "baseline", letter: "A", name: "Current composite", baseline: true, thesis: "The existing card establishes the reference point: familiar, but each detail competes for its own row.", benefit: "Zero relearning and lowest migration cost.", cost: "Identity, role, work, and reachability scan as separate fragments.", risk: "Adding one more field creates another row or duplicate chip." },
         { id: "commandbar", letter: "B", name: "Status-first command bar", thesis: "A full-width operational masthead makes working state the first read, then identity, then controls.", benefit: "Fastest state scan and clear top-to-bottom hierarchy.", cost: "Uses more vertical space than dense variants.", risk: "The status bar may feel heavy when most agents are idle." },
         { id: "ledger", letter: "C", name: "Operator ledger", thesis: "A disciplined two-column field grid turns the card into a compact instrument record.", benefit: "Predictable locations make cross-card scanning easy.", cost: "Feels more administrative than personable.", risk: "Long model or session names can make cells feel cramped." },
@@ -683,6 +1201,13 @@
         { id: "pillar", letter: "M", name: "Role pillar", thesis: "The editable role gets one unmistakable, canonical zone and never appears twice.", benefit: "Role ownership and reassignment become very clear.", cost: "Gives role more prominence than some users need.", risk: "Unassigned roles can leave the pillar visually empty." },
         { id: "tiles", letter: "N", name: "Workbench tiles", thesis: "Identity, work, runtime, and communication become small modular surfaces inside one card.", benefit: "Easy to extend without collapsing the hierarchy.", cost: "More component chrome and nesting.", risk: "Too many tiles can drift toward dashboard-within-dashboard." },
         { id: "calm", letter: "O", name: "Calm focus", thesis: "A quiet typographic card shows status, identity, work, and a single compact metadata rail.", benefit: "Cleanest balance of confidence, density, and low noise.", cost: "Relies on precise typography more than strong containers.", risk: "Subtle metadata may be missed during rapid scanning." }
+      ];
+
+      var groups = [
+        { id: "orb", mark: "ORB", name: "Orbital identities", description: "Seven ways for a live agent to occupy space, move, speak, and go still.", count: "7 new directions" },
+        { id: "passport-new", mark: "ID", name: "Portrait and passport identities", description: "Four ways to give the session a face, body, credential, or seal.", count: "4 new directions" },
+        { id: "role-new", mark: "ROLE", name: "Role-led identities", description: "Four alternatives to the duplicated role chip and dropdown.", count: "4 new directions" },
+        { id: "original", mark: "A–O", name: "Original comparison set", description: "The first-round directions are preserved here for reference and hybrid selection.", count: "15 original directions" }
       ];
 
       var baseData = {
@@ -705,7 +1230,7 @@
         mode: "overview",
         width: "wide",
         scenario: "working",
-        active: "commandbar",
+        active: "orb-ummon",
         shortlist: []
       };
       var lastFocus = null;
@@ -787,6 +1312,157 @@
       function cardOpenAttrs(opt, d) {
         return "class='agent-card concept-" + opt.id + " state-" + d.status + (d.channel ? "" : " state-offline") +
           "' role='button' tabindex='0' data-card='" + opt.id + "' aria-label='Open agent " + d.name + "'";
+      }
+
+      function identityOpenAttrs(opt, d, family) {
+        return "class='agent-card identity-variant identity-" + family + " concept-" + opt.id + " state-" + d.status +
+          (d.channel ? "" : " state-offline") + "' role='button' tabindex='0' data-card='" + opt.id +
+          "' aria-label='Open agent " + d.name + "'";
+      }
+
+      function identityStatus(d) {
+        var label = d.status === "working" ? "Working" : d.status === "waiting" ? "Waiting" : "Idle";
+        if (!d.channel) label += " · unreachable";
+        var mark = d.status === "idle" ? icon("clock") : gears();
+        return "<span class='identity-status " + d.status + "'>" + mark + "<span>" + label + "</span></span>";
+      }
+
+      function identityFooter(d) {
+        return "<div class='identity-footer role-led-select'>" + roleControl(d) + ticketChip(d) + channelChip(d,true) +
+          queueChip(d) + "<span class='seen'>" + d.seen + "</span></div>";
+      }
+
+      function ummonCard(opt, d) {
+        return "<article " + identityOpenAttrs(opt,d,"orb") + "><div class='ummon-top'>" + modelHarness(d) + projectChip(d) +
+          "</div><div class='ummon-orb'><div class='ummon-voice'><i></i><i></i><i></i><i></i><i></i></div></div>" +
+          "<div class='ummon-label'><div class='identity-name'>" + d.name + "</div>" + identityStatus(d) +
+          "</div>" + identityFooter(d) + "</article>";
+      }
+
+      function horizonCard(opt, d) {
+        return "<article " + identityOpenAttrs(opt,d,"orb") + "><div class='horizon-model'>" + modelHarness(d) +
+          "</div><div class='horizon-project'>" + projectChip(d) + "</div><div class='horizon-orb'><div class='horizon-core'><b>SOL</b><span>" +
+          (d.status === "working" ? "thinking" : d.status) + "</span></div></div><div class='horizon-name'><div class='identity-name'>" +
+          d.name + "</div>" + identityStatus(d) + "</div>" + identityFooter(d) + "</article>";
+      }
+
+      function livingCard(opt, d) {
+        return "<article " + identityOpenAttrs(opt,d,"orb") + "><div class='living-data'>" + modelHarness(d) + projectChip(d) +
+          "</div><div class='living-shell'><div class='living-blob'></div><div class='living-mark'>" + icon("spark") +
+          "</div></div><div class='living-name'><div class='identity-name'>" + d.name + "</div>" + identityStatus(d) +
+          "</div>" + identityFooter(d) + "</article>";
+      }
+
+      function gyroCard(opt, d) {
+        return "<article " + identityOpenAttrs(opt,d,"orb") + "><div class='gyro-top'>" + modelHarness(d) + projectChip(d) +
+          "</div><div class='gyro'><span class='gyro-ring a'></span><span class='gyro-ring b'></span><span class='gyro-ring c'></span>" +
+          "<div class='gyro-core'>SG</div></div><div class='gyro-name'><div class='identity-name'>" + d.name + "</div>" +
+          identityStatus(d) + "</div>" + identityFooter(d) + "</article>";
+      }
+
+      function thoughtCard(opt, d) {
+        return "<article " + identityOpenAttrs(opt,d,"orb") + "><div class='thought-top'>" + modelHarness(d) + projectChip(d) +
+          "</div><div class='thought-orb'><div class='thought-quote'>“</div><div class='thought-wave'><i></i><i></i><i></i><i></i><i></i></div>" +
+          "<div class='thought-title'>" + (d.status === "working" ? "forming a response" : d.status) + "</div></div>" +
+          "<div class='thought-name'><div class='identity-name'>" + d.name + "</div>" + identityStatus(d) +
+          "</div>" + identityFooter(d) + "</article>";
+      }
+
+      function lensCard(opt, d) {
+        return "<article " + identityOpenAttrs(opt,d,"orb") + "><div class='lens-top'>" + modelHarness(d) + projectChip(d) +
+          "</div><div class='phase-lens'><div class='lens-cross'></div><div class='lens-mark'>" + icon("terminal") +
+          "<span>" + (d.status === "working" ? "signal active" : d.status) + "</span></div></div><div class='lens-name'>" +
+          "<div class='identity-name'>" + d.name + "</div>" + identityStatus(d) + "</div>" + identityFooter(d) + "</article>";
+      }
+
+      function swarmCard(opt, d) {
+        var particles = "";
+        for (var i = 1; i <= 8; i++) particles += "<i class='swarm-particle p" + i + "'></i>";
+        return "<article " + identityOpenAttrs(opt,d,"orb") + "><div class='swarm-top'>" + modelHarness(d) + projectChip(d) +
+          "</div><div class='swarm'><span class='swarm-orbit'></span>" + particles + "<div class='swarm-core'>" + icon("spark") +
+          "</div></div><div class='swarm-name'><div class='identity-name'>" + d.name + "</div>" + identityStatus(d) +
+          "</div>" + identityFooter(d) + "</article>";
+      }
+
+      function passModelCard(opt, d) {
+        return "<article " + identityOpenAttrs(opt,d,"passport") + "><div class='pass-model-portrait'>" +
+          "<div class='portrait-ring'>" + icon("spark") + "</div><b>" + d.model + "<br>MODEL PORTRAIT</b></div>" +
+          "<div class='pass-model-main'>" + projectCorner(d) + "<div class='identity-name'>" + d.name + "</div>" + modelHarness(d) +
+          "<div class='passport-meta-grid'><div><span class='label'>Role</span><div class='value role-led-select'>" + roleControl(d) +
+          "</div></div><div><span class='label'>State</span><div class='value'>" + identityStatus(d) +
+          "</div></div><div><span class='label'>Current work</span><div class='value'>" + ticketChip(d) +
+          "</div></div><div><span class='label'>Communication</span><div class='value'>" + channelChip(d,false) +
+          "</div></div></div><span class='seen' style='display:block;margin-top:12px'>" + d.seen + "</span></div></article>";
+      }
+
+      function passHarnessCard(opt, d) {
+        return "<article " + identityOpenAttrs(opt,d,"passport") + "><div class='pass-harness-main'>" + projectCorner(d) +
+          "<div class='identity-name'>" + d.name + "</div>" + modelHarness(d) +
+          "<div class='passport-meta-grid'><div><span class='label'>Role</span><div class='value role-led-select'>" + roleControl(d) +
+          "</div></div><div><span class='label'>State</span><div class='value'>" + identityStatus(d) +
+          "</div></div><div><span class='label'>Current work</span><div class='value'>" + ticketChip(d) +
+          "</div></div><div><span class='label'>Last signal</span><div class='value seen'>" + d.seen +
+          "</div></div></div></div><div class='pass-harness-portrait'><div class='harness-frame'>" + icon("terminal") +
+          "</div><b>" + d.harness + "<br>" + (d.channel ? "CHANNEL LIVE" : "CHANNEL OFFLINE") + "</b></div></article>";
+      }
+
+      function passHoloCard(opt, d) {
+        return "<article " + identityOpenAttrs(opt,d,"passport") + "><div class='holo-watermark'>" + d.glyph +
+          "</div><div class='holo-head'><div class='holo-avatar'>" + icon("spark") + "</div><div><div class='identity-name'>" +
+          d.name + "</div><div style='margin-top:7px'>" + modelHarness(d) + "</div></div>" + projectChip(d) +
+          "</div><div class='holo-fields'><div class='holo-field'><span class='label'>State</span><div class='value'>" +
+          identityStatus(d) + "</div></div><div class='holo-field'><span class='label'>Role</span><div class='value role-led-select'>" +
+          roleControl(d) + "</div></div><div class='holo-field'><span class='label'>Work</span><div class='value'>" +
+          ticketChip(d) + "</div></div><div class='holo-field'><span class='label'>Endpoint</span><div class='value'>" +
+          channelChip(d,true) + "</div></div></div><span class='seen' style='display:block;margin-top:11px'>" + d.seen +
+          "</span></article>";
+      }
+
+      function passStampCard(opt, d) {
+        return "<article " + identityOpenAttrs(opt,d,"passport") + "><div class='stamp-main'>" + projectCorner(d) +
+          "<div class='identity-name'>" + d.name + "</div>" + modelHarness(d) +
+          "<div class='passport-meta-grid'><div><span class='label'>Role</span><div class='value role-led-select'>" + roleControl(d) +
+          "</div></div><div><span class='label'>State</span><div class='value'>" + identityStatus(d) +
+          "</div></div><div><span class='label'>Current work</span><div class='value'>" + ticketChip(d) +
+          "</div></div><div><span class='label'>Last seen</span><div class='value seen'>" + d.seen +
+          "</div></div></div></div><div class='stamp-seal'><div class='seal-circle'><div>" + icon("shield") +
+          "<b>operator</b></div></div>" + channelChip(d,true) + "</div></article>";
+      }
+
+      function roleTotemCard(opt, d) {
+        return "<article " + identityOpenAttrs(opt,d,"role") + "><div class='totem role-led-select'><div class='totem-glyph'>" +
+          icon("shield") + "</div><span class='label'>Canonical role</span>" + roleControl(d) +
+          "</div><div class='totem-main'>" + projectCorner(d) + "<div class='identity-name'>" + d.name + "</div>" +
+          modelHarness(d) + "<div class='totem-work'><span class='label'>Current work</span><div style='margin-top:8px'>" +
+          ticketChip(d) + "</div></div><div class='chip-row' style='margin-top:12px'>" + identityStatus(d) +
+          channelChip(d,true) + queueChip(d) + "<span class='seen'>" + d.seen + "</span></div></div></article>";
+      }
+
+      function roleBannerCard(opt, d) {
+        return "<article " + identityOpenAttrs(opt,d,"role") + "><div class='role-banner role-led-select'>" +
+          "<span class='role-banner-mark'>" + icon("shield") + "</span><div><span class='label'>Operating as</span><div style='margin-top:4px;color:var(--role-color);font-weight:700'>" +
+          d.role + "</div></div>" + roleControl(d) + "</div><div class='role-banner-main'>" + projectCorner(d) +
+          "<div class='identity-name'>" + d.name + "</div>" + modelHarness(d) + "<div class='role-banner-actions'>" +
+          identityStatus(d) + ticketChip(d) + channelChip(d,true) + queueChip(d) + "<span class='seen' style='margin-left:auto'>" +
+          d.seen + "</span></div></div></article>";
+      }
+
+      function roleConstellationCard(opt, d) {
+        return "<article " + identityOpenAttrs(opt,d,"role") + "><div class='role-constellation'><svg viewBox='0 0 188 188' aria-hidden='true'>" +
+          "<path class='role-link' d='M94 94 18 23M94 94 170 23M94 94 18 165M94 94 170 165'/></svg>" +
+          "<div class='role-core role-led-select'>" + icon("shield") + roleControl(d) + "</div>" +
+          "<div class='role-node model'>" + modelHarness(d) + "</div><div class='role-node project'>" + projectChip(d) +
+          "</div><div class='role-node ticket'>" + ticketChip(d) + "</div><div class='role-node channel'>" + channelChip(d,true) +
+          "</div></div><div class='constellation-name'><div class='identity-name'>" + d.name + "</div>" + identityStatus(d) +
+          "<span class='seen' style='display:block;margin-top:5px'>" + d.seen + "</span></div></article>";
+      }
+
+      function roleSealCard(opt, d) {
+        return "<article " + identityOpenAttrs(opt,d,"role") + "><div class='role-seal-panel role-led-select'>" +
+          "<div class='role-seal'>" + icon("shield") + "</div>" + roleControl(d) + "</div><div class='role-seal-main'>" +
+          projectCorner(d) + "<div class='identity-name'>" + d.name + "</div>" + modelHarness(d) +
+          "<div class='role-seal-work'>" + ticketChip(d) + identityStatus(d) + "</div><div class='chip-row' style='margin-top:12px'>" +
+          channelChip(d,false) + queueChip(d) + "<span class='seen'>" + d.seen + "</span></div></div></article>";
       }
 
       function baselineCard(opt, d) {
@@ -931,6 +1607,11 @@
       }
 
       var renderers = {
+        "orb-ummon": ummonCard, "orb-horizon": horizonCard, "orb-living": livingCard,
+        "orb-gyro": gyroCard, "orb-thought": thoughtCard, "orb-lens": lensCard, "orb-swarm": swarmCard,
+        "pass-model": passModelCard, "pass-harness": passHarnessCard, "pass-holo": passHoloCard,
+        "pass-stamp": passStampCard, "role-totem": roleTotemCard, "role-banner": roleBannerCard,
+        "role-constellation": roleConstellationCard, "role-seal": roleSealCard,
         baseline: baselineCard, commandbar: commandbarCard, ledger: ledgerCard, mission: missionCard,
         rail: railCard, passport: passportCard, deck: deckCard, sentence: sentenceCard, split: splitCard,
         trace: traceCard, orbital: orbitalCard, strip: stripCard, pillar: pillarCard, tiles: tilesCard, calm: calmCard
@@ -967,12 +1648,28 @@
         }).join("");
       }
 
+      function renderGroupedOptions(visible, d) {
+        if (state.mode === "focus") {
+          return "<section class='option-group'><div class='option-grid'>" +
+            visible.map(function (opt) { return renderOption(opt,d); }).join("") + "</div></section>";
+        }
+        return groups.map(function (group) {
+          var members = visible.filter(function (opt) { return (opt.group || "original") === group.id; });
+          if (!members.length) return "";
+          return "<section class='option-group " + (group.id === "original" ? "original-group" : "") +
+            "' data-group='" + group.id + "'><header class='group-heading'><div class='group-mark'>" + group.mark +
+            "</div><div><h2>" + group.name + "</h2><p>" + group.description + "</p></div><span class='group-count'>" +
+            group.count + "</span></header><div class='option-grid'>" +
+            members.map(function (opt) { return renderOption(opt,d); }).join("") + "</div></section>";
+        }).join("");
+      }
+
       function render() {
         document.body.dataset.mode = state.mode;
         document.body.dataset.width = state.width;
         var d = scenarioData(state.scenario);
         var visible = state.mode === "focus" ? options.filter(function (opt) { return opt.id === state.active; }) : options;
-        document.getElementById("gallery").innerHTML = visible.map(function (opt) { return renderOption(opt,d); }).join("");
+        document.getElementById("gallery").innerHTML = renderGroupedOptions(visible,d);
         document.getElementById("shortlist-count").textContent = String(state.shortlist.length);
         document.getElementById("scenario-select").value = state.scenario;
         document.querySelectorAll("[data-mode-button]").forEach(function (button) {
@@ -986,7 +1683,7 @@
       }
 
       function persist() {
-        try { localStorage.setItem("golem-agent-card-lab", JSON.stringify(state)); } catch (e) {}
+        try { localStorage.setItem("golem-agent-card-identity-lab-v2", JSON.stringify(state)); } catch (e) {}
         var hash = "option=" + encodeURIComponent(state.active) + "&state=" + encodeURIComponent(state.scenario) +
           "&mode=" + encodeURIComponent(state.mode) + "&width=" + encodeURIComponent(state.width);
         history.replaceState(null, "", "#" + hash);
@@ -994,7 +1691,7 @@
 
       function restore() {
         try {
-          var saved = JSON.parse(localStorage.getItem("golem-agent-card-lab") || "null");
+          var saved = JSON.parse(localStorage.getItem("golem-agent-card-identity-lab-v2") || "null");
           if (saved && typeof saved === "object") state = Object.assign(state, saved);
         } catch (e) {}
         var hash = location.hash.replace(/^#/, "");
