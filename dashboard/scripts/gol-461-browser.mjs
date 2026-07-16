@@ -209,12 +209,12 @@ try {
   const projectSessionNames = await projectSessions.locator('.agent-card-name').allTextContents();
   ok(await page.locator('.project-hero-meta').getByText('6 live sessions', { exact: true }).count() === 1 && projectSessionNames.length === 6, 'project hero count matches six alive project-session cards');
   ok(projectSessionNames.join('|') === 'Fixture Builder|Healthy Working Codex|Waiting Reviewer|Idle Newer|Legacy Status|Idle Older', 'project sessions include healthy busy, missing-channel, waiting, idle, and legacy rows in last-seen order');
-  const busyStatus = await projectSessions.filter({ hasText: 'Fixture Builder' }).locator('.agent-status-badge').innerText();
-  const waitingStatus = await projectSessions.filter({ hasText: 'Waiting Reviewer' }).locator('.agent-status-badge').innerText();
-  ok(busyStatus.trim().toLowerCase() === 'working', 'busy project card visibly renders Working');
-  ok(waitingStatus.trim().toLowerCase() === 'waiting', 'waiting project card visibly renders Waiting');
+  const busyCard = projectSessions.filter({ hasText: 'Fixture Builder' });
+  const waitingCard = projectSessions.filter({ hasText: 'Waiting Reviewer' });
+  ok(await busyCard.locator('.agent-status-badge').count() === 0 && await busyCard.locator('.agent-card-orb').count() === 1, 'busy project card uses the H1 orb instead of an obsolete Working badge');
+  ok(await waitingCard.locator('.agent-status-badge').count() === 0 && await waitingCard.locator('.agent-card-orb').count() === 1, 'waiting project card also keeps lifecycle state in its H1 orb');
   ok(await projectSessions.filter({ hasText: 'Healthy Working Codex' }).locator('.native-session-nochannel').count() === 0, 'healthy working card never renders a no-channel warning');
-  ok(await projectSessions.filter({ hasText: 'Legacy Status' }).locator('.native-session-nochannel').count() === 1, 'genuine missing-channel card retains the warning');
+  ok((await projectSessions.filter({ hasText: 'Legacy Status' }).locator('.agent-card-communication').innerText()).includes('Channel offline'), 'genuine missing-channel card retains visible offline communication');
   ok(!projectSessionNames.includes('Stale Ghost') && !projectSessionNames.includes('Beta Builder'), 'project sessions exclude dead and cross-project rows');
   const selectorNames = await page.evaluate((projectId) => {
     const state = window.Store.getState();
@@ -234,10 +234,11 @@ try {
   const projectModelImages = projectSessions.locator('.agent-model-icon img');
   ok(await projectHarnessImages.count() === 6 && await projectModelImages.count() === 6 && await projectIconImages.evaluateAll((images) => images.every((image) => image.complete && image.naturalWidth > 0 && (image.src.startsWith('data:image/svg+xml') || new URL(image.src).origin === location.origin))), 'six project cards render bundled harness and model SVG icons');
   const harnessIcons = projectSessions.locator('.agent-harness-icon[role="img"]');
-  ok(await harnessIcons.count() === 6 && await harnessIcons.evaluateAll((icons) => icons.every((icon) => icon.getAttribute('aria-label')?.startsWith('harness ') && !icon.querySelector(':scope > span'))), 'six harness SVG icons retain accessible names without text-initial fallbacks');
+  ok(await harnessIcons.count() === 6 && await harnessIcons.evaluateAll((icons) => icons.every((icon) => icon.getAttribute('aria-label')?.startsWith('Harness: ') && !icon.querySelector(':scope > span'))), 'six harness SVG icons retain accessible names without text-initial fallbacks');
   await page.goto(`${base}/agents`, { waitUntil: 'networkidle' });
   const agentCard = page.locator('.native-session-card').filter({ hasText: 'Healthy Working Codex' });
-  await agentCard.focus();
+  const agentSurface = agentCard.locator('.agent-card-surface');
+  await agentSurface.focus();
   await page.keyboard.press('Enter');
   await page.waitForSelector('[role="dialog"]');
   const agentText = await page.locator('[role="dialog"]').innerText();
@@ -262,7 +263,7 @@ try {
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
   ok(await page.locator('.app > .main[inert]').count() === 0, 'second Escape releases background inertness');
-  ok(await page.evaluate(() => document.activeElement?.classList.contains('native-session-card')), 'nested stack restores the original opener after the lower closes');
+  ok(await page.evaluate(() => document.activeElement?.classList.contains('agent-card-surface')), 'nested stack restores the original opener after the lower closes');
 
   // Move the seeded session from busy to idle and require the drainer to POST
   // the queued envelope to its isolated fake channel, then remove the queue row.
