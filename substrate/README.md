@@ -91,12 +91,9 @@ is running (they read its URL from `~/.golem/dashboard.json`).
 
 ### Receiving dispatched tickets (channel consumer)
 
-A plain `claude` session loads the tracker **tools** but is NOT a channel
-**consumer** — so when you "Dispatch" a ticket to it from the dashboard, the
-pushed brief is delivered to the session's channel server (HTTP 202) but
-[silently dropped](https://code.claude.com/docs/en/channels-reference#notification-format)
-by Claude Code. The session can still *pull* its work (`ticket_list mine:true`),
-but to have dispatches *push* in, launch it as a channel consumer:
+A plain `claude` session can load the tracker **tools** without being a channel
+**consumer**. The session can still *pull* its work (`ticket_list mine:true`),
+but to make it eligible for pushed dispatches, launch it as a channel consumer:
 
 ```bash
 claude --dangerously-load-development-channels plugin:golem@golem-workspace
@@ -111,6 +108,17 @@ in managed settings and use `--channels plugin:golem@golem-workspace`. Either wa
 per-session launch flag is required — there is no settings.json toggle that
 auto-consumes channels.
 
+Claude Channels also require Anthropic authentication through claude.ai or a
+Console API key. They are unavailable under Bedrock, Vertex, Foundry, or a
+non-default `ANTHROPIC_BASE_URL`; Golem records only a reason code for those
+known-negative modes, never the URL or any credential. A Claude channel becomes
+dashboard-reachable only after its MCP client sends `initialized` and the
+provider configuration is eligible. That is a transport eligibility signal,
+not proof that Claude consumed an event: organization policy, per-entry consent,
+and the launch flag remain host-owned, and an HTTP 202 confirms only that the
+target channel transport accepted the notification. OpenCode uses its separate
+`promptAsync` bridge and is unaffected by these Claude authentication rules.
+
 ## Session-to-session consult
 
 A live session can ask **another** live session for a *fresh pair of eyes* on a
@@ -120,8 +128,10 @@ like glm-5.2). It rides the same channel transport as dispatch:
 
 1. The asker calls **`consult_request({ to, question, context })`** — `to` is the
    peer's `/rename` name (resolved via `claude agents --json` ∩ live channels) or
-   a `session_id`. The tool POSTs to the peer's channel **`/consult`** route and
-   returns a `consult_id` immediately. **The asker never blocks.**
+   a `session_id`. The tool first requires a delivery-ready target, POSTs to the
+   peer's channel **`/consult`** route, and returns a `consult_id` after that
+   transport accepts it. This is not confirmation of a model turn. **The asker
+   never blocks.**
 2. The consult arrives at the peer as `<channel kind="consult" consult_id=…
    from_session=…>`. Its `golem:provide-consult` skill investigates independently
    (code, web), forms a proposal, and calls **`consult_reply({ to_session,
@@ -143,6 +153,10 @@ Requirements:
   session was launched as a consumer (`claude --dangerously-load-development-channels
   plugin:golem@golem-workspace`, i.e. the `golemc` alias). So the consultant must be a
   consumer to get the request, **and the asker must be a consumer to get the reply.**
+- **Claude Code consumers must use supported Anthropic authentication.** Known
+  Bedrock, Vertex, Foundry, and custom `ANTHROPIC_BASE_URL` sessions are marked
+  non-deliverable with remediation instead of returning a false consult success.
+  OpenCode peers remain consultable through their prompt bridge.
 
 Consult traffic also surfaces in the dashboard chat (a short audit marker on each
 session's lane).

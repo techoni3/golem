@@ -1,0 +1,4 @@
+interface:
+  display_name: "Compare Design Options"
+  short_description: "Build realistic UI decision labs before coding"
+  default_prompt: "Use $compare-design-options to render several realistic UI directions for this design decision before implementation."

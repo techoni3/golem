@@ -76,13 +76,11 @@
   border-radius: 3px;
 }
 
-/* Global appearance control. It deliberately sits below the drawer backdrop
-   (z50) so chat/ticket composers always own the bottom-right corner. */
+/* Appearance lives in the pinned sidebar footer. The panel uses a viewport
+   anchor so it opens above that footer without being clipped by the sidebar. */
 .appearance-control {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  z-index: 45;
+  position: relative;
+  flex: 0 0 auto;
 }
 .app:has(.drawer.open) .appearance-control {
   visibility: hidden;
@@ -90,39 +88,41 @@
 }
 .appearance-trigger {
   position: relative;
-  width: 44px;
-  height: 44px;
-  border: 1px solid var(--border-2);
-  border-radius: 50%;
-  background: var(--bg-1);
-  color: var(--text-1);
-  box-shadow: var(--shadow-2);
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-1);
+  background: transparent;
+  color: var(--text-3);
+  box-shadow: none;
   display: grid;
   place-items: center;
   transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
 }
 .appearance-trigger:hover,
 .appearance-control.open .appearance-trigger {
-  transform: translateY(-2px);
+  transform: translateY(-1px);
   border-color: var(--accent-border);
   background: var(--bg-2);
+  color: var(--text-1);
 }
-.appearance-trigger svg { width: 20px; height: 20px; }
+.appearance-trigger svg { width: 17px; height: 17px; }
 .appearance-accent-pip {
   position: absolute;
-  right: 1px;
-  bottom: 1px;
-  width: 11px;
-  height: 11px;
-  border: 2px solid var(--bg-1);
+  right: 0;
+  bottom: 0;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--sidebar-bg);
   border-radius: 50%;
   box-shadow: 0 0 0 1px var(--border-2);
 }
 
 .tweaks-pop {
-  position: absolute;
-  right: 0;
-  bottom: 56px;
+  position: fixed;
+  left: 14px;
+  bottom: 62px;
   width: min(340px, calc(100vw - 24px));
   background-color: var(--bg-1);
   background-image: var(--surface-pattern);
@@ -252,8 +252,15 @@
 .appearance-current-dot { width: 7px; height: 7px; border-radius: 50%; }
 
 @media (max-width: 640px) {
-  .appearance-control { right: 12px; bottom: 12px; }
-  .tweaks-pop { right: 0; bottom: 54px; width: calc(100vw - 24px); max-height: calc(100vh - 92px); overflow-y: auto; }
+  .tweaks-pop {
+    left: 12px;
+    right: 12px;
+    top: 60px;
+    bottom: auto;
+    width: auto;
+    max-height: calc(100vh - 72px);
+    overflow-y: auto;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2006,13 +2013,24 @@
     padding: 8px 12px;
     -webkit-overflow-scrolling: touch;
   }
-  .sidebar-brand { padding: 0; flex-shrink: 0; }
+  .sidebar-brand { padding: 0; height: auto; flex-shrink: 0; }
   .sidebar-brand-sub { display: none; }
   /* Collapse the section labels + the project section to keep the strip short;
      the project list is reachable from the Projects page. */
-  .sidebar-section-label,
-  .sidebar-footer { display: none; }
-  .sidebar-section { margin: 0; }
+  .sidebar-section-label { display: none; }
+  .sidebar-footer {
+    display: flex;
+    position: sticky;
+    right: 0;
+    flex: 0 0 auto;
+    margin: 0 0 0 auto;
+    padding: 0 0 0 4px;
+    border: 0;
+    background: var(--sidebar-bg);
+    z-index: 1;
+  }
+  .sidebar-footer-status { display: none; }
+  .sidebar-section { margin: 0; padding: 0; }
   .sidebar-section + .sidebar-section { display: none; }
   .sidebar-nav { flex-direction: row; gap: 4px; }
   .sidebar-link {

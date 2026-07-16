@@ -91,6 +91,12 @@ export function sessionFactsJsonPath() {
 export function endpointLeasesJsonPath() {
   return path.join(golemHome(), 'endpoint-leases.json');
 }
+// One durable record per Golem-owned, headless Codex App Server supervisor.
+// This is intentionally separate from generic session facts: it holds the
+// process/thread recovery mapping and must never be inferred from a hook.
+export function codexSupervisorsJsonPath() {
+  return path.join(golemHome(), 'codex-supervisors.json');
+}
 export function dashboardJsonPath() {
   return path.join(golemHome(), 'dashboard.json');
 }

@@ -3,10 +3,13 @@
 ## Appearance Persistence
 
 `dashboard/web/src/tweaks.jsx` owns the dashboard's global appearance control.
-It is mounted once by `app.jsx` in the bottom-right corner and sits below the
-drawer/backdrop stack so ticket and chat composers keep interaction priority.
-The control switches between the default dark theme and Loam & Linen, and maps
-the retained six-color accent palette to contrast-safe values for each theme.
+It is mounted once inside `shell.jsx`'s pinned sidebar footer, beside the harness
+status and package version. On narrow layouts the same footer-owned trigger
+stays in the horizontal shell bar while its panel opens below the bar, avoiding
+bottom-corner overlay collisions. Ticket and chat drawers keep interaction
+priority. The control switches between the default dark theme and Loam & Linen,
+and maps the retained six-color accent palette to contrast-safe values for each
+theme.
 
 Preferences are browser-local and independent:
 
@@ -18,7 +21,9 @@ Preferences are browser-local and independent:
 The inline bootstrap in `dashboard/web/index.html` reads the theme key before
 stylesheets load and only stamps `data-theme="loam"` when explicitly selected.
 Theme tokens and the Loam material/typography layer live in `styles.css`; panel
-and responsive control layout live in `extra.css`.
+and responsive control layout live in `extra.css`. `dashboard/vite.config.js`
+reads the root `package.json` and defines the version published by `entry.jsx`,
+so the sidebar's version label follows the package source of truth.
 
 ## Substrate Settings
 

@@ -265,6 +265,19 @@ function AgentCard({ session, name, queueCount = 0, setRoute, showControls = fal
     setRoleToast({ msg: `Role assignment failed: ${msg}`, id: Math.random() });
     setTimeout(() => setRoleToast(null), 3000);
   };
+  const assignRole = async (role) => {
+    try {
+      const result = await window.SubstrateAPI.setSessionRole(s.session_id, role);
+      if (result?.activation?.ok === false) {
+        const detail = result.activation.error || `status ${result.activation.status ?? 'unknown'}`;
+        console.warn('role saved but activation was not delivered', result.activation);
+        setRoleToast({ msg: `Role saved; activation not delivered: ${detail}`, id: Math.random() });
+        setTimeout(() => setRoleToast(null), 5000);
+      }
+    } catch (error) {
+      flashRoleError(error);
+    }
+  };
 
   return (
     <div
@@ -329,7 +342,7 @@ function AgentCard({ session, name, queueCount = 0, setRoute, showControls = fal
           Role{' '}
           <RoleSelect
             value={s.role || ''}
-            onChange={(role) => window.SubstrateAPI.setSessionRole(s.session_id, role).catch(flashRoleError)}
+            onChange={assignRole}
             disabled={!s.session_id}
           />
         </label>

@@ -29,7 +29,7 @@ import {
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import * as tracker from './tracker-client.js';
-import { bridgeEndpointForParent, resolveCallerSessionId, sessionsForParent } from './identity.js';
+import { bridgeEndpointForParent, managedCodexBinding, resolveCallerSessionId, sessionsForParent } from './identity.js';
 import { SESSION_ROLES, pushRoleBriefDirect, setSessionRole } from '../../lib/session-role.js';
 import { releaseEndpointLeases, renewEndpointLease, upsertSessionFact } from '../../lib/session-facts.js';
 
@@ -55,6 +55,11 @@ const ALLOWED_SENDERS = new Set(
     .map((s) => s.trim())
     .filter(Boolean),
 );
+// A Golem-owned Codex App Server uses this process only as a stdio MCP server.
+// Its supervisor is the sole addressed-delivery endpoint; binding an ordinary
+// channel HTTP port here would create a second, unauthenticated route and make
+// the dashboard falsely believe generic Claude notification delivery works.
+const MANAGED_CODEX_MCP_ONLY = process.env.GOLEM_MANAGED_CODEX_MCP_ONLY === '1';
 
 // Identity for chat-routing, dispatch, and consult.
 //
@@ -78,6 +83,8 @@ function readParentSessionFile() {
   return null;
 }
 function deriveSessionId() {
+  const managed = managedCodexBinding();
+  if (managed.enabled) return managed.sessionId || '';
   // Explicit launcher override wins; else the logical id from the parent session
   // file; else the per-run CLAUDE_CODE_SESSION_ID (last resort — diverges on resume).
   if (process.env.GOLEM_CEO_SESSION_ID) return process.env.GOLEM_CEO_SESSION_ID;
@@ -98,10 +105,69 @@ const CHANNELS_REGISTRY = path.join(tracker.golemHome(), 'channels.json');
 const CHANNELS_LOCK = `${CHANNELS_REGISTRY}.lock`;
 const OPENCODE_BRIDGES_REGISTRY = path.join(tracker.golemHome(), 'opencode-bridges.json');
 
+// A live HTTP child is only an endpoint, not proof that its host can consume
+// Claude channel notifications. Claude Code may initialize ordinary MCP tools
+// even when its model-provider configuration is ineligible for Channels. Keep
+// the signal deliberately narrow: completed MCP initialization plus the
+// absence of a provider mode Anthropic documents as unsupported. OpenCode does
+// not use Claude Channels; its promptAsync bridge remains ready independently.
+let MCP_INITIALIZED = false;
+let BOUND_PORT = null;
+
+function nonDefaultAnthropicBaseUrl(value) {
+  const normalized = String(value || '').trim().replace(/\/+$/, '').toLowerCase();
+  return !!normalized && normalized !== 'https://api.anthropic.com';
+}
+
+function enabledProviderFlag(value) {
+  return String(value || '').trim() === '1';
+}
+
+function claudeChannelProviderStatus(env = process.env) {
+  if (enabledProviderFlag(env.CLAUDE_CODE_USE_BEDROCK)) {
+    return { supported: false, reason: 'unsupported_bedrock_provider' };
+  }
+  if (enabledProviderFlag(env.CLAUDE_CODE_USE_VERTEX)) {
+    return { supported: false, reason: 'unsupported_vertex_provider' };
+  }
+  if (enabledProviderFlag(env.CLAUDE_CODE_USE_FOUNDRY)) {
+    return { supported: false, reason: 'unsupported_foundry_provider' };
+  }
+  if (nonDefaultAnthropicBaseUrl(env.ANTHROPIC_BASE_URL)) {
+    return { supported: false, reason: 'unsupported_custom_base_url' };
+  }
+  return { supported: true, reason: null };
+}
+
+function channelConsumerStatus(harness) {
+  if (harness === 'opencode') {
+    return { ready: true, reason: null, transport: 'opencode-bridge' };
+  }
+  const provider = claudeChannelProviderStatus();
+  if (!provider.supported) {
+    return { ready: false, reason: provider.reason, transport: 'claude-channel' };
+  }
+  if (!MCP_INITIALIZED) {
+    return { ready: false, reason: 'mcp_not_initialized', transport: 'claude-channel' };
+  }
+  return { ready: true, reason: null, transport: 'claude-channel' };
+}
+
+function channelReadinessError(reason) {
+  if (String(reason || '').startsWith('unsupported_')) {
+    return 'Claude Code channel is ineligible under this provider configuration. Claude Channels require Anthropic authentication through claude.ai or a Console API key; unset Bedrock/Vertex/Foundry or non-default ANTHROPIC_BASE_URL configuration, then restart with --dangerously-load-development-channels plugin:golem@golem-workspace.';
+  }
+  if (reason === 'mcp_not_initialized') {
+    return 'Claude Code channel is not ready because MCP initialization has not completed. Wait for plugin startup, or restart with --dangerously-load-development-channels plugin:golem@golem-workspace.';
+  }
+  return 'Claude Code channel consumer readiness is unknown. Restart the session with an Anthropic-authenticated Claude Code channel configuration and --dangerously-load-development-channels plugin:golem@golem-workspace.';
+}
+
 // Claude Code supplies an identity through its parent registry or environment.
 // OpenCode does not: its shim writes a bridge shortly after this MCP starts.
 const WATCH_OPENCODE_BRIDGES = !(
-  process.env.GOLEM_CEO_SESSION_ID
+  MANAGED_CODEX_MCP_ONLY
+  || process.env.GOLEM_CEO_SESSION_ID
   || readParentSessionFile()?.sessionId
   || process.env.CLAUDE_CODE_SESSION_ID
 );
@@ -193,6 +259,8 @@ function registerChannel(port, { logMissing = true } = {}) {
   SESSION_NAME = deriveSessionName();
   const bridge = bridgeEndpointForParent({ home: tracker.golemHome() });
   const siblings = sessionsForParent({ home: tracker.golemHome() });
+  const harness = siblings.length || (bridge && bridge.session_id === SESSION_ID) ? 'opencode' : 'claudecode';
+  const consumer = channelConsumerStatus(harness);
   if (!SESSION_ID && siblings.length === 0) {
     if (WATCH_OPENCODE_BRIDGES) {
       withChannelLock(() => {
@@ -220,10 +288,13 @@ function registerChannel(port, { logMissing = true } = {}) {
         host: HOST,
         port,
         version: VERSION,
-        harness: siblings.length ? 'opencode' : (bridge && bridge.session_id === SESSION_ID ? 'opencode' : undefined),
+        harness,
+        consumer_ready: consumer.ready,
+        consumer_reason: consumer.reason,
+        consumer_transport: consumer.transport,
+        delivery_ready: consumer.ready,
         started_at: STARTED_AT,
       });
-      const harness = siblings.length ? 'opencode' : (bridge && bridge.session_id === SESSION_ID ? 'opencode' : 'claudecode');
       upsertSessionFact({
         canonical_id: row.session_id,
         harness,
@@ -233,7 +304,19 @@ function registerChannel(port, { logMissing = true } = {}) {
         status: row.status || null,
         observed_at: new Date().toISOString(),
       });
-      renewEndpointLease({ canonical_id: row.session_id, owner_token: LEASE_OWNER, host: HOST, port, pid: process.pid, harness });
+      renewEndpointLease({
+        canonical_id: row.session_id,
+        owner_token: LEASE_OWNER,
+        host: HOST,
+        port,
+        pid: process.pid,
+        harness,
+        kind: harness === 'opencode' ? 'opencode-bridge' : 'claude-channel',
+        consumer_ready: consumer.ready,
+        consumer_reason: consumer.reason,
+        consumer_transport: consumer.transport,
+        delivery_ready: consumer.ready,
+      });
     }
     writeChannelsRegistry(reg);
   });
@@ -298,11 +381,25 @@ function unregisterChannel() {
 // never blocks. Targeting is by /rename name (resolved to a session_id that has
 // a live channel) or by session_id directly.
 
-function channelUrlForSession(sessionId) {
-  if (!sessionId) return null;
-  const reg = readChannelsRegistry();
-  const ch = reg.channels.find((c) => c.session_id === sessionId);
-  return ch ? `http://${ch.host}:${ch.port}` : null;
+function resolvedChannel(channel, name) {
+  if (!channel) return null;
+  if (channel.harness === 'opencode') {
+    return {
+      ok: true,
+      session_id: channel.session_id,
+      name: name || channel.name || channel.session_id,
+      url: `http://${channel.host}:${channel.port}`,
+    };
+  }
+  if (channel.consumer_ready !== true || channel.delivery_ready === false) {
+    return { ok: false, error: `consult: ${channelReadinessError(channel.consumer_reason)}` };
+  }
+  return {
+    ok: true,
+    session_id: channel.session_id,
+    name: name || channel.name || channel.session_id,
+    url: `http://${channel.host}:${channel.port}`,
+  };
 }
 
 // `claude agents --json` — a FALLBACK name source only now (the channel registry
@@ -338,12 +435,12 @@ function resolveConsultTarget(toRaw, agents) {
   const reg = readChannelsRegistry();
   // 1) direct session_id match
   const direct = reg.channels.find((c) => c.session_id === to);
-  if (direct) return { ok: true, session_id: to, name: direct.name || to, url: `http://${direct.host}:${direct.port}` };
+  if (direct) return resolvedChannel(direct, direct.name || to);
   // 2) by the name stored in the channel registry (reliable, no external call)
   const byName = reg.channels.filter((c) => (c.name || '') === to);
   if (byName.length === 1) {
     const c = byName[0];
-    return { ok: true, session_id: c.session_id, name: to, url: `http://${c.host}:${c.port}` };
+    return resolvedChannel(c, to);
   }
   if (byName.length > 1) {
     return { ok: false, error: `consult: multiple live channels named "${to}" (${byName.map((c) => c.session_id).join(', ')}) — pass an exact session_id as \`to\`.` };
@@ -356,7 +453,7 @@ function resolveConsultTarget(toRaw, agents) {
     if (consultable.length === 1) {
       const a = consultable[0];
       const ch = reg.channels.find((c) => c.session_id === a.sessionId);
-      return { ok: true, session_id: a.sessionId, name: to, url: `http://${ch.host}:${ch.port}` };
+      return resolvedChannel(ch, to);
     }
     if (consultable.length > 1) {
       return { ok: false, error: `consult: multiple live sessions named "${to}" — pass an exact session_id as \`to\`.` };
@@ -373,6 +470,42 @@ async function resolveTargetWithFallback(to) {
     t = resolveConsultTarget(to, await runClaudeAgentsJson());
   }
   return t;
+}
+
+// The legacy registry intentionally has no managed-Codex row: its App Server
+// supervisor is the only delivery endpoint. Resolve that target from the
+// tracker projection after the CC/OC lookup misses, so legacy consult routes
+// retain their existing direct semantics.
+async function resolveManagedControlTarget(toRaw) {
+  const to = String(toRaw || '').trim();
+  if (!to) return { ok: false, error: 'control target is required' };
+  let sessions;
+  try {
+    sessions = await tracker.listDispatchable();
+  } catch (error) {
+    return { ok: false, error: `could not list live sessions — ${error instanceof Error ? error.message : String(error)}` };
+  }
+  const candidates = (Array.isArray(sessions) ? sessions : []).filter((session) => (
+    session?.session_id === to || session?.label === to || session?.name === to
+  ));
+  if (candidates.length === 0) return { ok: false, error: `no live dispatchable session matches "${to}"` };
+  if (candidates.length > 1) return { ok: false, error: `multiple live sessions match "${to}" — pass an exact session_id` };
+  const target = candidates[0];
+  if (target.harness !== 'codex') return { ok: false, error: `target "${to}" has no reachable generic channel` };
+  if (target.reachable === false) return { ok: false, error: `managed Codex target "${target.label || target.session_id}" is not delivery-ready; wait for its current turn or recover its supervisor` };
+  return { ok: true, session_id: target.session_id, name: target.label || target.name || target.session_id, project_id: target.project_id || null };
+}
+
+async function deliverManagedControl({ target, senderId, kind, content, metadata, legacy }) {
+  return tracker.deliverControlMessage({
+    session_id: target.session_id,
+    sender_id: senderId,
+    project_id: target.project_id || null,
+    kind,
+    content,
+    metadata,
+    legacy,
+  });
 }
 
 async function postToChannel(baseUrl, pathSuffix, bodyObj) {
@@ -702,11 +835,11 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'sessions_dispatchable',
       description:
-        'Golem tracker — list live native Claude sessions that can receive a dispatched ticket, in your current project (or pass project for another). Returns session ids + labels for use with ticket_dispatch. Each entry carries a status (idle|busy|waiting) and a pending_count of queued dispatches — pass when_idle:true on ticket_dispatch for a busy/waiting target so the brief lands when it next goes idle.',
+        'Golem tracker — list live cross-harness sessions that are currently eligible to receive a dispatched ticket, in your current project (or pass project for another). Returns session ids + labels for use with ticket_dispatch. Each entry carries a status (idle|busy|waiting) and a pending_count of queued dispatches — pass when_idle:true on ticket_dispatch for a busy/waiting target so the brief lands when it next goes idle.',
       inputSchema: {
         type: 'object',
         properties: {
-          project: { type: 'string', description: 'Contract project_id. Defaults to your current project.' },
+          project: { type: 'string', description: 'Canonical project_id, registry id, or unique dashboard project name. Ambiguous human names fail explicitly. Defaults to your current project.' },
         },
       },
     },
@@ -807,7 +940,32 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const rawArgs = req.params.arguments || {};
   const injectedSessionId = rawArgs.__golem_session_id;
   const args = Object.fromEntries(Object.entries(rawArgs).filter(([key]) => !key.startsWith('__golem_')));
-  const caller = resolveCallerSessionId({ injectedId: injectedSessionId, home: tracker.golemHome() });
+  const managed = managedCodexBinding();
+  // In managed Codex mode __golem_session_id is model-controlled request data,
+  // not a trusted harness shim field. A conflicting value is an attempted actor
+  // spoof and is rejected before any read or write. A matching value is ignored;
+  // the only actor source remains the supervisor-owned process binding.
+  const caller = managed.enabled
+    ? (!managed.sessionId
+      ? { sessionId: null, error: managed.error }
+      : (typeof injectedSessionId === 'string' && injectedSessionId.trim() && injectedSessionId.trim() !== managed.sessionId
+        ? { sessionId: null, error: 'golem: managed Codex caller identity conflicts with the supervisor binding; refusing the tool call.' }
+        : { sessionId: managed.sessionId, source: 'managed_codex_supervisor' }))
+    : (() => {
+      // Preserve CC's launcher-bound actor and OpenCode's shim-bound actor.
+      // resolveCallerSessionId supplies the precise ambiguity diagnostic, while
+      // tracker.currentSessionId retains the existing GOLEM_CEO_SESSION_ID /
+      // Claude parent-session fallback used by ordinary channel children.
+      const resolved = resolveCallerSessionId({ injectedId: injectedSessionId, home: tracker.golemHome() });
+      return {
+        ...resolved,
+        sessionId: tracker.currentSessionId(injectedSessionId),
+      };
+    })();
+
+  if (managed.enabled && !caller.sessionId) {
+    return { isError: true, content: [{ type: 'text', text: caller.error || 'golem: managed Codex caller identity is unavailable.' }] };
+  }
 
   if (name === 'ack') {
     const payload = {
@@ -819,7 +977,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (args.envelope_id) {
       try {
         await tracker.acknowledgeEnvelope(String(args.envelope_id), {
-          target_session_id: tracker.currentSessionId(injectedSessionId), kind: payload.kind, summary: payload.summary,
+          target_session_id: caller.sessionId, kind: payload.kind, summary: payload.summary,
         });
         payload.envelope_id = String(args.envelope_id);
       } catch (err) {
@@ -844,7 +1002,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (args.envelope_id) {
       try {
         await tracker.replyEnvelope(String(args.envelope_id), {
-          target_session_id: tracker.currentSessionId(injectedSessionId), kind: payload.kind, text,
+          target_session_id: caller.sessionId, kind: payload.kind, text,
         });
         payload.envelope_id = String(args.envelope_id);
       } catch (err) {
@@ -877,48 +1035,125 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     if (!args.to) return { isError: true, content: [{ type: 'text', text: 'consult_request: `to` is required (the session name to consult, e.g. "ogolem", or a session_id).' }] };
     if (!args.question || !String(args.question).trim()) return { isError: true, content: [{ type: 'text', text: 'consult_request: `question` is required — describe what you are stuck on and what you have tried.' }] };
     const target = await resolveTargetWithFallback(args.to);
-    if (!target.ok) return { isError: true, content: [{ type: 'text', text: target.error }] };
     const consult_id = `cns-${crypto.randomBytes(3).toString('hex')}`;
-    const r = await postToChannel(target.url, '/consult', {
+    const legacyBody = {
       consult_id,
       from_name: SESSION_NAME || SESSION_ID || 'unknown',
       from_session: SESSION_ID,
       question: String(args.question),
       context: args.context ? String(args.context) : '',
-    });
-    if (!r.ok) return { isError: true, content: [{ type: 'text', text: `consult_request: could not deliver to "${target.name}" (${r.status} ${r.error || r.body}). Is it still running with the golem plugin?` }] };
-    return { content: [{ type: 'text', text: JSON.stringify({ ok: true, consult_id, to: target.name, to_session: target.session_id, note: 'Consult sent. Keep working — the reply pushes back asynchronously as a consult_reply channel event.' }, null, 2) }] };
+    };
+    if (target.ok) {
+      const r = await postToChannel(target.url, '/consult', legacyBody);
+      if (!r.ok) return { isError: true, content: [{ type: 'text', text: `consult_request: could not deliver to "${target.name}" (${r.status} ${r.error || r.body}). Is it still running with the golem plugin?` }] };
+      return { content: [{ type: 'text', text: JSON.stringify({ ok: true, consult_id, to: target.name, to_session: target.session_id, note: 'Consult accepted by the target channel transport. This does not confirm a model turn; keep working while any reply returns asynchronously as a consult_reply event.' }, null, 2) }] };
+    }
+    const managed = await resolveManagedControlTarget(args.to);
+    if (!managed.ok) return { isError: true, content: [{ type: 'text', text: target.error || managed.error }] };
+    const content = [
+      `CONSULT REQUEST from session "${legacyBody.from_name}" (consult_id ${consult_id}).`,
+      '',
+      'A peer session is stuck and wants a FRESH PAIR OF EYES — this is NOT delegation. Read golem:consulting, investigate independently, and reply with a proposal. Do NOT take their tickets or edit their repo.',
+      '',
+      'PROBLEM:',
+      legacyBody.question,
+      legacyBody.context ? `\nCONTEXT THEY PROVIDED:\n${legacyBody.context}` : '',
+      '',
+      `When ready, deliver your proposal with consult_reply({ to_session: "${legacyBody.from_session}", consult_id: "${consult_id}", text: "<your analysis + proposal>" }).`,
+    ].join('\n');
+    try {
+      const delivery = await deliverManagedControl({
+        target: managed,
+        senderId: caller.sessionId,
+        kind: 'consult_request',
+        content,
+        metadata: { consult_id, from_name: legacyBody.from_name, from_session: caller.sessionId },
+        legacy: { path: '/consult', body: legacyBody },
+      });
+      if (!delivery?.ok) throw new Error(delivery?.delivery?.error || 'managed control delivery failed');
+      return { content: [{ type: 'text', text: JSON.stringify({ ok: true, consult_id, to: managed.name, to_session: managed.session_id, envelope_id: delivery.envelope_id, note: 'Consult sent through the managed Codex envelope. Keep working; the reply arrives asynchronously.' }, null, 2) }] };
+    } catch (error) {
+      return { isError: true, content: [{ type: 'text', text: `consult_request: managed Codex delivery failed — ${error instanceof Error ? error.message : String(error)}` }] };
+    }
   }
 
   if (name === 'consult_reply') {
     if (!args.to_session) return { isError: true, content: [{ type: 'text', text: 'consult_reply: `to_session` is required (the from_session id carried on the consult event you are answering).' }] };
     if (!args.text || !String(args.text).trim()) return { isError: true, content: [{ type: 'text', text: 'consult_reply: `text` (your proposal) is required.' }] };
-    const url = channelUrlForSession(String(args.to_session));
-    if (!url) return { isError: true, content: [{ type: 'text', text: `consult_reply: asker session ${args.to_session} has no live channel (it may have ended) — the reply cannot be delivered.` }] };
-    const r = await postToChannel(url, '/consult/reply', {
+    const legacyTarget = resolveConsultTarget(String(args.to_session), null);
+    const legacyBody = {
       consult_id: args.consult_id ? String(args.consult_id) : '',
       from_name: SESSION_NAME || SESSION_ID || 'consultant',
       from_session: SESSION_ID,
       text: String(args.text),
-    });
-    if (!r.ok) return { isError: true, content: [{ type: 'text', text: `consult_reply: delivery failed (${r.status} ${r.error || r.body}).` }] };
-    return { content: [{ type: 'text', text: JSON.stringify({ ok: true, delivered_to: String(args.to_session), consult_id: args.consult_id || null }, null, 2) }] };
+    };
+    if (legacyTarget.ok) {
+      const r = await postToChannel(legacyTarget.url, '/consult/reply', legacyBody);
+      if (!r.ok) return { isError: true, content: [{ type: 'text', text: `consult_reply: delivery failed (${r.status} ${r.error || r.body}).` }] };
+      return { content: [{ type: 'text', text: JSON.stringify({ ok: true, delivered_to: String(args.to_session), consult_id: args.consult_id || null }, null, 2) }] };
+    }
+    const managed = await resolveManagedControlTarget(String(args.to_session));
+    if (!managed.ok) return { isError: true, content: [{ type: 'text', text: `consult_reply: ${legacyTarget.error || `asker session ${args.to_session} has no live channel (it may have ended) — ${managed.error}`}` }] };
+    const content = [
+      `CONSULT REPLY from session "${legacyBody.from_name}" (consult_id ${legacyBody.consult_id}) — your consult came back.`,
+      '',
+      'This is advice to weigh critically; keep what holds up and decide for yourself.',
+      '',
+      legacyBody.text,
+    ].join('\n');
+    try {
+      const delivery = await deliverManagedControl({
+        target: managed,
+        senderId: caller.sessionId,
+        kind: 'consult_reply',
+        content,
+        metadata: { consult_id: legacyBody.consult_id, from_name: legacyBody.from_name, from_session: caller.sessionId },
+        legacy: { path: '/consult/reply', body: legacyBody },
+      });
+      if (!delivery?.ok) throw new Error(delivery?.delivery?.error || 'managed control delivery failed');
+      return { content: [{ type: 'text', text: JSON.stringify({ ok: true, delivered_to: managed.session_id, consult_id: args.consult_id || null, envelope_id: delivery.envelope_id }, null, 2) }] };
+    } catch (error) {
+      return { isError: true, content: [{ type: 'text', text: `consult_reply: managed Codex delivery failed — ${error instanceof Error ? error.message : String(error)}` }] };
+    }
   }
 
   if (name === 'consult_status') {
     if (!args.to) return { isError: true, content: [{ type: 'text', text: 'consult_status: `to` is required.' }] };
     const target = await resolveTargetWithFallback(args.to);
-    if (!target.ok) return { isError: true, content: [{ type: 'text', text: target.error }] };
-    const r = await postToChannel(target.url, '/consult', {
+    const legacyBody = {
       consult_id: args.consult_id ? String(args.consult_id) : '',
       from_name: SESSION_NAME || SESSION_ID || 'unknown',
       from_session: SESSION_ID,
       question: `Any progress on consult ${args.consult_id || ''}?${args.note ? ' ' + String(args.note) : ''}`.trim(),
       context: '',
       status_ping: true,
-    });
-    if (!r.ok) return { isError: true, content: [{ type: 'text', text: `consult_status: ping failed (${r.status} ${r.error || r.body}).` }] };
-    return { content: [{ type: 'text', text: JSON.stringify({ ok: true, pinged: target.name, consult_id: args.consult_id || null }, null, 2) }] };
+    };
+    if (target.ok) {
+      const r = await postToChannel(target.url, '/consult', legacyBody);
+      if (!r.ok) return { isError: true, content: [{ type: 'text', text: `consult_status: ping failed (${r.status} ${r.error || r.body}).` }] };
+      return { content: [{ type: 'text', text: JSON.stringify({ ok: true, pinged: target.name, consult_id: args.consult_id || null }, null, 2) }] };
+    }
+    const managed = await resolveManagedControlTarget(args.to);
+    if (!managed.ok) return { isError: true, content: [{ type: 'text', text: target.error || managed.error }] };
+    const content = [
+      `CONSULT STATUS PING from session "${legacyBody.from_name}" (consult_id ${legacyBody.consult_id}).`,
+      '', legacyBody.question, '',
+      'If you are still investigating, send a brief consult_reply with your current status; otherwise send your final proposal.',
+    ].join('\n');
+    try {
+      const delivery = await deliverManagedControl({
+        target: managed,
+        senderId: caller.sessionId,
+        kind: 'consult_status',
+        content,
+        metadata: { consult_id: legacyBody.consult_id, from_name: legacyBody.from_name, from_session: caller.sessionId },
+        legacy: { path: '/consult', body: legacyBody },
+      });
+      if (!delivery?.ok) throw new Error(delivery?.delivery?.error || 'managed control delivery failed');
+      return { content: [{ type: 'text', text: JSON.stringify({ ok: true, pinged: managed.name, consult_id: args.consult_id || null, envelope_id: delivery.envelope_id }, null, 2) }] };
+    } catch (error) {
+      return { isError: true, content: [{ type: 'text', text: `consult_status: managed Codex delivery failed — ${error instanceof Error ? error.message : String(error)}` }] };
+    }
   }
 
   // --- Session-to-session notification --------------------------------------
@@ -956,7 +1191,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 
     const message = args.ticket ? `${args.ticket}: ${text}` : text;
     try {
-      const senderId = tracker.currentSessionId(injectedSessionId);
+      const senderId = caller.sessionId;
       if (!senderId) return { isError: true, content: [{ type: 'text', text: 'session_notify: no trusted caller session id.' }] };
       const delivery = await tracker.notifySession({ session_id: target.session_id, text: message, sender_id: senderId, project_id: target.project_id || null });
       return { content: [{ type: 'text', text: JSON.stringify({ ok: true, to: target.label || target.name || target.session_id, session_id: target.session_id, delivery }, null, 2) }] };
@@ -966,7 +1201,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   }
 
   if (name === 'subscribe' || name === 'unsubscribe' || name === 'subscriptions_list') {
-    const sessionId = tracker.currentSessionId(injectedSessionId);
+    const sessionId = caller.sessionId;
     if (!sessionId) return { isError: true, content: [{ type: 'text', text: `${name}: no trusted caller session id` }] };
     try {
       if (name === 'subscribe') {
@@ -1026,7 +1261,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       content: [{ type: 'text', text: JSON.stringify(await publicTicketIds(value), null, 2) }],
     });
     try {
-      const sessionId = tracker.currentSessionId(injectedSessionId);
+      const sessionId = caller.sessionId;
       const defaultProject = tracker.currentProjectId(sessionId);
       const writeTools = new Set([
         'ticket_create', 'ticket_update', 'ticket_transition', 'ticket_comment',
@@ -1221,6 +1456,12 @@ async function pushEvent(kind, content, extraMeta = {}, targetSessionId = null) 
     await postToOpencodeBridge(bridge, { session_id: targetSessionId || deriveSessionId(), kind, content, meta });
     return;
   }
+  const consumer = channelConsumerStatus('claudecode');
+  if (!consumer.ready) {
+    const error = new Error(channelReadinessError(consumer.reason));
+    error.statusCode = 503;
+    throw error;
+  }
   await mcp.notification({
     method: 'notifications/claude/channel',
     params: { content, meta },
@@ -1248,7 +1489,22 @@ const server = http.createServer(async (req, res) => {
       if (!canonicalId || ownerToken !== LEASE_OWNER || !ownedIds.has(canonicalId)) {
         return sendJson(res, 403, { ok: false, error: 'lease identity mismatch' });
       }
-      return sendJson(res, 200, { ok: true, version: VERSION, canonical_id: canonicalId, owner_token: LEASE_OWNER });
+      const harness = sessionsForParent({ home: tracker.golemHome() }).length > 0
+        || bridgeEndpointForParent({ home: tracker.golemHome() })
+        ? 'opencode'
+        : 'claudecode';
+      const consumer = channelConsumerStatus(harness);
+      return sendJson(res, 200, {
+        ok: true,
+        version: VERSION,
+        canonical_id: canonicalId,
+        owner_token: LEASE_OWNER,
+        harness,
+        consumer_ready: consumer.ready,
+        consumer_reason: consumer.reason,
+        consumer_transport: consumer.transport,
+        delivery_ready: consumer.ready,
+      });
     }
 
     // GET /events — SSE stream of CEO acks
@@ -1378,7 +1634,10 @@ const server = http.createServer(async (req, res) => {
     // Never crash on a bad client request.
     const msg = err instanceof Error ? err.message : String(err);
     try {
-      sendJson(res, 500, { ok: false, error: msg });
+      const status = Number(err?.statusCode) >= 400 && Number(err?.statusCode) <= 599
+        ? Number(err.statusCode)
+        : 500;
+      sendJson(res, status, { ok: false, error: msg });
     } catch {
       // headers already sent; nothing else to do.
     }
@@ -1428,9 +1687,17 @@ function extractMetadata(raw) {
 }
 
 // --- Boot ------------------------------------------------------------------
-server.listen(PORT, HOST, () => {
+mcp.oninitialized = () => {
+  MCP_INITIALIZED = true;
+  if (!MANAGED_CODEX_MCP_ONLY && BOUND_PORT != null) {
+    try { registerChannel(BOUND_PORT, { logMissing: false }); } catch { /* heartbeat retries */ }
+  }
+};
+
+if (!MANAGED_CODEX_MCP_ONLY) server.listen(PORT, HOST, () => {
   const addr = server.address();
   const boundPort = typeof addr === 'object' && addr ? addr.port : PORT;
+  BOUND_PORT = boundPort;
   // stderr only — stdout is reserved for MCP stdio framing.
   process.stderr.write(
     `[golem-channel] http://${HOST}:${boundPort} (v${VERSION}) session=${SESSION_ID || '(none)'}\n`,
@@ -1457,17 +1724,21 @@ server.listen(PORT, HOST, () => {
 // primary cleanup path.
 function shutdown(code = 0, why = 'signal') {
   try { process.stderr.write(`[golem-channel] shutdown (${why})\n`); } catch { /* stderr gone */ }
-  stopWatchingOpencodeBridges();
-  unregisterChannel();
-  try { server.close(); } catch { /* ignore */ }
+  if (!MANAGED_CODEX_MCP_ONLY) {
+    stopWatchingOpencodeBridges();
+    unregisterChannel();
+    try { server.close(); } catch { /* ignore */ }
+  }
   process.exit(code);
 }
 process.on('SIGINT',  () => shutdown(0, 'SIGINT'));
 process.on('SIGTERM', () => shutdown(0, 'SIGTERM'));
 process.on('SIGHUP',  () => shutdown(0, 'SIGHUP'));
 process.on('beforeExit', () => {
-  stopWatchingOpencodeBridges();
-  unregisterChannel();
+  if (!MANAGED_CODEX_MCP_ONLY) {
+    stopWatchingOpencodeBridges();
+    unregisterChannel();
+  }
 });
 // TKT-0369: the channel died mid-session with zero trace (no stderr, no crash
 // report) — every abnormal exit must say why, or the next death is

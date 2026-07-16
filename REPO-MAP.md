@@ -1,10 +1,10 @@
 # REPO-MAP.md
-> Last verified: 2026-07-15 @ b1b4a31 — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-16 @ cb3c409 — maintained via golem:docs-maintenance.
 ## Directory structure
-- `substrate/` — plugin source of truth.
+- `substrate/` — plugin source of truth; design labs are isolated until chosen.
 - `plugin/` — generated CC render; never hand-edit.
 - `cli/` — thin `golem` command entry point.
-- `lib/` — runtime, role, compiler, lint, LSP, and managed-harness helpers.
+- `lib/` — runtime, role, compiler, and managed-harness helpers.
 - `dashboard/server/` — Fastify API and `tracker.db` owner.
 - `dashboard/web/` → `dashboard/dist/` — pinned React production artifact.
 - `mcp/channel/` — per-session HTTP/MCP channel.
@@ -13,26 +13,26 @@
 
 ## Key modules & entry points
 ### `dashboard/server/index.js`
-- Registers REST/WS; envelope health is read-only and fact changes rebroadcast.
+- Registers REST/WS; project names resolve only when unique; fact changes rebroadcast.
 - Invariant: agents use HTTP/MCP, never direct DB writes.
 ### `tracker-db.js` + `phase-machine.js` + `team-assist.js`
 - Phase is source of truth; `state` derives from it; assists suggest but never dispatch.
 ### `dashboard/server/native-sessions.js`
-- Merges native registries with facts; hooks/shims register, while Codex owns its headless/TUI thread name/status map and `session-facts.js` owns freshness/leases. A healthy managed Codex lease collapses its duplicate raw hook row.
+- Merges registries with facts; Codex owns managed thread name/status/model while `session-facts.js` owns freshness/leases. A healthy lease collapses its raw hook duplicate.
 ### `lib/codex-supervisor.js` + `lib/codex-tui-bridge.js` + `lib/codex-app-server-contract.js`
-- Pinned stdio App Server owner; its private one-TUI Unix-WebSocket bridge preserves native approvals while typed delivery targets only an idle canonical thread.
+- Pinned stdio App Server owner; its private one-TUI bridge preserves native approvals while typed delivery targets only an idle canonical thread.
 ### `substrate/hooks/*.sh`
 - SessionStart registers, journals, and contextualizes; prompts add passive deltas.
 ### `mcp/channel/index.js`
-- Exposes briefs, roles, replies, consults, gates, and tracker tools.
+- Exposes briefs, roles, replies, consults, gates, and tracker tools; CC readiness requires initialized, eligible Channels.
 
 ## Data flow
-Hooks/shims write `~/.golem/`; dashboard owns envelopes; Codex owns the lease plus envelope→turn/approval map. Its private TUI socket has one client; false-ready is unreachable; CC/OC raw channels remain.
+Hooks/shims write `~/.golem/`; dashboard owns envelopes and routes only readiness-qualified endpoints. Managed Codex uses durable typed turns; CC/OC retain `/role`.
 
 ## Constraints & gotchas
 - Claude runs cached render bytes; sync + update + `/reload-plugins` after edits.
 - `plugin/` is a render target, not the source of truth; hand edits there are overwritten.
-- Ordinary/arbitrary remote Codex TUIs are Tier B pull-only; `golem codex` is the one private managed TUI bridge and raw role/interrupt/halt remain gated.
+- Ordinary remote Codex TUIs are Tier B pull-only; `golem codex` is the private managed bridge. Raw role/interrupt/halt stay gated.
 
 ## Common tasks
 | Task | Files | Verify with |

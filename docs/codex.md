@@ -202,6 +202,12 @@ The managed session card uses Codex's own thread identity and activity
 protocol. Start/resume responses and `thread/name/updated` supply the displayed
 thread name (for example `sol:main2`), while `thread/status/changed`,
 `turn/started`, and `turn/completed` drive working, waiting, and idle state.
+Start/resume/fork responses also supply the required top-level model and
+provider; `thread/settings/updated` refreshes them when the canonical thread's
+settings change. The supervisor persists that model and publishes it at the
+top level of the session fact so the card survives refresh/reconciliation.
+Ordinary Codex hooks likewise promote their documented `model` input to the
+fact top level.
 The dashboard reads Codex's append-only `session_index.jsonl` as a fail-open
 name fallback for managed sessions started before those notifications were
 captured. Its authenticated health response supplies the live delivery gate;
@@ -247,26 +253,28 @@ node test/cross-harness-matrix.test.mjs
 
 ## GOL-476 managed control plane and approvals
 
-Tier A applies only to the managed headless supervisor above. It is not a
-capability claim for a separately launched `codex` TUI, `codex --remote`, a
-WebSocket listener, or an arbitrary local terminal. Those remain Tier B/pull
-only because Golem has no documented, safe way to inject work into them.
+Tier A applies only to the managed supervisor above, including its private
+`golem codex` TUI bridge. It is not a capability claim for a separately
+launched `codex` TUI, arbitrary `codex --remote`, network WebSocket listener,
+or local terminal. Those remain Tier B/pull only.
 
 | Inbound behavior | Managed Codex | CC / OpenCode |
 |---|---|---|
 | Ticket dispatch | Durable envelope → typed `/brief` → one App Server turn | Existing channel/bridge route unchanged |
 | Session notification, consult request/reply/status | Durable control envelope → typed `/brief` | Existing `/brief` or `/consult` route unchanged |
 | Subscription digest, tracker gate resolution | Durable control envelope → typed `/brief` | Existing channel brief/gate route unchanged |
-| Role activation | Stored durably, then visibly gated; use an explicit ticket dispatch or restart before the next dispatch | Existing `/role` behavior |
+| Role activation | Save role, allocate durable `role_assign`, then typed `/brief` → one turn only when delivery-ready; otherwise report saved-but-undelivered | Existing `/role` behavior after the same durable allocation |
 | Interrupt / halt | Visibly gated; wait and send an explicit follow-up, or stop/recover the owning supervisor for an emergency | Existing generic controls |
 | App Server approval | Local owner-mediated, one-off decision only | Harness-native policy |
 
-Every managed non-ticket control is allocated in `message_envelopes` before
-network delivery with its canonical sender and target. The supervisor accepts
-only that typed envelope; it never accepts a raw `/consult`, `/role`, or
-untracked `/brief` from the dashboard. A retry keeps the original
-envelope-to-turn mapping. CC and OpenCode still receive their route-specific
-events, so the new Codex path does not alter their channel semantics.
+Every supported managed non-ticket delivery, including role activation, is allocated in
+`message_envelopes` before network delivery with its canonical sender and
+target. The supervisor accepts only that typed envelope; raw `/role` remains
+gated. A role selected while the managed thread is busy or unreachable stays
+saved and its failed activation remains visible; it is never injected later or
+mid-turn. A retry keeps the original envelope-to-turn mapping. CC and OpenCode
+still receive their route-specific events, so the Codex path does not alter
+their `/role` semantics.
 
 ### Operator approval procedure
 

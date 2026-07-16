@@ -70,6 +70,19 @@ async function stop(child) {
   if (child.exitCode === null) child.kill('SIGKILL');
 }
 
+async function startLegacyRoleChannel() {
+  const requests = [];
+  const server = createServer(async (request, response) => {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    requests.push({ method: request.method, path: request.url, body: Buffer.concat(chunks).toString('utf8') });
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ ok: true }));
+  });
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
+  return { server, port: server.address().port, requests };
+}
+
 async function post(base, pathname, body) {
   const response = await fetch(`${base}${pathname}`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
@@ -105,6 +118,7 @@ function approvalHeaders(record) {
 
 let supervisor;
 let dashboard;
+let legacyRoleChannel;
 try {
   const sessionId = 'codex-control-plane';
   supervisor = new CodexSupervisor({ canonicalId: sessionId, cwd: repo });
@@ -172,11 +186,74 @@ try {
   }, 'subscription digest envelope', 20_000);
   await awaitControl(supervisor, subscriptionEnvelope.envelope_id, 'subscription digest');
 
+  const threadName = 'sol:codex-control-plane';
+  await supervisor.rpc.request('thread/name/set', { threadId: first.thread_id, name: threadName });
+  await waitFor(() => readCodexSupervisor(sessionId)?.thread_name === threadName, 'managed Codex native thread name');
+  const beforeRoleDeliveries = readCodexSupervisor(sessionId).inbox.deliveries.length;
+  const roleTurns = [];
+  const request = supervisor.rpc.request.bind(supervisor.rpc);
+  supervisor.rpc.request = async (method, params, ...rest) => {
+    if (method === 'turn/start' && params.clientUserMessageId) roleTurns.push(params);
+    return request(method, params, ...rest);
+  };
   const role = await post(dashboard.base, `/api/sessions/${encodeURIComponent(sessionId)}/role`, { role: 'manager' });
+  supervisor.rpc.request = request;
   assert.equal(role.response.status, 200, role.text);
-  assert.equal(role.json.session.role, 'manager', 'role remains durably assigned when activation is gated');
-  assert.equal(role.json.activation.gated, true);
-  assert.match(role.json.activation.error, /explicit ticket dispatch/i);
+  assert.equal(role.json.saved, true);
+  assert.equal(role.json.session.role, 'manager');
+  assert.equal(role.json.session.harness, 'codex', 'managed role persistence is enriched from canonical facts');
+  assert.equal(role.json.session.name, threadName);
+  assert.equal(role.json.session.project_path, repo);
+  assert.equal(role.json.activation.ok, true, role.text);
+  assert.ok(role.json.activation.envelope_id, 'role activation is allocated as a durable control envelope');
+  assert.equal(roleTurns.length, 1, 'idle role assignment starts exactly one typed App Server turn');
+  assert.equal(roleTurns[0].clientUserMessageId, role.json.activation.envelope_id);
+  assert.match(roleTurns[0].input?.[0]?.text || '', /ROLE ASSIGNMENT ONLY/);
+  assert.match(roleTurns[0].input?.[0]?.text || '', /Your session role is now: manager/);
+  assert.match(roleTurns[0].input?.[0]?.text || '', /Role card \(identity context for later/);
+  await awaitControl(supervisor, role.json.activation.envelope_id, 'role assignment');
+  assert.equal(readCodexSupervisor(sessionId).inbox.deliveries.length, beforeRoleDeliveries + 1, 'one durable envelope maps to one role turn');
+  const renderedRole = await waitFor(async () => {
+    const snapshot = await (await fetch(`${dashboard.base}/api/snapshot`)).json();
+    return snapshot.native_sessions?.find((row) => row.session_id === sessionId && row.role === 'manager') || null;
+  }, 'managed Codex rendered role after dashboard reconciliation');
+  assert.equal(renderedRole.harness, 'codex');
+  assert.equal(renderedRole.name, threadName);
+  assert.ok(renderedRole.model, 'role-enriched managed card retains its App Server model');
+
+  // Persist first, then report partial success when the canonical thread is
+  // not delivery-ready. The failed durable envelope is never injected later.
+  supervisor.noteThreadStatus({ threadId: first.thread_id, status: { type: 'active', activeFlags: [] } });
+  await waitFor(() => readCodexSupervisor(sessionId)?.health?.delivery_ready === false, 'busy managed Codex delivery gate');
+  const beforeBusyRoleDeliveries = readCodexSupervisor(sessionId).inbox.deliveries.length;
+  const busyRole = await post(dashboard.base, `/api/sessions/${encodeURIComponent(sessionId)}/role`, { role: 'builder' });
+  assert.equal(busyRole.response.status, 200, busyRole.text);
+  assert.equal(busyRole.json.saved, true);
+  assert.equal(busyRole.json.session.role, 'builder');
+  assert.equal(busyRole.json.activation.ok, false);
+  assert.ok(busyRole.json.activation.envelope_id, 'undelivered activation remains a durable failed envelope');
+  assert.match(busyRole.json.activation.error, /not delivery-ready/i);
+  assert.equal(readCodexSupervisor(sessionId).inbox.deliveries.length, beforeBusyRoleDeliveries, 'busy role activation is never injected mid-turn');
+  supervisor.noteThreadStatus({ threadId: first.thread_id, status: { type: 'idle' } });
+  await waitFor(() => readCodexSupervisor(sessionId)?.health?.delivery_ready === true, 'managed Codex gate restored after synthetic busy boundary');
+
+  // A live OpenCode channel retains the legacy /role transport even though
+  // the dashboard now allocates the same durable role_assign envelope first.
+  legacyRoleChannel = await startLegacyRoleChannel();
+  fs.writeFileSync(path.join(home, 'channels.json'), JSON.stringify({ version: 1, channels: [{
+    session_id: 'opencode-role-legacy', pid: process.pid, host: '127.0.0.1', port: legacyRoleChannel.port,
+    harness: 'opencode', project_id: first.project_id, project_path: repo, cwd: repo, name: 'oc:role-legacy',
+  }] }));
+  const legacyRole = await post(dashboard.base, '/api/sessions/opencode-role-legacy/role', { role: 'manager' });
+  assert.equal(legacyRole.response.status, 200, legacyRole.text);
+  assert.equal(legacyRole.json.activation.ok, true, legacyRole.text);
+  assert.equal(legacyRoleChannel.requests.length, 1);
+  assert.equal(legacyRoleChannel.requests[0].path, '/role');
+  assert.match(legacyRoleChannel.requests[0].body, /Your session role is now: manager/);
+  const liveRolePush = await post(dashboard.base, '/api/roles/manager/push', {});
+  assert.equal(liveRolePush.response.status, 200, liveRolePush.text);
+  assert.ok(liveRolePush.json.results.some((row) => row.session_id === 'opencode-role-legacy' && row.ok), liveRolePush.text);
+  assert.equal(legacyRoleChannel.requests.at(-1).path, '/role', 'role push-to-live preserves the OpenCode legacy route');
   for (const [path, body, label] of [
     ['/api/interrupt', { session_id: sessionId, text: 'controlled interrupt' }, 'interrupt'],
     ['/api/halt', { session_id: sessionId, text: 'controlled halt' }, 'halt'],
@@ -242,8 +319,9 @@ try {
   }, 'permission decline stays fail-closed because the App Server schema has no deny result');
   supervisor.rpc.send = originalSend;
 
-  console.log('GOL-476 Codex control-plane journey passed: typed notify/consult/gate/subscription envelopes, actionable role/interrupt/halt gates, and owner-mediated one-off approvals.');
+  console.log('GOL-482 Codex control-plane journey passed: durable typed role assignment, saved busy-role warning, legacy OpenCode /role, gated interrupt/halt, and owner-mediated approvals.');
 } finally {
+  await new Promise((resolve) => legacyRoleChannel?.server.close(resolve) ?? resolve());
   await supervisor?.stop({ deleteThread: true }).catch(() => {});
   await stop(dashboard?.child);
   fs.rmSync(temp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

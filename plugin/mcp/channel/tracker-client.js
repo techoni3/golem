@@ -14,7 +14,7 @@ import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import { resolveCallerSessionId } from './identity.js';
+import { managedCodexBinding, resolveCallerSessionId } from './identity.js';
 
 // --- golem-home resolution (TKT-0573, ADR-4) --------------------------------
 // This is a hand-maintained MIRROR of lib/golem-home.js's golemHome(). This
@@ -73,6 +73,12 @@ export function dashboardBaseUrl() {
  * @returns {string|null}
  */
 export function currentSessionId(injectedId) {
+  // GOL-474: a supervisor-owned Codex MCP child has exactly one actor. Never
+  // let model-supplied metadata override that process binding. The request
+  // handler reports malformed/conflicting bound-mode calls precisely; this
+  // helper remains null-safe for callers outside the handler.
+  const managed = managedCodexBinding();
+  if (managed.enabled) return managed.sessionId || null;
   // The shim is the only component that knows which sibling made this tool
   // call. Its injected id is authoritative for this invocation.
   if (typeof injectedId === 'string' && injectedId.trim()) return injectedId.trim();
@@ -306,6 +312,15 @@ export function postBrief(sessionId, text) {
 
 export function notifySession({ session_id, text, sender_id, project_id } = {}) {
   return request('POST', '/api/messages/notify', { body: { session_id, text, sender_id, project_id } });
+}
+
+// Durable non-ticket control handoff. The dashboard selects the typed
+// envelope adapter for a managed Codex target and preserves the legacy route
+// for CC/OC. The MCP client never manufactures an envelope id locally.
+export function deliverControlMessage({ session_id, sender_id, project_id, kind, content, metadata, legacy } = {}) {
+  return request('POST', '/api/messages/control', {
+    body: { session_id, sender_id, project_id, kind, content, metadata, legacy },
+  });
 }
 
 /** Correlated channel lifecycle updates. The dashboard validates target identity. */

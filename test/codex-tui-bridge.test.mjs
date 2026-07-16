@@ -187,7 +187,12 @@ try {
   const started = await startThread;
   originalThreadId = started.result?.thread?.id;
   assert.ok(originalThreadId, JSON.stringify(started));
+  assert.ok(started.result?.model, 'pinned ThreadStartResponse supplies its required top-level model');
+  assert.ok(started.result?.modelProvider, 'pinned ThreadStartResponse supplies its required top-level modelProvider');
   await waitFor(() => readCodexSupervisor(supervisor.canonicalId)?.thread_id === originalThreadId, 'TUI thread/start canonical binding');
+  assert.equal(readCodexSupervisor(supervisor.canonicalId)?.model, started.result.model, 'TUI thread/start model is durable supervisor metadata');
+  assert.equal(readCodexSupervisor(supervisor.canonicalId)?.model_provider, started.result.modelProvider);
+  assert.equal(readSessionFacts().find((row) => row.canonical_id === supervisor.canonicalId)?.model, started.result.model, 'TUI thread/start model is published at fact top level');
   assert.equal(readCodexSupervisor(supervisor.canonicalId)?.health?.delivery_ready, false, 'an idle thread remains unavailable until the delayed MCP binding completes');
   assert.equal(readSessionFacts().find((row) => row.canonical_id === supervisor.canonicalId)?.status, 'idle', 'an idle thread is not misreported as working while MCP readiness catches up');
   releaseMcpActivation();
@@ -222,7 +227,26 @@ try {
   const sameActorRows = projected.filter((row) => [supervisor.canonicalId, originalThreadId].includes(row.session_id));
   assert.deepEqual(sameActorRows.map((row) => row.session_id), [supervisor.canonicalId], 'managed and raw Codex facts collapse to one canonical dashboard card');
   assert.equal(sameActorRows[0]?.name, threadName, 'canonical dashboard card uses the native Codex thread name');
+  assert.equal(sameActorRows[0]?.model, started.result.model, 'canonical dashboard card renders the App Server model');
   assert.equal(sameActorRows[0]?.status, 'idle', 'strict ready lease overrides a stale busy hook fact');
+
+  supervisor.tuiBridge.receiveAppServerLine(JSON.stringify({
+    method: 'thread/settings/updated',
+    params: {
+      threadId: originalThreadId,
+      threadSettings: { model: 'gpt-settings-journey', modelProvider: 'settings-provider' },
+    },
+  }));
+  assert.equal(readCodexSupervisor(supervisor.canonicalId)?.model, 'gpt-settings-journey', 'canonical thread settings update replaces durable model metadata');
+  assert.equal(readSessionFacts().find((row) => row.canonical_id === supervisor.canonicalId)?.model, 'gpt-settings-journey', 'settings update republishes the card model');
+  supervisor.tuiBridge.receiveAppServerLine(JSON.stringify({
+    method: 'thread/settings/updated',
+    params: {
+      threadId: 'subagent-settings-must-not-bind',
+      threadSettings: { model: 'wrong-thread-model', modelProvider: 'wrong-provider' },
+    },
+  }));
+  assert.equal(readCodexSupervisor(supervisor.canonicalId)?.model, 'gpt-settings-journey', 'non-canonical thread settings cannot retarget card metadata');
 
   supervisor.tuiBridge.receiveAppServerLine(JSON.stringify({
     method: 'thread/status/changed',
@@ -322,8 +346,10 @@ try {
   const forked = await forkRequest;
   const forkedThreadId = forked.result?.thread?.id;
   assert.ok(forkedThreadId, JSON.stringify(forked));
+  assert.ok(forked.result?.model, 'pinned ThreadForkResponse supplies its required top-level model');
   assert.notEqual(forkedThreadId, originalThreadId, 'TUI fork produces a distinct canonical tracker thread');
   await waitFor(() => readCodexSupervisor(supervisor.canonicalId)?.thread_id === forkedThreadId, 'TUI thread/fork canonical binding');
+  assert.equal(readCodexSupervisor(supervisor.canonicalId)?.model, forked.result.model, 'TUI fork response refreshes durable model metadata');
   assert.equal(supervisor.deliveryReady(), true, 'successful fork restores a bound, dispatchable TUI thread');
 
   const failedResumeGate = waitForTuiThreadGate(supervisor);
@@ -341,7 +367,9 @@ try {
   assert.equal(supervisor.deliveryReady(), false, 'TUI resume keeps the old mapping non-dispatchable until the response');
   const resumed = await resumeRequest;
   assert.equal(resumed.result?.thread?.id, forkedThreadId, JSON.stringify(resumed));
+  assert.ok(resumed.result?.model, 'pinned ThreadResumeResponse supplies its required top-level model');
   assert.equal(readCodexSupervisor(supervisor.canonicalId)?.thread_id, forkedThreadId, 'TUI thread/resume preserves canonical thread identity');
+  assert.equal(readCodexSupervisor(supervisor.canonicalId)?.model, resumed.result.model, 'TUI resume response refreshes durable model metadata');
 
   // The tracked canonical thread is the exact one that receives a durable
   // tracker envelope. Its lifecycle notifications remain visible to the TUI.

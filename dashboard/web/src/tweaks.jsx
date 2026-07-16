@@ -1,4 +1,4 @@
-// Global appearance control — theme + accent, persisted in localStorage.
+// Sidebar appearance control — theme + accent, persisted in localStorage.
 // Dark remains the default. Existing golem.tweaks.accent hex values are kept
 // as stable palette ids and translated to AA-safe Loam variants at render time.
 

@@ -148,6 +148,8 @@ Runtime flow:
   parents, the channel server forwards the push to the shim bridge; the shim
   injects the canonical `<channel source="golem" kind="...">...</channel>` text
   into the live session with `client.session.promptAsync(...)`.
+  That live bridge is the OpenCode consumer-readiness signal; Claude Channels'
+  Anthropic-authentication and MCP-initialization gates do not apply to it.
 - `session.idle`, busy `session.status`, `chat.message`, and tool events update
   the bridge and `sessions.json` status/recency so `sessions_dispatchable` can
   show idle/busy and queue `when_idle` dispatches the same way it does for Claude

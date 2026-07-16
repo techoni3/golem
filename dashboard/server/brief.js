@@ -13,7 +13,7 @@
 // /api/channel/health, but is no longer used for brief routing.
 
 import { CONFIG } from './config.js';
-import { isChannelDeliveryReady, readChannels } from './channels.js';
+import { channelDeliveryError, isChannelDeliveryReady, readChannels } from './channels.js';
 
 const DEFAULT_TIMEOUT_MS = 5000;
 
@@ -54,7 +54,7 @@ async function forward(method, pathSuffix, body, sessionId, metadata = null) {
   // says it is ready. CC/OC registrations intentionally keep their legacy
   // channel-presence behaviour through isChannelDeliveryReady().
   if (!isChannelDeliveryReady(channel)) {
-    return { ok: false, status: 503, body: '', error: 'managed Codex target is not delivery-ready', target: baseUrl };
+    return { ok: false, status: 503, body: '', error: channelDeliveryError(channel), target: baseUrl };
   }
   const url = `${baseUrl.replace(/\/$/, '')}${pathSuffix}`;
   const headers = { 'X-Sender': 'dashboard' };

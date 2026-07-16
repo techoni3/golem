@@ -10,6 +10,9 @@ import DOMPurify from 'dompurify';
 window.React = React;
 window.ReactDOM = ReactDOM;
 window.ReactDOMClient = ReactDOMClient;
+// Vite replaces this identifier from the root package.json at build/dev time.
+// Publishing it once keeps display code decoupled from package-file paths.
+window.__GOLEM_VERSION__ = __GOLEM_PACKAGE_VERSION__;
 window.__reactReady = true;
 window.__dndkit = dnd;
 window.__dndkitReady = true;

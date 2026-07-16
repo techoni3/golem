@@ -9,7 +9,7 @@ import websocket from '@fastify/websocket';
 import { CONFIG } from './config.js';
 import { createState } from './state.js';
 import { roleMetaMap } from './roles.js';
-import { pushBrief, pushRoleAssign, pushInterrupt, pushHalt, pushControlEnvelope, channelHealth, listChannels } from './brief.js';
+import { pushBrief, pushInterrupt, pushHalt, pushControlEnvelope, channelHealth, listChannels } from './brief.js';
 import { createChat } from './chat.js';
 import { readNativeSessionPeek } from './native-session-peek.js';
 import { openTrackerDb } from './tracker-db.js';
@@ -20,7 +20,7 @@ import { initDispatchDrainer } from './dispatch-queue.js';
 import { registerSubstrateRoutes } from './substrate.js';
 import { teamAssists } from './team-assist.js';
 import { golemHome, dashboardJsonPath, journalDirFor, sessionsJsonPath } from '../../lib/golem-home.js';
-import { createRole, deleteRole, getRole, listRoleCards, pushRoleBriefDirect, roleChangeBrief, roleMission, setSessionRole, updateRoleMeta, writeRoleCard } from '../../lib/session-role.js';
+import { createRole, deleteRole, getRole, listRoleCards, roleChangeBrief, roleMission, setSessionRole, updateRoleMeta, writeRoleCard } from '../../lib/session-role.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const WEB_SOURCE_ROOT = path.resolve(__dirname, '..', 'web');
@@ -487,16 +487,30 @@ async function main() {
 
   // Resolve a caller-supplied `project` query value to the canonical contract
   // project_id. Accepts either the contract id (passed straight through) OR a
-  // dashboard registry id (e.g. `sudoku`, `trialroom-ai`) which we map to its
-  // project_id via the projects list. Unknown values pass through unchanged so
-  // a not-yet-discovered project still filters correctly on its raw id.
+  // dashboard registry id (e.g. `sudoku`, `trialroom-ai`) OR a unique human
+  // project name, which we map to its project_id via the projects list.
+  // Ambiguous names are rejected rather than silently selecting a workspace.
+  // Unknown values pass through unchanged so a not-yet-discovered project
+  // still filters correctly on its raw id.
   function resolveProjectId(value) {
     if (!value) return null;
-    for (const p of state.projects()) {
-      if (p.project_id === value) return value; // already canonical
-      if (p.id === value && p.project_id) return p.project_id; // registry id → contract id
+    const requested = String(value).trim();
+    if (!requested) return null;
+    const projects = state.projects();
+    for (const p of projects) {
+      if (p.project_id === requested) return requested; // already canonical
+      if (p.id === requested && p.project_id) return p.project_id; // registry id → contract id
     }
-    return value;
+    const named = projects.filter((p) => p.name === requested && p.project_id);
+    if (named.length === 1) return named[0].project_id;
+    if (named.length > 1) {
+      const ids = [...new Set(named.map((p) => p.project_id))];
+      const error = new Error(`project name "${requested}" is ambiguous (${ids.join(', ')}); pass an exact project_id`);
+      error.statusCode = 400;
+      error.code = 'AMBIGUOUS_PROJECT_NAME';
+      throw error;
+    }
+    return requested;
   }
 
   // WS2: all streams across every project (no all-streams helper on the DB,
@@ -1985,7 +1999,22 @@ async function main() {
     const results = [];
     for (const session of targets) {
       const brief = roleChangeBrief(name, session);
-      const result = brief ? await pushRoleAssign(brief, session.session_id) : { ok: false, error: 'no role assign payload' };
+      let result = { ok: false, error: 'no role assign payload' };
+      if (brief) {
+        try {
+          const activated = await deliverControlEnvelope(tracker, {
+            project_id: session.project_id ?? null,
+            sender_id: 'human:dashboard',
+            recipient_session_id: session.session_id,
+            kind: 'role_assign',
+            content: brief,
+            legacy: { path: '/role', body: brief },
+          });
+          result = { ...activated.delivery, envelope_id: activated.envelope.id };
+        } catch (error) {
+          result = { ok: false, status: 0, error: String(error?.message ?? error) };
+        }
+      }
       results.push({
         session_id: session.session_id,
         name: session.name ?? null,
@@ -2059,13 +2088,29 @@ async function main() {
       const row = setSessionRole(id, role, { by: 'human:dashboard' });
       const text = `session role ${role ?? 'cleared'} for ${row.name || row.session_id || id}`;
       chat.record('system', 'session_role', text, { session_id: row.session_id || id });
-      const activation = await pushRoleBriefDirect(id, role, row);
-      if (activation.gated) {
+      let activation = { ok: true, skipped: true, reason: 'role cleared; no role card activation required' };
+      const brief = roleChangeBrief(role, row);
+      if (brief) {
+        try {
+          const activated = await deliverControlEnvelope(tracker, {
+            project_id: row.project_id ?? null,
+            sender_id: 'human:dashboard',
+            recipient_session_id: row.session_id || id,
+            kind: 'role_assign',
+            content: brief,
+            legacy: { path: '/role', body: brief },
+          });
+          activation = { ...activated.delivery, envelope_id: activated.envelope.id };
+        } catch (error) {
+          activation = { ok: false, status: 0, error: String(error?.message ?? error) };
+        }
+      }
+      if (!activation.ok) {
         chat.record('system', 'warning', activation.error, { session_id: row.session_id || id });
       }
       if (typeof state.refreshNativeSessions === 'function') await state.refreshNativeSessions();
       broadcastWS({ type: 'native-sessions-update', native_sessions: enrichSessionRows(state.nativeSessions(), state.channels()), channels: state.channels() });
-      return { ok: true, session: row, activation };
+      return { ok: true, saved: true, session: row, activation };
     } catch (err) {
       const msg = String(err?.message ?? err);
       const code = /not found/i.test(msg) ? 404 : 400;

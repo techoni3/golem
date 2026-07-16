@@ -57,6 +57,7 @@ try {
   execFileSync(process.execPath, [path.join(plugin, 'hooks/hook.mjs'), 'session-start'], { env, input: JSON.stringify(payload) });
   const fact = JSON.parse(fs.readFileSync(path.join(state, 'session-facts.json'))).facts[0];
   assert.equal(fact.canonical_id, 'codex-test');
+  assert.equal(fact.model, 'test', 'documented Codex hook model is published at fact top level for native cards');
   assert.deepEqual(fact.delivery, { mode: 'pull', push: false });
   execFileSync(process.execPath, [path.join(plugin, 'hooks/hook.mjs'), 'subagent-stop'], { env, input: JSON.stringify({ ...payload, hook_event_name: 'SubagentStop', agent_id: 'child' }) });
   assert.equal(JSON.parse(fs.readFileSync(path.join(state, 'session-facts.json'))).facts[0].status, 'active', 'SubagentStop preserves parent status');

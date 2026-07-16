@@ -48,8 +48,11 @@ schemas and install commands against current official docs
   `{id, name, path, kind: "auto", registered_by: "hook", first_seen, last_seen}`.
   Manual project entries created by the retired v3 `golem project register`
   keep `kind` as-is; the hook never overwrites a manual `name`.
-- `sessions.json`, `channels.json` — unchanged v3 schemas (pid-based liveness,
-  channel heartbeat).
+- `sessions.json` retains the cross-harness identity/recency rows.
+  `channels.json` adds explicit harness plus consumer/delivery readiness reason
+  codes: OpenCode is ready through its prompt bridge; Claude Code becomes
+  channel-eligible only after MCP initialization under a supported Anthropic
+  provider configuration. Endpoint liveness alone never implies delivery.
 
 ## Central artifacts (zero repo footprint)
 

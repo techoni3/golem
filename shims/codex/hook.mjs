@@ -22,6 +22,7 @@ try {
   const fact = {
     canonical_id: input.session_id, continuation_key: input.session_id,
     harness: 'codex', locator: { raw_session_id: input.session_id }, project_path: input.cwd,
+    model: input.model,
     ...(event === 'stop' ? { status: 'idle' } : event === 'subagent-stop' ? {} : { status: 'active' }),
     delivery: { mode: 'pull', push: false }, lifecycle_event: event, observations,
   };

@@ -9,13 +9,29 @@ import { readEndpointLeases } from '../../lib/session-facts.js';
 
 const CHANNELS_REGISTRY = channelsJsonPath();
 
-// A `delivery_ready:false` lease is meaningful only for the managed Codex
-// adapter: it means its required bound MCP or idle App Server turn is not
-// available. Legacy CC/OC registrations predate the field and retain their
-// historical channel-presence semantics.
+// Reachability means the endpoint's target transport is currently eligible,
+// not merely that its PID/HTTP listener exists. Managed Codex owns its typed
+// adapter gate; OpenCode owns a promptAsync bridge; Claude Code must publish an
+// explicit initialized/eligible channel-consumer signal. Unknown old CC rows
+// stay non-deliverable until their plugin process restarts and republishes.
 export function isChannelDeliveryReady(channel) {
   if (!channel) return false;
-  return channel.kind !== 'codex-supervisor' || channel.delivery_ready === true;
+  if (channel.kind === 'codex-supervisor') return channel.delivery_ready === true;
+  if (channel.harness === 'opencode' || channel.kind === 'opencode-bridge') {
+    return channel.delivery_ready !== false;
+  }
+  return channel.consumer_ready === true && channel.delivery_ready === true;
+}
+
+export function channelDeliveryError(channel) {
+  if (channel?.kind === 'codex-supervisor') return 'managed Codex target is not delivery-ready';
+  if (String(channel?.consumer_reason || '').startsWith('unsupported_')) {
+    return 'Claude Code channel is ineligible under this provider configuration. Claude Channels require Anthropic authentication through claude.ai or a Console API key; unset Bedrock/Vertex/Foundry or non-default ANTHROPIC_BASE_URL configuration, then restart with --dangerously-load-development-channels plugin:golem@golem-workspace.';
+  }
+  if (channel?.consumer_reason === 'mcp_not_initialized') {
+    return 'Claude Code channel MCP initialization has not completed; wait for plugin startup or restart the channel-enabled session.';
+  }
+  return 'Claude Code channel consumer readiness is unknown; restart the session with an Anthropic-authenticated channel configuration.';
 }
 
 function pidAlive(pid) {
@@ -76,16 +92,19 @@ export async function readChannels() {
           session_id: lease.canonical_id,
           url: `http://${lease.host}:${lease.port}`,
           endpoint_health: 'healthy',
-          // Existing channel registrations predate this field and remain
-          // delivery-capable. A managed Codex supervisor sets the field only
-          // after its typed target adapter and required MCP are both ready.
           // The authenticated health response is newer than the persisted
-          // heartbeat lease. Use its live dispatch gate so a just-started or
-          // just-completed Codex turn does not spend up to one lease interval
-          // displayed/routed in the opposite state.
+          // heartbeat lease. Use its live gate for managed Codex and require
+          // explicit consumer readiness for CC; old unknown CC rows fail
+          // closed until their channel process restarts. OpenCode's prompt
+          // bridge retains its independent readiness contract.
+          consumer_ready: body.consumer_ready ?? lease.consumer_ready ?? null,
+          consumer_reason: body.consumer_reason ?? lease.consumer_reason ?? null,
+          consumer_transport: body.consumer_transport ?? lease.consumer_transport ?? null,
           delivery_ready: lease.kind === 'codex-supervisor'
             ? body.delivery_ready === true
-            : lease.delivery_ready !== false,
+            : (lease.harness === 'opencode' || lease.kind === 'opencode-bridge')
+              ? body.delivery_ready !== false
+              : body.consumer_ready === true && body.delivery_ready === true,
         }, owner_token);
     } catch { return null; } finally { clearTimeout(timer); }
   }))).filter(Boolean);
@@ -94,6 +113,13 @@ export async function readChannels() {
   const legacy = channels
     .filter((c) => !canonicalIds.has(c.session_id))
     .filter((c) => pidAlive(c.pid))
-    .map((c) => ({ ...c, url: `http://${c.host}:${c.port}`, endpoint_health: 'legacy-pid-only', delivery_ready: c.delivery_ready !== false }));
+    .map((c) => ({
+      ...c,
+      url: `http://${c.host}:${c.port}`,
+      endpoint_health: 'legacy-pid-only',
+      delivery_ready: c.harness === 'opencode'
+        ? c.delivery_ready !== false
+        : c.consumer_ready === true && c.delivery_ready === true,
+    }));
   return [...healthy, ...legacy];
 }

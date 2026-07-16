@@ -66,12 +66,14 @@
 :root[data-theme="loam"] {
   color-scheme: light;
 
-  --bg-0: #f4efe4;
-  --bg-1: #fbf8f0;
-  --bg-2: #ede5d5;
-  --bg-3: #e2d5bd;
-  --bg-4: #d8c8ad;
-  --sidebar-bg: #e8deca;
+  /* One-step-down parchment ramp: paper stays light, but no large surface
+     reaches the near-white end of the original palette. */
+  --bg-0: #e8deca;
+  --bg-1: #ede5d5;
+  --bg-2: #e2d5bd;
+  --bg-3: #d8c8ad;
+  --bg-4: #cdbb9f;
+  --sidebar-bg: #e2d5bd;
 
   --border-1: #d6c9b3;
   --border-2: #baaa91;
@@ -102,12 +104,12 @@
   --radius-2: 8px;
   --radius-3: 12px;
 
-  --shadow-1: 0 1px 0 rgba(255,255,255,.75) inset, 0 1px 2px rgba(75,55,24,.07);
-  --shadow-2: 0 14px 32px rgba(69,51,25,.10), 0 1px 0 rgba(255,255,255,.78) inset;
-  --shadow-drawer: -18px 0 48px rgba(69,51,25,.18), -1px 0 rgba(255,255,255,.72) inset;
+  --shadow-1: 0 1px 0 rgba(255,255,255,.42) inset, 0 1px 2px rgba(75,55,24,.07);
+  --shadow-2: 0 14px 32px rgba(69,51,25,.10), 0 1px 0 rgba(255,255,255,.45) inset;
+  --shadow-drawer: -18px 0 48px rgba(69,51,25,.18), -1px 0 rgba(255,255,255,.38) inset;
   --surface-pattern:
     repeating-linear-gradient(0deg, transparent 0 3px, rgba(79,63,36,.018) 3px 4px),
-    repeating-linear-gradient(90deg, transparent 0 5px, rgba(255,255,255,.16) 5px 6px);
+    repeating-linear-gradient(90deg, transparent 0 5px, rgba(255,255,255,.10) 5px 6px);
   --canvas-pattern:
     radial-gradient(circle at 18% 4%, rgba(139,112,66,.08), transparent 28%),
     radial-gradient(circle at 84% 92%, rgba(85,105,58,.07), transparent 30%);
@@ -290,16 +292,27 @@ button {
   font-size: 10px;
   color: var(--text-3);
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
 }
 
-.sidebar-footer > div {
+.sidebar-footer-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar-footer-copy {
   display: flex;
   flex-direction: column;
   gap: 2px;
   line-height: 1.3;
+  min-width: 0;
 }
+
+.sidebar-footer-version { color: var(--text-3); margin-top: 2px; }
 
 .sidebar-footer-dot { margin-top: 4px; flex-shrink: 0; }
 

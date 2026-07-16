@@ -3,6 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { readEndpointLeases, readSessionFacts } from './session-facts.js';
 
 export const BUILTIN_ROLES = Object.freeze([
   { name: 'manager', color: '#f59e0b', glyph: 'MG', builtin: true },
@@ -392,38 +393,63 @@ function appendRoleJournal(row, role, by, ts) {
 }
 
 function roleTargetForSession(reg, sessionId) {
-  const exactIdx = reg.sessions.findIndex((s) => s.session_id === sessionId);
-  if (exactIdx >= 0) return { index: exactIdx, row: reg.sessions[exactIdx], canonical_id: sessionId, parent: null, channel: null, created: false };
-
   const channels = readChannels();
   const channel = channels.find((c) => c.session_id === sessionId && pidAlive(c.pid))
     || channels.find((c) => c.session_id === sessionId);
+  const facts = readSessionFacts();
+  const fact = facts.find((row) => row.canonical_id === sessionId) ?? null;
+  const lease = readEndpointLeases({ includeExpired: true })
+    .find((row) => row.canonical_id === sessionId) ?? null;
+  const exactIdx = reg.sessions.findIndex((s) => s.session_id === sessionId);
+  if (exactIdx >= 0) {
+    return {
+      index: exactIdx,
+      row: reg.sessions[exactIdx],
+      canonical_id: sessionId,
+      parent: null,
+      channel,
+      fact,
+      lease,
+      created: false,
+    };
+  }
+
   const parent = readClaudeParentSession(channel?.pid);
   const canonicalId = parent?.session_id || sessionId;
+  const canonicalFact = canonicalId === sessionId
+    ? fact
+    : (facts.find((row) => row.canonical_id === canonicalId) ?? fact);
+  const canonicalLease = canonicalId === sessionId
+    ? lease
+    : (readEndpointLeases({ includeExpired: true }).find((row) => row.canonical_id === canonicalId) ?? lease);
 
   if (canonicalId !== sessionId) {
     const canonicalIdx = reg.sessions.findIndex((s) => s.session_id === canonicalId);
-    if (canonicalIdx >= 0) return { index: canonicalIdx, row: reg.sessions[canonicalIdx], canonical_id: canonicalId, parent, channel, created: false };
+    if (canonicalIdx >= 0) {
+      return { index: canonicalIdx, row: reg.sessions[canonicalIdx], canonical_id: canonicalId, parent, channel, fact: canonicalFact, lease: canonicalLease, created: false };
+    }
   }
 
   if (channel?.pid) {
     const byPidIdx = reg.sessions.findIndex((s) => Number(s.hook_ppid) === Number(channel.pid));
-    if (byPidIdx >= 0) return { index: byPidIdx, row: reg.sessions[byPidIdx], canonical_id: canonicalId, parent, channel, created: false };
+    if (byPidIdx >= 0) {
+      return { index: byPidIdx, row: reg.sessions[byPidIdx], canonical_id: canonicalId, parent, channel, fact: canonicalFact, lease: canonicalLease, created: false };
+    }
   }
 
-  const projectPath = parent?.project_path || channel?.project_path || channel?.cwd || null;
+  const projectPath = parent?.project_path || canonicalFact?.project_path || channel?.project_path || channel?.cwd || null;
   const row = {
     session_id: canonicalId,
     hook_ppid: channel?.pid ? Number(channel.pid) : null,
-    project_id: channel?.project_id || (projectPath ? projectIdFor(projectPath) : null),
+    project_id: canonicalFact?.project_id || canonicalFact?.observations?.project_id || channel?.project_id || (projectPath ? projectIdFor(projectPath) : null),
     project_path: projectPath,
-    harness: channel?.harness || undefined,
-    name: parent?.name || channel?.name || null,
+    harness: canonicalFact?.harness || canonicalLease?.harness || channel?.harness || undefined,
+    name: parent?.name || canonicalFact?.name || channel?.name || null,
     boot_time: new Date().toISOString(),
     last_seen_at: new Date().toISOString(),
   };
   reg.sessions.push(row);
-  return { index: reg.sessions.length - 1, row, canonical_id: canonicalId, parent, channel, created: true };
+  return { index: reg.sessions.length - 1, row, canonical_id: canonicalId, parent, channel, fact: canonicalFact, lease: canonicalLease, created: true };
 }
 
 export function setSessionRole(sessionId, role, { by } = {}) {
@@ -440,10 +466,11 @@ export function setSessionRole(sessionId, role, { by } = {}) {
       ...base,
       session_id: target.canonical_id || sessionId,
       hook_ppid: base.hook_ppid ?? (target.channel?.pid ? Number(target.channel.pid) : null),
-      project_id: base.project_id || target.channel?.project_id || (base.project_path ? projectIdFor(base.project_path) : null),
-      project_path: base.project_path || target.parent?.project_path || target.channel?.project_path || target.channel?.cwd || null,
-      harness: base.harness || target.channel?.harness,
-      name: base.name || target.parent?.name || target.channel?.name || null,
+      project_id: base.project_id || target.fact?.project_id || target.fact?.observations?.project_id || target.channel?.project_id
+        || ((base.project_path || target.fact?.project_path) ? projectIdFor(base.project_path || target.fact.project_path) : null),
+      project_path: base.project_path || target.parent?.project_path || target.fact?.project_path || target.channel?.project_path || target.channel?.cwd || null,
+      harness: base.harness || target.fact?.harness || target.lease?.harness || target.channel?.harness,
+      name: base.name || target.parent?.name || target.fact?.name || target.channel?.name || null,
       last_seen_at: base.last_seen_at || now,
       role: nextRole,
       role_updated_at: now,
@@ -480,6 +507,22 @@ export async function pushRoleBriefDirect(sessionId, role, row = {}) {
   const content = roleChangeBrief(role, { session_id: sessionId, ...row });
   if (!sessionId || !content) return { ok: false, skipped: true };
   const ch = readChannels().find((c) => c.session_id === sessionId && pidAlive(c.pid));
+  const managedCodex = readEndpointLeases().find((lease) => (
+    lease.canonical_id === sessionId && lease.harness === 'codex'
+  ));
+  if (!ch && managedCodex) {
+    // A role is persisted above, but a managed App Server must never receive
+    // an uncorrelated generic /role event. An explicit ticket dispatch is the
+    // supported activation path; an operator may also stop/restart the
+    // supervisor after changing its role context.
+    return {
+      ok: false,
+      gated: true,
+      status: 409,
+      error: 'managed Codex role activation is gated: the role was saved, but no generic /role is injected into an App Server thread. Use an explicit ticket dispatch to activate work, or restart the managed Codex supervisor before its next dispatch.',
+      target: `http://${managedCodex.host}:${managedCodex.port}`,
+    };
+  }
   const baseUrl = ch?.url || (ch?.host && ch?.port ? `http://${ch.host}:${ch.port}` : null);
   if (!baseUrl) return { ok: false, skipped: true };
   const ctl = new AbortController();

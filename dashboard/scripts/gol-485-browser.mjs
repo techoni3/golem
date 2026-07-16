@@ -1,7 +1,7 @@
 // GOL-485 — production appearance journey through the real dashboard server.
 
 import { strict as assert } from 'node:assert';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -10,6 +10,7 @@ import { projectIdFor } from '../server/project-id.js';
 import { acquireChrome } from './_chrome.mjs';
 
 const ok = (condition, message) => { assert.ok(condition, message); console.log(`  ok  ${message}`); };
+const packageVersion = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 const scratch = mkdtempSync(path.join(tmpdir(), 'golem-485-'));
 const home = path.join(scratch, 'home');
 const projects = path.join(scratch, 'projects');
@@ -80,11 +81,43 @@ try {
     return root.getPropertyValue('--text-2').trim() === '#8a909c'
       && root.getPropertyValue('--text-3').trim() === '#5a606b';
   }), 'dark text-2/text-3 tokens remain byte-for-byte identical to the existing theme');
-  ok(await page.locator('.appearance-trigger').count() === 1, 'one global appearance control renders in the bottom-right');
+  ok(await page.locator('.sidebar-footer > .appearance-control > .appearance-trigger').count() === 1
+    && await page.locator('.app > .appearance-control').count() === 0,
+  'one appearance trigger is owned by the pinned sidebar footer with no App-level floating mount');
+  ok(await page.locator('.sidebar-footer-version').textContent() === `v${packageVersion}`,
+    `sidebar footer renders root package version v${packageVersion}`);
+  const desktopTrigger = await page.evaluate(() => {
+    const sidebar = document.querySelector('.sidebar').getBoundingClientRect();
+    const footer = document.querySelector('.sidebar-footer').getBoundingClientRect();
+    const trigger = document.querySelector('.appearance-trigger').getBoundingClientRect();
+    return {
+      position: getComputedStyle(document.querySelector('.appearance-control')).position,
+      footerAtBottom: Math.abs(footer.bottom - sidebar.bottom) <= 1,
+      triggerInsideFooter: trigger.left >= footer.left && trigger.right <= footer.right
+        && trigger.top >= footer.top - 1.1 && trigger.bottom <= footer.bottom,
+      footerInsideSidebar: footer.left >= sidebar.left && footer.right <= sidebar.right,
+    };
+  });
+  ok(desktopTrigger.position === 'relative' && desktopTrigger.footerAtBottom
+    && desktopTrigger.triggerInsideFooter && desktopTrigger.footerInsideSidebar,
+  'desktop appearance trigger is inline in the bottom-left pinned footer, not viewport-floating');
   await page.screenshot({ path: path.join(scratch, 'dark-dashboard.png'), fullPage: true });
 
   await page.locator('.appearance-trigger').click();
   ok(await page.locator('#appearance-panel[role="dialog"]').count() === 1, 'appearance control exposes one labelled dialog');
+  await page.waitForTimeout(200);
+  const desktopPanel = await page.evaluate(() => {
+    const panel = document.querySelector('#appearance-panel').getBoundingClientRect();
+    const footer = document.querySelector('.sidebar-footer').getBoundingClientRect();
+    return {
+      aboveFooter: panel.bottom <= footer.top,
+      insideViewport: panel.left >= 0 && panel.right <= innerWidth && panel.top >= 0,
+      panel: { left: panel.left, top: panel.top, right: panel.right, bottom: panel.bottom },
+      footer: { left: footer.left, top: footer.top, right: footer.right, bottom: footer.bottom },
+    };
+  });
+  ok(desktopPanel.aboveFooter && desktopPanel.insideViewport,
+    `desktop appearance panel opens above the pinned footer without clipping (${JSON.stringify(desktopPanel)})`);
   ok(await page.locator('.theme-choice').count() === 2 && await page.locator('.swatch').count() === 6, 'dialog exposes two themes and the retained six-color palette');
   const darkAppearanceContrast = await page.evaluate(() => {
     const rgb = (value) => {
@@ -179,30 +212,46 @@ try {
     await page.screenshot({ path: path.join(scratch, `loam-${label.toLowerCase()}.png`), fullPage: true });
   }
 
-  // A real composer drawer gets visual/keyboard priority over the fixed control.
+  // A real composer drawer gets visual/keyboard priority over the footer control.
   await page.goto(`${base}/agents`, { waitUntil: 'networkidle' });
   await page.evaluate((id) => window.Router.openComposer(id), projectId);
   await page.waitForSelector('.drawer-compose.open');
-  ok(await page.locator('.appearance-control').evaluate((node) => getComputedStyle(node).visibility === 'hidden'), 'open composer drawers suppress the appearance control instead of obscuring send controls');
+  ok(await page.locator('.appearance-control').evaluate((node) => getComputedStyle(node).visibility === 'hidden'), 'open composer drawers suppress the footer appearance control instead of competing with send controls');
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => !document.querySelector('.drawer.open'));
 
-  // The fixed trigger and panel stay within a phone viewport with no overflow.
+  // Mobile keeps the same footer-owned trigger in the horizontal shell bar;
+  // the panel opens below the bar instead of occupying either bottom corner.
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(base, { waitUntil: 'networkidle' });
   await page.locator('.appearance-trigger').click();
   await page.waitForTimeout(200);
   const mobile = await page.evaluate(() => {
+    const sidebar = document.querySelector('.sidebar').getBoundingClientRect();
+    const footer = document.querySelector('.sidebar-footer').getBoundingClientRect();
     const trigger = document.querySelector('.appearance-trigger').getBoundingClientRect();
     const panel = document.querySelector('#appearance-panel').getBoundingClientRect();
     return {
       scrollWidth: document.documentElement.scrollWidth,
       innerWidth,
+      footerVisible: getComputedStyle(document.querySelector('.sidebar-footer')).display === 'flex',
+      footerInShellBar: footer.top >= sidebar.top && footer.bottom <= sidebar.bottom,
+      triggerInsideFooter: trigger.left >= footer.left && trigger.right <= footer.right
+        && trigger.top >= footer.top - 1.1 && trigger.bottom <= footer.bottom,
+      triggerAwayFromBottomCorners: trigger.bottom < innerHeight / 2,
       triggerInside: trigger.right <= innerWidth && trigger.bottom <= innerHeight,
+      panelBelowShell: panel.top >= sidebar.bottom,
       panelInside: panel.left >= 0 && panel.right <= innerWidth && panel.bottom <= innerHeight,
+      sidebar: { left: sidebar.left, top: sidebar.top, right: sidebar.right, bottom: sidebar.bottom },
+      footer: { left: footer.left, top: footer.top, right: footer.right, bottom: footer.bottom },
+      trigger: { left: trigger.left, top: trigger.top, right: trigger.right, bottom: trigger.bottom },
+      panel: { left: panel.left, top: panel.top, right: panel.right, bottom: panel.bottom },
     };
   });
-  ok(mobile.scrollWidth <= mobile.innerWidth && mobile.triggerInside && mobile.panelInside, 'mobile appearance journey has no horizontal overflow or obscured controls');
+  ok(mobile.scrollWidth <= mobile.innerWidth && mobile.footerVisible && mobile.footerInShellBar
+    && mobile.triggerInsideFooter && mobile.triggerAwayFromBottomCorners && mobile.triggerInside
+    && mobile.panelBelowShell && mobile.panelInside,
+  `mobile appearance access stays in the shell bar with no overflow, clipping, or bottom-corner collision (${JSON.stringify(mobile)})`);
   await page.screenshot({ path: path.join(scratch, 'loam-mobile-appearance.png'), fullPage: true });
 
   await page.emulateMedia({ reducedMotion: 'reduce' });

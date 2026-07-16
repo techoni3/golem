@@ -92,6 +92,8 @@ try {
   assert.equal(first.process.transport, 'stdio');
   assert.ok(first.process.pid > 0, 'managed process pid is persisted');
   assert.ok(first.thread_id, 'managed Codex thread id is persisted');
+  assert.ok(first.model, 'thread/start required model is persisted');
+  assert.ok(first.model_provider, 'thread/start required modelProvider is persisted');
   assert.equal(first.cwd, repo);
   assert.ok(first.project_id, 'derived project id is persisted');
   assert.equal(first.version.cli_version, CODEX_APP_SERVER_CONTRACT.cliVersion);
@@ -103,6 +105,7 @@ try {
   const fact = facts.find((row) => row.canonical_id === canonicalId);
   assert.equal(fact?.harness, 'codex');
   assert.equal(fact?.status, 'idle');
+  assert.equal(fact?.model, first.model, 'managed model is published at fact top level');
   assert.deepEqual(fact?.delivery, { mode: 'supervisor-turn', push: true });
 
   const leases = readEndpointLeases();
@@ -115,6 +118,7 @@ try {
   const native = (await readNativeSessions(() => true, channels)).find((row) => row.session_id === canonicalId);
   assert.equal(native?.alive, true, 'healthy supervisor materializes a truthful live session fact');
   assert.equal(native?.endpoint_health, 'healthy');
+  assert.equal(native?.model, first.model, 'native session projection renders the managed App Server model');
 
   const port = await unusedPort();
   dashboard = await startDashboard(port);
@@ -159,6 +163,9 @@ try {
   const second = await resumed.start();
   assert.equal(second.thread_id, originalThread, 'restart resumes the same persisted Codex thread');
   assert.equal(second.lifecycle.resumed, true);
+  assert.ok(second.model, 'thread/resume required model remains durable');
+  assert.ok(second.model_provider, 'thread/resume required modelProvider remains durable');
+  assert.equal(readSessionFacts().find((row) => row.canonical_id === canonicalId)?.model, second.model, 'resumed model is republished to the native card fact');
   assert.equal(second.health.state, 'healthy');
   await resumed.stop({ deleteThread: true });
   resumed = null;

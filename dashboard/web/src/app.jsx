@@ -99,9 +99,6 @@ function App() {
       <IdeasDrawer
         open={!!route.overlays.ideas}
         onClose={() => window.Router.closeOverlay('ideas')}/>
-      {/* Global, fixed appearance control. It stays below drawer/backdrop
-          layers so a narrow composer always owns the bottom-right corner. */}
-      <TweaksButton/>
     </div>
   );
 }

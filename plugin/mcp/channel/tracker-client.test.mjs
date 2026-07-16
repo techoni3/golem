@@ -20,6 +20,7 @@ import { createServer } from 'node:http';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { z } from 'zod';
+import { projectIdFor } from '../../lib/project-id.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const DASHBOARD_SERVER = path.resolve(__dirname, '../../../dashboard/server/index.js');
@@ -43,7 +44,25 @@ const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'golem-tracker-test-'));
 const tmpConfigHome = path.join(tmpRoot, 'config'); // XDG_CONFIG_HOME
 const tmpGolemHome = path.join(tmpConfigHome, 'golem');
 const tmpDb = path.join(tmpRoot, 'tracker.db');
-fs.mkdirSync(tmpConfigHome, { recursive: true });
+const projectsRoot = path.join(tmpRoot, 'projects');
+const ideasRoot = path.join(tmpRoot, 'ideas');
+const uniqueProjectRoot = path.join(tmpRoot, 'trialroomai');
+const duplicateProjectRootA = path.join(tmpRoot, 'duplicate-a');
+const duplicateProjectRootB = path.join(tmpRoot, 'duplicate-b');
+const claudeSessionsDir = path.join(tmpRoot, '.claude', 'sessions');
+const uniqueProjectId = projectIdFor(uniqueProjectRoot);
+fs.mkdirSync(tmpGolemHome, { recursive: true });
+for (const directory of [projectsRoot, ideasRoot, uniqueProjectRoot, duplicateProjectRootA, duplicateProjectRootB, claudeSessionsDir]) {
+  fs.mkdirSync(directory, { recursive: true });
+}
+fs.writeFileSync(path.join(tmpGolemHome, 'projects.json'), JSON.stringify({
+  version: 1,
+  projects: [
+    { id: 'registry-trialroomai', name: 'trialroomai', path: uniqueProjectRoot, kind: 'external' },
+    { id: 'registry-duplicate-a', name: 'duplicate-human-name', path: duplicateProjectRootA, kind: 'external' },
+    { id: 'registry-duplicate-b', name: 'duplicate-human-name', path: duplicateProjectRootB, kind: 'external' },
+  ],
+}));
 process.env.GOLEM_HOME = tmpGolemHome;
 
 let failures = 0;
@@ -115,6 +134,18 @@ async function waitForChannel(timeoutMs = 15000) {
   return `http://${channel.host}:${channel.port}`;
 }
 
+function writeClaudeSession({ sessionId, pid, cwd = uniqueProjectRoot, name, status = 'idle' }) {
+  fs.writeFileSync(path.join(claudeSessionsDir, `${pid}.json`), JSON.stringify({
+    sessionId,
+    pid,
+    cwd,
+    name: name || null,
+    status,
+    startedAt: Date.now(),
+    updatedAt: Date.now(),
+  }));
+}
+
 let child;
 let mcpClient;
 let mcpTransport;
@@ -124,6 +155,9 @@ let noIdentityMcpClient;
 let noIdentityMcpTransport;
 let ccFallbackMcpClient;
 let ccFallbackMcpTransport;
+let unsupportedCcMcpClient;
+let unsupportedCcMcpTransport;
+let uninitializedCcChild;
 let bridgeCaptureServer;
 let port;
 
@@ -156,6 +190,9 @@ async function main() {
       GOLEM_TRACKER_DB: tmpDb,
       GOLEM_HOME: tmpGolemHome,
       XDG_CONFIG_HOME: tmpConfigHome,
+      GOLEM_PROJECTS_ROOT: projectsRoot,
+      GOLEM_IDEAS_ROOT: ideasRoot,
+      HOME: tmpRoot,
       LOG_LEVEL: 'warn',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -248,7 +285,69 @@ async function main() {
   }
   check('createTicket(no title) throws 400 with server error', badCreate && /400/.test(badCreate.message), badCreate?.message);
 
-  // 10) Drive the real channel MCP handler over stdio.
+  // 10) A Claude channel HTTP child is not dispatchable until the host sends
+  // the MCP `initialized` notification. This raw stdio child deliberately
+  // starts its listener but never initializes the MCP connection.
+  const uninitializedCcId = 'cc-not-initialized';
+  uninitializedCcChild = spawn(process.execPath, [CHANNEL_SERVER], {
+    cwd: CHANNEL_ROOT,
+    env: {
+      ...process.env,
+      XDG_CONFIG_HOME: tmpConfigHome,
+      GOLEM_HOME: tmpGolemHome,
+      GOLEM_CEO_SESSION_ID: uninitializedCcId,
+      CLAUDE_CODE_SESSION_ID: '',
+      GOLEM_CHANNEL_PORT: '0',
+      ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
+      CLAUDE_CODE_USE_BEDROCK: '',
+      CLAUDE_CODE_USE_VERTEX: '',
+      CLAUDE_CODE_USE_FOUNDRY: '',
+      HOME: tmpRoot,
+    },
+    stdio: ['pipe', 'ignore', 'pipe'],
+  });
+  uninitializedCcChild.stderr?.on('data', (d) => process.stderr.write(`[uninitialized-cc:err] ${d}`));
+  const uninitializedChannel = await waitForChannelEntry(
+    uninitializedCcId,
+    15_000,
+    (channel) => channel.consumer_reason === 'mcp_not_initialized',
+  );
+  check('CC registry row is explicitly not ready before MCP initialization',
+    uninitializedChannel.consumer_ready === false && uninitializedChannel.delivery_ready === false,
+    JSON.stringify(uninitializedChannel));
+  const uninitializedConsult = await fetch(`http://${uninitializedChannel.host}:${uninitializedChannel.port}/consult`, {
+    method: 'POST',
+    headers: { 'X-Sender': 'consult', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ consult_id: 'cns-preinit', question: 'must not be accepted' }),
+  });
+  check('pre-initialization CC endpoint refuses channel delivery', uninitializedConsult.status === 503, await uninitializedConsult.text());
+  writeClaudeSession({ sessionId: uninitializedCcId, pid: uninitializedCcChild.pid, name: 'preinit-cc' });
+  fs.writeFileSync(path.join(tmpGolemHome, 'sessions.json'), JSON.stringify({ sessions: [{
+    session_id: uninitializedCcId,
+    project_id: uniqueProjectId,
+    project_path: uniqueProjectRoot,
+    hook_ppid: uninitializedCcChild.pid,
+    harness: 'claudecode',
+    name: 'preinit-cc',
+    status: 'idle',
+    last_seen_at: new Date().toISOString(),
+  }] }));
+  await sleep(3_500);
+  const beforeInitDispatchable = await client.listDispatchable('trialroomai');
+  check('unique project name resolves while pre-initialization CC stays non-dispatchable',
+    Array.isArray(beforeInitDispatchable) && !beforeInitDispatchable.some((row) => row.session_id === uninitializedCcId),
+    JSON.stringify(beforeInitDispatchable));
+  const ambiguousProject = await fetch(`${doc.url}/api/sessions/dispatchable?project=${encodeURIComponent('duplicate-human-name')}`);
+  const ambiguousProjectText = await ambiguousProject.text();
+  check('duplicate human project names return an explicit ambiguity error',
+    ambiguousProject.status === 400 && /ambiguous.*pass an exact project_id/i.test(ambiguousProjectText),
+    `${ambiguousProject.status} ${ambiguousProjectText}`);
+  uninitializedCcChild.stdin.end();
+  await Promise.race([new Promise((resolve) => uninitializedCcChild.once('exit', resolve)), sleep(1_000)]);
+  if (uninitializedCcChild.exitCode === null) uninitializedCcChild.kill('SIGTERM');
+  uninitializedCcChild = null;
+
+  // 11) Drive the real channel MCP handler over stdio.
   mcpClient = new Client({ name: 'golem-ticket-transition-journey', version: '1.0.0' });
   mcpTransport = new StdioClientTransport({
     command: process.execPath,
@@ -260,6 +359,10 @@ async function main() {
       GOLEM_HOME: tmpGolemHome,
       GOLEM_CEO_SESSION_ID: SESSION_ID,
       GOLEM_CHANNEL_PORT: '0',
+      ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
+      CLAUDE_CODE_USE_BEDROCK: '',
+      CLAUDE_CODE_USE_VERTEX: '',
+      CLAUDE_CODE_USE_FOUNDRY: '',
       HOME: tmpRoot,
     },
     stderr: 'pipe',
@@ -357,6 +460,10 @@ async function main() {
   const nativeModule = await import(url.pathToFileURL(path.resolve(__dirname, '../../dashboard/server/native-sessions.js')).href + `?t=${Date.now()}`);
   const channelsModule = await import(url.pathToFileURL(path.resolve(__dirname, '../../dashboard/server/channels.js')).href + `?t=${Date.now()}`);
   const verifiedSiblingChannels = await channelsModule.readChannels();
+  const readySiblingChannels = verifiedSiblingChannels.filter((channel) => channel.session_id === siblingA || channel.session_id === siblingB);
+  check('OpenCode bridge readiness is preserved independently of Claude Channels',
+    readySiblingChannels.length === 2 && readySiblingChannels.every((channel) => channelsModule.isChannelDeliveryReady(channel)),
+    JSON.stringify(verifiedSiblingChannels));
   const nativeSiblings = await nativeModule.readNativeSessions(() => true, verifiedSiblingChannels);
   const nativeSiblingRows = nativeSiblings.filter((session) => session.session_id === siblingA || session.session_id === siblingB);
   check('native sessions reports both sibling rows alive', nativeSiblingRows.length === 2 && nativeSiblingRows.every((session) => session.alive === true), JSON.stringify(nativeSiblings));
@@ -536,6 +643,8 @@ async function main() {
 
   const ccFallbackId = 'ses_claude_env_fallback';
   ccFallbackMcpClient = new Client({ name: 'golem-cc-env-fallback-journey', version: '1.0.0' });
+  const ccFallbackNotifications = [];
+  ccFallbackMcpClient.setNotificationHandler(ChannelNotificationSchema, (notification) => ccFallbackNotifications.push(notification));
   ccFallbackMcpTransport = new StdioClientTransport({
     command: process.execPath,
     args: [CHANNEL_SERVER],
@@ -547,14 +656,139 @@ async function main() {
       GOLEM_CEO_SESSION_ID: '',
       CLAUDE_CODE_SESSION_ID: ccFallbackId,
       GOLEM_CHANNEL_PORT: '0',
+      ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
+      CLAUDE_CODE_USE_BEDROCK: '',
+      CLAUDE_CODE_USE_VERTEX: '',
+      CLAUDE_CODE_USE_FOUNDRY: '',
       HOME: tmpRoot,
     },
     stderr: 'pipe',
   });
   await ccFallbackMcpClient.connect(ccFallbackMcpTransport);
-  await sleep(50);
+  const ccFallbackChannel = await waitForChannelEntry(ccFallbackId, 15_000, (channel) => channel.consumer_ready === true);
   const ccFallbackChannels = JSON.parse(fs.readFileSync(channelsFile, 'utf8')).channels;
-  check('CLAUDE_CODE_SESSION_ID fallback still registers a channel', ccFallbackChannels.some((channel) => channel.session_id === ccFallbackId), JSON.stringify(ccFallbackChannels));
+  check('initialized Anthropic-configured CC registers an eligible channel',
+    ccFallbackChannel.harness === 'claudecode' && ccFallbackChannel.delivery_ready === true,
+    JSON.stringify(ccFallbackChannel));
+
+  writeClaudeSession({ sessionId: ccFallbackId, pid: ccFallbackChannel.pid, name: 'supported-cc' });
+  fs.writeFileSync(path.join(tmpGolemHome, 'sessions.json'), JSON.stringify({ sessions: [{
+    session_id: ccFallbackId,
+    project_id: uniqueProjectId,
+    project_path: uniqueProjectRoot,
+    hook_ppid: ccFallbackChannel.pid,
+    harness: 'claudecode',
+    name: 'supported-cc',
+    status: 'idle',
+    last_seen_at: new Date().toISOString(),
+  }] }));
+  await sleep(3_500);
+  const supportedByHumanProjectName = await client.listDispatchable('trialroomai');
+  check('unique human project name resolves to its canonical project dispatchables',
+    supportedByHumanProjectName.some((row) => row.session_id === ccFallbackId && row.project_id === uniqueProjectId && row.reachable === true),
+    JSON.stringify(supportedByHumanProjectName));
+
+  const supportedConsult = await callTool('consult_request', {
+    to: ccFallbackId,
+    question: 'Does the supported Claude channel receive this consult?',
+    context: 'GOL-483 positive channel-eligibility journey.',
+  });
+  await sleep(50);
+  const supportedConsultNotification = ccFallbackNotifications.find((notification) => (
+    notification.params?.meta?.kind === 'consult'
+      && notification.params?.meta?.consult_id === supportedConsult.json?.consult_id
+  ));
+  check('supported CC consult is accepted and emits concrete channel bytes',
+    !supportedConsult.result.isError && !!supportedConsultNotification,
+    `${supportedConsult.text} notifications=${JSON.stringify(ccFallbackNotifications)}`);
+
+  const unsupportedCcId = 'cc-custom-provider';
+  const unsupportedCcNotifications = [];
+  unsupportedCcMcpClient = new Client({ name: 'golem-unsupported-cc-journey', version: '1.0.0' });
+  unsupportedCcMcpClient.setNotificationHandler(ChannelNotificationSchema, (notification) => unsupportedCcNotifications.push(notification));
+  unsupportedCcMcpTransport = new StdioClientTransport({
+    command: process.execPath,
+    args: [CHANNEL_SERVER],
+    cwd: CHANNEL_ROOT,
+    env: {
+      ...process.env,
+      XDG_CONFIG_HOME: tmpConfigHome,
+      GOLEM_HOME: tmpGolemHome,
+      GOLEM_CEO_SESSION_ID: unsupportedCcId,
+      CLAUDE_CODE_SESSION_ID: '',
+      GOLEM_CHANNEL_PORT: '0',
+      ANTHROPIC_BASE_URL: 'http://127.0.0.1:11434',
+      CLAUDE_CODE_USE_BEDROCK: '',
+      CLAUDE_CODE_USE_VERTEX: '',
+      CLAUDE_CODE_USE_FOUNDRY: '',
+      HOME: tmpRoot,
+    },
+    stderr: 'pipe',
+  });
+  unsupportedCcMcpTransport.stderr?.on('data', (d) => process.stderr.write(`[unsupported-cc:err] ${d}`));
+  await unsupportedCcMcpClient.connect(unsupportedCcMcpTransport);
+  const unsupportedChannel = await waitForChannelEntry(
+    unsupportedCcId,
+    15_000,
+    (channel) => channel.consumer_reason === 'unsupported_custom_base_url',
+  );
+  check('custom-provider CC stays explicitly ineligible after MCP initialization',
+    unsupportedChannel.consumer_ready === false && unsupportedChannel.delivery_ready === false,
+    JSON.stringify(unsupportedChannel));
+  check('channel metadata persists no provider URL or auth secret',
+    !/11434|ANTHROPIC_(?:BASE_URL|API_KEY|AUTH_TOKEN)/.test(JSON.stringify(unsupportedChannel)),
+    JSON.stringify(unsupportedChannel));
+  writeClaudeSession({ sessionId: unsupportedCcId, pid: unsupportedChannel.pid, name: 'unsupported-cc' });
+  fs.writeFileSync(path.join(tmpGolemHome, 'sessions.json'), JSON.stringify({ sessions: [
+    {
+      session_id: ccFallbackId,
+      project_id: uniqueProjectId,
+      project_path: uniqueProjectRoot,
+      hook_ppid: ccFallbackChannel.pid,
+      harness: 'claudecode',
+      name: 'supported-cc',
+      status: 'idle',
+      last_seen_at: new Date().toISOString(),
+    },
+    {
+      session_id: unsupportedCcId,
+      project_id: uniqueProjectId,
+      project_path: uniqueProjectRoot,
+      hook_ppid: unsupportedChannel.pid,
+      harness: 'claudecode',
+      name: 'unsupported-cc',
+      status: 'idle',
+      last_seen_at: new Date().toISOString(),
+    },
+  ] }));
+  await sleep(3_500);
+  const readinessFilteredDispatchables = await client.listDispatchable('trialroomai');
+  check('dashboard dispatchability keeps supported CC and excludes unsupported-provider CC',
+    readinessFilteredDispatchables.some((row) => row.session_id === ccFallbackId)
+      && !readinessFilteredDispatchables.some((row) => row.session_id === unsupportedCcId),
+    JSON.stringify(readinessFilteredDispatchables));
+
+  const unsupportedConsult = await callTool('consult_request', {
+    to: unsupportedCcId,
+    question: 'This must fail before HTTP acceptance.',
+  });
+  check('consult_request rejects unsupported CC with actionable Anthropic-auth guidance',
+    unsupportedConsult.result.isError === true
+      && /Anthropic authentication.*claude\.ai.*Console API key/i.test(unsupportedConsult.text)
+      && /ANTHROPIC_BASE_URL/.test(unsupportedConsult.text),
+    unsupportedConsult.text);
+  check('unsupported consult emits no channel notification', unsupportedCcNotifications.length === 0, JSON.stringify(unsupportedCcNotifications));
+
+  const unsupportedDirect = await fetch(`http://${unsupportedChannel.host}:${unsupportedChannel.port}/consult`, {
+    method: 'POST',
+    headers: { 'X-Sender': 'consult', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ consult_id: 'cns-unsupported', question: 'must not be accepted' }),
+  });
+  const unsupportedDirectText = await unsupportedDirect.text();
+  check('unsupported CC endpoint refuses direct legacy delivery before 202',
+    unsupportedDirect.status === 503 && /Anthropic authentication/i.test(unsupportedDirectText),
+    `${unsupportedDirect.status} ${unsupportedDirectText}`);
+
 
   const tools = await mcpClient.listTools();
   const transitionTool = tools.tools.find((tool) => tool.name === 'ticket_transition');
@@ -633,6 +867,9 @@ main()
     try { await noIdentityMcpTransport?.close(); } catch { /* ignore */ }
     try { await ccFallbackMcpClient?.close(); } catch { /* ignore */ }
     try { await ccFallbackMcpTransport?.close(); } catch { /* ignore */ }
+    try { await unsupportedCcMcpClient?.close(); } catch { /* ignore */ }
+    try { await unsupportedCcMcpTransport?.close(); } catch { /* ignore */ }
+    try { uninitializedCcChild?.kill('SIGKILL'); } catch { /* ignore */ }
     try { await new Promise((resolve) => bridgeCaptureServer?.close(resolve) ?? resolve()); } catch { /* ignore */ }
     try { child?.kill('SIGKILL'); } catch { /* ignore */ }
     try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* ignore */ }

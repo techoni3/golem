@@ -2706,6 +2706,7 @@ WHERE state_changed_at IS NULL`).run();
         'consult_status',
         'subscription_digest',
         'gate_resolution',
+        'role_assign',
       ]);
       if (!sender_id || !recipient_session_id) throw new Error('createControlEnvelope: sender and recipient are required');
       if (!allowedKinds.has(kind)) throw new Error(`createControlEnvelope: unsupported control kind '${kind}'`);

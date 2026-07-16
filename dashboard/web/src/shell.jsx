@@ -156,11 +156,14 @@ function Sidebar({ route, setRoute }) {
       <SidebarIdeasLink/>
 
       <div className="sidebar-footer">
-        <div className="sidebar-footer-dot"/>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div>HARNESS · {window.Store.getState().connection === 'connected' ? 'ONLINE' : 'OFFLINE'}</div>
-          <div style={{ color: 'var(--text-3)', marginTop: 2 }}>v0.1.0</div>
+        <div className="sidebar-footer-status">
+          <div className="sidebar-footer-dot"/>
+          <div className="sidebar-footer-copy">
+            <div>HARNESS · {window.Store.getState().connection === 'connected' ? 'ONLINE' : 'OFFLINE'}</div>
+            <div className="sidebar-footer-version">v{window.__GOLEM_VERSION__}</div>
+          </div>
         </div>
+        <TweaksButton/>
       </div>
     </aside>
   );

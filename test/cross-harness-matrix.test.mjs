@@ -297,6 +297,10 @@ try {
   fs.mkdirSync(home, { recursive: true });
   fs.mkdirSync(project, { recursive: true });
   fs.mkdirSync(hooks, { recursive: true });
+  fs.writeFileSync(path.join(home, 'projects.json'), JSON.stringify({
+    version: 1,
+    projects: [{ id: 'matrix-project', name: 'matrix-human-project', path: project, kind: 'external' }],
+  }));
   fs.writeFileSync(path.join(project, 'AGENTS.md'), '# GOL-475 isolated project\n');
   fs.writeFileSync(path.join(hooks, 'session-register.sh'), '#!/usr/bin/env bash\nexit 0\n');
   fs.writeFileSync(path.join(hooks, 'journal-route.sh'), '#!/usr/bin/env bash\nexit 0\n');
@@ -310,6 +314,13 @@ try {
   projectId = targetRecord.project_id;
   assert.equal(sourceRecord.health.delivery_ready, true);
   assert.equal(targetRecord.health.delivery_ready, true);
+  const codexByHumanProjectName = await waitFor(async () => {
+    const response = await fetch(`${dashboard.base}/api/sessions/dispatchable?project=${encodeURIComponent('matrix-human-project')}`);
+    if (!response.ok) return null;
+    const rows = await response.json();
+    return rows.find((row) => row.session_id === codexTarget.canonicalId && row.project_id === projectId) || null;
+  }, 'managed Codex discovery by unique human project name', 15_000);
+  assert.equal(codexByHumanProjectName.harness, 'codex');
 
   codexSourceMcp = await startChannelClient({ sessionId: codexSource.canonicalId, managed: true, name: 'golem-matrix-codex-source' });
   codexTargetMcp = await startChannelClient({ sessionId: codexTarget.canonicalId, managed: true, name: 'golem-matrix-codex-target' });
