@@ -208,7 +208,7 @@ try {
   threadId = started?.thread?.id;
   assert.ok(threadId, `thread/start returned no thread id: ${JSON.stringify(started)}`);
 
-  // In 0.144.4 a new thread does not yet have a resumable rollout. Complete a
+  // In 0.144.5 a new thread does not yet have a resumable rollout. Complete a
   // read-only turn first, then prove that the resulting thread can resume.
   const firstTurn = await rpc.request('turn/start', {
     threadId,
@@ -253,7 +253,7 @@ try {
   assert.equal(completed.params.turn.status, 'completed', `denied approval turn did not complete: ${JSON.stringify(completed.params.turn)}`);
   assert.equal(fs.existsSync(deniedPath), false, 'the spike must never approve or create the requested file');
 
-  // `thread/resume` needs a completed, persisted rollout in 0.144.4, so
+  // `thread/resume` needs a completed, persisted rollout in 0.144.5, so
   // delete the probe explicitly once the lifecycle proof is complete.
   await rpc.request('thread/delete', { threadId });
   threadId = undefined;

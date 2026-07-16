@@ -79,7 +79,7 @@ async function readCodexThreadNames() {
   try {
     const raw = await fs.readFile(CODEX_SESSION_INDEX, 'utf8');
     const names = new Map();
-    // Codex 0.144.4 owns this append-only index and resolves the latest entry
+    // Codex 0.144.5 owns this append-only index and resolves the latest entry
     // for each thread id. Mirror that exact rule as a fail-open dashboard
     // fallback so already-running managed sessions gain their real TUI name
     // before they are restarted onto the protocol notification fix.

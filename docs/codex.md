@@ -1,8 +1,8 @@
 # Codex support matrix
 
 Validated against the official OpenAI Codex Hooks, Build plugins, MCP,
-AGENTS.md, and App Server documentation on 2026-07-15 and native
-`codex-cli 0.144.4`.
+AGENTS.md, and App Server documentation on 2026-07-15, plus the native
+`codex-cli 0.144.5` App Server schema on 2026-07-16.
 
 | Capability | Support |
 |---|---|
@@ -15,7 +15,7 @@ AGENTS.md, and App Server documentation on 2026-07-15 and native
 | Live push into an ordinary CLI turn | **Not supported / never reported delivered** |
 | Managed App Server dispatch/control delivery | Tier A for a Golem-owned, version-gated headless supervisor or its private `golem codex` TUI bridge: typed durable envelopes into one idle, bound thread |
 
-`codex-cli 0.144.4` can add and enable the generated plugin, but its `codex mcp`
+`codex-cli 0.144.5` can add and enable the generated plugin, but its `codex mcp`
 command exposes configuration (`list/get/add/remove/login/logout`) and no
 generic MCP tool-call command. The isolated journey therefore installs the
 plugin with the native CLI, verifies it is enabled, and speaks MCP stdio
@@ -38,9 +38,9 @@ The supported spike environment is exactly:
 
 | Field | Contract |
 |---|---|
-| CLI | `codex-cli 0.144.4` |
+| CLI | `codex-cli 0.144.5` |
 | Schema command | `codex app-server generate-json-schema --experimental --out <dir>` |
-| Fingerprinted surface | Deterministically ordered hashes of the 28 generated request, response, approval, lifecycle, and TUI-bridge leaf schemas used by the supervisor |
+| Fingerprinted surface | Deterministically ordered hashes of the 30 generated request, response, approval, lifecycle, and TUI-bridge leaf schemas used by the supervisor |
 | Contract SHA-256 | `8fea722bf38d19e54265e4650f36e9329bac40d334c1c287d12bb6d21c8eac71` |
 | Transport exercised | Local JSONL over `stdio://` |
 | WebSocket | Not a production transport: documented as experimental and unsupported |
@@ -86,7 +86,7 @@ The managed process is local JSONL over `stdio://` only. It runs the exact
 GOL-472 CLI/schema gate before spawning, initializes once, starts or resumes
 the persisted thread, and denies unknown unsolicited server callbacks. A new
 thread gets one read-only, network-disabled readiness turn before a health lease
-is exposed; this is necessary because 0.144.4 only resumes a thread after it
+is exposed; this is necessary because 0.144.5 only resumes a thread after it
 has a persisted completed rollout. A restart resumes the recorded thread id and
 fails closed rather than silently creating a replacement thread.
 
