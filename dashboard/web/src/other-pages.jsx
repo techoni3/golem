@@ -33,9 +33,11 @@ function UnackedDispatchBadge({ warning, compact = false }) {
     window.SubstrateAPI.dismissUnackedDispatch(ticketId, deliveryId).catch((err) => console.error('dismiss unacked failed', err));
   };
   return (
-    <span className={`unacked-dispatch-badge severity-${severity}`} title={title} onClick={open} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') open(e); }}>
-      <span>{severity === 'escalated' ? '⛔' : severity === 'failed' ? '✕' : '⚠'} {compact ? `${label} · ${statusText}` : `${label} · ${statusText}${age ? ` · ${age}` : ''}`}</span>
-      <button className="unacked-dispatch-dismiss" title="dismiss warning" onClick={dismiss} disabled={!ticketId || deliveryId == null}>×</button>
+    <span className={`unacked-dispatch-badge severity-${severity}`}>
+      <button className="unacked-dispatch-open" title={title} aria-label={`Open ${label}: ${statusText}`} onClick={open} disabled={!ticketId}>
+        {severity === 'escalated' ? '⛔' : severity === 'failed' ? '✕' : '⚠'} {compact ? `${label} · ${statusText}` : `${label} · ${statusText}${age ? ` · ${age}` : ''}`}
+      </button>
+      <button className="unacked-dispatch-dismiss" title="dismiss warning" aria-label={`Dismiss ${label} warning`} onClick={dismiss} disabled={!ticketId || deliveryId == null}>×</button>
     </span>
   );
 }

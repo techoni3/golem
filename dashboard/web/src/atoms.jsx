@@ -27,11 +27,14 @@ function Avatar({ role, size = 32, pulse = false }) {
   );
 }
 
-function RoleSelect({ value, disabled, onChange }) {
+function RoleSelect({ value, disabled, onChange, id }) {
   const roles = window.Store.getRoles ? window.Store.getRoles() : [];
+  const current = value || '';
+  const missingRole = current && !roles.some((role) => role.name === current);
   return (
-    <select value={value || ''} onChange={(e) => onChange(e.target.value || null)} disabled={disabled}>
+    <select id={id} value={current} onChange={(e) => onChange(e.target.value || null)} disabled={disabled}>
       <option value="">clear</option>
+      {missingRole && <option value={current}>{current} (legacy)</option>}
       {roles.map((role) => <option key={role.name} value={role.name}>{role.name}</option>)}
     </select>
   );
@@ -200,33 +203,68 @@ function PlanProgress({ plan, color, defaultOpen = false }) {
 }
 
 function sessionStatusKind(s) {
-  if (!s?.alive) return 'dead';
+  if (s?.alive === false || ['dead', 'ended', 'stopped'].includes(s?.status)) return 'dead';
   if (s.status === 'busy') return 'busy';
   if (s.status === 'waiting') return 'waiting';
-  return 'idle';
+  if (s.status === 'idle') return 'idle';
+  if (['error', 'failed', 'system error'].includes(s.status)) return 'error';
+  if (['initializing', 'starting'].includes(s.status)) return 'initializing';
+  if (s.status === 'offline') return 'unavailable';
+  return 'unknown';
 }
 
 function HarnessIcon({ harness }) {
   const h = harness || 'claudecode';
-  const cls = h === 'opencode' ? 'opencode' : h === 'claudecode' ? 'claudecode' : 'other';
   const icon = window.ModelProviders?.harnessForId?.(h);
   return (
-    <span className={`agent-harness-icon ${cls}`} role="img" title={`harness: ${icon?.label || h}`} aria-label={`harness ${icon?.label || h}`}>
+    <span className={`agent-harness-icon ${icon ? `harness-${icon.id}` : 'harness-unknown'}`} role="img" title={`Harness: ${icon?.label || h}`} aria-label={`Harness: ${icon?.label || h}`}>
       {icon?.iconSrc ? <img src={icon.iconSrc} alt=""/> : (
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="2"/><path d="M8 12h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.8"/><path d="M8 12h8M12 8v8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
       )}
     </span>
   );
 }
 
 function ModelPill({ model }) {
-  if (!model) return null;
-  const provider = window.ModelProviders?.providerForModel?.(model);
+  const modelLabel = typeof model === 'string' && model.trim() ? model.trim() : 'model unavailable';
+  const provider = window.ModelProviders?.providerForModel?.(model) || window.ModelProviders?.fallback || { id: 'fallback', label: 'Unknown' };
+  const providerLabel = provider.id === 'fallback' ? 'Unknown provider' : provider.label;
   return (
-    <span className="agent-model-pill" title={provider ? `${provider.label}: ${model}` : model}>
-      {provider?.iconSrc && <span className={`agent-model-icon provider-${provider.id}`} aria-hidden="true"><img src={provider.iconSrc} alt=""/></span>}<span>{model}</span>
+    <span className="agent-model-pill" title={`${providerLabel}: ${modelLabel}`}>
+      <span className={`agent-model-icon provider-${provider.id || 'fallback'}`} aria-hidden="true">
+        {provider.iconSrc ? <img src={provider.iconSrc} alt=""/> : (
+          <svg viewBox="0 0 24 24"><path d="M12 3.5 20 8v8l-8 4.5L4 16V8l8-4.5Z" fill="none" stroke="currentColor" strokeWidth="1.8"/><path d="M8.5 12h7M12 8.5v7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
+        )}
+      </span>
+      <span>{modelLabel}</span>
     </span>
   );
+}
+
+function stateLabel(statusKind) {
+  return {
+    busy: 'Active work',
+    waiting: 'Waiting',
+    idle: 'Idle',
+    error: 'Error',
+    initializing: 'Initializing',
+    unavailable: 'Unavailable',
+    unknown: 'Unknown state',
+    dead: 'Offline',
+  }[statusKind] || 'Unknown state';
+}
+
+function waitingBayMessage(waitingFor) {
+  const value = typeof waitingFor === 'string' ? waitingFor.trim() : '';
+  if (!value) return '';
+  if (value.toLowerCase() === 'approval') return 'await approval';
+  if (value.toLowerCase() === 'user input') return 'await input';
+  return value;
+}
+
+function timestampMs(value) {
+  const stamp = typeof value === 'number' ? value : Date.parse(value);
+  return Number.isFinite(stamp) ? stamp : null;
 }
 
 function AgentCard({ session, name, queueCount = 0, setRoute, showControls = false, compact = false }) {
@@ -235,24 +273,28 @@ function AgentCard({ session, name, queueCount = 0, setRoute, showControls = fal
   const project = window.Store.getProjectByContractId(s.project_id);
   const channel = window.Store.getChannelForSession(s.session_id);
   const hasChannel = !!channel;
-  const registered = s.registered || !!project;
   const statusKind = sessionStatusKind(s);
-  const working = statusKind === 'busy' || statusKind === 'waiting';
-  const statusLabel = statusKind === 'busy' ? 'Working'
-    : statusKind === 'waiting' ? 'Waiting'
-    : statusKind === 'idle' ? 'Idle'
-    : 'Dead';
-  const title = name || s.name || (s.session_id ? s.session_id.slice(0, 8) : `pid ${s.pid}`);
-  const currentTicket = s.current_in_progress_ticket;
-  const pendingCount = Number(s.pending_count || queueCount || 0);
+  const title = name || s.name || (s.session_id ? s.session_id.slice(0, 8) : (s.pid != null ? `pid ${s.pid}` : 'unnamed session'));
+  const currentTicket = s.current_in_progress_ticket?.id ? s.current_in_progress_ticket : null;
+  const pendingSource = s.pending_count != null ? Number(s.pending_count) : Number(queueCount);
+  const pendingCount = Number.isInteger(pendingSource) && pendingSource > 0 ? pendingSource : 0;
   const unackedWarnings = s.active_unacked_dispatches || [];
-  const channelUnavailable = s.channel_present === false
-    || (s.channel_present === true && ['unreachable', 'unverified', 'unhealthy'].includes(s.endpoint_health))
-    || (s.channel_present == null && s.reachable === false);
-  const needsRevival = pendingCount > 0 && (statusKind === 'dead' || channelUnavailable);
-  const projectLabel = project?.name || s.project_id || 'unregistered project';
   const fallbackProject = project || { glyph: '?', color: 'var(--text-3)' };
-  const lastSeen = window.Store.getSessionLastSeen?.(s) || 0;
+  const lastSeen = window.Store.getSessionLastSeen?.(s);
+  const startedAt = timestampMs(s.started_at);
+  const lifetime = startedAt == null
+    ? 'age unknown'
+    : `${window.SubstrateFmt?.fmtRuntime?.(Math.max(0, (Date.now() - startedAt) / 1000)) || 'age unknown'} old`;
+  const freshness = Number.isFinite(lastSeen) && lastSeen > 0 && window.SubstrateFmt?.fmtTimeAgo?.(lastSeen)
+    ? `seen ${window.SubstrateFmt.fmtTimeAgo(lastSeen)}`
+    : 'seen unknown';
+  const bayMessage = statusKind === 'waiting' ? waitingBayMessage(s.waiting_for) : '';
+  const communication = s.reachable === true ? 'live' : s.reachable === false ? 'offline' : 'unknown';
+  const communicationLabel = communication === 'live' ? 'Channel live'
+    : communication === 'offline' ? 'Channel offline'
+    : 'Channel unknown';
+  const ticketLabel = currentTicket?.display_id || currentTicket?.id;
+  const roleControlId = `agent-role-${String(s.session_id || s.pid || title).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 
   const openPeek = () => {
     if (s.session_id) window.openNativeSessionDrawer(s.session_id);
@@ -283,95 +325,90 @@ function AgentCard({ session, name, queueCount = 0, setRoute, showControls = fal
   };
 
   return (
-    <div
-      className={`agent-card native-session-card ${working ? 'busy' : 'idle'} status-${statusKind} ${compact ? 'compact' : ''} cc-clickable`}
-      data-focus-key={s.session_id ? `agent:${s.session_id}` : undefined}
-      onClick={openPeek}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPeek(); } }}
-      title="open session details"
-    >
-      <div className="agent-card-head">
-        <ProjectGlyph project={fallbackProject} size={compact ? 28 : 34}/>
-        <div className="agent-card-titleblock">
-          <div className="agent-card-name-row">
-            <span className="native-session-name agent-card-name" title={s.name || title}>{title}</span>
+    <article className={`agent-card native-session-card state-${statusKind} ${compact ? 'compact' : ''}`}>
+      <button
+        type="button"
+        className="agent-card-surface"
+        data-focus-key={s.session_id ? `agent:${s.session_id}` : undefined}
+        onClick={openPeek}
+        disabled={!s.session_id}
+        aria-label={s.session_id ? `Open agent ${title} details` : 'Agent details unavailable'}
+      ><span className="agent-card-sr-only">Open agent {title} details</span></button>
+
+      <div className="agent-card-passport">
+        <div className="agent-card-portrait">
+          <div className="agent-card-orb">
             <HarnessIcon harness={s.harness}/>
+            <span className="agent-card-sr-only">{stateLabel(statusKind)}</span>
           </div>
-          <button
-            className={`agent-project-link ${project ? '' : 'unregistered'}`}
-            onClick={openProject}
-            disabled={!project || !setRoute}
-            title={project ? `open ${project.name}` : (s.project_id || 'unregistered project')}
-          >
-            {projectLabel}
-          </button>
+          <div className="agent-card-transient-bay" aria-live="polite" aria-atomic="true" title={bayMessage || undefined}>
+            {bayMessage && <span>{bayMessage}</span>}
+          </div>
         </div>
-        <span className={`cc-status-badge badge-${statusKind} agent-status-badge`}>
-          {statusKind === 'busy' && <span className="cc-status-pulse"/>}
-          {statusLabel}
-        </span>
-      </div>
 
-      <div className="agent-card-chips">
-        {s.role && <span className="native-session-role-chip">{s.role}</span>}
-        <ModelPill model={s.model}/>
-        {pendingCount > 0 && <span className="native-session-queue-chip" title={`${pendingCount} queued dispatch${pendingCount === 1 ? '' : 'es'}`}>queued {pendingCount}</span>}
-        {needsRevival && <span className="native-session-queue-chip" title="queued dispatches are held for an offline or channel-less session">revival needed</span>}
-        {!registered && <span className="native-session-badge">unregistered</span>}
-        {unackedWarnings.map((w) => window.UnackedDispatchBadge ? <window.UnackedDispatchBadge key={w.envelope_id || w.delivery_event_id || w.warning_event_id} warning={w} compact/> : null)}
-      </div>
+        <div className="agent-card-main">
+          <div className="agent-card-identity">
+            <button
+              type="button"
+              className="agent-card-project-action"
+              onClick={openProject}
+              disabled={!project || !setRoute}
+              title={project ? `Open ${project.name} agents` : 'Unregistered project; project navigation is unavailable'}
+              aria-label={project ? `Open ${project.name} agents` : 'Unregistered project; project navigation is unavailable'}
+            ><ProjectGlyph project={fallbackProject} size={compact ? 28 : 32}/></button>
+            <div className="native-session-name agent-card-name" title={title}>{title}</div>
+            <ModelPill model={s.model}/>
+            <div className="agent-card-time mono" title={`${lifetime}; ${freshness}`} aria-label={`${lifetime}, ${freshness}`}>
+              <span>{lifetime}</span><span aria-hidden="true">/</span><span>{freshness}</span>
+            </div>
+          </div>
 
-      {statusKind === 'waiting' && s.waiting_for && (
-        <div className="cc-session-waiting" title="what this session is stuck on">
-          <Icon.Clock size={12}/><span>{s.waiting_for}</span>
+          <div className="agent-card-operations">
+            <div className="agent-card-field agent-card-role-field">
+              <label className="agent-card-field-label agent-card-role-label" htmlFor={roleControlId}>Role</label>
+              <RoleSelect id={roleControlId} value={s.role || ''} onChange={assignRole} disabled={!s.session_id}/>
+              {roleToast && <div className="orch-toast err cc-toast" key={roleToast.id}>{roleToast.msg}</div>}
+            </div>
+            <div className={`agent-card-field agent-card-communication communication-${communication}`}>
+              <span className="agent-card-field-label">Communication</span>
+              <span className="agent-card-field-value"><span className="agent-card-communication-icon" aria-hidden="true">{communication === 'live' ? '↗' : communication === 'offline' ? '×' : '?'}</span>{communicationLabel}</span>
+            </div>
+            <div className="agent-card-field">
+              <span className="agent-card-field-label">Current work</span>
+              {currentTicket ? (
+                <a
+                  className="agent-card-ticket mono"
+                  href={window.Router.buildHref({ kind: 'ticket', id: currentTicket.id })}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); window.Router.openTicket(currentTicket.id); }}
+                  title={currentTicket.title || ticketLabel}
+                  aria-label={`Open ticket ${ticketLabel}${currentTicket.title ? `: ${currentTicket.title}` : ''}`}
+                >{ticketLabel}</a>
+              ) : <span className="agent-card-field-value is-empty">No current work</span>}
+            </div>
+            <div className="agent-card-field">
+              <span className="agent-card-field-label">Dispatches</span>
+              <span className={`agent-card-field-value ${pendingCount ? '' : 'is-empty'}`} title={pendingCount ? `${pendingCount} queued dispatch${pendingCount === 1 ? '' : 'es'}` : undefined}>{pendingCount ? `${pendingCount} queued` : 'Queue clear'}</span>
+            </div>
+          </div>
         </div>
-      )}
-
-      {currentTicket && (
-        <a
-          className="native-session-current mono"
-          href={window.Router.buildHref({ kind: 'ticket', id: currentTicket.id })}
-          onClick={(e) => { e.preventDefault(); e.stopPropagation(); window.Router.openTicket(currentTicket.id); }}
-          title={currentTicket.title}
-        >
-          current: {currentTicket.display_id || currentTicket.id} · {currentTicket.title}
-        </a>
-      )}
-
-      <div className="native-session-role agent-card-role" onClick={(e) => e.stopPropagation()}>
-        <label>
-          Role{' '}
-          <RoleSelect
-            value={s.role || ''}
-            onChange={assignRole}
-            disabled={!s.session_id}
-          />
-        </label>
-        {lastSeen > 0 && <span className="agent-card-seen mono" title="last seen">seen {window.SubstrateFmt?.fmtTimeAgo?.(lastSeen) || ''}</span>}
-        {roleToast && <div className="orch-toast err cc-toast" key={roleToast.id}>{roleToast.msg}</div>}
       </div>
 
-      {!showControls && channelUnavailable && s.alive && (
-        <div className="native-session-nochannel" title="live session with no golem channel registered — dispatches can queue, but briefs/interrupts cannot be delivered now">
-          <span className="cc-nochannel-dot"/>no channel — dispatches queue until reachable
+      {unackedWarnings.length > 0 && (
+        <div className="agent-card-attention-footer">
+          {unackedWarnings.map((warning) => window.UnackedDispatchBadge ? <window.UnackedDispatchBadge key={warning.envelope_id || warning.delivery_event_id || warning.warning_event_id} warning={warning}/> : null)}
         </div>
       )}
 
       {showControls && (hasChannel ? (
-        <SessionControls session={s} channel={channel}/>
+        <div className="agent-card-controls-footer"><SessionControls session={s} channel={channel}/></div>
       ) : (
         s.alive && (
-          <div className="cc-session-nochannel" onClick={(e) => e.stopPropagation()} title="no golem channel registered for this session — briefs/interrupts cannot be delivered">
-            <span className="cc-nochannel-dot"/>
-            {window.Store.getChannels().length > 0
-              ? 'no channel (pre-v4 session) — restart to enable controls'
-              : 'no channel — controls unavailable'}
-          </div>
+          <div className="agent-card-controls-footer"><div className="cc-session-nochannel" title="No golem channel registered for this session — briefs and interrupts are unavailable.">
+            <span className="cc-nochannel-dot"/>{window.Store.getChannels().length > 0 ? 'no channel (pre-v4 session) — restart to enable controls' : 'no channel — controls unavailable'}
+          </div></div>
         )
       ))}
-    </div>
+    </article>
   );
 }
 
