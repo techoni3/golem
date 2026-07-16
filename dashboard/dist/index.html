@@ -3,10 +3,21 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="color-scheme" content="dark light"/>
   <title>Golem · Dashboard</title>
-  <script type="module" crossorigin src="/assets/index-DQBtMpH9.js"></script>
+  <script>
+    // Apply the saved appearance before CSS is requested so reloads never
+    // paint the dark shell underneath Loam & Linen. Dark remains the default.
+    (() => {
+      try {
+        const theme = localStorage.getItem('golem.tweaks.theme');
+        if (theme === 'loam') document.documentElement.dataset.theme = 'loam';
+      } catch {}
+    })();
+  </script>
+  <script type="module" crossorigin src="/assets/index-fiepz7PN.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/purify.es-Bq2FbTja.js">
-  <link rel="stylesheet" crossorigin href="/assets/index-6zpWuYvD.css">
+  <link rel="stylesheet" crossorigin href="/assets/index-CTAUaMBZ.css">
 </head>
 <body>
   <div id="root"></div>

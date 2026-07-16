@@ -76,41 +76,90 @@
   border-radius: 3px;
 }
 
-/* Tweaks button — small inline gear in the sidebar footer (no longer a
-   floating FAB; the FAB conflicted with the CEO drawer's send button). */
-.tweaks-button-inline {
-  flex: 0 0 auto;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border-radius: 4px;
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--text-3);
+/* Global appearance control. It deliberately sits below the drawer backdrop
+   (z50) so chat/ticket composers always own the bottom-right corner. */
+.appearance-control {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 45;
+}
+.app:has(.drawer.open) .appearance-control {
+  visibility: hidden;
+  pointer-events: none;
+}
+.appearance-trigger {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--border-2);
+  border-radius: 50%;
+  background: var(--bg-1);
+  color: var(--text-1);
+  box-shadow: var(--shadow-2);
   display: grid;
   place-items: center;
-  cursor: pointer;
-  transition: all 100ms;
+  transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
 }
-.tweaks-button-inline:hover {
+.appearance-trigger:hover,
+.appearance-control.open .appearance-trigger {
+  transform: translateY(-2px);
+  border-color: var(--accent-border);
   background: var(--bg-2);
-  border-color: var(--border-2);
-  color: var(--text-1);
+}
+.appearance-trigger svg { width: 20px; height: 20px; }
+.appearance-accent-pip {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  width: 11px;
+  height: 11px;
+  border: 2px solid var(--bg-1);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--border-2);
 }
 
 .tweaks-pop {
-  position: fixed;
-  bottom: 60px;
-  left: 14px;
-  z-index: 70;
-  width: 220px;
-  background: var(--bg-2);
+  position: absolute;
+  right: 0;
+  bottom: 56px;
+  width: min(340px, calc(100vw - 24px));
+  background-color: var(--bg-1);
+  background-image: var(--surface-pattern);
   border: 1px solid var(--border-2);
-  border-radius: var(--radius-2);
+  border-radius: var(--radius-3);
   box-shadow: var(--shadow-2);
-  padding: 14px 14px 12px;
+  padding: 16px;
   animation: orch-modal-in 140ms ease-out;
 }
+.appearance-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 15px;
+}
+.appearance-kicker {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.appearance-close {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border: 1px solid var(--border-2);
+  border-radius: 50%;
+  background: var(--bg-2);
+  color: var(--text-2);
+  font-size: 18px;
+  line-height: 1;
+}
+.appearance-close:hover { color: var(--text-0); border-color: var(--border-3); }
 .tweaks-pop .kbd {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -128,26 +177,91 @@
   color: var(--text-3);
   margin-bottom: 8px;
 }
+.tweaks-pop .tweaks-pop-label { color: var(--text-2); }
 .tweaks-pop-title {
-  font-size: 13px;
+  font-family: var(--font-display);
+  font-size: 20px;
   font-weight: 600;
-  margin-bottom: 10px;
+  line-height: 1.1;
 }
+.theme-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.theme-choice {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-2);
+  background: var(--bg-2);
+  color: var(--text-1);
+  text-align: left;
+  box-shadow: var(--shadow-1);
+  transition: transform 120ms ease, border-color 120ms ease;
+}
+.theme-choice:hover { transform: translateY(-1px); border-color: var(--border-3); }
+.theme-choice.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft), var(--shadow-1); }
+.theme-choice-preview {
+  height: 31px;
+  display: grid;
+  grid-template-columns: 30% 1fr;
+  grid-template-rows: 9px 1fr;
+  overflow: hidden;
+  border: 1px solid rgba(20,20,16,.18);
+  border-radius: 4px;
+  margin-bottom: 8px;
+  background: #0a0b0d;
+}
+.theme-choice-preview i { display: block; }
+.theme-choice-preview i:first-child { grid-row: 1 / -1; background: #101216; border-right: 1px solid #2a2f3a; }
+.theme-choice-preview i:nth-child(2) { background: #15181d; border-bottom: 1px solid #2a2f3a; }
+.theme-choice-preview i:nth-child(3) { background: #0a0b0d; }
+.theme-choice-loam .theme-choice-preview { background: #f4efe4; border-color: #baaa91; }
+.theme-choice-loam .theme-choice-preview i:first-child { background: #e8deca; border-color: #d6c9b3; }
+.theme-choice-loam .theme-choice-preview i:nth-child(2) { background: #fbf8f0; border-color: #d6c9b3; }
+.theme-choice-loam .theme-choice-preview i:nth-child(3) { background: #f4efe4; }
+.theme-choice strong { display: block; color: var(--text-0); font-size: 11.5px; }
+.theme-choice small { display: block; color: var(--text-2); font-size: 9.5px; line-height: 1.35; margin-top: 2px; }
+.appearance-accent-label { margin-top: 16px; }
+.color-swatches { flex-wrap: wrap; }
 .tweaks-pop-version {
   margin-top: 10px;
   font-family: var(--font-mono);
   font-size: 10px;
-  color: var(--text-3);
+  color: var(--text-2);
   line-height: 1.5;
 }
+.appearance-platform-note { display: block; margin-top: 3px; }
 .swatch {
-  width: 24px;
-  height: 24px;
-  border-radius: 4px;
-  border: 1px solid var(--border-2);
+  width: 31px;
+  height: 31px;
+  border-radius: 50%;
+  border: 3px solid var(--bg-1);
+  box-shadow: 0 0 0 1px var(--border-2);
   cursor: pointer;
 }
-.swatch.active { outline: 2px solid var(--accent); outline-offset: 1px; }
+.swatch.active { outline: 2px solid var(--accent); outline-offset: 2px; }
+.appearance-current {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 12px;
+  padding-top: 11px;
+  border-top: 1px solid var(--border-1);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.appearance-current-dot { width: 7px; height: 7px; border-radius: 50%; }
+
+@media (max-width: 640px) {
+  .appearance-control { right: 12px; bottom: 12px; }
+  .tweaks-pop { right: 0; bottom: 54px; width: calc(100vw - 24px); max-height: calc(100vh - 92px); overflow-y: auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  .appearance-trigger:hover,
+  .appearance-control.open .appearance-trigger,
+  .theme-choice:hover { transform: none; }
+}
 
 /* ===== Settings / substrate control surface (P7) ===== */
 .settings-page { max-width: 1180px; }
@@ -4028,3 +4142,23 @@ mark.anno.anno-tail::after {
 .sidebar-see-all { display: flex; justify-content: space-between; margin: 7px 8px 0; padding: 7px 8px; border-top: 1px solid var(--border); color: var(--text-2); font-size: 11px; text-decoration: none; }
 .sidebar-freshness { margin-left: auto; font: 9px/1 var(--font-mono); color: var(--text-3); text-transform: uppercase; }
 .sidebar-freshness.stale, .sidebar-freshness.archived { color: var(--status-blocked); }
+
+/* Loam material finish comes last so component background shorthands cannot
+   erase it. Dense controls stay plain linen; primary objects carry the weave. */
+:root[data-theme="loam"] :is(
+  .summary-card,
+  .project-card,
+  .project-hero,
+  .native-session-card,
+  .agent-card,
+  .ticket,
+  .kanban-col,
+  .settings-section,
+  .cc-session-card,
+  .cc-work-card,
+  .communication-envelope,
+  .spec-result-row,
+  .drawer
+) {
+  background-image: var(--surface-pattern);
+}

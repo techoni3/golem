@@ -1,0 +1,687 @@
+<!doctype html>
+<html lang="en" data-theme="loam">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" href="data:,">
+  <title>Golem — Earthbound Light Theme Lab</title>
+  <style>
+    /*
+      GOL-484 — isolated visual exploration only.
+      This file deliberately does not import or mutate the production dashboard.
+    */
+    :root {
+      --sidebar-w: 236px;
+      --topbar-h: 58px;
+      --radius-xs: 5px;
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 18px;
+      --font-ui: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+      --font-display: Charter, "Iowan Old Style", Georgia, serif;
+      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      --paper: #f4efe4;
+      --paper-raised: #fbf8f0;
+      --paper-soft: #ede5d5;
+      --paper-deep: #e2d5bd;
+      --sidebar: #e8deca;
+      --ink: #29281f;
+      --ink-2: #555246;
+      --ink-3: #7e7869;
+      --ink-4: #aaa18f;
+      --line: #d6c9b3;
+      --line-strong: #baaa91;
+      --accent: #596b3b;
+      --accent-2: #9c6038;
+      --accent-soft: #dce3c7;
+      --accent-ink: #2f3c1d;
+      --working: #356b4c;
+      --waiting: #a56a24;
+      --blocked: #a84e3e;
+      --idle: #6f7566;
+      --shadow-sm: 0 1px 0 rgba(255,255,255,.7) inset, 0 1px 2px rgba(75,55,24,.07);
+      --shadow-md: 0 14px 32px rgba(69,51,25,.10), 0 1px 0 rgba(255,255,255,.78) inset;
+      --shadow-float: 0 28px 70px rgba(54,42,24,.22), 0 2px 0 rgba(255,255,255,.78) inset;
+      --grain-opacity: .22;
+      --surface-pattern:
+        repeating-linear-gradient(0deg, transparent 0 3px, rgba(79,63,36,.018) 3px 4px),
+        repeating-linear-gradient(90deg, transparent 0 5px, rgba(255,255,255,.16) 5px 6px);
+      --canvas-pattern:
+        radial-gradient(circle at 18% 4%, rgba(139,112,66,.08), transparent 28%),
+        radial-gradient(circle at 84% 92%, rgba(85,105,58,.07), transparent 30%);
+      --card-border-style: solid;
+      --letterspace: -.012em;
+    }
+
+    /* 01 — warm, grounded, woven. */
+    html[data-theme="loam"] {
+      --font-ui: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+      --font-display: Charter, "Iowan Old Style", Georgia, serif;
+      --paper: #f4efe4; --paper-raised: #fbf8f0; --paper-soft: #ede5d5; --paper-deep: #e2d5bd;
+      --sidebar: #e8deca; --ink: #29281f; --ink-2: #555246; --ink-3: #635d52; --ink-4: #aaa18f;
+      --line: #d6c9b3; --line-strong: #baaa91; --accent: #596b3b; --accent-2: #9c6038;
+      --accent-soft: #dce3c7; --accent-ink: #2f3c1d; --working: #356b4c; --waiting: #a56a24;
+      --blocked: #a84e3e; --idle: #6f7566;
+      --shadow-sm: 0 1px 0 rgba(255,255,255,.75) inset, 0 1px 2px rgba(75,55,24,.07);
+      --shadow-md: 0 14px 32px rgba(69,51,25,.10), 0 1px 0 rgba(255,255,255,.78) inset;
+      --surface-pattern: repeating-linear-gradient(0deg, transparent 0 3px, rgba(79,63,36,.018) 3px 4px), repeating-linear-gradient(90deg, transparent 0 5px, rgba(255,255,255,.16) 5px 6px);
+      --canvas-pattern: radial-gradient(circle at 18% 4%, rgba(139,112,66,.08), transparent 28%), radial-gradient(circle at 84% 92%, rgba(85,105,58,.07), transparent 30%);
+    }
+
+    /* 02 — herbarium ledger, green-forward and crisp. */
+    html[data-theme="moss"] {
+      --font-ui: Optima, Candara, "Segoe UI", sans-serif;
+      --font-display: Palatino, "Palatino Linotype", Georgia, serif;
+      --paper: #edf0e4; --paper-raised: #f8f8ef; --paper-soft: #e1e7d7; --paper-deep: #ced8c1;
+      --sidebar: #dce4d1; --ink: #1f2a20; --ink-2: #4c5a49; --ink-3: #576253; --ink-4: #9da995;
+      --line: #c7d0bd; --line-strong: #9fad94; --accent: #315d3a; --accent-2: #9c7b2f;
+      --accent-soft: #cfe1cd; --accent-ink: #173b21; --working: #2f6b44; --waiting: #997329;
+      --blocked: #a65441; --idle: #667668;
+      --shadow-sm: 0 1px 0 rgba(255,255,255,.8) inset, 0 1px 3px rgba(31,58,32,.07);
+      --shadow-md: 0 16px 35px rgba(35,61,37,.10), 0 1px 0 rgba(255,255,255,.8) inset;
+      --surface-pattern: radial-gradient(ellipse at 8% 14%, rgba(49,93,58,.035), transparent 35%), radial-gradient(ellipse at 88% 78%, rgba(116,128,111,.045), transparent 30%);
+      --canvas-pattern: repeating-radial-gradient(ellipse at 100% 0%, transparent 0 28px, rgba(49,93,58,.028) 29px 30px, transparent 31px 49px);
+      --radius-sm: 10px; --radius-md: 15px; --radius-lg: 22px;
+    }
+
+    /* 03 — sun-baked ceramics, strong edge and warmth. */
+    html[data-theme="clay"] {
+      --font-ui: "Gill Sans", "Gill Sans MT", Calibri, sans-serif;
+      --font-display: Rockwell, "Roboto Slab", Georgia, serif;
+      --paper: #f5e9dc; --paper-raised: #fff8ed; --paper-soft: #eed9ca; --paper-deep: #dfbfaa;
+      --sidebar: #e9d1bf; --ink: #36251e; --ink-2: #674b3e; --ink-3: #6d5249; --ink-4: #b29585;
+      --line: #d9bca9; --line-strong: #bc9278; --accent: #a34f32; --accent-2: #59724c;
+      --accent-soft: #f0cbbb; --accent-ink: #6f2f1d; --working: #49704e; --waiting: #a96229;
+      --blocked: #a53e37; --idle: #806d64;
+      --shadow-sm: 2px 2px 0 rgba(163,79,50,.10), 0 1px 0 rgba(255,255,255,.7) inset;
+      --shadow-md: 5px 6px 0 rgba(163,79,50,.11), 0 12px 26px rgba(88,49,32,.08);
+      --surface-pattern: linear-gradient(135deg, rgba(163,79,50,.025) 25%, transparent 25%) 0 0/12px 12px, linear-gradient(315deg, rgba(255,255,255,.18) 25%, transparent 25%) 0 0/12px 12px;
+      --canvas-pattern: radial-gradient(circle at 12% 16%, rgba(178,99,65,.10) 0 2px, transparent 3px), radial-gradient(circle at 90% 76%, rgba(89,114,76,.075), transparent 28%);
+      --radius-xs: 3px; --radius-sm: 5px; --radius-md: 7px; --radius-lg: 10px;
+      --card-border-style: double;
+    }
+
+    /* 04 — cool understory mist, quiet and spacious. */
+    html[data-theme="fog"] {
+      --font-ui: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+      --font-display: "Iowan Old Style", Baskerville, Georgia, serif;
+      --paper: #eef1ec; --paper-raised: #fbfcf9; --paper-soft: #e3e9e3; --paper-deep: #cfd9d2;
+      --sidebar: #dfe7e1; --ink: #22302b; --ink-2: #52615b; --ink-3: #56655f; --ink-4: #a0aaa5;
+      --line: #ccd7d0; --line-strong: #a8b9af; --accent: #286356; --accent-2: #687b59;
+      --accent-soft: #cbe2da; --accent-ink: #17473d; --working: #236d55; --waiting: #9b793b;
+      --blocked: #a4534f; --idle: #708079;
+      --shadow-sm: 0 1px 1px rgba(30,53,45,.04), 0 8px 22px rgba(40,79,66,.035);
+      --shadow-md: 0 24px 55px rgba(40,78,65,.11), 0 1px 0 rgba(255,255,255,.85) inset;
+      --surface-pattern: linear-gradient(120deg, rgba(255,255,255,.46), transparent 38%, rgba(40,99,86,.018));
+      --canvas-pattern: radial-gradient(ellipse at 5% 4%, rgba(255,255,255,.9), transparent 42%), radial-gradient(ellipse at 88% 90%, rgba(40,99,86,.08), transparent 38%);
+      --radius-sm: 12px; --radius-md: 18px; --radius-lg: 28px;
+    }
+
+    /* 05 — sunlit agrarian utility, graphic horizontal rhythm. */
+    html[data-theme="prairie"] {
+      --font-ui: "Trebuchet MS", "Avenir Next", sans-serif;
+      --font-display: Cochin, Georgia, serif;
+      --paper: #f5f0d8; --paper-raised: #fffbee; --paper-soft: #ebe3bd; --paper-deep: #dcd0a2;
+      --sidebar: #e7ddb7; --ink: #302e22; --ink-2: #5f5a42; --ink-3: #625d46; --ink-4: #ada688;
+      --line: #d8cda6; --line-strong: #b8aa79; --accent: #6c7134; --accent-2: #52778b;
+      --accent-soft: #e0e3b9; --accent-ink: #464b1d; --working: #52714b; --waiting: #9c712d;
+      --blocked: #a54f3a; --idle: #77745f;
+      --shadow-sm: 0 2px 0 rgba(108,113,52,.07);
+      --shadow-md: 0 4px 0 rgba(108,113,52,.09), 0 16px 34px rgba(71,66,35,.07);
+      --surface-pattern: repeating-linear-gradient(0deg, transparent 0 11px, rgba(94,89,59,.026) 11px 12px);
+      --canvas-pattern: linear-gradient(175deg, transparent 0 63%, rgba(108,113,52,.045) 63% 64%, transparent 64%), radial-gradient(circle at 78% 10%, rgba(192,157,69,.11), transparent 23%);
+      --radius-xs: 2px; --radius-sm: 4px; --radius-md: 8px; --radius-lg: 12px;
+    }
+
+    /* 06 — pebbled riverbed, cool mineral tactility. */
+    html[data-theme="river"] {
+      --font-ui: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      --font-display: Didot, "Bodoni 72", Georgia, serif;
+      --paper: #edf0ed; --paper-raised: #fafbf8; --paper-soft: #e0e5e2; --paper-deep: #cbd3cf;
+      --sidebar: #dde3df; --ink: #252d2d; --ink-2: #566161; --ink-3: #576260; --ink-4: #a4aeaa;
+      --line: #cbd3d0; --line-strong: #a7b2ae; --accent: #3d6f6e; --accent-2: #88735b;
+      --accent-soft: #cfe1de; --accent-ink: #24504f; --working: #39715e; --waiting: #9d793f;
+      --blocked: #9c5450; --idle: #6e7977;
+      --shadow-sm: 0 2px 5px rgba(43,63,62,.06), 0 1px 0 rgba(255,255,255,.92) inset;
+      --shadow-md: 0 18px 40px rgba(46,67,66,.11), 0 1px 0 rgba(255,255,255,.9) inset;
+      --surface-pattern: radial-gradient(ellipse at 14% 22%, rgba(61,111,110,.035) 0 18%, transparent 19%), radial-gradient(ellipse at 75% 85%, rgba(136,115,91,.028) 0 13%, transparent 14%);
+      --canvas-pattern: radial-gradient(ellipse at 17% 20%, rgba(61,111,110,.07), transparent 24%), radial-gradient(ellipse at 90% 78%, rgba(136,115,91,.07), transparent 26%);
+      --radius-xs: 9px; --radius-sm: 15px; --radius-md: 24px; --radius-lg: 34px;
+    }
+
+    /* 07 — high-key bark paper and ink, sharp editorial hierarchy. */
+    html[data-theme="birch"] {
+      --font-ui: "DIN Alternate", "Arial Narrow", "Helvetica Neue", sans-serif;
+      --font-display: Baskerville, "Times New Roman", serif;
+      --paper: #f5f4ee; --paper-raised: #fffefa; --paper-soft: #ecebe3; --paper-deep: #dcdbd1;
+      --sidebar: #e9e8e0; --ink: #202321; --ink-2: #4d524e; --ink-3: #5f6560; --ink-4: #a1a59f;
+      --line: #d7d6ce; --line-strong: #aeb1aa; --accent: #66752d; --accent-2: #2d6255;
+      --accent-soft: #e0e6c8; --accent-ink: #3d4819; --working: #336650; --waiting: #987333;
+      --blocked: #a2473d; --idle: #6f756f;
+      --shadow-sm: 1px 1px 0 rgba(32,35,33,.10);
+      --shadow-md: 2px 2px 0 rgba(32,35,33,.11), 0 16px 34px rgba(32,35,33,.07);
+      --surface-pattern: repeating-linear-gradient(90deg, transparent 0 42px, rgba(32,35,33,.026) 42px 43px), linear-gradient(rgba(255,255,255,.28), transparent);
+      --canvas-pattern: repeating-linear-gradient(92deg, transparent 0 95px, rgba(32,35,33,.023) 96px 97px, transparent 98px 164px);
+      --radius-xs: 0; --radius-sm: 2px; --radius-md: 3px; --radius-lg: 5px;
+      --letterspace: .005em;
+    }
+
+    /* 08 — vintage seed catalogue, typographic and collectible. */
+    html[data-theme="seed"] {
+      --font-ui: Georgia, "Times New Roman", serif;
+      --font-display: Copperplate, "Copperplate Gothic Light", Georgia, serif;
+      --font-mono: "Courier New", Courier, monospace;
+      --paper: #f3ead0; --paper-raised: #fff8df; --paper-soft: #e9dbb7; --paper-deep: #d9c393;
+      --sidebar: #e4d2a8; --ink: #302719; --ink-2: #63533a; --ink-3: #65543d; --ink-4: #b09b75;
+      --line: #d4bf8f; --line-strong: #aa8e58; --accent: #24553b; --accent-2: #8c3f35;
+      --accent-soft: #d2dfbf; --accent-ink: #143924; --working: #2d6042; --waiting: #986522;
+      --blocked: #973f35; --idle: #756b54;
+      --shadow-sm: 0 1px 0 rgba(255,255,255,.6) inset, 0 2px 0 rgba(117,88,39,.10);
+      --shadow-md: 0 3px 0 rgba(117,88,39,.12), 0 18px 38px rgba(79,55,23,.11);
+      --surface-pattern: radial-gradient(circle at 10% 15%, rgba(113,83,39,.045) 0 1px, transparent 1.5px) 0 0/9px 9px;
+      --canvas-pattern: radial-gradient(circle at 80% 10%, rgba(140,63,53,.07), transparent 26%), radial-gradient(circle at 14% 88%, rgba(36,85,59,.07), transparent 28%);
+      --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px; --radius-lg: 9px;
+      --card-border-style: double;
+      --letterspace: .012em;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--paper); color: var(--ink); }
+    body {
+      font-family: var(--font-ui);
+      font-size: 14px;
+      line-height: 1.45;
+      letter-spacing: var(--letterspace);
+      background-image: var(--canvas-pattern);
+      transition: background-color .28s ease, color .28s ease;
+      -webkit-font-smoothing: antialiased;
+    }
+    button, select { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    button:focus-visible, a:focus-visible, select:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--accent) 65%, white);
+      outline-offset: 3px;
+    }
+    .mono { font-family: var(--font-mono); }
+    .tnum { font-variant-numeric: tabular-nums; }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+
+    .app { min-height: 100vh; display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); }
+    .sidebar {
+      min-height: 100vh;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background-color: var(--sidebar);
+      background-image: var(--surface-pattern);
+      border-right: 1px solid var(--line);
+      z-index: 5;
+    }
+    .brand { height: var(--topbar-h); padding: 0 18px; display: flex; align-items: center; gap: 11px; border-bottom: 1px solid var(--line); }
+    .brand-mark {
+      width: 28px; height: 28px; display: grid; place-items: center; flex: 0 0 auto;
+      color: var(--paper-raised); background: var(--accent); border-radius: var(--radius-xs);
+      box-shadow: 3px 3px 0 color-mix(in srgb, var(--accent) 24%, transparent);
+      font: 700 12px/1 var(--font-mono); letter-spacing: -.06em;
+    }
+    .brand-name { font-weight: 720; font-size: 14px; line-height: 1.15; }
+    .brand-sub { color: var(--ink-3); font: 9px/1.3 var(--font-mono); text-transform: uppercase; letter-spacing: .10em; margin-top: 3px; }
+    .nav-block { padding: 19px 12px 3px; }
+    .nav-label { color: var(--ink-3); font: 9px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .13em; padding: 0 9px 9px; }
+    .nav-list { display: grid; gap: 2px; }
+    .nav-item {
+      appearance: none; border: 1px solid transparent; background: transparent; width: 100%;
+      display: flex; align-items: center; gap: 10px; padding: 8px 9px; border-radius: var(--radius-xs);
+      color: var(--ink-2); text-align: left; transition: background .12s, color .12s, transform .12s;
+    }
+    .nav-item:hover { background: color-mix(in srgb, var(--paper-raised) 62%, transparent); color: var(--ink); }
+    .nav-item.active { background: var(--paper-raised); border-color: var(--line); color: var(--ink); box-shadow: var(--shadow-sm); }
+    .nav-item.active .nav-icon { color: var(--accent); }
+    .nav-icon { width: 18px; text-align: center; color: var(--ink-3); font: 14px/1 var(--font-mono); }
+    .nav-count { margin-left: auto; color: var(--ink-3); font: 10px/1 var(--font-mono); }
+    .project-dot { width: 9px; height: 9px; border-radius: 3px; background: currentColor; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 13%, transparent); }
+    .spacer { flex: 1; min-height: 16px; }
+    .sidebar-note { margin: 13px 13px 0; padding: 11px; border: 1px dashed var(--line-strong); border-radius: var(--radius-sm); color: var(--ink-2); background: color-mix(in srgb, var(--paper-raised) 42%, transparent); }
+    .sidebar-note strong { display: block; color: var(--accent); font: 10px/1.2 var(--font-mono); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 5px; }
+    .sidebar-note span { font-size: 11px; line-height: 1.4; display: block; }
+    .sidebar-footer { padding: 13px 16px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 9px; color: var(--ink-3); font: 9px/1.45 var(--font-mono); }
+    .online-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--working); box-shadow: 0 0 0 4px color-mix(in srgb, var(--working) 13%, transparent); }
+    .footer-gear { margin-left: auto; width: 28px; height: 28px; border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--paper-raised); color: var(--ink-2); }
+
+    .main { min-width: 0; min-height: 100vh; display: flex; flex-direction: column; }
+    .topbar {
+      height: var(--topbar-h); position: sticky; top: 0; z-index: 4; padding: 0 25px;
+      display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--paper) 89%, transparent); backdrop-filter: blur(16px) saturate(.9);
+    }
+    .crumbs { display: flex; align-items: center; gap: 9px; color: var(--ink-3); font-size: 12px; }
+    .crumb-current { color: var(--ink); font-weight: 650; }
+    .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 9px; }
+    .study-pill, .connection-pill { border: 1px solid var(--line); border-radius: 999px; padding: 5px 9px; background: var(--paper-raised); color: var(--ink-2); font: 9px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .07em; }
+    .study-pill { border-style: dashed; }
+    .connection-pill::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: var(--working); }
+    .content { padding: 28px clamp(22px, 3.5vw, 52px) 110px; max-width: 1540px; width: 100%; margin: 0 auto; }
+    .view { display: none; }
+    .view.active { display: block; animation: settle .32s cubic-bezier(.2,.75,.25,1); }
+    @keyframes settle { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+
+    .project-hero, .page-head { display: flex; gap: 16px; align-items: center; margin-bottom: 23px; }
+    .project-glyph {
+      width: 56px; height: 56px; display: grid; place-items: center; flex: 0 0 auto;
+      border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line)); border-radius: var(--radius-md);
+      color: var(--accent); background: var(--accent-soft); font: 760 17px/1 var(--font-mono); box-shadow: var(--shadow-sm);
+    }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-family: var(--font-display); font-size: clamp(28px, 3vw, 39px); font-weight: 600; line-height: 1; letter-spacing: -.035em; }
+    .hero-kicker { color: var(--accent); font: 9px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .14em; margin-bottom: 7px; }
+    .hero-meta { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; color: var(--ink-3); font-size: 11px; }
+    .hero-meta .live { color: var(--working); font-weight: 650; }
+    .hero-actions { margin-left: auto; display: flex; gap: 8px; }
+    .button { border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--paper-raised); color: var(--ink-2); padding: 8px 11px; box-shadow: var(--shadow-sm); font-size: 11px; }
+    .button.primary { background: var(--accent); color: var(--paper-raised); border-color: var(--accent); font-weight: 680; }
+    .button:hover { transform: translateY(-1px); border-color: var(--line-strong); }
+
+    .signal-strip { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 9px; margin-bottom: 18px; }
+    .signal { position: relative; overflow: hidden; padding: 13px 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); background-color: var(--paper-raised); background-image: var(--surface-pattern); box-shadow: var(--shadow-sm); }
+    .signal::after { content: ""; position: absolute; inset: auto 0 0; height: 2px; background: var(--signal, var(--accent)); opacity: .65; }
+    .signal-label { color: var(--ink-3); font: 9px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .09em; }
+    .signal-value { margin-top: 7px; font-family: var(--font-display); font-weight: 600; font-size: 21px; line-height: 1; }
+    .signal-note { color: var(--ink-3); font-size: 9px; margin-left: 4px; }
+
+    .section { border: 1px solid var(--line); border-style: var(--card-border-style); border-radius: var(--radius-md); background-color: var(--paper-raised); background-image: var(--surface-pattern); box-shadow: var(--shadow-sm); margin-top: 11px; overflow: hidden; }
+    .section-head { min-height: 48px; padding: 0 15px; display: flex; align-items: center; gap: 9px; border-bottom: 1px solid var(--line); }
+    .section-caret { color: var(--ink-3); font: 11px/1 var(--font-mono); }
+    .section-title { font-weight: 690; font-size: 13px; }
+    .count { color: var(--ink-3); font: 9px/1 var(--font-mono); padding: 4px 6px; background: var(--paper-soft); border-radius: 999px; }
+    .section-tools { margin-left: auto; display: flex; align-items: center; gap: 7px; color: var(--ink-3); font-size: 10px; }
+    .section-body { padding: 15px; }
+    .plan-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 9px; }
+    .plan-row strong { font-family: var(--font-display); font-size: 15px; }
+    .progress { height: 7px; border-radius: 99px; overflow: hidden; background: var(--paper-deep); border: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+    .progress > span { display: block; height: 100%; width: 68%; background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--accent-2))); border-radius: inherit; }
+    .plan-list { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; margin-top: 13px; }
+    .plan-item { display: flex; gap: 8px; align-items: flex-start; color: var(--ink-2); font-size: 11px; }
+    .check { width: 17px; height: 17px; border: 1px solid var(--line-strong); border-radius: var(--radius-xs); display: grid; place-items: center; color: var(--accent); background: var(--accent-soft); font: 9px/1 var(--font-mono); flex: 0 0 auto; }
+    .check.open { color: var(--ink-4); background: var(--paper-soft); }
+
+    .board { display: grid; grid-template-columns: repeat(4,minmax(170px,1fr)); gap: 9px; }
+    .board-col { min-width: 0; }
+    .board-col-head { display: flex; align-items: center; gap: 7px; color: var(--ink-3); font: 9px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .08em; padding: 0 3px 9px; }
+    .board-col-head .count { margin-left: auto; }
+    .ticket { padding: 11px; min-height: 103px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--paper-raised) 80%, var(--paper-soft)); box-shadow: var(--shadow-sm); display: flex; flex-direction: column; gap: 9px; }
+    .ticket + .ticket { margin-top: 8px; }
+    .ticket.active { border-color: color-mix(in srgb, var(--accent) 46%, var(--line)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 8%, transparent), var(--shadow-sm); }
+    .ticket-id { color: var(--accent); font: 9px/1 var(--font-mono); }
+    .ticket-title { font-size: 11px; font-weight: 650; line-height: 1.35; }
+    .ticket-foot { margin-top: auto; display: flex; align-items: center; color: var(--ink-3); font-size: 9px; }
+    .avatar { width: 19px; height: 19px; display: grid; place-items: center; border-radius: 50%; color: var(--paper-raised); background: var(--accent-2); font: 7px/1 var(--font-mono); margin-left: auto; }
+
+    .page-head { align-items: flex-end; }
+    .page-title-wrap { flex: 1; }
+    .page-sub { color: var(--ink-3); font-size: 12px; margin-top: 7px; }
+    .health { min-width: 250px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--paper-raised); display: flex; align-items: center; gap: 9px; box-shadow: var(--shadow-sm); }
+    .health-ring { width: 30px; height: 30px; border: 5px solid var(--accent-soft); border-top-color: var(--working); border-radius: 50%; }
+    .health strong { display: block; font-size: 10px; }
+    .health span { color: var(--ink-3); font-size: 9px; }
+    .roles { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin-bottom: 22px; }
+    .role-card { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--paper-raised); padding: 10px; display: flex; align-items: center; gap: 9px; box-shadow: var(--shadow-sm); }
+    .role-glyph { width: 28px; height: 28px; border-radius: var(--radius-xs); display: grid; place-items: center; font: 8px/1 var(--font-mono); color: var(--accent-ink); background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line)); }
+    .role-name { font-weight: 650; font-size: 10px; }
+    .role-mission { color: var(--ink-3); font-size: 8px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .agents-group { margin-top: 19px; }
+    .agents-group-head { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; color: var(--ink-2); }
+    .gear { width: 17px; height: 17px; display: grid; place-items: center; color: var(--working); font: 13px/1 var(--font-mono); }
+    .gear.idle { color: var(--ink-4); }
+    .group-title { font: 10px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .09em; font-weight: 700; }
+    .agent-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+    .agent-card { border: 1px solid var(--line); border-style: var(--card-border-style); border-radius: var(--radius-md); background-color: var(--paper-raised); background-image: var(--surface-pattern); padding: 14px; box-shadow: var(--shadow-sm); }
+    .agent-card.busy { border-color: color-mix(in srgb, var(--working) 45%, var(--line)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--working) 8%, transparent), var(--shadow-sm); }
+    .agent-card-head { display: flex; align-items: center; gap: 11px; }
+    .agent-glyph { width: 38px; height: 38px; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line)); border-radius: var(--radius-sm); display: grid; place-items: center; color: var(--accent); background: var(--accent-soft); font: 10px/1 var(--font-mono); }
+    .agent-name { font-weight: 700; font-size: 12px; }
+    .agent-project { color: var(--ink-3); font-size: 9px; margin-top: 3px; }
+    .status { margin-left: auto; border-radius: 999px; padding: 5px 7px; font: 8px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .06em; background: var(--paper-soft); color: var(--idle); border: 1px solid var(--line); }
+    .status.working { color: var(--working); background: color-mix(in srgb, var(--working) 10%, var(--paper-raised)); border-color: color-mix(in srgb, var(--working) 25%, var(--line)); }
+    .status.working::before { content: ""; display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: currentColor; margin-right: 5px; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent); }
+    .chips { margin: 12px 0 0 49px; display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip { border: 1px solid var(--line); border-radius: 999px; background: var(--paper-soft); color: var(--ink-2); padding: 4px 7px; font: 8px/1 var(--font-mono); }
+    .chip.role { color: var(--accent-ink); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 25%, var(--line)); }
+    .agent-current { margin: 11px 0 0 49px; padding: 7px 9px; border-left: 2px solid var(--accent); color: var(--ink-2); background: color-mix(in srgb, var(--accent-soft) 45%, transparent); font-size: 9px; }
+    .agent-controls { margin-top: 11px; padding-top: 10px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 8px; color: var(--ink-3); font: 9px/1 var(--font-mono); }
+    .role-select { border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--paper-soft); padding: 4px 7px; font-size: 9px; }
+    .seen { margin-left: auto; }
+
+    /* The exploratory control intentionally lives bottom-right. */
+    .theme-fab {
+      position: fixed; right: 20px; bottom: 19px; z-index: 40; min-width: 214px; height: 50px;
+      display: flex; align-items: center; gap: 10px; padding: 0 12px 0 10px;
+      border: 1px solid var(--line-strong); border-radius: 999px; background-color: var(--paper-raised); background-image: var(--surface-pattern);
+      color: var(--ink); box-shadow: var(--shadow-float); transition: transform .18s ease, box-shadow .18s ease;
+    }
+    .theme-fab:hover { transform: translateY(-2px); }
+    .theme-orbit { width: 31px; height: 31px; border-radius: 50%; display: grid; place-items: center; color: var(--paper-raised); background: conic-gradient(var(--accent), var(--accent-2), var(--paper-deep), var(--accent)); box-shadow: 0 0 0 3px var(--accent-soft); font: 12px/1 var(--font-mono); }
+    .theme-fab-copy { text-align: left; min-width: 0; }
+    .theme-fab-label { display: block; color: var(--ink-3); font: 8px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .09em; }
+    .theme-fab-name { display: block; margin-top: 3px; font-weight: 720; font-size: 11px; white-space: nowrap; }
+    .theme-number { margin-left: auto; color: var(--ink-3); font: 9px/1 var(--font-mono); }
+    .theme-panel {
+      position: fixed; right: 20px; bottom: 78px; z-index: 39; width: min(640px, calc(100vw - 32px)); max-height: min(700px, calc(100vh - 105px)); overflow: auto;
+      border: 1px solid var(--line-strong); border-radius: var(--radius-lg); background-color: var(--paper-raised); background-image: var(--surface-pattern);
+      box-shadow: var(--shadow-float); padding: 17px; transform-origin: 86% 100%;
+      opacity: 0; transform: translateY(8px) scale(.98); pointer-events: none; transition: opacity .18s ease, transform .18s ease;
+    }
+    .theme-panel.open { opacity: 1; transform: none; pointer-events: auto; }
+    .theme-panel-head { display: flex; align-items: flex-start; gap: 12px; padding: 2px 2px 15px; }
+    .theme-panel-kicker { color: var(--accent); font: 8px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .12em; margin-bottom: 6px; }
+    .theme-panel h2 { font-family: var(--font-display); font-size: 21px; font-weight: 600; letter-spacing: -.02em; }
+    .theme-panel p { color: var(--ink-3); font-size: 10px; margin-top: 5px; }
+    .panel-close { margin-left: auto; width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 50%; background: var(--paper-soft); }
+    .theme-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+    .theme-option { position: relative; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-md); background: color-mix(in srgb, var(--paper) 64%, var(--paper-raised)); padding: 12px; text-align: left; box-shadow: var(--shadow-sm); }
+    .theme-option:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+    .theme-option.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft), var(--shadow-sm); }
+    .theme-option.active::after { content: "Selected"; position: absolute; right: 10px; top: 10px; color: var(--accent); font: 7px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .08em; }
+    .theme-option-index { color: var(--ink-3); font: 8px/1 var(--font-mono); }
+    .theme-option-name { margin-top: 5px; font-family: var(--font-display); font-size: 14px; font-weight: 650; }
+    .theme-option-note { color: var(--ink-3); font-size: 9px; margin-top: 4px; line-height: 1.35; padding-right: 35px; }
+    .theme-swatches { display: flex; margin-top: 10px; gap: 4px; }
+    .theme-swatches span { width: 21px; height: 8px; border-radius: 99px; border: 1px solid rgba(30,30,20,.10); }
+    .theme-panel-foot { display: flex; align-items: center; gap: 8px; margin-top: 13px; padding: 12px 2px 0; border-top: 1px solid var(--line); color: var(--ink-3); font: 8px/1.4 var(--font-mono); }
+    kbd { border: 1px solid var(--line); border-bottom-color: var(--line-strong); border-radius: 4px; background: var(--paper-soft); color: var(--ink-2); padding: 2px 5px; font: inherit; }
+    .panel-arrows { margin-left: auto; display: flex; gap: 5px; }
+    .panel-arrows button { width: 28px; height: 26px; border: 1px solid var(--line); background: var(--paper-soft); border-radius: var(--radius-xs); }
+
+    .toast { position: fixed; left: 50%; bottom: 28px; z-index: 42; transform: translate(-50%,12px); opacity: 0; pointer-events: none; color: var(--paper-raised); background: var(--ink); border-radius: 999px; padding: 8px 12px; box-shadow: var(--shadow-md); font-size: 10px; transition: opacity .15s, transform .15s; }
+    .toast.show { opacity: 1; transform: translate(-50%,0); }
+
+    @media (max-width: 1100px) {
+      :root { --sidebar-w: 205px; }
+      .signal-strip { grid-template-columns: repeat(2,1fr); }
+      .board { grid-template-columns: repeat(2,1fr); }
+      .roles { grid-template-columns: repeat(2,1fr); }
+    }
+    @media (max-width: 760px) {
+      .app { display: block; }
+      .sidebar { position: sticky; height: auto; min-height: 0; top: 0; flex-direction: row; align-items: center; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+      .brand { border-bottom: 0; min-width: 145px; }
+      .brand-sub, .nav-label, .sidebar-note, .sidebar-footer, .nav-block.projects, .spacer { display: none; }
+      .nav-block { padding: 8px 10px; }
+      .nav-list { display: flex; }
+      .nav-item { width: auto; white-space: nowrap; }
+      .nav-item:not([data-view]) { display: none; }
+      .topbar { top: 58px; padding: 0 15px; }
+      .study-pill, .topbar-meta { display: none; }
+      .content { padding: 22px 14px 105px; }
+      .hero-actions { display: none; }
+      .signal-strip, .agent-grid, .roles { grid-template-columns: 1fr; }
+      .board { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; }
+      .board-col { min-width: 76vw; scroll-snap-align: start; }
+      .plan-list { grid-template-columns: 1fr; }
+      .page-head { align-items: flex-start; flex-direction: column; }
+      .health { width: 100%; }
+      .theme-grid { grid-template-columns: 1fr; }
+      .theme-fab { right: 12px; bottom: 12px; }
+      .theme-panel { right: 8px; bottom: 70px; width: calc(100vw - 16px); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" aria-label="Golem workspace navigation">
+      <div class="brand">
+        <div class="brand-mark">GO</div>
+        <div><div class="brand-name">Golem</div><div class="brand-sub">command center</div></div>
+      </div>
+
+      <div class="nav-block">
+        <div class="nav-label">Workspace</div>
+        <nav class="nav-list">
+          <button class="nav-item" type="button"><span class="nav-icon">⌂</span><span>Dashboard</span></button>
+          <button class="nav-item" type="button"><span class="nav-icon">▤</span><span>Tracker</span></button>
+          <button class="nav-item" type="button"><span class="nav-icon">◇</span><span>Specs</span></button>
+          <button class="nav-item active" type="button" data-view="project"><span class="nav-icon">◫</span><span>Projects</span><span class="nav-count">8</span></button>
+          <button class="nav-item" type="button" data-view="agents"><span class="nav-icon">◎</span><span>Agents</span><span class="nav-count">10</span></button>
+          <button class="nav-item" type="button"><span class="nav-icon">✓</span><span>Review Inbox</span></button>
+        </nav>
+      </div>
+
+      <div class="nav-block projects">
+        <div class="nav-label">Recent projects</div>
+        <nav class="nav-list">
+          <button class="nav-item active" type="button" data-view="project"><span class="nav-icon"><i class="project-dot" style="color:var(--accent)"></i></span><span>golem</span><span class="nav-count">4</span></button>
+          <button class="nav-item" type="button"><span class="nav-icon"><i class="project-dot" style="color:var(--accent-2)"></i></span><span>trialroom</span><span class="nav-count">2</span></button>
+          <button class="nav-item" type="button"><span class="nav-icon"><i class="project-dot" style="color:var(--waiting)"></i></span><span>hearth</span><span class="nav-count">1</span></button>
+          <button class="nav-item" type="button"><span class="nav-icon"><i class="project-dot" style="color:var(--ink-3)"></i></span><span>fable</span><span class="nav-count">0</span></button>
+        </nav>
+      </div>
+
+      <div class="sidebar-note">
+        <strong>Theme study</strong>
+        <span>Same dashboard. Eight light material systems. Choose atmosphere before implementation.</span>
+      </div>
+      <div class="spacer"></div>
+      <div class="sidebar-footer">
+        <span class="online-dot"></span>
+        <span>HARNESS · ONLINE<br><span style="color:var(--ink-4)">v0.1.0 · study</span></span>
+        <button class="footer-gear" type="button" title="This is where the production theme and accent controls will live">✣</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="crumbs"><span>Workspace</span><span>/</span><span id="crumb-current" class="crumb-current">Projects</span></div>
+        <div class="topbar-right">
+          <span class="study-pill">visual prototype · no production changes</span>
+          <span class="topbar-meta mono">10 live&nbsp; · &nbsp;3 working</span>
+          <span class="connection-pill">online</span>
+        </div>
+      </header>
+
+      <div class="content">
+        <section id="view-project" class="view active" aria-labelledby="project-heading">
+          <div class="project-hero">
+            <div class="project-glyph">GO</div>
+            <div>
+              <div class="hero-kicker">Project command center</div>
+              <h1 id="project-heading">golem</h1>
+              <div class="hero-meta"><span class="mono">golem-1eba80</span><span>·</span><span>27 milestones</span><span>·</span><span class="live">4 live sessions</span><span>·</span><span>updated now</span></div>
+            </div>
+            <div class="hero-actions"><button class="button" type="button">Open repository</button><button class="button primary" type="button">+ New ticket</button></div>
+          </div>
+
+          <div class="signal-strip" aria-label="Project summary">
+            <div class="signal" style="--signal:var(--accent)"><div class="signal-label">Build progress</div><div class="signal-value tnum">68<span class="signal-note">%</span></div></div>
+            <div class="signal" style="--signal:var(--working)"><div class="signal-label">Live sessions</div><div class="signal-value tnum">04<span class="signal-note">healthy</span></div></div>
+            <div class="signal" style="--signal:var(--waiting)"><div class="signal-label">Awaiting review</div><div class="signal-value tnum">03<span class="signal-note">items</span></div></div>
+            <div class="signal" style="--signal:var(--accent-2)"><div class="signal-label">Latest milestone</div><div class="signal-value" style="font-size:15px">Cross-harness bridge</div></div>
+          </div>
+
+          <article class="section">
+            <div class="section-head"><span class="section-caret">▾</span><span class="section-title">Plan · Golem v5 substrate</span><span class="count">12</span><div class="section-tools"><span class="mono">8 / 12</span><button class="button" type="button" style="padding:5px 7px">↑</button><button class="button" type="button" style="padding:5px 7px">↓</button></div></div>
+            <div class="section-body">
+              <div class="plan-row"><strong>Delivery plane hardening</strong><span class="mono" style="color:var(--accent)">68% complete</span></div>
+              <div class="progress"><span></span></div>
+              <div class="plan-list">
+                <div class="plan-item"><span class="check">✓</span><span>Managed Codex transport and canonical identity</span></div>
+                <div class="plan-item"><span class="check">✓</span><span>Cross-harness discovery and role propagation</span></div>
+                <div class="plan-item"><span class="check open">○</span><span>Operator themes and appearance persistence</span></div>
+              </div>
+            </div>
+          </article>
+
+          <article class="section">
+            <div class="section-head"><span class="section-caret">▾</span><span class="section-title">Tickets</span><span class="count">9</span><div class="section-tools"><label><input type="checkbox"> archived</label><button class="button primary" type="button" style="padding:6px 9px">+ New ticket</button></div></div>
+            <div class="section-body">
+              <div class="board">
+                <div class="board-col"><div class="board-col-head">Queued <span class="count">2</span></div><div class="ticket"><div class="ticket-id">GOL-486 · FEATURE</div><div class="ticket-title">Carry theme choice into the production tweaks panel</div><div class="ticket-foot"><span>high · today</span><span class="avatar">PL</span></div></div><div class="ticket"><div class="ticket-id">GOL-489 · FIX</div><div class="ticket-title">Restore focus after drawer close</div><div class="ticket-foot"><span>medium</span><span class="avatar">EX</span></div></div></div>
+                <div class="board-col"><div class="board-col-head">Building <span class="count">2</span></div><div class="ticket active"><div class="ticket-id">GOL-484 · DESIGN</div><div class="ticket-title">Explore an earthy light theme for the dashboard</div><div class="ticket-foot"><span>in progress</span><span class="avatar">UI</span></div></div><div class="ticket"><div class="ticket-id">GOL-483 · BRIDGE</div><div class="ticket-title">Make consult delivery truthful across harnesses</div><div class="ticket-foot"><span>high</span><span class="avatar">BU</span></div></div></div>
+                <div class="board-col"><div class="board-col-head">Verifying <span class="count">3</span></div><div class="ticket"><div class="ticket-id">GOL-482 · CONTROL</div><div class="ticket-title">Deliver managed Codex role assignments durably</div><div class="ticket-foot"><span>3 checks</span><span class="avatar">EX</span></div></div><div class="ticket"><div class="ticket-id">GOL-477 · DOCS</div><div class="ticket-title">Refresh operator recovery handbook</div><div class="ticket-foot"><span>review</span><span class="avatar">RE</span></div></div></div>
+                <div class="board-col"><div class="board-col-head">Done <span class="count">2</span></div><div class="ticket"><div class="ticket-id">GOL-470 · TRACKER</div><div class="ticket-title">Sort board lanes with stable phase order</div><div class="ticket-foot"><span>verified</span><span class="avatar">✓</span></div></div><div class="ticket"><div class="ticket-id">GOL-461 · UI</div><div class="ticket-title">Surface communication health at a glance</div><div class="ticket-foot"><span>verified</span><span class="avatar">✓</span></div></div></div>
+              </div>
+            </div>
+          </article>
+
+          <article class="section">
+            <div class="section-head"><span class="section-caret">▸</span><span class="section-title">Specs</span><span class="count">4</span><div class="section-tools"><span>collapsed</span><button class="button" type="button" style="padding:5px 7px">↑</button></div></div>
+          </article>
+          <article class="section">
+            <div class="section-head"><span class="section-caret">▸</span><span class="section-title">Milestones</span><span class="count">27</span><div class="section-tools"><span class="mono">latest · 12m ago</span></div></div>
+          </article>
+        </section>
+
+        <section id="view-agents" class="view" aria-labelledby="agents-heading">
+          <div class="page-head">
+            <div class="page-title-wrap"><div class="hero-kicker">Native session registry</div><h1 id="agents-heading">Agents</h1><div class="page-sub">10 Golem sessions online across three harnesses.</div></div>
+            <div class="health"><span class="health-ring"></span><div><strong>Communication healthy</strong><span>9 reachable · 1 pull-only · no stuck envelopes</span></div></div>
+          </div>
+
+          <div class="roles" aria-label="Available roles">
+            <div class="role-card"><span class="role-glyph">MA</span><div><div class="role-name">manager</div><div class="role-mission">route, verify, reconcile</div></div></div>
+            <div class="role-card"><span class="role-glyph">PL</span><div><div class="role-name">planner</div><div class="role-mission">shape specs and waves</div></div></div>
+            <div class="role-card"><span class="role-glyph">BU</span><div><div class="role-name">builder</div><div class="role-mission">implement one ticket</div></div></div>
+            <div class="role-card"><span class="role-glyph">EX</span><div><div class="role-name">explorer</div><div class="role-mission">recon and verification</div></div></div>
+          </div>
+
+          <div class="agents-group">
+            <div class="agents-group-head"><span class="gear">✣</span><span class="group-title">Working</span><span class="count">3</span></div>
+            <div class="agent-grid">
+              <article class="agent-card busy"><div class="agent-card-head"><span class="agent-glyph">GO</span><div><div class="agent-name">sol:golem:manager</div><div class="agent-project">golem · Codex</div></div><span class="status working">working</span></div><div class="chips"><span class="chip role">manager</span><span class="chip">gpt-5.6-terra</span><span class="chip">1 queued</span></div><div class="agent-current"><span class="mono">GOL-484</span> · Earthbound dashboard theme exploration</div><div class="agent-controls"><span>Role</span><select class="role-select"><option>manager</option><option>planner</option><option>builder</option><option>explorer</option><option>clear</option></select><span class="seen">seen now</span></div></article>
+              <article class="agent-card busy"><div class="agent-card-head"><span class="agent-glyph" style="color:var(--accent-2)">TR</span><div><div class="agent-name">trialroom:builder</div><div class="agent-project">trialroom · OpenCode</div></div><span class="status working">working</span></div><div class="chips"><span class="chip role">builder</span><span class="chip">gpt-5.6-luna</span></div><div class="agent-current"><span class="mono">TRI-118</span> · Add scene comparison workflow</div><div class="agent-controls"><span>Role</span><select class="role-select"><option>builder</option><option>clear</option></select><span class="seen">seen 8s ago</span></div></article>
+              <article class="agent-card busy"><div class="agent-card-head"><span class="agent-glyph" style="color:var(--waiting)">HE</span><div><div class="agent-name">hearth:planner</div><div class="agent-project">hearth · Claude Code</div></div><span class="status working">waiting</span></div><div class="chips"><span class="chip role">planner</span><span class="chip">claude-opus-4.1</span></div><div class="agent-current" style="border-left-color:var(--waiting)">Waiting for approval · data retention boundary</div><div class="agent-controls"><span>Role</span><select class="role-select"><option>planner</option><option>clear</option></select><span class="seen">seen 31s ago</span></div></article>
+            </div>
+          </div>
+
+          <div class="agents-group">
+            <div class="agents-group-head"><span class="gear idle">✣</span><span class="group-title">Idle</span><span class="count">7</span></div>
+            <div class="agent-grid">
+              <article class="agent-card"><div class="agent-card-head"><span class="agent-glyph">GO</span><div><div class="agent-name">dx:test</div><div class="agent-project">golem · Codex</div></div><span class="status">idle</span></div><div class="chips"><span class="chip role">explorer</span><span class="chip">gpt-5.6-terra</span></div><div class="agent-controls"><span>Role</span><select class="role-select"><option>explorer</option><option>clear</option></select><span class="seen">seen 12s ago</span></div></article>
+              <article class="agent-card"><div class="agent-card-head"><span class="agent-glyph">GO</span><div><div class="agent-name">oc:test</div><div class="agent-project">golem · OpenCode</div></div><span class="status">idle</span></div><div class="chips"><span class="chip">gpt-5.6-luna</span><span class="chip">reachable</span></div><div class="agent-controls"><span>Role</span><select class="role-select"><option>clear</option><option>builder</option><option>explorer</option></select><span class="seen">seen 18s ago</span></div></article>
+              <article class="agent-card"><div class="agent-card-head"><span class="agent-glyph" style="color:var(--accent-2)">FA</span><div><div class="agent-name">fable:main</div><div class="agent-project">fable · Claude Code</div></div><span class="status">idle</span></div><div class="chips"><span class="chip">claude-sonnet-4.5</span><span class="chip">pull-only</span></div><div class="agent-controls"><span>Role</span><select class="role-select"><option>clear</option><option>manager</option></select><span class="seen">seen 1m ago</span></div></article>
+              <article class="agent-card"><div class="agent-card-head"><span class="agent-glyph" style="color:var(--waiting)">GO</span><div><div class="agent-name">golem:reviewer</div><div class="agent-project">golem · Codex</div></div><span class="status">idle</span></div><div class="chips"><span class="chip role">explorer</span><span class="chip">gpt-5.6-terra</span></div><div class="agent-controls"><span>Role</span><select class="role-select"><option>explorer</option><option>clear</option></select><span class="seen">seen 2m ago</span></div></article>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <button id="theme-fab" class="theme-fab" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="theme-panel">
+    <span class="theme-orbit" aria-hidden="true">✦</span>
+    <span class="theme-fab-copy"><span class="theme-fab-label">Light theme</span><span id="theme-fab-name" class="theme-fab-name">Loam &amp; Linen</span></span>
+    <span id="theme-number" class="theme-number">01 / 08</span>
+  </button>
+
+  <aside id="theme-panel" class="theme-panel" role="dialog" aria-modal="false" aria-labelledby="theme-panel-title" aria-hidden="true" inert>
+    <div class="theme-panel-head">
+      <div><div class="theme-panel-kicker">Earthbound light studies</div><h2 id="theme-panel-title">Choose an atmosphere</h2><p>Same information architecture. Different material, rhythm, and daylight.</p></div>
+      <button id="panel-close" class="panel-close" type="button" aria-label="Close theme chooser">×</button>
+    </div>
+    <div id="theme-grid" class="theme-grid"></div>
+    <div class="theme-panel-foot"><span>Switch with <kbd>[</kbd> <kbd>]</kbd> · Open with <kbd>T</kbd> · Close with <kbd>Esc</kbd></span><span class="panel-arrows"><button id="prev-theme" type="button" aria-label="Previous theme">←</button><button id="next-theme" type="button" aria-label="Next theme">→</button></span></div>
+  </aside>
+
+  <div id="theme-toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    const themes = [
+      { id: 'loam', name: 'Loam & Linen', note: 'Woven ivory, garden loam, olive leaf. Warm and deeply grounded.', colors: ['#f4efe4','#e8deca','#596b3b','#9c6038'] },
+      { id: 'moss', name: 'Moss Ledger', note: 'Herbarium greens with botanical contours and ledger-like clarity.', colors: ['#edf0e4','#dce4d1','#315d3a','#9c7b2f'] },
+      { id: 'clay', name: 'Clay Kiln', note: 'Sun-baked plaster, terracotta edges, and crafted ceramic geometry.', colors: ['#f5e9dc','#e9d1bf','#a34f32','#59724c'] },
+      { id: 'fog', name: 'Forest Fog', note: 'Cool understory mist, pine ink, and soft translucent elevation.', colors: ['#eef1ec','#dfe7e1','#286356','#687b59'] },
+      { id: 'prairie', name: 'Prairie Field', note: 'Straw paper, field lines, weathered blue, and agrarian utility.', colors: ['#f5f0d8','#e7ddb7','#6c7134','#52778b'] },
+      { id: 'river', name: 'Riverstone', note: 'Mineral gray-green, pebble shapes, and calm cool-water restraint.', colors: ['#edf0ed','#dde3df','#3d6f6e','#88735b'] },
+      { id: 'birch', name: 'Birch & Ink', note: 'High-key bark paper, charcoal rules, and sharp editorial hierarchy.', colors: ['#f5f4ee','#e9e8e0','#66752d','#2d6255'] },
+      { id: 'seed', name: 'Seed Catalogue', note: 'Collectible horticultural print: bottle green, ochre, and stamped type.', colors: ['#f3ead0','#e4d2a8','#24553b','#8c3f35'] }
+    ];
+
+    const root = document.documentElement;
+    const fab = document.getElementById('theme-fab');
+    const panel = document.getElementById('theme-panel');
+    const grid = document.getElementById('theme-grid');
+    const fabName = document.getElementById('theme-fab-name');
+    const number = document.getElementById('theme-number');
+    const toast = document.getElementById('theme-toast');
+    let current = Math.max(0, themes.findIndex((t) => t.id === localStorage.getItem('golem.theme-lab')));
+    let toastTimer;
+
+    const escapeHTML = (value) => String(value).replace(/[&<>'"]/g, (ch) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+    grid.innerHTML = themes.map((theme, i) => `
+      <button class="theme-option" type="button" data-theme-id="${theme.id}" aria-pressed="false">
+        <span class="theme-option-index">${String(i + 1).padStart(2,'0')}</span>
+        <div class="theme-option-name">${escapeHTML(theme.name)}</div>
+        <div class="theme-option-note">${escapeHTML(theme.note)}</div>
+        <div class="theme-swatches" aria-hidden="true">${theme.colors.map((c) => `<span style="background:${c}"></span>`).join('')}</div>
+      </button>`).join('');
+
+    function showToast(text) {
+      toast.textContent = text;
+      toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 1200);
+    }
+
+    function applyTheme(index, announce = false) {
+      current = (index + themes.length) % themes.length;
+      const theme = themes[current];
+      root.dataset.theme = theme.id;
+      localStorage.setItem('golem.theme-lab', theme.id);
+      fabName.textContent = theme.name;
+      number.textContent = `${String(current + 1).padStart(2,'0')} / ${String(themes.length).padStart(2,'0')}`;
+      document.querySelectorAll('.theme-option').forEach((button) => {
+        const active = button.dataset.themeId === theme.id;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', String(active));
+      });
+      if (announce) showToast(`${theme.name} applied`);
+    }
+
+    function togglePanel(force) {
+      const open = typeof force === 'boolean' ? force : !panel.classList.contains('open');
+      panel.classList.toggle('open', open);
+      panel.inert = !open;
+      panel.setAttribute('aria-hidden', String(!open));
+      fab.setAttribute('aria-expanded', String(open));
+      if (open) requestAnimationFrame(() => document.querySelector('.theme-option.active')?.focus());
+      else fab.focus();
+    }
+
+    fab.addEventListener('click', () => togglePanel());
+    document.getElementById('panel-close').addEventListener('click', () => togglePanel(false));
+    document.getElementById('prev-theme').addEventListener('click', () => applyTheme(current - 1, true));
+    document.getElementById('next-theme').addEventListener('click', () => applyTheme(current + 1, true));
+    grid.addEventListener('click', (event) => {
+      const button = event.target.closest('.theme-option');
+      if (!button) return;
+      applyTheme(themes.findIndex((theme) => theme.id === button.dataset.themeId), true);
+    });
+    document.addEventListener('pointerdown', (event) => {
+      if (panel.classList.contains('open') && !panel.contains(event.target) && !fab.contains(event.target)) togglePanel(false);
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && panel.classList.contains('open')) togglePanel(false);
+      if (!['INPUT','SELECT','TEXTAREA'].includes(document.activeElement?.tagName)) {
+        if (event.key.toLowerCase() === 't') { event.preventDefault(); togglePanel(); }
+        if (event.key === '[') { event.preventDefault(); applyTheme(current - 1, true); }
+        if (event.key === ']') { event.preventDefault(); applyTheme(current + 1, true); }
+      }
+    });
+
+    const viewButtons = [...document.querySelectorAll('[data-view]')];
+    function setView(view) {
+      document.querySelectorAll('.view').forEach((node) => node.classList.toggle('active', node.id === `view-${view}`));
+      viewButtons.forEach((node) => node.classList.toggle('active', node.dataset.view === view));
+      document.getElementById('crumb-current').textContent = view === 'agents' ? 'Agents' : 'Projects / golem';
+      history.replaceState(null, '', `#${view}`);
+    }
+    viewButtons.forEach((button) => button.addEventListener('click', () => setView(button.dataset.view)));
+    applyTheme(current);
+    setView(location.hash === '#agents' ? 'agents' : 'project');
+  </script>
+</body>
+</html>

@@ -1,5 +1,25 @@
 # Dashboard Runtime Notes
 
+## Appearance Persistence
+
+`dashboard/web/src/tweaks.jsx` owns the dashboard's global appearance control.
+It is mounted once by `app.jsx` in the bottom-right corner and sits below the
+drawer/backdrop stack so ticket and chat composers keep interaction priority.
+The control switches between the default dark theme and Loam & Linen, and maps
+the retained six-color accent palette to contrast-safe values for each theme.
+
+Preferences are browser-local and independent:
+
+- `golem.tweaks.theme` is either `dark` or `loam`; missing or invalid values
+  resolve to dark.
+- `golem.tweaks.accent` retains the original dark-palette hex strings as stable
+  ids, so preferences saved by older dashboard versions continue to work.
+
+The inline bootstrap in `dashboard/web/index.html` reads the theme key before
+stylesheets load and only stamps `data-theme="loam"` when explicitly selected.
+Theme tokens and the Loam material/typography layer live in `styles.css`; panel
+and responsive control layout live in `extra.css`.
+
 ## Substrate Settings
 
 The dashboard exposes a substrate control surface at `/settings`. It is backed by

@@ -3,7 +3,18 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="color-scheme" content="dark light"/>
   <title>Golem · Dashboard</title>
+  <script>
+    // Apply the saved appearance before CSS is requested so reloads never
+    // paint the dark shell underneath Loam & Linen. Dark remains the default.
+    (() => {
+      try {
+        const theme = localStorage.getItem('golem.tweaks.theme');
+        if (theme === 'loam') document.documentElement.dataset.theme = 'loam';
+      } catch {}
+    })();
+  </script>
   <link rel="stylesheet" href="/styles.css"/>
   <link rel="stylesheet" href="/extra.css"/>
 </head>

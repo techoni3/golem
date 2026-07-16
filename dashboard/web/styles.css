@@ -3,12 +3,14 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Geist:wght@400;500;600;700&display=swap');
 
 :root {
+  color-scheme: dark;
   /* Surfaces — cool near-black with slate undertone */
   --bg-0: #0a0b0d;          /* page background */
   --bg-1: #101216;          /* primary surface */
   --bg-2: #15181d;          /* raised surface */
   --bg-3: #1c2027;          /* hover / active */
   --bg-4: #242932;          /* deepest raise */
+  --sidebar-bg: var(--bg-1);
 
   /* Borders — hairline */
   --border-1: #1e222a;
@@ -38,7 +40,12 @@
 
   /* Typography */
   --font-sans: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: var(--font-sans);
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* Theme material hooks. Dark intentionally stays visually unchanged. */
+  --canvas-pattern: none;
+  --surface-pattern: none;
 
   /* Sizing */
   --sidebar-w: 220px;
@@ -53,12 +60,66 @@
   --shadow-drawer: -16px 0 48px rgba(0,0,0,0.6);
 }
 
+/* Loam & Linen — the production light theme approved in GOL-485. The token
+   names remain shared with dark mode so every existing surface inherits the
+   new material system without duplicating component rules. */
+:root[data-theme="loam"] {
+  color-scheme: light;
+
+  --bg-0: #f4efe4;
+  --bg-1: #fbf8f0;
+  --bg-2: #ede5d5;
+  --bg-3: #e2d5bd;
+  --bg-4: #d8c8ad;
+  --sidebar-bg: #e8deca;
+
+  --border-1: #d6c9b3;
+  --border-2: #baaa91;
+  --border-3: #8f7d63;
+
+  --text-0: #29281f;
+  --text-1: #454238;
+  --text-2: #555246;
+  --text-3: #635d52;
+  --text-4: #82796b;
+
+  --accent: #596b3b;
+  --accent-soft: rgba(89, 107, 59, 0.12);
+  --accent-border: rgba(89, 107, 59, 0.32);
+
+  --status-active: #356b4c;
+  --status-running: #3f6680;
+  --status-review: #885a1e;
+  --status-blocked: #a13f34;
+  --status-done: #646a5e;
+  --status-triage: #72517f;
+  --status-open: #59645d;
+
+  --font-sans: 'Avenir Next', Avenir, 'Segoe UI', sans-serif;
+  --font-display: Charter, 'Iowan Old Style', Georgia, serif;
+
+  --radius-1: 5px;
+  --radius-2: 8px;
+  --radius-3: 12px;
+
+  --shadow-1: 0 1px 0 rgba(255,255,255,.75) inset, 0 1px 2px rgba(75,55,24,.07);
+  --shadow-2: 0 14px 32px rgba(69,51,25,.10), 0 1px 0 rgba(255,255,255,.78) inset;
+  --shadow-drawer: -18px 0 48px rgba(69,51,25,.18), -1px 0 rgba(255,255,255,.72) inset;
+  --surface-pattern:
+    repeating-linear-gradient(0deg, transparent 0 3px, rgba(79,63,36,.018) 3px 4px),
+    repeating-linear-gradient(90deg, transparent 0 5px, rgba(255,255,255,.16) 5px 6px);
+  --canvas-pattern:
+    radial-gradient(circle at 18% 4%, rgba(139,112,66,.08), transparent 28%),
+    radial-gradient(circle at 84% 92%, rgba(85,105,58,.07), transparent 30%);
+}
+
 * { box-sizing: border-box; }
 
 html, body {
   margin: 0;
   padding: 0;
   background: var(--bg-0);
+  background-image: var(--canvas-pattern);
   color: var(--text-0);
   font-family: var(--font-sans);
   font-size: 14px;
@@ -66,6 +127,15 @@ html, body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-feature-settings: 'cv11', 'ss01';
+}
+
+button:focus-visible,
+a:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 #root { min-height: 100vh; }
@@ -90,7 +160,8 @@ button {
 /* Sidebar — bounded to the viewport; scrolls internally when the project list
    overflows (TKT-0155, pairs with .app height:100vh). */
 .sidebar {
-  background: var(--bg-1);
+  background-color: var(--sidebar-bg);
+  background-image: var(--surface-pattern);
   border-right: 1px solid var(--border-1);
   display: flex;
   flex-direction: column;
@@ -180,6 +251,18 @@ button {
   background: var(--bg-3);
   color: var(--text-0);
 }
+
+:root[data-theme="loam"] .sidebar-link:hover {
+  background: color-mix(in srgb, var(--bg-1) 62%, transparent);
+}
+
+:root[data-theme="loam"] .sidebar-link.active {
+  background: var(--bg-1);
+  border-color: var(--border-1);
+  box-shadow: var(--shadow-1);
+}
+
+:root[data-theme="loam"] .sidebar-brand-mark { color: var(--bg-1); }
 
 .sidebar-link-icon {
   width: 14px;
@@ -313,10 +396,19 @@ button {
 }
 
 .page-title {
+  font-family: var(--font-display);
   font-size: 22px;
   font-weight: 600;
   letter-spacing: -0.02em;
   margin: 0;
+}
+
+:root[data-theme="loam"] .page-title,
+:root[data-theme="loam"] .project-hero-name,
+:root[data-theme="loam"] .drawer-title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.018em;
 }
 
 .page-subtitle {

@@ -161,7 +161,6 @@ function Sidebar({ route, setRoute }) {
           <div>HARNESS · {window.Store.getState().connection === 'connected' ? 'ONLINE' : 'OFFLINE'}</div>
           <div style={{ color: 'var(--text-3)', marginTop: 2 }}>v0.1.0</div>
         </div>
-        <TweaksButton/>
       </div>
     </aside>
   );
@@ -221,7 +220,7 @@ window.Topbar = Topbar;
 // event so post/pop from anywhere in the app stay in sync.
 //
 // Lives in the sidebar's normal flow (no position:fixed, no z-index),
-// so it can't cover the sidebar footer (HARNESS · ONLINE, TweaksButton)
+// so it can't cover the sidebar footer (HARNESS · ONLINE)
 // or any other sidebar content — which is the regression that killed
 // the floating-anchor version.
 function SidebarIdeasLink() {
