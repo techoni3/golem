@@ -69,6 +69,7 @@
       stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
     }
     .icon.fill { fill: currentColor; stroke: none; }
+    .icon.icon-fill { fill: currentColor; stroke: none; }
     .mono { font-family: var(--mono); }
 
     .lab-head {
@@ -166,6 +167,14 @@
     .option-group + .option-group { margin-top: 42px; }
     .option-group.original-group {
       margin-top: 72px; padding-top: 42px; border-top: 1px solid var(--line);
+    }
+    .option-group.prior-round {
+      position: relative; margin-top: 78px; padding-top: 48px; border-top: 1px solid var(--line);
+    }
+    .option-group.prior-round::before {
+      content: "Previous exploration · 30 preserved directions";
+      position: absolute; left: 2px; top: 17px; color: var(--text-4);
+      font: 650 8px/1 var(--mono); letter-spacing: .13em; text-transform: uppercase;
     }
     .group-heading {
       display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: end; gap: 14px;
@@ -306,6 +315,136 @@
     .seen { color: var(--text-4); font: 560 9px/1 var(--mono); }
     .label { color: var(--text-4); font: 650 8px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
     .work-empty { color: var(--text-4); font: 560 10px/1 var(--mono); }
+
+    /* Final O1 × P1 hybrids — a live orb inside the passport template */
+    .identity-variant.identity-finalist {
+      --orb: #747d89;
+      --orb-soft: rgba(116,125,137,.09);
+      display: grid; grid-template-columns: 116px minmax(0,1fr); min-height: 248px;
+      border-color: #334155; background: #0c1118;
+    }
+    .identity-finalist.state-working {
+      --orb: var(--signal);
+      --orb-soft: rgba(69,212,131,.13);
+      border-color: var(--signal-line);
+    }
+    .identity-finalist.state-waiting {
+      --orb: #8b9098;
+      --orb-soft: rgba(139,144,152,.08);
+      border-color: rgba(242,184,75,.3);
+    }
+    .identity-finalist.state-idle {
+      --orb: #68717d;
+      --orb-soft: rgba(104,113,125,.07);
+      border-color: #303a48;
+    }
+    .finalist-portrait {
+      position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center;
+      padding: 22px 12px 13px; border-right: 1px solid var(--line);
+      background: radial-gradient(circle at 50% 29%, var(--orb-soft), transparent 47%), #0a1017;
+    }
+    .finalist-orb {
+      position: relative; display: grid; place-items: center; width: 76px; height: 76px;
+      flex: 0 0 auto; border: 1px solid color-mix(in oklab, var(--orb) 58%, #394453);
+      border-radius: 50%; color: var(--orb);
+      background:
+        radial-gradient(circle at 35% 27%, rgba(255,255,255,.11), transparent 12%),
+        radial-gradient(circle at 50% 50%, var(--orb-soft), #0d141c 72%);
+      box-shadow: inset -10px -12px 23px rgba(0,0,0,.35);
+    }
+    .finalist-orb::before, .finalist-orb::after {
+      content: ""; position: absolute; inset: 0; border: 1px solid var(--orb);
+      border-radius: 50%; opacity: 0; pointer-events: none;
+    }
+    .state-working .finalist-orb {
+      box-shadow: inset -10px -12px 23px rgba(0,0,0,.35), 0 0 25px var(--orb-soft);
+    }
+    .state-working .finalist-orb::before { animation: finalist-radiate 2.55s ease-out infinite; }
+    .state-working .finalist-orb::after { animation: finalist-radiate 2.55s 1.25s ease-out infinite; }
+    .state-idle .finalist-orb {
+      color: #7a838e; border-color: #4c5662;
+      background: radial-gradient(circle at 36% 28%, rgba(255,255,255,.055), transparent 12%), #151b23;
+      box-shadow: inset -9px -11px 20px rgba(0,0,0,.3); filter: saturate(.2);
+    }
+    .finalist-orb .icon { position: relative; z-index: 2; width: 31px; height: 31px; }
+    .finalist-transient {
+      width: 100%; min-height: 48px; margin-top: 16px; display: flex; align-items: flex-start;
+      justify-content: center; color: var(--waiting); font: 650 8px/1.35 var(--mono);
+      letter-spacing: .06em; text-transform: uppercase;
+    }
+    .finalist-transient.has-message { align-items: center; }
+    .finalist-transient .icon { width: 11px; height: 11px; margin-right: 5px; }
+    .finalist-main { position: relative; min-width: 0; padding: 17px 52px 14px 15px; }
+    .finalist-main .project-corner { top: 13px; right: 13px; }
+    .finalist-name { padding-right: 4px; font: 760 20px/1.1 var(--display); }
+    .finalist-model {
+      display: inline-flex; align-items: center; gap: 6px; width: fit-content; max-width: 100%;
+      min-width: 0; margin-top: 7px; padding: 4px 7px;
+      border: 1px solid rgba(167,154,255,.25); border-radius: 999px;
+      color: var(--text-2); background: rgba(167,154,255,.055); font: 610 9px/1.2 var(--mono);
+    }
+    .finalist-model .provider-mark { display: grid; place-items: center; flex: 0 0 auto; color: var(--model); }
+    .finalist-model .provider-mark .icon { width: 11px; height: 11px; }
+    .finalist-model b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 640; }
+    .finalist-time-pair {
+      display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--text-3);
+      font: 590 9px/1 var(--mono); white-space: nowrap;
+    }
+    .finalist-time-pair .icon { width: 11px; height: 11px; color: var(--text-4); }
+    .finalist-time-pair .slash { color: var(--text-4); }
+    .finalist-ops { min-width: 0; }
+    .finalist-value { display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: 5px; }
+    .finalist-value .ticket-chip, .finalist-value .channel-chip, .finalist-value .role-control { max-width: 100%; }
+
+    /* H1 — the balanced P1 reading order */
+    .concept-hybrid-balanced .finalist-time-pair { margin-top: 10px; }
+    .hybrid-balanced-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 11px 14px;
+      margin-top: 17px; padding-top: 13px; border-top: 1px solid var(--line-soft);
+    }
+
+    /* H2 — transient speech is treated as a quiet marginal annotation */
+    .concept-hybrid-margin .finalist-transient {
+      justify-content: flex-start; padding: 8px 0 0 10px; border-left: 1px solid transparent;
+    }
+    .concept-hybrid-margin .finalist-transient.has-message { border-left-color: rgba(242,184,75,.28); }
+    .hybrid-margin-identity { padding-bottom: 12px; border-bottom: 1px solid var(--line-soft); }
+    .concept-hybrid-margin .finalist-time-pair { margin-top: 9px; }
+    .hybrid-margin-rail {
+      display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-top: 17px;
+    }
+    .hybrid-margin-rail .channel-chip { margin-left: auto; }
+
+    /* H3 — age and freshness become a small two-cell ledger */
+    .hybrid-freshness-ledger {
+      display: grid; grid-template-columns: 1fr 1.15fr; margin-top: 14px;
+      border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+    }
+    .hybrid-freshness-cell { min-width: 0; padding: 9px 8px 9px 0; }
+    .hybrid-freshness-cell + .hybrid-freshness-cell { padding-left: 10px; border-left: 1px solid var(--line-soft); }
+    .hybrid-freshness-cell b { display: block; margin-top: 5px; color: var(--text-2); font: 610 9px/1 var(--mono); }
+    .hybrid-freshness-ops { display: grid; grid-template-columns: 1fr 1fr; gap: 9px 12px; margin-top: 12px; }
+    .hybrid-freshness-ops .work { grid-column: 1 / -1; }
+    .concept-hybrid-freshness .finalist-transient {
+      border: 1px solid transparent; border-radius: 6px;
+    }
+    .concept-hybrid-freshness .finalist-transient.has-message { border-color: rgba(242,184,75,.2); background: rgba(242,184,75,.035); }
+
+    /* H4 — fleet-dense passport with one operational footer */
+    .identity-finalist.concept-hybrid-compact { grid-template-columns: 102px minmax(0,1fr); min-height: 224px; }
+    .concept-hybrid-compact .finalist-portrait { padding-top: 18px; }
+    .concept-hybrid-compact .finalist-orb { width: 66px; height: 66px; }
+    .concept-hybrid-compact .finalist-orb .icon { width: 27px; height: 27px; }
+    .concept-hybrid-compact .finalist-transient { min-height: 38px; margin-top: 12px; }
+    .hybrid-compact-time { margin-top: 11px; padding-bottom: 12px; border-bottom: 1px solid var(--line-soft); }
+    .hybrid-compact-footer { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 14px; }
+    .hybrid-compact-footer .channel-chip { margin-left: auto; }
+
+    @keyframes finalist-radiate {
+      0% { transform: scale(.86); opacity: 0; }
+      18% { opacity: .56; }
+      100% { transform: scale(1.36); opacity: 0; }
+    }
 
     /* A — current composite baseline */
     .concept-baseline { padding: 14px; display: grid; gap: 9px; }
@@ -1063,6 +1202,16 @@
       .strip-actions { grid-column: 1 / -1; flex-wrap: wrap; padding-top: 7px; border-top: 1px solid var(--line-soft); }
       .group-heading { grid-template-columns: auto minmax(0,1fr); align-items: start; }
       .group-count { grid-column: 2; }
+      .identity-finalist { grid-template-columns: 96px minmax(0,1fr); }
+      .finalist-portrait { padding-left: 8px; padding-right: 8px; }
+      .finalist-orb { width: 64px; height: 64px; }
+      .finalist-orb .icon { width: 27px; height: 27px; }
+      .finalist-main { padding-left: 12px; }
+      .finalist-name { font-size: 17px; }
+      .hybrid-balanced-grid, .hybrid-freshness-ops { grid-template-columns: 1fr; gap: 8px; }
+      .hybrid-freshness-ops .work { grid-column: auto; }
+      .hybrid-margin-rail .channel-chip, .hybrid-compact-footer .channel-chip { margin-left: 0; }
+      .concept-hybrid-compact { grid-template-columns: 88px minmax(0,1fr); }
       .identity-footer { flex-wrap: wrap; }
       .identity-footer .seen { width: 100%; margin-left: 0; }
       .concept-pass-model { grid-template-columns: 92px minmax(0,1fr); }
@@ -1097,12 +1246,12 @@
 <body data-mode="overview" data-width="wide">
   <header class="lab-head">
     <div class="eyebrow">Golem agent identity lab</div>
-    <h1>Give the agent <em>a body.</em></h1>
+    <h1>Resolve the <em>living passport.</em></h1>
     <p class="decision">
-      This round asks whether a live agent can feel like a persistent identity rather than a task row.
-      The primary family treats the agent as a changing orb: radiating, rotating, speaking, or going
-      still as its state changes. Passport and role-led families explore two quieter identity systems.
-      The original comparison set remains intact below.
+      This final round combines O1’s live orb with P1’s practical identity card. The harness is the
+      static mark inside the orb; only active work produces accent-colored radiation. Name, model,
+      lifetime, freshness, role, work, project, and channel keep durable homes while the area beneath
+      the orb remains available for short transient signals. All 30 earlier directions remain below.
     </p>
     <div class="contract" id="contract"></div>
   </header>
@@ -1110,13 +1259,14 @@
   <div class="toolbar-wrap">
     <div class="toolbar" aria-label="Decision lab controls">
       <div class="segmented" aria-label="View mode">
-        <button type="button" data-mode-button="overview" aria-pressed="true">All 30</button>
+        <button type="button" data-mode-button="overview" aria-pressed="true">All 34</button>
         <button type="button" data-mode-button="focus" aria-pressed="false">Focus</button>
       </div>
       <label class="toolbar-field">
         <span>State</span>
         <select id="scenario-select">
           <option value="working">Working · online</option>
+          <option value="working-empty">Working · no current work</option>
           <option value="waiting">Waiting · queued</option>
           <option value="offline">Working · offline</option>
           <option value="idle">Idle · online</option>
@@ -1155,6 +1305,8 @@
       var icons = {
         gear: "<svg class='icon' viewBox='0 0 24 24' aria-hidden='true'><path d='M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z'/><path d='M19.4 15a1.7 1.7 0 0 0 .34 1.88l.05.05-2.83 2.83-.05-.05a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.07A1.7 1.7 0 0 0 8.97 19.4a1.7 1.7 0 0 0-1.88.34l-.05.05-2.83-2.83.05-.05A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.53-1.03H3v-4h.07A1.7 1.7 0 0 0 4.6 8.94a1.7 1.7 0 0 0-.34-1.88l-.05-.05 2.83-2.83.05.05a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 10 3.04V3h4v.04a1.7 1.7 0 0 0 1.03 1.53 1.7 1.7 0 0 0 1.88-.34l.05-.05 2.83 2.83-.05.05a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 20.93 10H21v4h-.07A1.7 1.7 0 0 0 19.4 15Z'/></svg>",
         spark: "<svg class='icon' viewBox='0 0 24 24' aria-hidden='true'><path d='m12 3 1.7 5.3L19 10l-5.3 1.7L12 17l-1.7-5.3L5 10l5.3-1.7L12 3Z'/><path d='m19 16 .8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8L19 16Z'/></svg>",
+        openai: "<svg class='icon icon-fill' viewBox='0 0 24 24' aria-hidden='true'><path d='M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 0 0-.856 0l-5.97 3.473Zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 0 1 .476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163ZM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898ZM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128Zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472Zm-5.637-5.303-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 0 1 4.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 0 1-.476 0Zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523Zm5.899 2.83a5.947 5.947 0 0 0 5.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0 0 10.205 0a5.947 5.947 0 0 0-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 0 0 4.162 1.713Z'/></svg>",
+        codex: "<svg class='icon icon-fill' viewBox='0 0 24 24' aria-hidden='true'><path d='M8.086.457a6.105 6.105 0 0 1 3.046-.415c1.333.153 2.521.72 3.564 1.7a.117.117 0 0 0 .107.029c1.408-.346 2.762-.224 4.061.366l.217.106c1.357.703 2.33 1.77 2.918 3.198.278.679.418 1.388.421 2.126a5.655 5.655 0 0 1-.18 1.631.167.167 0 0 0 .04.155 5.982 5.982 0 0 1 1.578 2.891c.385 1.901-.01 3.615-1.183 5.14l-.182.22a6.063 6.063 0 0 1-2.934 1.851.162.162 0 0 0-.108.102c-.255.736-.511 1.364-.987 1.992-1.199 1.582-2.962 2.462-4.948 2.451-1.583-.008-2.986-.587-4.21-1.736a.145.145 0 0 0-.14-.032c-.518.167-1.04.191-1.604.185a5.924 5.924 0 0 1-2.595-.622 6.058 6.058 0 0 1-2.146-1.781c-.203-.269-.404-.522-.551-.821a7.74 7.74 0 0 1-.495-1.283 6.11 6.11 0 0 1-.017-3.064.166.166 0 0 0-.029-.138 5.958 5.958 0 0 1-1.38-2.202 5.196 5.196 0 0 1-.333-1.589 6.915 6.915 0 0 1 .188-2.132c.45-1.484 1.309-2.648 2.577-3.493.282-.188.55-.334.802-.438.286-.12.573-.22.861-.304a.129.129 0 0 0 .087-.087A6.016 6.016 0 0 1 5.635 2.31C6.315 1.464 7.132.846 8.086.457Zm-.804 7.85a.848.848 0 0 0-1.473.842l1.694 2.965-1.688 2.848a.849.849 0 0 0 1.46.864l1.94-3.272a.849.849 0 0 0 .007-.854l-1.94-3.393Zm5.446 6.24a.849.849 0 0 0 0 1.695h4.848a.849.849 0 0 0 0-1.696h-4.848Z'/></svg>",
         terminal: "<svg class='icon' viewBox='0 0 24 24' aria-hidden='true'><rect x='3' y='4' width='18' height='16' rx='3'/><path d='m7 9 3 3-3 3M13 15h4'/></svg>",
         ticket: "<svg class='icon' viewBox='0 0 24 24' aria-hidden='true'><path d='M4 7a3 3 0 0 0 0 6v4h16v-4a3 3 0 0 0 0-6V3H4v4Z'/><path d='M13 6v2M13 11v2M13 16v1'/></svg>",
         plug: "<svg class='icon' viewBox='0 0 24 24' aria-hidden='true'><path d='M9 8V3M15 8V3M7 8h10v3a5 5 0 0 1-5 5v0a5 5 0 0 1-5-5V8ZM12 16v5'/></svg>",
@@ -1171,6 +1323,10 @@
       };
 
       var options = [
+        { id: "hybrid-balanced", group: "finalists", letter: "H1", name: "Balanced passport", thesis: "The clearest P1 reading order: live harness orb, session and model, paired time, then a calm two-column operations grid.", benefit: "Closest to the requested hybrid and easiest to understand at a glance.", cost: "The two-column field grid keeps some credential-card formality.", risk: "Transient messages remain deliberately quiet and may be missed when they appear." },
+        { id: "hybrid-margin", group: "finalists", letter: "H2", name: "Signal margin", thesis: "The reserved area beneath the orb becomes a marginal note while role, ticket, and channel share one direct action rail.", benefit: "Short signals such as “await ack” have a recognizable voice without displacing durable facts.", cost: "The bottom action rail can wrap when session data is unusually long.", risk: "A marginal note may look decorative when the signal bay is empty." },
+        { id: "hybrid-freshness", group: "finalists", letter: "H3", name: "Freshness ledger", thesis: "Lifetime and last-seen receive two labeled cells; transient speech gets a bounded bay and operational facts follow below.", benefit: "Best for comparing agent longevity and freshness across a fleet.", cost: "Explicit time cells add one horizontal rule and slightly more height.", risk: "The labeled ledger can feel more administrative than personal." },
+        { id: "hybrid-compact", group: "finalists", letter: "H4", name: "Compact credential", thesis: "A tighter P1 silhouette keeps the time pair on one line and consolidates role, work, and comms into a single footer.", benefit: "Preserves identity and the activity orb at a fleet-friendly height.", cost: "Controls have less breathing room and may wrap sooner on mobile.", risk: "Transient messages have the smallest visual stage of the four." },
         { id: "orb-ummon", group: "orb", letter: "O1", name: "Ummon pulse", thesis: "A speaking sphere radiates thought in concentric waves; activity becomes presence rather than a status dot.", benefit: "The clearest sense of an intelligent identity that is currently thinking.", cost: "Animation and glow need disciplined performance limits.", risk: "A strong literary presence can feel theatrical in dense fleet views." },
         { id: "orb-horizon", group: "orb", letter: "O2", name: "Event horizon", thesis: "A dark core bends a luminous orbit around itself, suggesting gravity, focus, and accumulated context.", benefit: "Working, waiting, and offline states read naturally through orbital speed and stability.", cost: "The black core carries less explicit personality than portrait-led ideas.", risk: "The metaphor may imply danger or failure when the agent is healthy." },
         { id: "orb-living", group: "orb", letter: "O3", name: "Living core", thesis: "A softly shape-shifting membrane makes the agent feel adaptive, organic, and continuously recomposing.", benefit: "The most direct expression of a non-static digital being.", cost: "Morphing geometry is harder to make crisp at very small sizes.", risk: "Organic motion can feel decorative unless tightly linked to state." },
@@ -1204,6 +1360,7 @@
       ];
 
       var groups = [
+        { id: "finalists", mark: "O1×P1", name: "Final living-passport directions", description: "Four controlled compositions of the same approved idea; only transient space, time, and metadata structure vary.", count: "4 finalists" },
         { id: "orb", mark: "ORB", name: "Orbital identities", description: "Seven ways for a live agent to occupy space, move, speak, and go still.", count: "7 new directions" },
         { id: "passport-new", mark: "ID", name: "Portrait and passport identities", description: "Four ways to give the session a face, body, credential, or seal.", count: "4 new directions" },
         { id: "role-new", mark: "ROLE", name: "Role-led identities", description: "Four alternatives to the duplicated role chip and dropdown.", count: "4 new directions" },
@@ -1222,15 +1379,17 @@
         ticketTitle: "Unify agent card identity, work, and reachability",
         channel: true,
         queue: 0,
-        seen: "seen 1s ago",
-        waitingFor: ""
+        age: "3h old",
+        seen: "seen 7s ago",
+        waitingFor: "",
+        transient: ""
       };
 
       var state = {
         mode: "overview",
         width: "wide",
         scenario: "working",
-        active: "orb-ummon",
+        active: "hybrid-balanced",
         shortlist: []
       };
       var lastFocus = null;
@@ -1245,7 +1404,9 @@
         var d = Object.assign({}, baseData);
         if (name === "waiting") {
           d.status = "waiting"; d.queue = 1; d.seen = "seen 12s ago";
-          d.waitingFor = "Review evidence";
+          d.waitingFor = "Review evidence"; d.transient = "await ack";
+        } else if (name === "working-empty") {
+          d.ticket = ""; d.ticketTitle = ""; d.queue = 0;
         } else if (name === "offline") {
           d.status = "working"; d.channel = false; d.queue = 2; d.seen = "seen 4m ago";
         } else if (name === "idle") {
@@ -1254,7 +1415,7 @@
           d.name = "sol:golem:manager:reconciliation-and-verification";
           d.model = "gpt-5.6-sol-extended-context";
           d.ticketTitle = "Reconcile dispatch delivery evidence across every supported harness";
-          d.seen = "seen 1s ago";
+          d.seen = "seen 1s ago"; d.age = "19h old";
         }
         return d;
       }
@@ -1330,6 +1491,65 @@
       function identityFooter(d) {
         return "<div class='identity-footer role-led-select'>" + roleControl(d) + ticketChip(d) + channelChip(d,true) +
           queueChip(d) + "<span class='seen'>" + d.seen + "</span></div>";
+      }
+
+      function finalistModel(d) {
+        return "<div class='finalist-model' title='Model " + d.model + "'><span class='provider-mark'>" +
+          icon("openai") + "</span><b>" + d.model + "</b></div>";
+      }
+
+      function finalistTimePair(d) {
+        return "<div class='finalist-time-pair'>" + icon("clock") + "<span>" + d.age + "</span><span class='slash'>/</span><span>" + d.seen + "</span></div>";
+      }
+
+      function finalistTransient(d, variant) {
+        var message = d.transient || "";
+        return "<div class='finalist-transient " + variant + (message ? " has-message" : "") +
+          "' aria-label='Transient agent message space'>" + (message ? icon("queue") + "<span>" + message + "</span>" : "") + "</div>";
+      }
+
+      function finalistPortrait(d, variant) {
+        return "<div class='finalist-portrait'><div class='finalist-orb' title='Harness " + d.harness +
+          "'>" + icon("codex") + "<span class='sr-only'>" + d.harness + " harness</span></div>" +
+          finalistTransient(d,variant) + "</div>";
+      }
+
+      function finalistField(label, value, cls) {
+        return "<div class='" + (cls || "") + "'><span class='label'>" + label + "</span><div class='finalist-value'>" + value + "</div></div>";
+      }
+
+      function hybridBalancedCard(opt, d) {
+        return "<article " + identityOpenAttrs(opt,d,"finalist") + ">" + finalistPortrait(d,"quiet") +
+          "<div class='finalist-main'>" + projectCorner(d) + "<div class='identity-name finalist-name'>" + d.name + "</div>" +
+          finalistModel(d) + finalistTimePair(d) + "<div class='finalist-ops hybrid-balanced-grid role-led-select'>" +
+          finalistField("Role",roleControl(d)) + finalistField("Communication",channelChip(d,false)) +
+          finalistField("Current work",ticketChip(d)) + finalistField("Dispatches",queueChip(d) || "<span class='seen'>Queue clear</span>") +
+          "</div></div></article>";
+      }
+
+      function hybridMarginCard(opt, d) {
+        return "<article " + identityOpenAttrs(opt,d,"finalist") + ">" + finalistPortrait(d,"margin-note") +
+          "<div class='finalist-main'>" + projectCorner(d) + "<div class='hybrid-margin-identity'><div class='identity-name finalist-name'>" +
+          d.name + "</div>" + finalistModel(d) + finalistTimePair(d) + "</div><div class='finalist-ops hybrid-margin-rail role-led-select'>" +
+          roleControl(d) + ticketChip(d) + queueChip(d) + channelChip(d,true) + "</div></div></article>";
+      }
+
+      function hybridFreshnessCard(opt, d) {
+        return "<article " + identityOpenAttrs(opt,d,"finalist") + ">" + finalistPortrait(d,"message-bay") +
+          "<div class='finalist-main'>" + projectCorner(d) + "<div class='identity-name finalist-name'>" + d.name + "</div>" + finalistModel(d) +
+          "<div class='hybrid-freshness-ledger'><div class='hybrid-freshness-cell'><span class='label'>Lifetime</span><b>" + d.age +
+          "</b></div><div class='hybrid-freshness-cell'><span class='label'>Last signal</span><b>" + d.seen +
+          "</b></div></div><div class='finalist-ops hybrid-freshness-ops role-led-select'>" +
+          finalistField("Role",roleControl(d)) + finalistField("Communication",channelChip(d,true)) +
+          finalistField("Current work",ticketChip(d) + queueChip(d),"work") + "</div></div></article>";
+      }
+
+      function hybridCompactCard(opt, d) {
+        return "<article " + identityOpenAttrs(opt,d,"finalist") + ">" + finalistPortrait(d,"compact-bay") +
+          "<div class='finalist-main'>" + projectCorner(d) + "<div class='identity-name finalist-name'>" + d.name + "</div>" +
+          finalistModel(d) + "<div class='hybrid-compact-time'>" + finalistTimePair(d) +
+          "</div><div class='finalist-ops hybrid-compact-footer role-led-select'>" + roleControl(d) + ticketChip(d) +
+          queueChip(d) + channelChip(d,true) + "</div></div></article>";
       }
 
       function ummonCard(opt, d) {
@@ -1607,6 +1827,8 @@
       }
 
       var renderers = {
+        "hybrid-balanced": hybridBalancedCard, "hybrid-margin": hybridMarginCard,
+        "hybrid-freshness": hybridFreshnessCard, "hybrid-compact": hybridCompactCard,
         "orb-ummon": ummonCard, "orb-horizon": horizonCard, "orb-living": livingCard,
         "orb-gyro": gyroCard, "orb-thought": thoughtCard, "orb-lens": lensCard, "orb-swarm": swarmCard,
         "pass-model": passModelCard, "pass-harness": passHarnessCard, "pass-holo": passHoloCard,
@@ -1634,9 +1856,9 @@
 
       function contractMarkup() {
         var items = [
-          ["gear","Working state"], ["spark","Model + harness"], ["terminal","Session identity"],
+          ["gear","Activity orb"], ["spark","Model identity"], ["terminal","Static harness mark"],
           ["shield","One role control"], ["ticket","Clickable GOL-489"], ["project","Project"],
-          ["plug","Persistent comms"], ["clock","Last seen"]
+          ["plug","Persistent comms"], ["clock","Age / freshness"]
         ];
         return items.map(function (item) { return "<span>" + icon(item[0]) + item[1] + "</span>"; }).join("");
       }
@@ -1656,7 +1878,8 @@
         return groups.map(function (group) {
           var members = visible.filter(function (opt) { return (opt.group || "original") === group.id; });
           if (!members.length) return "";
-          return "<section class='option-group " + (group.id === "original" ? "original-group" : "") +
+          var groupClass = group.id === "original" ? "original-group" : group.id === "orb" ? "prior-round" : "";
+          return "<section class='option-group " + groupClass +
             "' data-group='" + group.id + "'><header class='group-heading'><div class='group-mark'>" + group.mark +
             "</div><div><h2>" + group.name + "</h2><p>" + group.description + "</p></div><span class='group-count'>" +
             group.count + "</span></header><div class='option-grid'>" +
@@ -1683,7 +1906,7 @@
       }
 
       function persist() {
-        try { localStorage.setItem("golem-agent-card-identity-lab-v2", JSON.stringify(state)); } catch (e) {}
+        try { localStorage.setItem("golem-agent-card-identity-lab-v3", JSON.stringify(state)); } catch (e) {}
         var hash = "option=" + encodeURIComponent(state.active) + "&state=" + encodeURIComponent(state.scenario) +
           "&mode=" + encodeURIComponent(state.mode) + "&width=" + encodeURIComponent(state.width);
         history.replaceState(null, "", "#" + hash);
@@ -1691,14 +1914,14 @@
 
       function restore() {
         try {
-          var saved = JSON.parse(localStorage.getItem("golem-agent-card-identity-lab-v2") || "null");
+          var saved = JSON.parse(localStorage.getItem("golem-agent-card-identity-lab-v3") || "null");
           if (saved && typeof saved === "object") state = Object.assign(state, saved);
         } catch (e) {}
         var hash = location.hash.replace(/^#/, "");
         if (hash) {
           var params = new URLSearchParams(hash);
           if (options.some(function (o) { return o.id === params.get("option"); })) state.active = params.get("option");
-          if (["working","waiting","offline","idle","long"].indexOf(params.get("state")) >= 0) state.scenario = params.get("state");
+          if (["working","working-empty","waiting","offline","idle","long"].indexOf(params.get("state")) >= 0) state.scenario = params.get("state");
           if (["overview","focus"].indexOf(params.get("mode")) >= 0) state.mode = params.get("mode");
           if (["wide","mobile"].indexOf(params.get("width")) >= 0) state.width = params.get("width");
         }
