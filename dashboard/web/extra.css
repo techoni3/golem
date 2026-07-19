@@ -2918,18 +2918,40 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
 .mermaid-fs-overlay {
   position: fixed; inset: 0; z-index: 10000;
   background: rgba(8, 10, 16, 0.92);
-  display: flex; align-items: center; justify-content: center;
+  display: grid; overflow: hidden; isolation: isolate;
   opacity: 0; transition: opacity .2s ease;
 }
 .mermaid-fs-overlay.open { opacity: 1; }
 .mermaid-fs-stage {
-  max-width: 96vw; max-height: 92vh; overflow: auto;
-  padding: 32px; display: flex; align-items: center; justify-content: center;
-  border-radius: var(--radius-2);
+  grid-area: 1 / 1; min-width: 0; min-height: 0;
+  width: 100%; height: 100%; box-sizing: border-box;
+  overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable both-edges;
+  cursor: grab; touch-action: none; outline: none;
 }
-/* Unconstrained: the cloned SVG renders at its natural size (no max-width:100%
-   squeeze), scrollable inside the stage if bigger than the viewport. */
-.mermaid-fs-stage svg { max-width: none; width: auto; height: auto; }
+.mermaid-fs-stage:focus-visible { outline: 2px solid var(--accent-border); outline-offset: -4px; }
+.mermaid-fs-stage.is-panning { cursor: grabbing; user-select: none; }
+.mermaid-fs-canvas {
+  display: grid; place-items: center; box-sizing: border-box;
+}
+/* The canvas dimensions are set in JS at the selected zoom. Do not make the
+   SVG a flexible item: flex shrink was silently squeezing wide diagrams back
+   to the viewport and preventing any horizontal scroll. */
+.mermaid-fs-canvas svg { display: block; flex: none; max-width: none; height: auto; }
+.mermaid-fs-toolbar {
+  position: fixed; top: 16px; left: 50%; z-index: 10002; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 4px; padding: 5px;
+  background: color-mix(in srgb, var(--bg-1) 94%, transparent);
+  border: 1px solid var(--border-2); border-radius: calc(var(--radius-2) + 2px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .35); backdrop-filter: blur(10px);
+}
+.mermaid-fs-toolbar button, .mermaid-fs-zoom-level {
+  min-width: 32px; height: 30px; padding: 0 9px; display: grid; place-items: center;
+  border: 0; border-radius: var(--radius-1); color: var(--text-1);
+  font: 600 12px/1 var(--font-mono); white-space: nowrap;
+}
+.mermaid-fs-toolbar button { background: transparent; cursor: pointer; }
+.mermaid-fs-toolbar button:hover, .mermaid-fs-toolbar button:focus-visible { background: var(--bg-3); color: var(--text-0); outline: none; }
+.mermaid-fs-zoom-level { min-width: 48px; color: var(--text-2); }
 .mermaid-fs-close {
   position: fixed; top: 16px; right: 16px; z-index: 10001;
   width: 36px; height: 36px; display: grid; place-items: center;
@@ -2937,6 +2959,10 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
   color: var(--text-1); font-size: 18px; line-height: 1; cursor: pointer;
 }
 .mermaid-fs-close:hover { color: var(--text-0); border-color: var(--accent-border); }
+@media (max-width: 560px) {
+  .mermaid-fs-toolbar { left: 12px; right: 56px; transform: none; justify-content: center; }
+  .mermaid-fs-toolbar button, .mermaid-fs-zoom-level { padding: 0 6px; }
+}
 
 /* Diagrams + figures (backfilled raw-HTML svg/figure blocks). */
 .td-md figure { margin: 12px 0 4px; }

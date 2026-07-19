@@ -39,17 +39,76 @@ const CTX = 42;
 
 function authorMeta(a) { return TA_AUTHORS[a] || { label: a, color: '#9aa4bb' }; }
 
-// TKT-0234: fullscreen mermaid. After window.runMermaid renders SVGs into
-// .mermaid blocks, attach an expand button to each; clicking opens a viewport-
-// wide overlay (portaled to document.body, outside .td-md's max-width) with the
-// SVG cloned at natural size + scrollable. Vanilla DOM (mermaid blocks are raw
-// marked output, not React-managed). Idempotent via data-fs-attached + an
-// SVG-present check, so re-renders (new body) don't double-attach or attach to
-// not-yet-rendered blocks.
+// Fullscreen Mermaid. After window.runMermaid renders SVGs into .mermaid
+// blocks, attach an expand button to each. The overlay is vanilla DOM because
+// Mermaid's generated SVG is not React-managed.
 const MERMAID_FS_ICON =
   '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" ' +
   'stroke-linecap="round" stroke-linejoin="round">' +
   '<path d="M3 6V3.5A.5.5 0 0 1 3.5 3H6M13 6V3.5a.5.5 0 0 0-.5-.5H10M3 10v2.5a.5.5 0 0 0 .5.5H6M13 10v2.5a.5.5 0 0 1-.5.5H10"/></svg>';
+
+const MERMAID_ZOOM_MIN = 10;
+const MERMAID_ZOOM_MAX = 400;
+const MERMAID_ZOOM_STEP = 1.25;
+const MERMAID_VIEWPORT_PADDING = 72;
+let mermaidFullscreenSequence = 0;
+
+function pixelValue(value) {
+  const text = String(value || '').trim();
+  if (!text || text.includes('%')) return 0;
+  const number = Number.parseFloat(text);
+  return Number.isFinite(number) && number > 0 ? number : 0;
+}
+
+function clampMermaidZoom(value) {
+  return Math.max(MERMAID_ZOOM_MIN, Math.min(MERMAID_ZOOM_MAX, Math.round(value)));
+}
+
+// Mermaid scopes its generated CSS to the root SVG id (for example,
+// #mermaid-123 .node rect). A straight clone with the root id removed loses
+// those styles, while retaining the id makes a duplicate-id document. Give the
+// clone a private id namespace and rewrite its SVG-internal references so it
+// remains visually identical without leaking ids into the page.
+function cloneMermaidSvg(svg) {
+  const clone = svg.cloneNode(true);
+  const prefix = `mermaid-fs-${++mermaidFullscreenSequence}`;
+  const ids = new Map();
+  const rootId = clone.getAttribute('id');
+  if (rootId) {
+    const nextId = `${prefix}-root`;
+    ids.set(rootId, nextId);
+    clone.setAttribute('id', nextId);
+  } else {
+    clone.setAttribute('id', `${prefix}-root`);
+  }
+  clone.querySelectorAll('[id]').forEach((element) => {
+    const previousId = element.getAttribute('id');
+    if (!previousId) return;
+    const nextId = `${prefix}-${previousId}`;
+    ids.set(previousId, nextId);
+    element.setAttribute('id', nextId);
+  });
+  const rewriteReferences = (value) => {
+    let result = String(value || '');
+    ids.forEach((nextId, previousId) => {
+      result = result.split(`#${previousId}`).join(`#${nextId}`);
+    });
+    return result;
+  };
+  const rewriteElement = (element) => {
+    ['href', 'xlink:href', 'fill', 'filter', 'mask', 'clip-path', 'marker-start', 'marker-mid', 'marker-end', 'style']
+      .forEach((attribute) => {
+        const value = element.getAttribute(attribute);
+        if (value) element.setAttribute(attribute, rewriteReferences(value));
+      });
+  };
+  rewriteElement(clone);
+  clone.querySelectorAll('*').forEach(rewriteElement);
+  clone.querySelectorAll('style').forEach((style) => {
+    style.textContent = rewriteReferences(style.textContent);
+  });
+  return clone;
+}
 
 function attachMermaidFullscreen(root) {
   if (!root) return;
@@ -70,35 +129,106 @@ function attachMermaidFullscreen(root) {
 
 function openMermaidFullscreen(block) {
   const svg = block.querySelector('svg');
-  if (!svg) return;
+  if (!svg || document.querySelector('.mermaid-fs-overlay')) return;
+
+  const previouslyFocused = document.activeElement;
   const overlay = document.createElement('div');
   overlay.className = 'mermaid-fs-overlay';
   overlay.setAttribute('role', 'dialog');
   overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-label', 'Fullscreen diagram');
   overlay.innerHTML =
-    '<button class="mermaid-fs-close" type="button" aria-label="Close">&#215;</button>' +
-    '<div class="mermaid-fs-stage"></div>';
+    '<button class="mermaid-fs-close" type="button" aria-label="Close fullscreen diagram">&#215;</button>' +
+    '<div class="mermaid-fs-toolbar" role="toolbar" aria-label="Diagram controls">' +
+      '<button class="mermaid-fs-zoom-out" type="button" aria-label="Zoom out" title="Zoom out">&#8722;</button>' +
+      '<output class="mermaid-fs-zoom-level" aria-live="polite">100%</output>' +
+      '<button class="mermaid-fs-zoom-in" type="button" aria-label="Zoom in" title="Zoom in">+</button>' +
+      '<button class="mermaid-fs-fit" type="button" title="Fit diagram to the viewport">Fit</button>' +
+      '<button class="mermaid-fs-reset" type="button" title="View diagram at 100%">100%</button>' +
+    '</div>' +
+    '<div class="mermaid-fs-stage" tabindex="0" aria-label="Diagram viewport. Scroll, drag, or use the zoom controls to explore the diagram.">' +
+      '<div class="mermaid-fs-canvas"></div>' +
+    '</div>';
   const stage = overlay.querySelector('.mermaid-fs-stage');
-  // Clone the SVG and render it at its NATURAL pixel width (no squeeze):
-  // mermaid emits width="100%" + style="max-width:<natural>px"; strip those so
-  // the clone uses the diagram's real dimensions. height:auto keeps the aspect
-  // ratio from the viewBox; the stage scrolls if the diagram overflows the
-  // viewport. Remove the id so the page doesn't end up with two same-id SVGs.
-  const clone = svg.cloneNode(true);
-  clone.removeAttribute('id');
+  const canvas = overlay.querySelector('.mermaid-fs-canvas');
+  const level = overlay.querySelector('.mermaid-fs-zoom-level');
+  const clone = cloneMermaidSvg(svg);
   clone.removeAttribute('width');
   clone.removeAttribute('height');
   clone.style.maxWidth = 'none';
-  const vb = svg.viewBox && svg.viewBox.baseVal;
-  clone.style.width = svg.style.maxWidth || (vb && vb.width ? (vb.width + 'px') : 'auto');
+  const viewBox = svg.viewBox && svg.viewBox.baseVal;
+  const baseWidth = pixelValue(svg.style.maxWidth)
+    || (viewBox && viewBox.width)
+    || pixelValue(svg.getAttribute('width'))
+    || svg.getBoundingClientRect().width
+    || 1;
+  const baseHeight = viewBox && viewBox.height && viewBox.width
+    ? baseWidth * (viewBox.height / viewBox.width)
+    : pixelValue(svg.getAttribute('height')) || svg.getBoundingClientRect().height || 1;
   clone.style.height = 'auto';
-  stage.appendChild(clone);
+  canvas.appendChild(clone);
   document.body.appendChild(overlay);
-  requestAnimationFrame(() => overlay.classList.add('open'));
+
+  let zoom = 100;
+  let layout = null;
+  let pan = null;
+  let closed = false;
+
+  const viewportLayout = (nextZoom) => {
+    const scale = nextZoom / 100;
+    const width = Math.max(1, Math.round(baseWidth * scale));
+    const height = Math.max(1, Math.round(baseHeight * scale));
+    const canvasWidth = Math.max(stage.clientWidth, width + MERMAID_VIEWPORT_PADDING * 2);
+    const canvasHeight = Math.max(stage.clientHeight, height + MERMAID_VIEWPORT_PADDING * 2);
+    return {
+      scale,
+      width,
+      height,
+      canvasWidth,
+      canvasHeight,
+      diagramLeft: (canvasWidth - width) / 2,
+      diagramTop: (canvasHeight - height) / 2,
+    };
+  };
+  const renderViewport = (nextZoom) => {
+    zoom = clampMermaidZoom(nextZoom);
+    layout = viewportLayout(zoom);
+    clone.style.width = `${layout.width}px`;
+    canvas.style.width = `${layout.canvasWidth}px`;
+    canvas.style.height = `${layout.canvasHeight}px`;
+    level.textContent = `${zoom}%`;
+  };
+  const setZoom = (nextZoom, anchor) => {
+    const before = layout || viewportLayout(zoom);
+    const rect = stage.getBoundingClientRect();
+    const localX = anchor ? anchor.clientX - rect.left : stage.clientWidth / 2;
+    const localY = anchor ? anchor.clientY - rect.top : stage.clientHeight / 2;
+    const diagramX = (stage.scrollLeft + localX - before.diagramLeft) / before.scale;
+    const diagramY = (stage.scrollTop + localY - before.diagramTop) / before.scale;
+    renderViewport(nextZoom);
+    stage.scrollLeft = Math.max(0, diagramX * layout.scale + layout.diagramLeft - localX);
+    stage.scrollTop = Math.max(0, diagramY * layout.scale + layout.diagramTop - localY);
+  };
+  const fitDiagram = () => {
+    const usableWidth = Math.max(1, stage.clientWidth - MERMAID_VIEWPORT_PADDING * 2);
+    const usableHeight = Math.max(1, stage.clientHeight - MERMAID_VIEWPORT_PADDING * 2);
+    setZoom(Math.min(100, (Math.min(usableWidth / baseWidth, usableHeight / baseHeight)) * 100));
+  };
+
+  // Start with the whole diagram visible, then let readers zoom to native size
+  // and pan or scroll through the enlarged canvas.
+  renderViewport(100);
+  fitDiagram();
+
   const close = () => {
+    if (closed) return;
+    closed = true;
     overlay.classList.remove('open');
-    window.setTimeout(() => overlay.remove(), 220);
     document.removeEventListener('keydown', onKey, true);
+    window.setTimeout(() => {
+      overlay.remove();
+      if (previouslyFocused && typeof previouslyFocused.focus === 'function') previouslyFocused.focus();
+    }, 220);
   };
   // Esc closes ONLY the overlay — not the ticket drawer. The drawer registers
   // its own Esc handler on window (bubble) that would otherwise unmount the
@@ -107,10 +237,55 @@ function openMermaidFullscreen(block) {
   // stopImmediatePropagation kills the event so the drawer's (and the
   // annotation-rail's) Esc listeners never see it. (Registering on window
   // instead would lose the ordering — the drawer's listener is added first.)
-  const onKey = (e) => { if (e.key === 'Escape') { e.stopImmediatePropagation(); close(); } };
+  const onKey = (e) => {
+    if (e.key === 'Escape') {
+      e.stopImmediatePropagation();
+      close();
+    } else if (e.key === '+' || e.key === '=') {
+      e.preventDefault();
+      setZoom(zoom * MERMAID_ZOOM_STEP);
+    } else if (e.key === '-') {
+      e.preventDefault();
+      setZoom(zoom / MERMAID_ZOOM_STEP);
+    } else if (e.key === '0') {
+      e.preventDefault();
+      fitDiagram();
+    }
+  };
+  const stopPanning = (event) => {
+    if (!pan || (event && event.pointerId !== pan.pointerId)) return;
+    if (stage.hasPointerCapture(pan.pointerId)) stage.releasePointerCapture(pan.pointerId);
+    pan = null;
+    stage.classList.remove('is-panning');
+  };
+  stage.addEventListener('wheel', (event) => {
+    if (!event.ctrlKey && !event.metaKey) return;
+    event.preventDefault();
+    setZoom(zoom * (event.deltaY < 0 ? MERMAID_ZOOM_STEP : 1 / MERMAID_ZOOM_STEP), event);
+  }, { passive: false });
+  stage.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    pan = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, left: stage.scrollLeft, top: stage.scrollTop };
+    stage.setPointerCapture(event.pointerId);
+    stage.classList.add('is-panning');
+  });
+  stage.addEventListener('pointermove', (event) => {
+    if (!pan || event.pointerId !== pan.pointerId) return;
+    stage.scrollLeft = pan.left - (event.clientX - pan.x);
+    stage.scrollTop = pan.top - (event.clientY - pan.y);
+  });
+  stage.addEventListener('pointerup', stopPanning);
+  stage.addEventListener('pointercancel', stopPanning);
+  stage.addEventListener('dragstart', (event) => event.preventDefault());
+  overlay.querySelector('.mermaid-fs-zoom-out').addEventListener('click', () => setZoom(zoom / MERMAID_ZOOM_STEP));
+  overlay.querySelector('.mermaid-fs-zoom-in').addEventListener('click', () => setZoom(zoom * MERMAID_ZOOM_STEP));
+  overlay.querySelector('.mermaid-fs-fit').addEventListener('click', fitDiagram);
+  overlay.querySelector('.mermaid-fs-reset').addEventListener('click', () => setZoom(100));
   overlay.querySelector('.mermaid-fs-close').addEventListener('click', close);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   document.addEventListener('keydown', onKey, true);
+  requestAnimationFrame(() => overlay.classList.add('open'));
+  overlay.querySelector('.mermaid-fs-close').focus();
 }
 
 // Test hooks for smoke-tkt-0234.mjs (fullscreen-mermaid Esc regression). The
