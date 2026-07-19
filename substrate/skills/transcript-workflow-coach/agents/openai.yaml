@@ -1,0 +1,4 @@
+interface:
+  display_name: "Transcript Workflow Coach"
+  short_description: "Turn AI transcripts into better work habits"
+  default_prompt: "Use $transcript-workflow-coach to review my selected AI transcripts and propose evidence-backed workflow experiments."
