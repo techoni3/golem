@@ -2,6 +2,7 @@
 // Normalize documented Codex hook fields only. Transcript contents are
 // intentionally ignored because OpenAI documents that format as unstable.
 import { upsertSessionFact } from '../lib/session-facts.js';
+import { upsertSessionRegistration } from '../lib/session-registry.js';
 
 const chunks = [];
 for await (const chunk of process.stdin) chunks.push(chunk);
@@ -18,6 +19,16 @@ const documented = {
   last_assistant_message: input.last_assistant_message,
 };
 const observations = Object.fromEntries(Object.entries(documented).filter(([, value]) => value !== undefined));
+if (event === 'session-start') {
+  try {
+    await upsertSessionRegistration({
+      sessionId: input.session_id,
+      cwd: input.cwd,
+      harness: 'codex',
+      model: input.model,
+    });
+  } catch {}
+}
 try {
   const fact = {
     canonical_id: input.session_id, continuation_key: input.session_id,

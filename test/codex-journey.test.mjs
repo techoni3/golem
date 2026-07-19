@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { projectIdFor } from '../lib/project-id.js';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'golem-codex-'));
@@ -44,6 +45,8 @@ try {
   assert.equal(fs.existsSync(path.join(home, '.codex')), false, 'render must not mutate user Codex state');
   const root = path.join(state, 'renders', 'codex');
   const plugin = path.join(root, 'plugins', 'golem');
+  assert.ok(fs.existsSync(path.join(plugin, 'lib', 'session-registry.js')), 'Codex render includes the registry helper');
+  assert.ok(fs.existsSync(path.join(plugin, 'lib', 'project-id.js')), 'Codex render includes the shared project identity contract');
   const caps = JSON.parse(fs.readFileSync(path.join(plugin, 'capabilities.json')));
   assert.deepEqual(caps.delivery, ['pull']);
   assert.equal(caps.push_delivery, false);
@@ -53,17 +56,92 @@ try {
   assert.deepEqual(mcp.golem, { command: 'node', args: ['mcp/channel/index.js'], cwd: '.' });
   assert.doesNotMatch(JSON.stringify(mcp), /PLUGIN_ROOT/);
   await mcpInitialize(mcp.golem, plugin);
-  const payload = { session_id: 'codex-test', cwd: repo, hook_event_name: 'SessionStart', source: 'resume', model: 'test' };
+  const projectRoot = path.join(temp, 'codex-project');
+  const nestedCwd = path.join(projectRoot, 'packages', 'app');
+  fs.mkdirSync(nestedCwd, { recursive: true });
+  fs.mkdirSync(path.join(projectRoot, '.git'));
+  const payload = { session_id: 'codex-test', cwd: nestedCwd, hook_event_name: 'SessionStart', source: 'resume', model: 'test' };
   execFileSync(process.execPath, [path.join(plugin, 'hooks/hook.mjs'), 'session-start'], { env, input: JSON.stringify(payload) });
   const fact = JSON.parse(fs.readFileSync(path.join(state, 'session-facts.json'))).facts[0];
   assert.equal(fact.canonical_id, 'codex-test');
   assert.equal(fact.model, 'test', 'documented Codex hook model is published at fact top level for native cards');
   assert.deepEqual(fact.delivery, { mode: 'pull', push: false });
+  const projectId = projectIdFor(projectRoot);
+  const projectsFile = path.join(state, 'projects.json');
+  const sessionsFile = path.join(state, 'sessions.json');
+  const projects = JSON.parse(fs.readFileSync(projectsFile, 'utf8'));
+  assert.equal(projects.projects.length, 1, 'SessionStart registers one project');
+  assert.deepEqual(projects.projects[0] && {
+    id: projects.projects[0].id,
+    name: projects.projects[0].name,
+    path: projects.projects[0].path,
+    kind: projects.projects[0].kind,
+    registered_by: projects.projects[0].registered_by,
+  }, {
+    id: projectId,
+    name: 'codex-project',
+    path: projectRoot,
+    kind: 'auto',
+    registered_by: 'hook',
+  }, 'SessionStart registers the resolved project root with hook-owned metadata');
+  const firstSeen = projects.projects[0].first_seen;
+  const sessions = JSON.parse(fs.readFileSync(sessionsFile, 'utf8'));
+  assert.equal(sessions.sessions.length, 1, 'SessionStart registers one session');
+  assert.deepEqual(sessions.sessions[0] && {
+    session_id: sessions.sessions[0].session_id,
+    project_id: sessions.sessions[0].project_id,
+    project_path: sessions.sessions[0].project_path,
+    harness: sessions.sessions[0].harness,
+    model: sessions.sessions[0].model,
+  }, {
+    session_id: 'codex-test',
+    project_id: projectId,
+    project_path: projectRoot,
+    harness: 'codex',
+    model: 'test',
+  }, 'SessionStart links the Codex session to the same resolved project');
+  const staleTimestamp = '2000-01-01T00:00:00.000Z';
+  projects.projects[0] = {
+    ...projects.projects[0],
+    name: 'Manual name',
+    kind: 'manual',
+    registered_by: 'manual',
+    last_seen: staleTimestamp,
+  };
+  fs.writeFileSync(projectsFile, `${JSON.stringify(projects, null, 2)}\n`);
+  sessions.sessions[0] = { ...sessions.sessions[0], last_seen_at: staleTimestamp };
+  fs.writeFileSync(sessionsFile, `${JSON.stringify(sessions, null, 2)}\n`);
+  execFileSync(process.execPath, [path.join(plugin, 'hooks/hook.mjs'), 'session-start'], { env, input: JSON.stringify({ ...payload, model: 'updated-model' }) });
+  const updatedProjects = JSON.parse(fs.readFileSync(projectsFile, 'utf8'));
+  assert.deepEqual(updatedProjects.projects[0] && {
+    name: updatedProjects.projects[0].name,
+    kind: updatedProjects.projects[0].kind,
+    registered_by: updatedProjects.projects[0].registered_by,
+    first_seen: updatedProjects.projects[0].first_seen,
+  }, {
+    name: 'Manual name',
+    kind: 'manual',
+    registered_by: 'manual',
+    first_seen: firstSeen,
+  }, 'repeat registration preserves manual project metadata');
+  assert.ok(Date.parse(updatedProjects.projects[0].last_seen) > Date.parse(staleTimestamp), 'repeat registration refreshes the project timestamp');
+  const updatedSessions = JSON.parse(fs.readFileSync(sessionsFile, 'utf8'));
+  assert.equal(updatedSessions.sessions.length, 1, 'repeat registration updates rather than duplicates the session');
+  assert.equal(updatedSessions.sessions[0].model, 'updated-model');
+  assert.ok(Date.parse(updatedSessions.sessions[0].last_seen_at) > Date.parse(staleTimestamp), 'repeat registration refreshes the session timestamp');
+  const unregisteredRoot = path.join(temp, 'unregistered-codex-project');
+  const unregisteredCwd = path.join(unregisteredRoot, 'nested');
+  fs.mkdirSync(unregisteredCwd, { recursive: true });
+  fs.mkdirSync(path.join(unregisteredRoot, '.git'));
+  execFileSync(process.execPath, [path.join(plugin, 'hooks/hook.mjs'), 'user-prompt'], { env, input: JSON.stringify({ ...payload, session_id: 'codex-non-start', cwd: unregisteredCwd, hook_event_name: 'UserPromptSubmit' }) });
+  assert.equal(JSON.parse(fs.readFileSync(projectsFile, 'utf8')).projects.length, 1, 'non-SessionStart hooks do not register projects');
+  assert.equal(JSON.parse(fs.readFileSync(sessionsFile, 'utf8')).sessions.length, 1, 'non-SessionStart hooks do not register sessions');
   execFileSync(process.execPath, [path.join(plugin, 'hooks/hook.mjs'), 'subagent-stop'], { env, input: JSON.stringify({ ...payload, hook_event_name: 'SubagentStop', agent_id: 'child' }) });
-  assert.equal(JSON.parse(fs.readFileSync(path.join(state, 'session-facts.json'))).facts[0].status, 'active', 'SubagentStop preserves parent status');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(state, 'session-facts.json'))).facts.find((row) => row.canonical_id === 'codex-test').status, 'active', 'SubagentStop preserves parent status');
   const xdgOnly = { ...env, GOLEM_HOME: '' };
   execFileSync(process.execPath, [path.join(plugin, 'hooks/hook.mjs'), 'session-start'], { env: xdgOnly, input: JSON.stringify({ ...payload, session_id: 'xdg-test' }) });
   assert.ok(fs.existsSync(path.join(env.XDG_CONFIG_HOME, 'golem', 'session-facts.json')), 'shared XDG golemHome resolution is used');
+  assert.ok(fs.existsSync(path.join(env.XDG_CONFIG_HOME, 'golem', 'projects.json')), 'Codex registration uses the shared XDG golemHome resolution');
   const native = spawnSync('codex', ['--version'], { env, encoding: 'utf8' });
   if (native.status === 0) {
     const added = spawnSync('codex', ['plugin', 'marketplace', 'add', root], { env, encoding: 'utf8' });
