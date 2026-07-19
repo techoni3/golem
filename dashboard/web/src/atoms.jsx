@@ -32,7 +32,7 @@ function RoleSelect({ value, disabled, onChange, id }) {
   const current = value || '';
   const missingRole = current && !roles.some((role) => role.name === current);
   return (
-    <select id={id} value={current} onChange={(e) => onChange(e.target.value || null)} disabled={disabled}>
+    <select className="agent-card-role-select" id={id} value={current} onChange={(e) => onChange(e.target.value || null)} disabled={disabled}>
       <option value="">clear</option>
       {missingRole && <option value={current}>{current} (legacy)</option>}
       {roles.map((role) => <option key={role.name} value={role.name}>{role.name}</option>)}
@@ -304,6 +304,7 @@ function AgentCard({ session, name, queueCount = 0, setRoute, showControls = fal
     e.stopPropagation();
     if (project && setRoute) setRoute({ kind: 'project', id: project.id, tab: 'agents' });
   };
+  const containRoleControl = (e) => e.stopPropagation();
   const flashRoleError = (err) => {
     const msg = err?.payload?.error || err?.message || 'Role assignment failed';
     console.error('set role failed', err);
@@ -359,6 +360,7 @@ function AgentCard({ session, name, queueCount = 0, setRoute, showControls = fal
             <div className="native-session-name agent-card-name" title={title}>{title}</div>
             <ModelPill model={s.model}/>
             <div className="agent-card-time mono" title={`${lifetime}; ${freshness}`} aria-label={`${lifetime}, ${freshness}`}>
+              <Icon.Clock size={13}/>
               <span>{lifetime}</span><span aria-hidden="true">/</span><span>{freshness}</span>
             </div>
           </div>
@@ -366,14 +368,23 @@ function AgentCard({ session, name, queueCount = 0, setRoute, showControls = fal
           <div className="agent-card-operations">
             <div className="agent-card-field agent-card-role-field">
               <label className="agent-card-field-label agent-card-role-label" htmlFor={roleControlId}>Role</label>
-              <RoleSelect id={roleControlId} value={s.role || ''} onChange={assignRole} disabled={!s.session_id}/>
+              <div className="agent-card-role-control" onPointerDown={containRoleControl} onClick={containRoleControl}>
+                <span className="agent-card-role-emblem" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M8 1.75 13 3.75v3.75c0 3.05-2.03 5.5-5 6.75-2.97-1.25-5-3.7-5-6.75V3.75L8 1.75Z"/>
+                    <path d="m5.75 7.8 1.5 1.5 3-3"/>
+                  </svg>
+                </span>
+                <span className="agent-card-role-value" aria-hidden="true">{s.role || 'clear'}</span>
+                <RoleSelect id={roleControlId} value={s.role || ''} onChange={assignRole} disabled={!s.session_id}/>
+              </div>
               {roleToast && <div className="orch-toast err cc-toast" key={roleToast.id}>{roleToast.msg}</div>}
             </div>
             <div className={`agent-card-field agent-card-communication communication-${communication}`}>
               <span className="agent-card-field-label">Communication</span>
               <span className="agent-card-field-value"><span className="agent-card-communication-icon" aria-hidden="true">{communication === 'live' ? '↗' : communication === 'offline' ? '×' : '?'}</span>{communicationLabel}</span>
             </div>
-            <div className="agent-card-field">
+            <div className="agent-card-field agent-card-dispatch-field">
               <span className="agent-card-field-label">Current work</span>
               {currentTicket ? (
                 <a

@@ -113,12 +113,13 @@ surface for via-manager verification. Hook ingest writes lifecycle/activity/cust
 events through `/api/bus/ingest`; subscriptions are managed through
 `/api/bus/subscribe`, `/api/bus/unsubscribe`, and `/api/bus/subscriptions`.
 
-The project team API returns `assists.suggested_manager` and
-`assists.suggested_explorer`, both chosen from live same-project role sessions by
-least in-progress work then pending queue. The create-ticket drawer uses the same
-manager-default intent by preselecting a live manager in the Assignee/dispatch
-dropdown when the user has not chosen another target. These are defaults and
-suggestions, never gates; explicit selections always win.
+The dispatchable-session route marks the least-loaded live same-project manager
+with `suggested: "manager"`, ranking by in-progress work then pending queue. The
+create-ticket drawer uses that annotation to preselect a live manager in the
+Assignee/dispatch dropdown when the user has not chosen another target. These
+are defaults and suggestions, never gates; explicit selections always win. The
+project detail page presents the project-scoped session roster directly rather
+than a second, overlapping team roster.
 
 ## Tracker Waves
 

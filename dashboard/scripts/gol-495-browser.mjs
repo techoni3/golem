@@ -70,14 +70,6 @@ writeFileSync(path.join(home, 'session-facts.json'), JSON.stringify({ version: 1
     status: 'not-a-known-state', name: 'H1 Unknown Static', model: 'prototype-unknown-model',
     project_path: alpha, locator: { raw_session_id: 'unknown-static' },
   },
-  // Invalid observation data is retained by the real registry reader. This
-  // row is deliberately not alive, so ProjectTeam is the real route that
-  // surfaces the signed age/seen fallback without polluting live sessions.
-  {
-    canonical_id: 'missing-time', harness: 'mystery-harness', revision: 1, observed_at: 'not-a-date',
-    status: 'not-a-known-state', name: 'H1 Missing Time Fallback', model: null,
-    project_path: alpha, locator: { raw_session_id: 'missing-time' },
-  },
 ] }));
 
 const channelServer = http.createServer((req, res) => {
@@ -145,6 +137,8 @@ try {
   const projectsResponse = await json('/api/projects');
   const alphaUiId = projectsResponse.find((project) => project.project_id === alphaId)?.id;
   ok(alphaUiId, 'isolated project is exposed through the production projects route');
+  const obsoleteTeamResponse = await fetch(`${base}/api/projects/${encodeURIComponent(alphaId)}/team`);
+  ok(obsoleteTeamResponse.status === 404, 'obsolete project Team endpoint is no longer exposed');
   const createTicket = async (title, extra = {}) => json('/api/tickets', {
     method: 'POST',
     body: JSON.stringify({
@@ -173,6 +167,8 @@ try {
   await page.goto(`${base}/project/${encodeURIComponent(alphaUiId)}`, { waitUntil: 'networkidle' });
   const sessionsSection = page.locator('.pv-section').filter({ hasText: 'Sessions in this project' }).first();
   await sessionsSection.locator('.agent-card.native-session-card').first().waitFor();
+  const sectionTitles = await page.locator('.pv-section-title').allTextContents();
+  ok(sectionTitles.includes('Sessions in this project') && !sectionTitles.includes('Team'), 'project view exposes one project-scoped session roster and no duplicate Team roster');
   const sessions = sessionsSection.locator('.agent-card.native-session-card');
   const card = (label) => sessions.filter({ has: page.locator('.agent-card-name', { hasText: label }) }).first();
   const busy = card('H1 Busy Without Ticket');
@@ -180,6 +176,23 @@ try {
   const waiting = card('H1 Waiting Acknowledgement');
   const offline = card('H1 Offline With Queue');
   const unknown = card('H1 Unknown Static');
+
+  const passportGeometry = await sessionsSection.evaluate((section) => {
+    const grid = section.querySelector('.native-sessions');
+    const cards = [...section.querySelectorAll('.agent-card.native-session-card')];
+    const sample = cards[0];
+    const portrait = sample?.querySelector('.agent-card-portrait');
+    const operations = sample?.querySelector('.agent-card-operations');
+    return {
+      widths: cards.map((node) => node.getBoundingClientRect().width),
+      gridColumns: getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length,
+      portraitWidth: portrait?.getBoundingClientRect().width ?? 0,
+      portraitDivider: getComputedStyle(portrait).borderRightWidth,
+      operationsColumns: getComputedStyle(operations).gridTemplateColumns.split(' ').filter(Boolean).length,
+      fieldBorders: [...sample.querySelectorAll('.agent-card-field')].map((field) => getComputedStyle(field).borderTopWidth),
+    };
+  });
+  ok(passportGeometry.widths.length > 1 && passportGeometry.widths.every((width) => width <= 520.5) && passportGeometry.gridColumns === 2 && passportGeometry.portraitWidth >= 110 && passportGeometry.portraitDivider !== '0px' && passportGeometry.operationsColumns === 2 && passportGeometry.fieldBorders.every((border) => border === '0px'), 'project sessions use bounded two-up passport cards with a portrait rail and unboxed operations');
 
   const anatomy = await busy.evaluate((node) => ({
     element: node.tagName,
@@ -215,7 +228,12 @@ try {
     await page.waitForFunction(() => !document.querySelector('[role="dialog"][aria-label^="Agent details"]'));
   }
 
-  const role = busy.locator('select');
+  const role = busy.locator('.agent-card-role-select');
+  const roleBox = await role.boundingBox();
+  ok(roleBox && roleBox.width > 20, 'role pill exposes a full native-select hit target');
+  await role.click({ position: { x: Math.max(1, roleBox.width - 4), y: Math.max(1, roleBox.height / 2) } });
+  ok(!page.url().includes('ns=') && await page.locator('[role="dialog"][aria-label^="Agent details"]:visible').count() === 0 && await role.evaluate((node) => document.activeElement === node), 'role pill chevron focuses its native picker without opening agent details');
+  await page.keyboard.press('Escape');
   const pointerRoleResponse = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/sessions/busy-empty/role'));
   await role.selectOption('builder');
   ok((await pointerRoleResponse).ok() && !page.url().includes('ns='), 'role pointer mutation reaches the real role endpoint without opening a drawer');
@@ -306,13 +324,7 @@ try {
   const controls = page.locator('.agent-card.native-session-card').filter({ has: page.locator('.agent-card-name', { hasText: long }) }).first();
   ok(await controls.locator('.agent-card-controls-footer .cc-session-controls').count() === 1 && await controls.evaluate((node) => node.scrollWidth <= node.clientWidth), 'showControls long-content card retains controls without horizontal overflow');
   await page.goto(`${base}/project/${encodeURIComponent(alphaUiId)}`, { waitUntil: 'networkidle' });
-  const team = page.locator('.pv-section').filter({ hasText: 'Team' }).first();
-  await team.locator('.agent-card.compact').first().waitFor();
-  const missingTime = team.locator('.agent-card.compact').filter({ has: page.locator('.agent-card-name', { hasText: 'H1 Missing Time Fallback' }) }).first();
-  await missingTime.waitFor();
-  const missingTimeEvidence = { count: await missingTime.count(), time: await missingTime.locator('.agent-card-time').allTextContents(), fallbackIcons: await missingTime.locator('.agent-model-icon.provider-fallback svg').count() };
-  ok(missingTimeEvidence.count === 1 && missingTimeEvidence.time[0] === 'age unknown/seen unknown' && missingTimeEvidence.fallbackIcons === 1, 'compact Team card exposes signed missing-time and missing-model fallbacks without losing its icon slot');
-
+  await sessionsSection.locator('.agent-card.native-session-card').first().waitFor();
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -322,6 +334,17 @@ try {
   });
   ok(reducedMotion.animation === 'none' && reducedMotion.transform !== 'none' && reducedMotion.opacity > 0, 'reduced motion disables radiation while retaining the static active cue');
   await page.screenshot({ path: path.join(artifacts, 'reduced-motion.png'), fullPage: true });
+  await page.goto(`${base}/agents`, { waitUntil: 'networkidle' });
+  const agentsPassport = page.locator('.native-sessions .agent-card.native-session-card').first();
+  await agentsPassport.waitFor();
+  const agentsGeometry = await agentsPassport.evaluate((node) => ({
+    width: node.getBoundingClientRect().width,
+    portraitDivider: getComputedStyle(node.querySelector('.agent-card-portrait')).borderRightWidth,
+    operationsColumns: getComputedStyle(node.querySelector('.agent-card-operations')).gridTemplateColumns.split(' ').filter(Boolean).length,
+  }));
+  ok(agentsGeometry.width <= 520.5 && agentsGeometry.portraitDivider !== '0px' && agentsGeometry.operationsColumns === 2, 'Agents page shares the bounded passport card rather than a stretched compact variant');
+  await agentsPassport.screenshot({ path: path.join(artifacts, 'agents-passport.png') });
+  await page.screenshot({ path: path.join(artifacts, 'agents.png'), fullPage: true });
   ok(pageErrors.length === 0, `browser emitted no page errors${pageErrors.length ? `: ${pageErrors.join('; ')}` : ''}`);
   console.log(`GOL-495 H1 browser journey passed; isolated port=${port}; screenshots=${artifacts}`);
 } finally {

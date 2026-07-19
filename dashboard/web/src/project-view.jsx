@@ -1,7 +1,8 @@
 // Project view (v4) — the per-project command center.
 //
-// The hero leads, then five sections (Plan, Tickets, Specs, Milestones,
-// Sessions) — each a collapsible, re-orderable PVSection (TKT-0518).
+// The hero leads, then project-scoped sections (Plan, Tickets, Specs,
+// Milestones, Sessions) — each a collapsible, re-orderable PVSection
+// (TKT-0518).
 // Layout (order + collapsed) is PAGE-scoped (one layout for every project's
 // detail page), persisted to localStorage. The v3 journal-synthesized agents
 // panel, markdown tracker kanban, hook-event stream, and gate panels were
@@ -13,7 +14,7 @@ const { useState: usePVState } = React;
 // PAGE-scoped, not project-scoped: one layout for the project-detail page no
 // matter which project is open (explicit product decision on the ticket).
 const PV_LAYOUT_KEY = 'golem.pv.layout.v1';
-const PV_SECTION_IDS = ['plan', 'tickets', 'specs', 'milestones', 'team', 'sessions', 'streams'];
+const PV_SECTION_IDS = ['plan', 'tickets', 'specs', 'milestones', 'sessions', 'streams'];
 const PV_DEFAULT_COLLAPSED = { specs: true }; // today's defaults: specs closed, rest open
 
 function pvLoadLayout() {
@@ -116,8 +117,7 @@ function ProjectView({ projectId, tab, setRoute }) {
       // TKT-0339: spec-kind tickets as a project sub-board (SpecsBoardView pinned).
       case 'specs':      return <ProjectSpecsBoard key={id} contractId={cid} {...shell}/>;
       case 'milestones': return <ProjectMilestoneTimeline key={id} milestones={milestones} {...shell}/>;
-      case 'team':       return <ProjectTeam key={id} contractId={cid} setRoute={setRoute} {...shell}/>;
-      case 'sessions':   return <ProjectSessions key={id} sessions={sessions} setRoute={setRoute} projectId={cid} {...shell}/>;
+      case 'sessions':   return <ProjectSessions key={id} sessions={sessions} setRoute={setRoute} {...shell}/>;
       case 'streams':    return window.StreamsPanel ? <window.StreamsPanel key={id} contractId={cid}/> : null;
       default: return null;
     }
@@ -306,31 +306,8 @@ function ProjectMilestoneTimeline({ milestones, ...shell }) {
   );
 }
 
-// ── 4. SESSIONS ──
-function ProjectTeam({ contractId, setRoute, ...shell }) {
-  const [team, setTeam] = usePVState([]);
-  React.useEffect(() => {
-    if (!contractId) { setTeam([]); return; }
-    let cancelled = false;
-    window.SubstrateAPI.projectTeam(contractId)
-      .then((res) => { if (!cancelled) setTeam(Array.isArray(res?.team) ? res.team : []); })
-      .catch(() => { if (!cancelled) setTeam([]); });
-    return () => { cancelled = true; };
-  }, [contractId]);
-  return (
-    <PVSection {...shell} title="Team" count={team.length}>
-      {team.length === 0 ? (
-        <div className="pv-quiet-line">no team sessions registered for this project yet.</div>
-      ) : (
-        <div className="native-sessions project-native-sessions">
-          {team.map((s) => <AgentCard key={s.session_id || s.pid} session={s} setRoute={setRoute} compact/>) }
-        </div>
-      )}
-    </PVSection>
-  );
-}
-
-function ProjectSessions({ sessions, setRoute, projectId, ...shell }) {
+// ── 4. PROJECT SESSIONS ──
+function ProjectSessions({ sessions, setRoute, ...shell }) {
   return (
     <PVSection {...shell} title="Sessions in this project" count={sessions.length}>
       {sessions.length === 0 ? (

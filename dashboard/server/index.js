@@ -2022,16 +2022,6 @@ async function main() {
     return out.map((row) => ({ ...row, suggested: row.session_id === assists.suggested_manager?.session_id ? 'manager' : null }));
   });
 
-  fastify.get('/api/projects/:id/team', async (req, reply) => {
-    try {
-      const projectId = resolveProjectId(req.params.id);
-      const rows = buildTeamRows(projectId);
-      return { project_id: projectId, team: rows, assists: teamAssists(rows) };
-    } catch (err) {
-      return reply.code(400).send({ error: String(err?.message ?? err) });
-    }
-  });
-
   fastify.get('/api/roles', async () => listRoleCards());
 
   async function pushRoleToLive(name) {
