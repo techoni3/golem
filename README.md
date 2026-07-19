@@ -301,6 +301,13 @@ documented hooks, marketplace metadata, and the bundled MCP server. The
 define Golem's worker, reviewer, or researcher agents and does not render a
 Golem AGENTS.md.
 
+Its `SessionStart` hook also resolves the shared project root from the
+documented CWD and additively upserts `projects.json` and `sessions.json`.
+That makes an ordinary Codex session discoverable as a dashboard project even
+when it starts in a nested directory; an existing manual project name and kind
+are preserved. Later lifecycle hooks continue to record facts only. This local
+best-effort registration does not change Codex's Tier B delivery boundary.
+
 Codex's shipped contract is explicit pull. Use the bundled Golem MCP tools to
 list current tickets, optionally scoped by project, then inspect assignments to
 find relevant work. The default generated Codex MCP launch does not supply a

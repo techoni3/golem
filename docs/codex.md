@@ -26,6 +26,11 @@ The adapter relies only on documented hook inputs. In particular it does not
 parse `transcript_path`, whose format OpenAI explicitly says is unstable. The
 supported events are `SessionStart`, `UserPromptSubmit`, `PreToolUse`,
 `PostToolUse`, `PreCompact`, `PostCompact`, `SubagentStop`, and `Stop`.
+On `SessionStart`, the generated hook resolves the shared project root from
+the documented CWD and additively writes the v1 `projects.json` and
+`sessions.json` registries alongside its canonical session fact. This keeps
+ordinary Codex work discoverable by the dashboard, preserves manual project
+metadata, and remains fail-open; subsequent lifecycle hooks update facts only.
 
 ## GOL-472 App Server version contract
 

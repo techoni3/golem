@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-07-17 @ 1b24230 — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-18 @ 2dfcdf7 — maintained via golem:docs-maintenance.
 ## Directory structure
 - `substrate/` — plugin source; design labs stay isolated.
 - `plugin/` — generated CC render; never hand-edit.
@@ -18,20 +18,21 @@
 - Phase is source of truth; `state` derives from it; assists suggest but never dispatch.
 ### `dashboard/server/native-sessions.js`
 - Merges registries with facts; Codex owns thread name/status/model and `session-facts.js` owns freshness/leases. A healthy lease collapses its raw hook duplicate.
-### `lib/codex-supervisor.js` + `lib/codex-tui-bridge.js` + `lib/codex-app-server-contract.js`
-- Pinned stdio App Server owner; its private one-TUI bridge preserves native approvals while typed delivery targets only an idle canonical thread.
+### `lib/codex-supervisor.js` + `lib/codex-tui-bridge.js`
+- Pinned App Server owner; the private TUI bridge preserves native approvals and targets only idle canonical threads.
+### `shims/codex/hook.mjs` + `lib/session-registry.js`
+- Codex SessionStart registers project/session; every documented hook records a fact.
 ### `substrate/hooks/*.sh`
 - SessionStart registers, journals, and contextualizes; prompts add passive deltas.
-### `mcp/channel/index.js`
-- Exposes briefs, roles, replies, consults, gates, and tracker tools; CC readiness requires initialized, eligible Channels.
 
 ## Data flow
-Hooks/shims write `~/.golem/`; dashboard owns envelopes and routes qualified endpoints. Managed Codex uses durable typed turns; CC/OC retain `/role`. A healthy channel may be busy/not-ready: native and dispatchable rows separate channel presence from delivery readiness, and busy/waiting rows remain queueable.
+Hooks/shims write registries in `~/.golem/`; project detail reads only that roster. Dashboard owns envelopes/qualified routes. Managed Codex uses typed turns; CC/OC retain `/role`. Native and dispatchable rows separate channel presence from delivery readiness.
 
 ## Constraints & gotchas
 - Claude runs cached render bytes; sync + update + `/reload-plugins` after edits.
 - `plugin/` is a render target, not the source of truth; hand edits there are overwritten.
 - Ordinary Codex TUIs are Tier B pull-only; `golem codex` is private. Raw role/interrupt/halt stay gated.
+- Agents and project sessions share capped 520px H1 passport cards; never make their grid tracks `1fr`.
 
 ## Common tasks
 | Task | Files | Verify with |
