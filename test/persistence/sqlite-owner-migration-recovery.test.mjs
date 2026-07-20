@@ -513,6 +513,7 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 			}
 			for (const [locationId, relation] of [
 				["loc_worktree", "worktree"],
+				["loc_registered", "registered"],
 				["loc_legacy", "legacy"],
 			])
 				insertLocation({
@@ -532,6 +533,36 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 				/constraint/i,
 				"project locations reject competing persistence-only relation values",
 			);
+			for (const relationKind of [
+				"same_project",
+				"worktree_of",
+				"relocated_from",
+				"legacy_source",
+			])
+				contractDatabase
+					.prepare("INSERT INTO location_relations VALUES (?, ?, ?, ?, ?, '{}')")
+					.run(
+						"prj_contract",
+						"loc_text_identity",
+						"loc_worktree",
+						relationKind,
+						clock.now(),
+					);
+			for (const relationKind of ["main", "worktree", "registered", "legacy"])
+				assert.throws(
+					() =>
+						contractDatabase
+							.prepare("INSERT INTO location_relations VALUES (?, ?, ?, ?, ?, '{}')")
+							.run(
+								"prj_contract",
+								"loc_text_identity",
+								"loc_worktree",
+								relationKind,
+								clock.now(),
+							),
+					/constraint/i,
+					"location relation edges reject project-location node vocabularies",
+				);
 			const lifecycle = [
 				"starting",
 				"idle",
@@ -640,7 +671,7 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 				assert.throws(
 					() =>
 						contractDatabase
-							.prepare("INSERT INTO location_relations VALUES (?, ?, ?, 'worktree', ?, '{}')")
+							.prepare("INSERT INTO location_relations VALUES (?, ?, ?, 'worktree_of', ?, '{}')")
 							.run("prj_contract", locationId, relatedLocationId, clock.now()),
 					/FOREIGN KEY/i,
 					"both relation endpoints stay within the owning project",
@@ -662,6 +693,31 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 					/FOREIGN KEY/i,
 					"session aliases cannot cross-link project-owned sessions or generations, including a different same-project session",
 				);
+			assert.equal(
+				contractDatabase
+					.prepare("PRAGMA table_info(session_aliases)")
+					.all()
+					.find((column) => column.name === "session_id").notnull,
+				0,
+				"unresolved alias evidence may omit its session reference",
+			);
+			insertAlias({
+				projectId: "prj_contract",
+				alias: "unresolved-native-evidence",
+				sessionId: null,
+				generationId: null,
+			});
+			assert.throws(
+				() =>
+					insertAlias({
+						projectId: "prj_contract",
+						alias: "generation-without-session",
+						sessionId: null,
+						generationId: "gen_lifecycle_0",
+					}),
+				/constraint/i,
+				"an attached generation cannot omit the owning session",
+			);
 			for (const aliasKind of [
 				"native_conversation",
 				"native_run",
@@ -829,13 +885,17 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 				"unsupported",
 				"unknown",
 			])
-				insertCapability({
-					id: `cap_${qualification}`,
-					endpointId: "endpoint_0",
-					capability: `dispatch_${qualification}`,
-					qualification,
-					readiness: "ready",
-				});
+				assert.doesNotThrow(
+					() =>
+						insertCapability({
+							id: `cap_${qualification}`,
+							endpointId: "endpoint_0",
+							capability: `dispatch_${qualification}`,
+							qualification,
+							readiness: "held_busy",
+						}),
+					`${qualification} capability evidence retains its independent readiness fact`,
+				);
 			assert.throws(
 				() =>
 					insertCapability({
@@ -851,14 +911,14 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 			assert.throws(
 				() =>
 					insertCapability({
-						id: "cap_mismatched_readiness",
+						id: "cap_invalid_readiness",
 						endpointId: "endpoint_0",
-						capability: "mismatched_readiness",
+						capability: "invalid_readiness",
 						qualification: "supported",
-						readiness: "held_busy",
+						readiness: "busy",
 					}),
-				/FOREIGN KEY/i,
-				"capability readiness is relationally bound to the endpoint readiness fact",
+				/constraint/i,
+				"capability readiness remains a closed vocabulary independent of endpoint state",
 			);
 			contractDatabase
 				.prepare("INSERT INTO commands VALUES (?, ?, '{}', 'accepted', ?)")

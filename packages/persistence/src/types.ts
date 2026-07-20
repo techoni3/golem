@@ -1,70 +1,28 @@
-import type { ContractBoundary } from "@golem/contracts";
+import type {
+	AliasReference,
+	CapabilityRecord,
+	ContractBoundary,
+	DeliveryMode as ContractDeliveryMode,
+	Harness as ContractHarness,
+	DeliveryReadiness,
+	EndpointRouteState,
+	LifecycleState,
+	ProjectLocationReference,
+} from "@golem/contracts";
 
 export type DatabaseScope = "runtime" | "tracker";
 export type MigrationMode = "apply" | "dry-run";
 export type RuntimeFailpoint = "before_commit" | "after_commit";
 
-/** Exact GOL-15 generation lifecycle; persistence never aliases legacy states. */
-export type GenerationLifecycleState =
-	| "starting"
-	| "idle"
-	| "active"
-	| "waiting"
-	| "ending"
-	| "ended"
-	| "errored"
-	| "superseded";
-
-export type EndpointLifecycleState =
-	| "claiming"
-	| "healthy"
-	| "degraded"
-	| "released"
-	| "expired"
-	| "superseded";
-
-export type EndpointReadinessState =
-	| "ready"
-	| "held_busy"
-	| "held_waiting"
-	| "pull_only"
-	| "next_turn"
-	| "unsupported"
-	| "unhealthy"
-	| "uninitialized";
-
-export type DeliveryMode =
-	| "pull"
-	| "native_channel"
-	| "prompt_bridge"
-	| "managed_app_server"
-	| "next_turn";
-
-/** GOL-26 project-location facts, never inferred from a mutable observed path. */
-export type ProjectLocationRelation =
-	| "main"
-	| "worktree"
-	| "registered"
-	| "legacy";
-
-/** Exact GOL-26 harness closure for generations and scoped aliases. */
-export type Harness = "claude" | "codex" | "opencode" | "pi";
-
-/** Stable, project-scoped native identity evidence from GOL-15/GOL-26. */
-export type SessionAliasKind =
-	| "native_conversation"
-	| "native_run"
-	| "legacy_canonical_id"
-	| "supervisor_thread"
-	| "bridge_session"
-	| "migration_relation";
-
-/** Capability support truth is distinct from delivery readiness. */
-export type CapabilityQualification =
-	| "supported"
-	| "experimental"
-	| "unsupported"
-	| "unknown";
+/** Canonical GOL-15/GOL-26 facts are owned by @golem/contracts. */
+export type GenerationLifecycleState = LifecycleState;
+export type EndpointLifecycleState = EndpointRouteState;
+export type EndpointReadinessState = DeliveryReadiness;
+export type DeliveryMode = ContractDeliveryMode;
+export type ProjectLocationRelation = ProjectLocationReference["relation"];
+export type Harness = ContractHarness;
+export type SessionAliasKind = AliasReference["alias_kind"];
+export type CapabilityQualification = CapabilityRecord["qualification"];
 
 /** Closed runtime-v1 recovery/control vocabularies mirrored by SQL CHECKs. */
 export type CommandStatus =

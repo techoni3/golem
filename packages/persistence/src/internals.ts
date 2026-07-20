@@ -14,6 +14,13 @@ import type {
 	SessionAliasKind,
 } from "./types.js";
 
+/** Location relation rows describe edges, distinct from location node relations. */
+type ProjectLocationEdgeRelation =
+	| "same_project"
+	| "worktree_of"
+	| "relocated_from"
+	| "legacy_source";
+
 export interface SqliteStatement<Row = Record<string, unknown>> {
 	run(...parameters: readonly unknown[]): {
 		readonly changes: number;
@@ -74,7 +81,7 @@ export interface RuntimeTables {
 		readonly project_id: string;
 		readonly location_id: string;
 		readonly related_location_id: string;
-		readonly relation_kind: ProjectLocationRelation;
+		readonly relation_kind: ProjectLocationEdgeRelation;
 		readonly observed_at: string;
 		readonly provenance_json: string;
 	};
@@ -107,7 +114,7 @@ export interface RuntimeTables {
 		readonly alias_kind: SessionAliasKind;
 		readonly producer_id: string | null;
 		readonly alias: string;
-		readonly session_id: string;
+		readonly session_id: string | null;
 		readonly generation_id: string | null;
 		readonly source: string;
 		readonly provenance_json: string;

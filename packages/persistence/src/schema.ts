@@ -66,7 +66,7 @@ CREATE TABLE location_relations (
   project_id TEXT NOT NULL,
   location_id TEXT NOT NULL,
   related_location_id TEXT NOT NULL,
-  relation_kind TEXT NOT NULL CHECK(relation_kind IN ('main', 'worktree', 'registered', 'legacy')),
+  relation_kind TEXT NOT NULL CHECK(relation_kind IN ('same_project', 'worktree_of', 'relocated_from', 'legacy_source')),
   observed_at TEXT NOT NULL,
   provenance_json TEXT NOT NULL,
   PRIMARY KEY(project_id, location_id, related_location_id, relation_kind),
@@ -109,13 +109,14 @@ CREATE TABLE session_aliases (
   alias_kind TEXT NOT NULL CHECK(alias_kind IN ('native_conversation', 'native_run', 'legacy_canonical_id', 'supervisor_thread', 'bridge_session', 'migration_relation')),
   producer_id TEXT CHECK(producer_id IS NULL OR length(producer_id) > 0),
   alias TEXT NOT NULL CHECK(length(alias) > 0),
-  session_id TEXT NOT NULL,
+  session_id TEXT,
   generation_id TEXT,
   source TEXT NOT NULL,
   provenance_json TEXT NOT NULL,
   created_at TEXT NOT NULL,
   FOREIGN KEY(project_id, session_id) REFERENCES logical_sessions(project_id, session_id),
-  FOREIGN KEY(project_id, session_id, generation_id) REFERENCES session_generations(project_id, session_id, generation_id)
+  FOREIGN KEY(project_id, session_id, generation_id) REFERENCES session_generations(project_id, session_id, generation_id),
+  CHECK(generation_id IS NULL OR session_id IS NOT NULL)
 );
 CREATE UNIQUE INDEX session_aliases_scoped_identity ON session_aliases(project_id, harness, alias_kind, COALESCE(producer_id, ''), alias);
 CREATE TABLE producer_watermarks (
@@ -149,7 +150,6 @@ CREATE TABLE endpoint_claims (
   heartbeat_at TEXT,
   expires_at TEXT,
   superseded_at TEXT,
-  UNIQUE(endpoint_id, readiness_state),
   CHECK((state = 'superseded' AND superseded_at IS NOT NULL) OR (state <> 'superseded'))
 );
 CREATE UNIQUE INDEX endpoint_claims_one_live_route ON endpoint_claims(generation_id, route_kind) WHERE state IN ('claiming', 'healthy', 'degraded');
@@ -175,7 +175,6 @@ CREATE TABLE capability_observations (
   evidence_json TEXT NOT NULL,
   observed_at TEXT NOT NULL,
   expires_at TEXT,
-  FOREIGN KEY(endpoint_id, readiness_state) REFERENCES endpoint_claims(endpoint_id, readiness_state),
   UNIQUE(endpoint_id, capability, evidence_kind, observed_at)
 );
 CREATE TABLE commands (

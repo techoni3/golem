@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-07-20 @ c0c014a — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-20 @ d5c8529 — maintained via golem:docs-maintenance.
 
 ## Structure
 
@@ -16,7 +16,7 @@
 - One npm 11 lock owns `apps/`, `packages/`, and `tools/`; applications use TS 7 while legacy JS stays unchecked. `typecheck`, `build`, boundaries, lint, clean, and `api:*` are the typed-scaffold contract.
 - `api-client` owns runtime `openapi-fetch@0.17.0`; codegen owns private TS 5.9.3/OpenAPI Typescript 7.13.0. `contracts:*` owns the deterministic v1 registry and one JSON-wire journey.
 - `testkit` owns temp-home containment, child cleanup, stable summaries, and fresh-context browser fixtures; denied loopback is `UNMET`.
-- `persistence` owns private SQLite/Kysely, exact project/alias/harness/capability and lifecycle schemas, nonce guards, checked migrations, clone dry-runs, backups, injected clock, and bounded outbox; writer construction stays internal to control-plane.
+- `persistence` owns private SQLite/Kysely, exact project node/edge, alias/harness/capability, and lifecycle schemas, nonce guards, checked migrations, clone dry-runs, backups, injected clock, and bounded outbox; writer construction stays internal to control-plane.
 - `packages/ui` owns semantic tokens/React Aria wrappers; `apps/dashboard/src/design-lab` is its isolated consumer.
 
 ### `scripts/check-boundaries.mjs`
