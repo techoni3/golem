@@ -49,17 +49,17 @@
   "engines": {
     "node": ">=24.18.0 <25"
   },
-	"scripts": {
-    "api:check": "npm run check -w @golem/openapi-codegen",
-    "api:generate": "npm run generate -w @golem/openapi-codegen",
-    "build": "npm run typecheck && npm run build -w @golem/compiler -w @golem/mcp-adapter && npm run build -w @golem/dashboard",
+  "scripts": {
+    "api:check": "npm run build -w @golem/control-plane && npm run openapi -w @golem/control-plane && npm run check -w @golem/openapi-codegen && node tools/openapi-codegen/generate.mjs --check",
+    "api:generate": "npm run build -w @golem/control-plane && npm run openapi -w @golem/control-plane && npm run generate -w @golem/openapi-codegen",
+    "build": "npm run typecheck && npm run build -w @golem/compiler -w @golem/mcp-adapter -w @golem/dashboard",
     "check": "npm run typecheck && npm run check:boundaries && npm run check:strictness && npm run lint && npm run check:legacy",
     "check:boundaries": "node scripts/check-boundaries.mjs",
     "check:legacy": "node --check cli/golem.js && node cli/golem.js sync --check --all",
     "check:strictness": "node scripts/check-strictness.mjs",
     "clean": "node scripts/clean-workspace.mjs",
-	"contracts:check": "npm run build -w @golem/contracts && npm run check -w @golem/contracts",
-	"contracts:generate": "npm run build -w @golem/contracts && npm run generate -w @golem/contracts",
+    "contracts:check": "npm run build -w @golem/contracts && npm run check -w @golem/contracts",
+    "contracts:generate": "npm run build -w @golem/contracts && npm run generate -w @golem/contracts",
     "lint": "biome check apps packages tools scripts --no-errors-on-unmatched",
     "test": "node test/session-facts.test.mjs && node test/codex-journey.test.mjs && node test/pi-journey.test.mjs && node test/pi-tracker-integration.test.mjs && node test/sync-enforcement.test.mjs && node shims/opencode/resume-dispatchable.test.mjs && node shims/opencode/passive-delta.test.mjs && node mcp/channel/tracker-client.test.mjs",
     "verify:stack": "node test/stack-certification/run.mjs",
@@ -70,8 +70,9 @@
     "test:domain": "npm run build -w @golem/domain && node --test test/domain/kernel-replay.test.mjs",
     "test:persistence": "npm run build -w @golem/persistence -w @golem/control-plane && node --test --test-concurrency=1 test/persistence/sqlite-owner-migration-recovery.test.mjs",
     "test:testkit": "npm run build -w @golem/testkit && node --test --test-concurrency=1 test/journeys/testkit.test.mjs",
-    "test:journey": "npm run build -w @golem/compiler -w @golem/mcp-adapter -w @golem/domain -w @golem/testkit -w @golem/persistence -w @golem/control-plane && node test/journeys/run.mjs",
+    "test:journey": "npm run build -w @golem/compiler -w @golem/mcp-adapter -w @golem/domain -w @golem/testkit -w @golem/persistence -w @golem/control-plane -w @golem/api-client && node test/journeys/run.mjs",
     "db:fixtures:check": "npm run build -w @golem/persistence -w @golem/control-plane && node --test --test-concurrency=1 test/persistence/sqlite-owner-migration-recovery.test.mjs",
+    "test:browser": "npm run build -w @golem/testkit -w @golem/control-plane -w @golem/api-client && node test/browser/run.mjs",
     "postinstall": "npm --prefix mcp/channel ci --omit=dev --workspaces=false",
     "prepack": "npm run build -w @golem/compiler -w @golem/mcp-adapter",
     "test:release": "node test/release-smoke.mjs",
@@ -106,8 +107,10 @@
     "ws": "^8.21.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.4",
     "@babel/parser": "^7.29.7",
+    "@biomejs/biome": "2.5.4",
+    "@types/node": "^24.10.4",
+    "@types/ws": "^8.18.1",
     "playwright-core": "^1.61.0",
     "typescript": "7.0.2",
     "vite": "^6.3.5"

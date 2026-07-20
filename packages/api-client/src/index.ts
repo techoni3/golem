@@ -1,3 +1,7 @@
+import createClient from "openapi-fetch";
+
+import type { paths } from "./generated/openapi.js";
+
 export type ApiClientMethod = "GET" | "POST" | "PATCH" | "DELETE";
 
 export interface ApiClientRequest {
@@ -62,4 +66,16 @@ export function createFetchApiClient(
 			return { status: response.status, body };
 		},
 	};
+}
+
+export interface ControlPlaneClientOptions {
+	readonly baseUrl: string;
+	readonly token: string;
+}
+
+export function createControlPlaneClient(options: ControlPlaneClientOptions) {
+	return createClient<paths>({
+		baseUrl: options.baseUrl,
+		headers: { authorization: `Bearer ${options.token}` },
+	});
 }

@@ -596,6 +596,16 @@ async function cmdRole(args) {
 }
 
 async function cmdDashboard(args) {
+  if (args.includes('-h') || args.includes('--help')) {
+    log(`Usage: golem dashboard [--public] [dashboard-server options]
+
+Run the legacy dashboard server in the foreground.
+
+Options:
+  --public   Bind the legacy dashboard to 0.0.0.0 (unsafe on untrusted networks)
+  -h, --help Show this help without starting a service.`);
+    return;
+  }
   const serverEntry = resolve(DASHBOARD_DIR, 'server', 'index.js');
   if (!existsSync(serverEntry)) {
     fatal(1, `dashboard server entry missing: ${serverEntry}`);

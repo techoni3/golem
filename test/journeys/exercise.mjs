@@ -22,6 +22,7 @@ import {
 	waitFor,
 } from "@golem/testkit";
 import { normalizeLegacyObservation } from "../parity/normalization.mjs";
+import { exerciseControlPlaneShell } from "../control-plane/control-plane-shell.mjs";
 import { exerciseRenderMcpClosure } from "../render-mcp-closure.mjs";
 import { exerciseDomainReplay } from "./domain-replay.mjs";
 
@@ -394,4 +395,5 @@ export const exercises = Object.freeze({
 	"testkit-browser": exerciseBrowser,
 	"legacy-parity-baseline": exerciseLegacyParityBaseline,
 	"render-mcp-closure": exerciseRenderMcpClosure,
+	"control-plane-auth-ws-lifecycle": exerciseControlPlaneShell,
 });
