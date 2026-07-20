@@ -74,6 +74,32 @@ CREATE TABLE location_relations (
   FOREIGN KEY(project_id, location_id) REFERENCES project_locations(project_id, location_id),
   FOREIGN KEY(project_id, related_location_id) REFERENCES project_locations(project_id, location_id)
 );
+CREATE UNIQUE INDEX project_locations_canonical_path_unique
+  ON project_locations(canonical_path);
+CREATE TABLE project_metadata (
+  project_id TEXT PRIMARY KEY REFERENCES projects(project_id) ON DELETE CASCADE,
+  name_source TEXT NOT NULL CHECK(name_source IN ('git', 'marker', 'register', 'legacy_import', 'hook')),
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  provenance_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE project_identity_keys (
+  project_id TEXT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+  identity_key TEXT NOT NULL UNIQUE CHECK(length(identity_key) > 0),
+  source TEXT NOT NULL CHECK(source IN ('git', 'marker', 'register', 'legacy_import', 'hook')),
+  provenance_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(project_id, identity_key)
+);
+CREATE TABLE project_location_state (
+  project_id TEXT NOT NULL,
+  location_id TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('active', 'retired', 'unregistered')),
+  last_confirmed_at TEXT,
+  provenance_json TEXT NOT NULL,
+  PRIMARY KEY(project_id, location_id),
+  FOREIGN KEY(project_id, location_id) REFERENCES project_locations(project_id, location_id) ON DELETE CASCADE
+);
 CREATE TABLE logical_sessions (
   session_id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(project_id),

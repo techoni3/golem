@@ -76,6 +76,27 @@ export interface RuntimeTables {
 		readonly source_observed_at: string;
 		readonly created_at: string;
 	};
+	readonly project_metadata: {
+		readonly project_id: string;
+		readonly name_source: string;
+		readonly metadata_json: string;
+		readonly provenance_json: string;
+		readonly updated_at: string;
+	};
+	readonly project_identity_keys: {
+		readonly project_id: string;
+		readonly identity_key: string;
+		readonly source: string;
+		readonly provenance_json: string;
+		readonly updated_at: string;
+	};
+	readonly project_location_state: {
+		readonly project_id: string;
+		readonly location_id: string;
+		readonly status: string;
+		readonly last_confirmed_at: string | null;
+		readonly provenance_json: string;
+	};
 	readonly location_aliases: {
 		readonly project_id: string;
 		readonly location_id: string;

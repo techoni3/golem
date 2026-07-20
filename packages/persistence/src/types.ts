@@ -156,6 +156,93 @@ export interface RuntimeCanonicalMutation {
 	};
 }
 
+export type ProjectLocationStatus = "active" | "retired" | "unregistered";
+export type ProjectIdentitySource =
+	| "git"
+	| "marker"
+	| "register"
+	| "legacy_import"
+	| "hook";
+
+export interface RuntimeProjectLocationInput {
+	readonly locationId: string;
+	readonly canonicalPath: string;
+	readonly observedPath?: string;
+	readonly relation: ProjectLocationRelation;
+	readonly status?: ProjectLocationStatus;
+	readonly source: ProjectIdentitySource;
+	readonly evidence: Readonly<Record<string, unknown>>;
+	readonly observedAt: string;
+}
+
+export interface RuntimeProjectObservationInput {
+	readonly projectId?: string;
+	readonly name: string;
+	readonly location: RuntimeProjectLocationInput;
+	readonly identityKey?: string;
+	readonly metadata?: Readonly<Record<string, unknown>>;
+	readonly source: ProjectIdentitySource;
+	readonly eventId: string;
+	readonly deduplicationKey: string;
+	readonly payload: Readonly<Record<string, unknown>>;
+	readonly provenance: Readonly<Record<string, unknown>>;
+	readonly occurredAt: string;
+}
+
+export interface RuntimeProjectLocationView {
+	readonly locationId: string;
+	readonly canonicalPath: string;
+	readonly observedPath?: string;
+	readonly relation: ProjectLocationRelation;
+	readonly status: ProjectLocationStatus;
+	readonly lastConfirmedAt?: string;
+	readonly provenance: Readonly<Record<string, unknown>>;
+}
+
+export interface RuntimeProjectView {
+	readonly projectId: string;
+	readonly name: string;
+	readonly nameSource: ProjectIdentitySource;
+	readonly metadata: Readonly<Record<string, unknown>>;
+	readonly identityKeys: readonly string[];
+	readonly locations: readonly RuntimeProjectLocationView[];
+}
+
+export interface RuntimeProjectObservationResult {
+	readonly disposition: "accepted" | "duplicate";
+	readonly projectId: string;
+	readonly locationId: string;
+	readonly outboxId?: string;
+}
+
+/** Runtime project identity capability; no SQLite/Kysely handle crosses it. */
+export interface RuntimeProjectStorage {
+	observe(
+		input: RuntimeProjectObservationInput,
+	): RuntimeProjectObservationResult;
+	get(projectId: string): RuntimeProjectView | undefined;
+	findByCanonicalPath(canonicalPath: string): RuntimeProjectView | undefined;
+	findByIdentityKey(identityKey: string): RuntimeProjectView | undefined;
+	attachLocation(input: {
+		readonly projectId: string;
+		readonly name?: string;
+		readonly location: RuntimeProjectLocationInput;
+		readonly identityKey?: string;
+		readonly metadata?: Readonly<Record<string, unknown>>;
+		readonly source: ProjectIdentitySource;
+	}): RuntimeProjectView;
+	retireLocation(
+		projectId: string,
+		locationId: string,
+		reason: string,
+	): RuntimeProjectView;
+	rename(
+		projectId: string,
+		name: string,
+		source?: ProjectIdentitySource,
+	): RuntimeProjectView;
+}
+
 export interface RuntimeTransactionInput {
 	readonly eventId: string;
 	readonly deduplicationKey: string;
@@ -740,6 +827,8 @@ export interface PersistenceWriteCapability {
 		error: string,
 	): RuntimeOutboxFailure | undefined;
 	runtimeOutboxHealth(): RuntimeOutboxHealth;
+	/** Typed project/location identity capability owned by the runtime DB owner. */
+	runtimeProjectStorage(): RuntimeProjectStorage;
 	/** Typed tracker store; no raw connection leaves the single owner. */
 	trackerStorage(): TrackerStorageCapability;
 	/** Typed work-item/phase repository capability for @golem/tracker only. */

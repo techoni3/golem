@@ -5,10 +5,17 @@ import { sha256 } from "./schema.js";
 import type {
 	ClaimedOutboxRecord,
 	PersistenceClock,
+	ProjectIdentitySource,
 	RuntimeMaterializationInput,
 	RuntimeMaterializationResult,
 	RuntimeOutboxFailure,
 	RuntimeOutboxHealth,
+	RuntimeProjectLocationInput,
+	RuntimeProjectLocationView,
+	RuntimeProjectObservationInput,
+	RuntimeProjectObservationResult,
+	RuntimeProjectStorage,
+	RuntimeProjectView,
 	RuntimeTransactionInput,
 	RuntimeTransactionResult,
 } from "./types.js";
@@ -49,6 +56,564 @@ function terminal(state: string): boolean {
 	return state === "ended" || state === "errored" || state === "superseded";
 }
 
+function objectJson(
+	value: string | null | undefined,
+): Readonly<Record<string, unknown>> {
+	if (!value) return {};
+	try {
+		const parsed: unknown = JSON.parse(value);
+		return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+			? (parsed as Readonly<Record<string, unknown>>)
+			: {};
+	} catch {
+		return {};
+	}
+}
+
+function projectId(): string {
+	return `prj_${cryptoBoundary.randomUUID()}`;
+}
+
+interface ProjectRow {
+	readonly project_id: string;
+	readonly name: string;
+	readonly created_at: string;
+}
+
+interface LocationRow {
+	readonly location_id: string;
+	readonly project_id: string;
+	readonly canonical_path: string;
+	readonly observed_path: string | null;
+	readonly relation: RuntimeProjectLocationInput["relation"];
+}
+
+interface LocationStateRow {
+	readonly status: "active" | "retired" | "unregistered";
+	readonly last_confirmed_at: string | null;
+	readonly provenance_json: string;
+}
+
+/** Transactional project/location repository behind the runtime owner. */
+export class RuntimeProjectRepository implements RuntimeProjectStorage {
+	readonly #database: SqliteConnection;
+	readonly #clock: PersistenceClock;
+
+	constructor(database: SqliteConnection, clock: PersistenceClock) {
+		this.#database = database;
+		this.#clock = clock;
+	}
+
+	#view(projectIdValue: string): RuntimeProjectView | undefined {
+		const project = this.#database
+			.prepare<ProjectRow>(
+				"SELECT project_id, name, created_at FROM projects WHERE project_id = ?",
+			)
+			.get(projectIdValue);
+		if (!project) return undefined;
+		const metadata = this.#database
+			.prepare<{
+				readonly name_source: ProjectIdentitySource;
+				readonly metadata_json: string;
+			}>(
+				"SELECT name_source, metadata_json FROM project_metadata WHERE project_id = ?",
+			)
+			.get(projectIdValue);
+		const identityKeys = this.#database
+			.prepare<{ readonly identity_key: string }>(
+				"SELECT identity_key FROM project_identity_keys WHERE project_id = ? ORDER BY identity_key",
+			)
+			.all(projectIdValue)
+			.map((row) => row.identity_key);
+		const locations = this.#database
+			.prepare<LocationRow>(
+				"SELECT location_id, project_id, canonical_path, observed_path, relation FROM project_locations WHERE project_id = ? ORDER BY created_at, location_id",
+			)
+			.all(projectIdValue)
+			.map((row): RuntimeProjectLocationView => {
+				const state = this.#database
+					.prepare<LocationStateRow>(
+						"SELECT status, last_confirmed_at, provenance_json FROM project_location_state WHERE project_id = ? AND location_id = ?",
+					)
+					.get(row.project_id, row.location_id);
+				return Object.freeze({
+					locationId: row.location_id,
+					canonicalPath: row.canonical_path,
+					...(row.observed_path ? { observedPath: row.observed_path } : {}),
+					relation: row.relation,
+					status: state?.status ?? "active",
+					...(state?.last_confirmed_at
+						? { lastConfirmedAt: state.last_confirmed_at }
+						: {}),
+					provenance: objectJson(state?.provenance_json),
+				});
+			});
+		return Object.freeze({
+			projectId: project.project_id,
+			name: project.name,
+			nameSource: metadata?.name_source ?? "legacy_import",
+			metadata: objectJson(metadata?.metadata_json),
+			identityKeys: Object.freeze(identityKeys),
+			locations: Object.freeze(locations),
+		});
+	}
+
+	get(projectIdValue: string): RuntimeProjectView | undefined {
+		return this.#view(projectIdValue);
+	}
+
+	findByCanonicalPath(canonicalPath: string): RuntimeProjectView | undefined {
+		const row = this.#database
+			.prepare<{ readonly project_id: string }>(
+				"SELECT project_id FROM project_locations WHERE canonical_path = ?",
+			)
+			.get(canonicalPath);
+		return row ? this.#view(row.project_id) : undefined;
+	}
+
+	findByIdentityKey(identityKey: string): RuntimeProjectView | undefined {
+		const row = this.#database
+			.prepare<{ readonly project_id: string }>(
+				"SELECT project_id FROM project_identity_keys WHERE identity_key = ?",
+			)
+			.get(identityKey);
+		return row ? this.#view(row.project_id) : undefined;
+	}
+
+	#ensureMetadata(
+		projectIdValue: string,
+		name: string,
+		source: ProjectIdentitySource,
+		metadata: Readonly<Record<string, unknown>>,
+		provenance: Readonly<Record<string, unknown>>,
+		now: string,
+	): void {
+		const existing = this.#database
+			.prepare<{ readonly name_source: ProjectIdentitySource }>(
+				"SELECT name_source FROM project_metadata WHERE project_id = ?",
+			)
+			.get(projectIdValue);
+		const manual = existing?.name_source === "register";
+		if (!existing) {
+			this.#database
+				.prepare(
+					"INSERT INTO project_metadata(project_id, name_source, metadata_json, provenance_json, updated_at) VALUES (?, ?, ?, ?, ?)",
+				)
+				.run(projectIdValue, source, json(metadata), json(provenance), now);
+		} else {
+			this.#database
+				.prepare(
+					"UPDATE project_metadata SET name_source = ?, metadata_json = ?, provenance_json = ?, updated_at = ? WHERE project_id = ?",
+				)
+				.run(
+					manual ? "register" : source,
+					json(metadata),
+					json(provenance),
+					now,
+					projectIdValue,
+				);
+		}
+		if (!manual || source === "register")
+			this.#database
+				.prepare("UPDATE projects SET name = ? WHERE project_id = ?")
+				.run(name, projectIdValue);
+	}
+
+	#ensureLocation(
+		projectIdValue: string,
+		location: RuntimeProjectLocationInput,
+		provenance: Readonly<Record<string, unknown>>,
+		now: string,
+	): void {
+		const existingPath = this.#database
+			.prepare<LocationRow>(
+				"SELECT location_id, project_id, canonical_path, observed_path, relation FROM project_locations WHERE canonical_path = ?",
+			)
+			.get(location.canonicalPath);
+		if (existingPath && existingPath.project_id !== projectIdValue)
+			throw new Error("runtime.project.identity_conflict");
+		const existingLocation = this.#database
+			.prepare<LocationRow>(
+				"SELECT location_id, project_id, canonical_path, observed_path, relation FROM project_locations WHERE project_id = ? AND location_id = ?",
+			)
+			.get(projectIdValue, location.locationId);
+		if (
+			existingLocation &&
+			existingLocation.canonical_path !== location.canonicalPath
+		)
+			throw new Error("runtime.project.location_conflict");
+		if (!existingLocation) {
+			this.#database
+				.prepare(
+					"INSERT INTO project_locations(location_id, project_id, canonical_path, observed_path, relation, source_observed_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+				)
+				.run(
+					location.locationId,
+					projectIdValue,
+					location.canonicalPath,
+					location.observedPath ?? null,
+					location.relation,
+					location.observedAt,
+					now,
+				);
+		}
+		this.#database
+			.prepare(
+				"INSERT INTO project_location_state(project_id, location_id, status, last_confirmed_at, provenance_json) VALUES (?, ?, ?, ?, ?) ON CONFLICT(project_id, location_id) DO UPDATE SET status = excluded.status, last_confirmed_at = excluded.last_confirmed_at, provenance_json = excluded.provenance_json",
+			)
+			.run(
+				projectIdValue,
+				location.locationId,
+				location.status ?? "active",
+				now,
+				json(provenance),
+			);
+		this.#database
+			.prepare(
+				"INSERT OR IGNORE INTO location_aliases(project_id, location_id, alias_path, alias_kind, observed_at, provenance_json) VALUES (?, ?, ?, 'path', ?, ?)",
+			)
+			.run(
+				projectIdValue,
+				location.locationId,
+				location.canonicalPath,
+				now,
+				json(provenance),
+			);
+		if (location.observedPath)
+			this.#database
+				.prepare(
+					"INSERT OR IGNORE INTO location_aliases(project_id, location_id, alias_path, alias_kind, observed_at, provenance_json) VALUES (?, ?, ?, 'path', ?, ?)",
+				)
+				.run(
+					projectIdValue,
+					location.locationId,
+					location.observedPath,
+					now,
+					json(provenance),
+				);
+	}
+
+	#identityKey(
+		projectIdValue: string,
+		identityKey: string | undefined,
+		source: ProjectIdentitySource,
+		provenance: Readonly<Record<string, unknown>>,
+		now: string,
+	): void {
+		if (!identityKey) return;
+		const existing = this.#database
+			.prepare<{ readonly project_id: string }>(
+				"SELECT project_id FROM project_identity_keys WHERE identity_key = ?",
+			)
+			.get(identityKey);
+		if (existing && existing.project_id !== projectIdValue)
+			throw new Error("runtime.project.identity_conflict");
+		this.#database
+			.prepare(
+				"INSERT INTO project_identity_keys(project_id, identity_key, source, provenance_json, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(project_id, identity_key) DO UPDATE SET source = excluded.source, provenance_json = excluded.provenance_json, updated_at = excluded.updated_at",
+			)
+			.run(projectIdValue, identityKey, source, json(provenance), now);
+	}
+
+	#worktreeAlias(
+		projectIdValue: string,
+		locationId: string,
+		identityKey: string | undefined,
+		provenance: Readonly<Record<string, unknown>>,
+		now: string,
+	): void {
+		if (!identityKey?.startsWith("git-common:", 0)) return;
+		this.#database
+			.prepare(
+				"INSERT OR IGNORE INTO location_aliases(project_id, location_id, alias_path, alias_kind, observed_at, provenance_json) VALUES (?, ?, ?, 'worktree', ?, ?)",
+			)
+			.run(projectIdValue, locationId, identityKey, now, json(provenance));
+	}
+
+	#writeOutbox(
+		projectIdValue: string,
+		event: string,
+		payload: Readonly<Record<string, unknown>>,
+		now: string,
+	): string {
+		const outboxId = sha256(
+			`project:${projectIdValue}:${event}:${JSON.stringify(payload)}`,
+		).slice(0, 32);
+		this.#database
+			.prepare(
+				"INSERT OR IGNORE INTO runtime_outbox(id, destination, payload_json, status, created_at, attempts) VALUES (?, 'management', ?, 'pending', ?, 0)",
+			)
+			.run(outboxId, json(payload), now);
+		return outboxId;
+	}
+
+	#writeProjectEvent(
+		projectIdValue: string,
+		event: string,
+		payload: Readonly<Record<string, unknown>>,
+		provenance: Readonly<Record<string, unknown>>,
+		now: string,
+	): string {
+		const identity = `${projectIdValue}:${event}:${JSON.stringify(payload)}`;
+		const eventId = `evt_${sha256(identity).slice(0, 32)}`;
+		this.#database
+			.prepare(
+				"INSERT OR IGNORE INTO runtime_events(event_id, deduplication_key, event_kind, payload_json, provenance_json, source_observed_at, received_at, materialized_at, activity_at, metadata_version, disposition) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'golem.runtime-signal/v1', 'accepted')",
+			)
+			.run(
+				eventId,
+				`project:${identity}`,
+				event,
+				json(payload),
+				json(provenance),
+				now,
+				now,
+				now,
+				now,
+			);
+		return eventId;
+	}
+
+	observe(
+		input: RuntimeProjectObservationInput,
+	): RuntimeProjectObservationResult {
+		return this.#database.transaction(() => {
+			const now = this.#clock.now();
+			const existingEvent = this.#database
+				.prepare<{ readonly event_id: string }>(
+					"SELECT event_id FROM runtime_events WHERE event_id = ? OR deduplication_key = ?",
+				)
+				.get(input.eventId, input.deduplicationKey);
+			if (existingEvent) {
+				const existing = this.#database
+					.prepare<{
+						readonly project_id: string;
+						readonly location_id: string;
+					}>(
+						"SELECT project_id, location_id FROM project_locations WHERE canonical_path = ?",
+					)
+					.get(input.location.canonicalPath);
+				return Object.freeze({
+					disposition: "duplicate" as const,
+					projectId: existing?.project_id ?? input.projectId ?? "",
+					locationId: existing?.location_id ?? input.location.locationId,
+				});
+			}
+			const byIdentity = input.identityKey
+				? this.findByIdentityKey(input.identityKey)
+				: undefined;
+			const byPath = this.findByCanonicalPath(input.location.canonicalPath);
+			if (byIdentity && byPath && byIdentity.projectId !== byPath.projectId)
+				throw new Error("runtime.project.identity_conflict");
+			const resolvedProjectId =
+				input.projectId ??
+				byIdentity?.projectId ??
+				byPath?.projectId ??
+				projectId();
+			if (input.projectId && byPath && byPath.projectId !== input.projectId)
+				throw new Error("runtime.project.identity_conflict");
+			this.#database
+				.prepare(
+					"INSERT OR IGNORE INTO projects(project_id, name, created_at) VALUES (?, ?, ?)",
+				)
+				.run(resolvedProjectId, input.name, now);
+			this.#ensureMetadata(
+				resolvedProjectId,
+				input.name,
+				input.source,
+				input.metadata ?? {},
+				input.provenance,
+				now,
+			);
+			this.#ensureLocation(
+				resolvedProjectId,
+				input.location,
+				input.provenance,
+				now,
+			);
+			this.#worktreeAlias(
+				resolvedProjectId,
+				input.location.locationId,
+				input.identityKey,
+				input.provenance,
+				now,
+			);
+			this.#identityKey(
+				resolvedProjectId,
+				input.identityKey,
+				input.source,
+				input.provenance,
+				now,
+			);
+			this.#database
+				.prepare(
+					"INSERT INTO runtime_events(event_id, deduplication_key, event_kind, payload_json, provenance_json, source_observed_at, received_at, materialized_at, activity_at, metadata_version, disposition) VALUES (?, ?, 'project.observed', ?, ?, ?, ?, ?, ?, 'golem.runtime-signal/v1', 'accepted')",
+				)
+				.run(
+					input.eventId,
+					input.deduplicationKey,
+					json(input.payload),
+					json(input.provenance),
+					input.occurredAt,
+					now,
+					now,
+					input.occurredAt,
+				);
+			const outboxId = this.#writeOutbox(
+				resolvedProjectId,
+				"project.observed",
+				{
+					event_id: input.eventId,
+					project_id: resolvedProjectId,
+					location_id: input.location.locationId,
+				},
+				now,
+			);
+			return Object.freeze({
+				disposition: "accepted" as const,
+				projectId: resolvedProjectId,
+				locationId: input.location.locationId,
+				outboxId,
+			});
+		})() as RuntimeProjectObservationResult;
+	}
+
+	attachLocation(input: {
+		readonly projectId: string;
+		readonly name?: string;
+		readonly location: RuntimeProjectLocationInput;
+		readonly identityKey?: string;
+		readonly metadata?: Readonly<Record<string, unknown>>;
+		readonly source: ProjectIdentitySource;
+	}): RuntimeProjectView {
+		return this.#database.transaction(() => {
+			const now = this.#clock.now();
+			if (!this.#view(input.projectId))
+				throw new Error("runtime.project.not_found");
+			const provenance = {
+				source: input.source,
+				evidence: input.location.evidence,
+			};
+			this.#ensureMetadata(
+				input.projectId,
+				input.name ?? this.#view(input.projectId)?.name ?? input.projectId,
+				input.source,
+				input.metadata ?? {},
+				provenance,
+				now,
+			);
+			this.#ensureLocation(input.projectId, input.location, provenance, now);
+			this.#worktreeAlias(
+				input.projectId,
+				input.location.locationId,
+				input.identityKey,
+				provenance,
+				now,
+			);
+			this.#identityKey(
+				input.projectId,
+				input.identityKey,
+				input.source,
+				provenance,
+				now,
+			);
+			const eventId = this.#writeProjectEvent(
+				input.projectId,
+				"project.location.attached",
+				{ project_id: input.projectId, location_id: input.location.locationId },
+				provenance,
+				now,
+			);
+			this.#writeOutbox(
+				input.projectId,
+				"project.location.attached",
+				{
+					event_id: eventId,
+					project_id: input.projectId,
+					location_id: input.location.locationId,
+				},
+				now,
+			);
+			return this.#view(input.projectId) as RuntimeProjectView;
+		})() as RuntimeProjectView;
+	}
+
+	retireLocation(
+		projectIdValue: string,
+		locationId: string,
+		reason: string,
+	): RuntimeProjectView {
+		return this.#database.transaction(() => {
+			const now = this.#clock.now();
+			if (!this.#view(projectIdValue))
+				throw new Error("runtime.project.not_found");
+			const changed = this.#database
+				.prepare(
+					"UPDATE project_location_state SET status = 'retired', provenance_json = ? WHERE project_id = ? AND location_id = ?",
+				)
+				.run(
+					json({ source: "register", reason }),
+					projectIdValue,
+					locationId,
+				).changes;
+			if (changed !== 1) throw new Error("runtime.project.location_not_found");
+			const eventId = this.#writeProjectEvent(
+				projectIdValue,
+				"project.location.retired",
+				{ project_id: projectIdValue, location_id: locationId, reason },
+				{ source: "register", reason },
+				now,
+			);
+			this.#writeOutbox(
+				projectIdValue,
+				"project.location.retired",
+				{
+					event_id: eventId,
+					project_id: projectIdValue,
+					location_id: locationId,
+					reason,
+				},
+				now,
+			);
+			return this.#view(projectIdValue) as RuntimeProjectView;
+		})() as RuntimeProjectView;
+	}
+
+	rename(
+		projectIdValue: string,
+		name: string,
+		source: ProjectIdentitySource = "register",
+	): RuntimeProjectView {
+		return this.#database.transaction(() => {
+			const current = this.#view(projectIdValue);
+			if (!current) throw new Error("runtime.project.not_found");
+			const now = this.#clock.now();
+			this.#ensureMetadata(
+				projectIdValue,
+				name,
+				source,
+				current.metadata,
+				{ source },
+				now,
+			);
+			const eventId = this.#writeProjectEvent(
+				projectIdValue,
+				"project.renamed",
+				{ project_id: projectIdValue, name },
+				{ source },
+				now,
+			);
+			this.#writeOutbox(
+				projectIdValue,
+				"project.renamed",
+				{ event_id: eventId, project_id: projectIdValue, name },
+				now,
+			);
+			return this.#view(projectIdValue) as RuntimeProjectView;
+		})() as RuntimeProjectView;
+	}
+}
+
 interface ClaimedOutboxRow {
 	readonly id: string;
 	readonly destination: "tracker" | "management";
@@ -68,6 +633,10 @@ export class RuntimeRepository {
 	constructor(database: SqliteConnection, clock: PersistenceClock) {
 		this.#database = database;
 		this.#clock = clock;
+	}
+
+	runtimeProjectStorage(): RuntimeProjectStorage {
+		return new RuntimeProjectRepository(this.#database, this.#clock);
 	}
 
 	record(input: RuntimeTransactionInput): RuntimeTransactionResult {

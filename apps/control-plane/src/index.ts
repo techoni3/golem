@@ -38,6 +38,7 @@ export type {
 	ControlPlaneReplayPort,
 	ControlPlaneReplayResult,
 } from "./ports.js";
+export { composeControlPlaneProjectService } from "./projects.js";
 export type {
 	ControlPlaneLifecycleOptions,
 	StartedControlPlane,

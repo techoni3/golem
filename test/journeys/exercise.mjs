@@ -43,6 +43,8 @@ const persistenceJourney = path.join(repositoryRoot, "test/persistence/sqlite-ow
 const runtimeEngineJourney = path.join(repositoryRoot, "test/runtime/materializer-crash-matrix.test.mjs");
 const dashboardDownJourney = path.join(repositoryRoot, "test/runtime/dashboard-down-inbox-replay.test.mjs");
 const deliveryBusJourney = path.join(repositoryRoot, "test/tracker/delivery-bus.test.mjs");
+const projectIdentityJourney = path.join(repositoryRoot, "test/projects/project-identity-git-worktree-relocation.test.mjs");
+const projectConcurrencyJourney = path.join(repositoryRoot, "test/projects/project-register-concurrency.test.mjs");
 const controlPlaneProgram = path.join(repositoryRoot, "apps/control-plane/dist/main.js");
 const trackerCoreJourney = path.join(repositoryRoot, "test/tracker/tracker-core.test.mjs");
 const chromeExecutable = process.env.GOLEM_CHROME_EXECUTABLE || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -652,6 +654,27 @@ export async function exerciseWsGapResync() {
 	}
 }
 
+async function runProjectJourney(journey, label) {
+	const home = createTemporaryHome(`golem-j2-${label}-`);
+	const group = spawnGrouped(process.execPath, ["--test", "--test-concurrency=1", journey], { cwd: repositoryRoot, env: home.env });
+	try {
+		await waitFor(() => (exited(group) ? true : undefined), `${label} project journey exit`, 30_000);
+		if (group.child.exitCode !== 0) throw processFailure(`${label} project journey exited ${group.child.exitCode}`, group);
+		return group.stdout().trim() || `${label} project identity journey passed`;
+	} finally {
+		if (!exited(group)) await stopProcessGroup(group);
+		cleanupHome(home);
+	}
+}
+
+export function exerciseProjectIdentityGitWorktreeRelocation() {
+	return runProjectJourney(projectIdentityJourney, "identity-git-worktree-relocation");
+}
+
+export function exerciseProjectRegisterConcurrency() {
+	return runProjectJourney(projectConcurrencyJourney, "register-concurrency");
+}
+
 export async function exerciseTrackerCoreCompatibility() {
 	const home = createTemporaryHome("golem-j4-tracker-core-runner-");
 	const group = spawnGrouped(
@@ -724,6 +747,8 @@ export function diagnosticFor(error, context) {
 
 export const exercises = Object.freeze({
 	"domain-replay": exerciseDomainReplay,
+	"project-identity-git-worktree-relocation": exerciseProjectIdentityGitWorktreeRelocation,
+	"project-register-concurrency": exerciseProjectRegisterConcurrency,
 	"launcher-resolution-matrix": exerciseLauncherResolution,
 	"native-spawn-safety": exerciseNativeSpawnSafety,
 	"launcher-signal-cleanup": exerciseLauncherSignalCleanup,
