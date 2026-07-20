@@ -14,6 +14,18 @@ export const scenarios = [
 		regression: "duplicate real producer registrations allocate multiple project UUIDs or lose durable location/outbox evidence",
 	}),
 	registerScenario({
+		id: "cross-harness-session-lifecycle",
+		journey: "J2",
+		tier: "integration",
+		regression: "cross-harness session generations, terminal lifecycle, aliases, and actor-vs-observation projections drift or resurrect",
+	}),
+	registerScenario({
+		id: "session-reorder-restart-replay",
+		journey: "J2",
+		tier: "integration",
+		regression: "delayed, duplicate, reordered, and restarted logical session facts fail to converge byte-for-byte",
+	}),
+	registerScenario({
 		id: "cli-command-parity",
 		journey: "J5",
 		tier: "pr",

@@ -740,6 +740,22 @@ export async function exerciseMigrationDryRunAmbiguity() {
 	return runMigrationPlanReplay();
 }
 
+const sessionJourney = path.join(repositoryRoot, "test/sessions/session-service.test.mjs");
+
+function runSessionJourney(name) {
+	const result = spawnSync(process.execPath, ["--test", "--test-concurrency=1", "--test-name-pattern", name, sessionJourney], { cwd: repositoryRoot, encoding: "utf8", env: process.env });
+	if (result.status !== 0) throw new Error(`session journey failed: ${result.stdout}\n${result.stderr}`);
+	return result.stdout.trim().split("\n").filter(Boolean).at(-1) || `${name} passed`;
+}
+
+export async function exerciseCrossHarnessSessionLifecycle() {
+	return runSessionJourney("GOL-41 cross-harness lifecycle");
+}
+
+export async function exerciseSessionReorderRestartReplay() {
+	return runSessionJourney("GOL-41 reorder/restart/replay");
+}
+
 const typedCliEntry = path.join(repositoryRoot, "dist/apps/cli/golem.js");
 
 function runTypedCliFixture(home, args) {
@@ -795,6 +811,8 @@ export const exercises = Object.freeze({
 	"domain-replay": exerciseDomainReplay,
 	"project-identity-git-worktree-relocation": exerciseProjectIdentityGitWorktreeRelocation,
 	"project-register-concurrency": exerciseProjectRegisterConcurrency,
+	"cross-harness-session-lifecycle": exerciseCrossHarnessSessionLifecycle,
+	"session-reorder-restart-replay": exerciseSessionReorderRestartReplay,
 	"launcher-resolution-matrix": exerciseLauncherResolution,
 	"launcher-launchability-delivery-split": exerciseLauncherLaunchabilityDeliverySplit,
 	"native-spawn-safety": exerciseNativeSpawnSafety,

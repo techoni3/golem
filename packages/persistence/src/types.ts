@@ -8,6 +8,7 @@ import type {
 	EndpointRouteState,
 	LifecycleState,
 	ProjectLocationReference,
+	RuntimeSignalV1,
 } from "@golem/contracts";
 
 export type DatabaseScope = "runtime" | "tracker";
@@ -23,6 +24,118 @@ export type ProjectLocationRelation = ProjectLocationReference["relation"];
 export type Harness = ContractHarness;
 export type SessionAliasKind = AliasReference["alias_kind"];
 export type CapabilityQualification = CapabilityRecord["qualification"];
+
+/** Public, persistence-owned projection of the canonical logical session model. */
+export interface RuntimeSessionGenerationView {
+	readonly generationId: string;
+	readonly sessionId: string;
+	readonly projectId: string;
+	readonly ordinal: number;
+	readonly harness: Harness;
+	readonly state: GenerationLifecycleState;
+	readonly metadata: Readonly<Record<string, unknown>>;
+	readonly fieldProvenance: Readonly<Record<string, unknown>>;
+	readonly lifecycleProvenance: Readonly<Record<string, unknown>>;
+	readonly parentGenerationId?: string;
+	readonly continuation?: "resume";
+	readonly activityAt?: string;
+	readonly observedAt?: string;
+	readonly endedAt?: string;
+	readonly revision: number;
+}
+
+export interface RuntimeSessionView {
+	readonly sessionId: string;
+	readonly projectId: string;
+	readonly revision: number;
+	readonly metadata: Readonly<Record<string, unknown>>;
+	readonly fieldProvenance: Readonly<Record<string, unknown>>;
+	readonly role?: string;
+	readonly activityAt?: string;
+	readonly observedAt?: string;
+	readonly generationIds: readonly string[];
+	readonly activeGenerationId?: string;
+	readonly generations: readonly RuntimeSessionGenerationView[];
+}
+
+export interface RuntimeSessionAliasInput {
+	readonly projectId: string;
+	readonly harness: Harness;
+	readonly aliasKind: SessionAliasKind;
+	readonly producerId?: string;
+	readonly alias: string;
+	readonly sessionId?: string;
+	readonly generationId?: string;
+	readonly source: string;
+	readonly provenance: Readonly<Record<string, unknown>>;
+}
+
+export interface RuntimeSessionApplyInput {
+	readonly signal: RuntimeSignalV1;
+	readonly alias?: RuntimeSessionAliasInput;
+}
+
+export type RuntimeSessionDisposition =
+	| "accepted"
+	| "duplicate"
+	| "ignored"
+	| "rejected"
+	| "review";
+
+export interface RuntimeSessionApplyResult {
+	readonly disposition: RuntimeSessionDisposition;
+	readonly code: string;
+	readonly sessionId?: string;
+	readonly generationId?: string;
+	readonly revision?: number;
+	readonly details?: Readonly<Record<string, unknown>>;
+}
+
+export interface RuntimeSessionCommandContext {
+	readonly projectId: string;
+	readonly sessionId: string;
+	readonly generationId: string;
+	readonly expectedRevision: number;
+	readonly eventId: string;
+	readonly producerInstanceId: string;
+	readonly harness: Harness;
+	readonly sourceObservedAt: string;
+	readonly receivedAt: string;
+}
+
+export interface RuntimeSessionStorage {
+	apply(input: RuntimeSessionApplyInput): RuntimeSessionApplyResult;
+	attachAlias(input: RuntimeSessionAliasInput): RuntimeSessionApplyResult;
+	rename(
+		input: RuntimeSessionCommandContext & { readonly name: string },
+	): RuntimeSessionApplyResult;
+	patchMetadata(
+		input: RuntimeSessionCommandContext & {
+			readonly metadata: Readonly<Record<string, unknown>>;
+			readonly clearFields?: readonly string[];
+		},
+	): RuntimeSessionApplyResult;
+	end(
+		input: RuntimeSessionCommandContext & {
+			readonly disposition: "ended" | "errored" | "superseded";
+		},
+	): RuntimeSessionApplyResult;
+	observe(input: {
+		readonly projectId: string;
+		readonly sessionId: string;
+		readonly generationId?: string;
+		readonly observedAt: string;
+	}): RuntimeSessionApplyResult;
+	get(projectId: string, sessionId: string): RuntimeSessionView | undefined;
+	list(projectId: string): readonly RuntimeSessionView[];
+	findAlias(input: {
+		readonly projectId: string;
+		readonly harness: Harness;
+		readonly aliasKind: SessionAliasKind;
+		readonly producerId?: string;
+		readonly alias: string;
+	}): Readonly<{ sessionId?: string; generationId?: string }> | undefined;
+}
 
 /** Closed runtime-v1 recovery/control vocabularies mirrored by SQL CHECKs. */
 export type CommandStatus =
@@ -829,6 +942,8 @@ export interface PersistenceWriteCapability {
 	runtimeOutboxHealth(): RuntimeOutboxHealth;
 	/** Typed project/location identity capability owned by the runtime DB owner. */
 	runtimeProjectStorage(): RuntimeProjectStorage;
+	/** Typed logical session/generation/alias projection owned by the runtime DB owner. */
+	runtimeSessionStorage(): RuntimeSessionStorage;
 	/** Typed tracker store; no raw connection leaves the single owner. */
 	trackerStorage(): TrackerStorageCapability;
 	/** Typed work-item/phase repository capability for @golem/tracker only. */

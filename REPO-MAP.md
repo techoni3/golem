@@ -4,7 +4,7 @@
 ## Structure
 
 - `apps/`: private TypeScript composition; typed CLI registry, Fastify control-plane and typed dashboard shell. `dashboard/web` remains a narrow body/drawer island.
-- `packages/`: contracts, domain, persistence, runtime/tracker, launcher, compat, compiler, MCP, generated client, testkit, and UI. Apps use TS7; only `tools/openapi-codegen/` uses TS5.9.3.
+- `packages/`: contracts, domain, persistence, runtime/tracker, launcher, compat, compiler, MCP, generated client, testkit, and UI. Apps use TS7; only `tools/openapi-codegen/` uses TS5.9.3. Runtime session materialization is split between `packages/runtime/src/sessions/` and the typed SQLite projection in `packages/persistence/src/session-repository.ts`.
 - `substrate/` is render source; `plugin/` and `dashboard/dist/` are generated. Legacy `dashboard/dist/` remains the `golem dashboard` root; typed control-plane is parallel.
 
 ## Invariants and flow
@@ -16,6 +16,7 @@
 - Control plane owns REST/WS; bearer is CLI/MCP-only. Browser mutation bootstrap is same-origin/CSRF-protected; dashboard code receives no bearer. `api-client` owns generated validation/resync; typed dashboard owns UI lifecycle.
 - Tracker core uses `tracker/003-live-tracker-core` over canonical rows/events. CAS/outbox/audit derive from `events.id`; legacy tracker remains byte-preserved until explicit migration.
 - Project identity uses canonical real paths plus Git common-dir/worktree evidence. Git roots auto-register; non-Git paths require `.golem-project` or explicit registration. Runtime observations are one-owner transactional and deduplicated; relocation history retains the UUID.
+- Logical sessions are project-first; immutable generations, scoped aliases, source-time provenance, terminal monotonic lifecycle, actor activity, observation timestamps, and deterministic outbox explanations are materialized by `SessionService`.
 - `apps/cli/src/registry.ts` is the one Commander vocabulary for parser/help/metadata; `cli/golem.js` delegates harness dry-runs through `dist/apps/cli/`.
 
 ## Checks and gotchas

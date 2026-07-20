@@ -51,3 +51,8 @@ export {
 	RuntimeEngineScheduler,
 	type RuntimeEngineTick,
 } from "./scheduler.js";
+export {
+	createSessionService,
+	SessionService,
+	type SessionServiceOptions,
+} from "./sessions/index.js";
