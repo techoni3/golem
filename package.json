@@ -69,7 +69,7 @@
     "test:contracts": "npm run contracts:check && node --test test/contracts/contracts-v1.test.mjs",
     "test:testkit": "npm run build -w @golem/testkit && node --test --test-concurrency=1 test/journeys/testkit.test.mjs",
     "test:journey": "npm run build -w @golem/compiler -w @golem/mcp-adapter -w @golem/testkit && node test/journeys/run.mjs",
-    "postinstall": "npm ci --omit=dev --prefix mcp/channel",
+    "postinstall": "npm --prefix mcp/channel ci --omit=dev --workspaces=false",
     "prepack": "npm run build -w @golem/compiler -w @golem/mcp-adapter",
     "test:release": "node test/release-smoke.mjs",
     "verify:render": "npm run test:journey -- --scenario render-mcp-closure",

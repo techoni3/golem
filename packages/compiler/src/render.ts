@@ -11,19 +11,163 @@ import type {
 } from "./types.js";
 
 const lockName = ".golem-render-lock.json";
+const swapName = ".golem-render-swap.json";
+
+interface SwapMarker {
+	readonly schemaVersion: "golem.render-swap/v1";
+	readonly state: "prepared" | "prior-moved" | "stage-moved";
+	readonly manifestSha256: string;
+}
+
+type LockState =
+	| { readonly state: "missing" }
+	| { readonly state: "valid"; readonly lock: RenderLock }
+	| { readonly state: "invalid" };
 
 function lockPath(outputDir: string): string {
 	return path.join(outputDir, lockName);
 }
 
 function readLock(outputDir: string): RenderLock | undefined {
+	const state = readLockState(outputDir);
+	return state.state === "valid" ? state.lock : undefined;
+}
+
+function validLock(value: unknown): value is RenderLock {
+	if (!value || typeof value !== "object") return false;
+	const candidate = value as Partial<RenderLock>;
+	return (
+		candidate.schemaVersion === "golem.render-lock/v1" &&
+		typeof candidate.target === "string" &&
+		typeof candidate.version === "string" &&
+		typeof candidate.manifestSha256 === "string" &&
+		Array.isArray(candidate.files) &&
+		candidate.files.every(
+			(file) =>
+				file &&
+				typeof file.outputPath === "string" &&
+				typeof file.mode === "number" &&
+				typeof file.sha256 === "string" &&
+				Array.isArray(file.provenance),
+		)
+	);
+}
+
+function readLockState(outputDir: string): LockState {
+	if (!fs.existsSync(outputDir)) return { state: "missing" };
 	try {
-		return JSON.parse(
+		const parsed = JSON.parse(
 			fs.readFileSync(lockPath(outputDir), "utf8"),
-		) as RenderLock;
+		) as unknown;
+		return validLock(parsed)
+			? { state: "valid", lock: parsed }
+			: { state: "invalid" };
 	} catch {
-		return undefined;
+		return { state: "invalid" };
 	}
+}
+
+function swapPath(outputDir: string): string {
+	return `${outputDir}${swapName}`;
+}
+
+function stagePath(outputDir: string): string {
+	return `${outputDir}.golem-stage`;
+}
+
+function priorPath(outputDir: string): string {
+	return `${outputDir}.golem-prior`;
+}
+
+function syncFile(pathname: string, contents: string): void {
+	const descriptor = fs.openSync(pathname, "w", 0o600);
+	try {
+		fs.writeFileSync(descriptor, contents, "utf8");
+		fs.fsyncSync(descriptor);
+	} finally {
+		fs.closeSync(descriptor);
+	}
+}
+
+function writeMarker(outputDir: string, marker: SwapMarker): void {
+	syncFile(swapPath(outputDir), canonicalJson(marker));
+}
+
+function readMarker(outputDir: string): SwapMarker | undefined {
+	try {
+		const parsed = JSON.parse(
+			fs.readFileSync(swapPath(outputDir), "utf8"),
+		) as Partial<SwapMarker>;
+		if (
+			parsed.schemaVersion !== "golem.render-swap/v1" ||
+			!(["prepared", "prior-moved", "stage-moved"] as const).includes(
+				parsed.state as SwapMarker["state"],
+			) ||
+			typeof parsed.manifestSha256 !== "string"
+		)
+			throw new Error("render.swap_marker.invalid");
+		return parsed as SwapMarker;
+	} catch (error) {
+		if (
+			error instanceof Error &&
+			(error as Error & { readonly code?: string }).code === "ENOENT"
+		)
+			return undefined;
+		throw error;
+	}
+}
+
+/**
+ * Finish or reverse an interrupted sibling swap. A marker is durable before a
+ * target move and is advanced only after the next move completes, so a prior
+ * directory is never treated as disposable merely because it exists.
+ */
+function recoverSwap(outputDir: string): void {
+	const marker = readMarker(outputDir);
+	if (!marker) {
+		if (
+			fs.existsSync(priorPath(outputDir)) ||
+			fs.existsSync(stagePath(outputDir))
+		)
+			throw new Error("render.swap_recovery.required");
+		return;
+	}
+	const stageDir = stagePath(outputDir);
+	const previousDir = priorPath(outputDir);
+	const targetExists = fs.existsSync(outputDir);
+	const priorExists = fs.existsSync(previousDir);
+	if (marker.state === "prepared") {
+		if (!targetExists || priorExists)
+			throw new Error("render.swap_recovery.inconsistent");
+		fs.rmSync(stageDir, { recursive: true, force: true });
+		fs.rmSync(swapPath(outputDir), { force: true });
+		return;
+	}
+	if (marker.state === "prior-moved") {
+		if (!targetExists && priorExists) {
+			fs.renameSync(previousDir, outputDir);
+			fs.rmSync(stageDir, { recursive: true, force: true });
+			fs.rmSync(swapPath(outputDir), { force: true });
+			return;
+		}
+		if (targetExists && priorExists) {
+			const current = readLock(outputDir);
+			if (current?.manifestSha256 !== marker.manifestSha256)
+				throw new Error("render.swap_recovery.ambiguous");
+			writeMarker(outputDir, { ...marker, state: "stage-moved" });
+			fs.rmSync(previousDir, { recursive: true, force: true });
+			fs.rmSync(swapPath(outputDir), { force: true });
+			return;
+		}
+		throw new Error("render.swap_recovery.inconsistent");
+	}
+	if (!targetExists || !priorExists)
+		throw new Error("render.swap_recovery.inconsistent");
+	const current = readLock(outputDir);
+	if (current?.manifestSha256 !== marker.manifestSha256)
+		throw new Error("render.swap_recovery.ambiguous");
+	fs.rmSync(previousDir, { recursive: true, force: true });
+	fs.rmSync(swapPath(outputDir), { force: true });
 }
 
 function outputPath(root: string, relativePath: string): string {
@@ -85,7 +229,16 @@ function tamperedFile(
 			const contents = fs.readFileSync(target, "utf8");
 			if (file.managedRegion) {
 				const parsed = parseManagedBlock(contents, file.managedRegion);
-				if (!parsed || sha256(parsed.inner) !== file.sha256)
+				if (
+					!parsed ||
+					sha256(
+						framedBlock(
+							parsed.inner,
+							file.managedRegion.begin,
+							file.managedRegion.end,
+						),
+					) !== file.sha256
+				)
 					return file.outputPath;
 			} else if (sha256(contents) !== file.sha256) return file.outputPath;
 		} catch {
@@ -100,7 +253,28 @@ function writeStage(
 	lock: RenderLock,
 	manifest: RenderManifest,
 	previousOutputDir: string,
+	previous: RenderLock | undefined,
 ): void {
+	if (fs.existsSync(previousOutputDir))
+		fs.cpSync(previousOutputDir, stageDir, { recursive: true });
+	else fs.mkdirSync(stageDir, { recursive: true });
+	const nextPaths = new Set(lock.files.map((file) => file.outputPath));
+	for (const prior of previous?.files ?? []) {
+		if (nextPaths.has(prior.outputPath)) continue;
+		const target = outputPath(stageDir, prior.outputPath);
+		if (!fs.existsSync(target)) continue;
+		if (!prior.managedRegion) {
+			fs.rmSync(target, { force: true });
+			continue;
+		}
+		const contents = fs.readFileSync(target, "utf8");
+		const parsed = parseManagedBlock(contents, prior.managedRegion);
+		if (!parsed)
+			throw new Error(`render.managed_region.invalid:${prior.outputPath}`);
+		const survivor = `${parsed.prefix}${parsed.suffix}`;
+		if (survivor) fs.writeFileSync(target, survivor, "utf8");
+		else fs.rmSync(target, { force: true });
+	}
 	for (const source of manifest.sources) {
 		const target = outputPath(stageDir, source.outputPath);
 		fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -108,7 +282,7 @@ function writeStage(
 		if (source.managedRegion) {
 			try {
 				const previous = fs.readFileSync(
-					outputPath(previousOutputDir, source.outputPath),
+					outputPath(stageDir, source.outputPath),
 					"utf8",
 				);
 				const parsed = parseManagedBlock(previous, source.managedRegion);
@@ -149,11 +323,39 @@ export function compileRender(
 ): RenderReceipt {
 	const manifest = createRenderManifest(input);
 	const lock = lockForManifest(manifest);
-	const previous = readLock(options.outputDir);
+	recoverSwap(options.outputDir);
+	const priorState = readLockState(options.outputDir);
+	if (priorState.state === "invalid" && !options.force) {
+		return {
+			status: "refused",
+			target: manifest.target,
+			manifestSha256: lock.manifestSha256,
+			outputSha256: "",
+			written: [],
+			rollback: "not-needed",
+			refusal: { code: "render.invalid_lock", outputPath: lockName },
+		};
+	}
+	if (
+		priorState.state === "missing" &&
+		fs.existsSync(options.outputDir) &&
+		!options.force
+	) {
+		return {
+			status: "refused",
+			target: manifest.target,
+			manifestSha256: lock.manifestSha256,
+			outputSha256: "",
+			written: [],
+			rollback: "not-needed",
+			refusal: { code: "render.unmanaged_target", outputPath: lockName },
+		};
+	}
+	const previous = priorState.state === "valid" ? priorState.lock : undefined;
 	const previousTamper = previous
 		? tamperedFile(options.outputDir, previous)
 		: undefined;
-	if (previousTamper) {
+	if (previousTamper && !options.force) {
 		return {
 			status: "refused",
 			target: manifest.target,
@@ -165,18 +367,34 @@ export function compileRender(
 		};
 	}
 
-	const stageDir = `${options.outputDir}.golem-stage`;
-	const previousDir = `${options.outputDir}.golem-prior`;
-	fs.rmSync(stageDir, { recursive: true, force: true });
-	fs.rmSync(previousDir, { recursive: true, force: true });
+	const stageDir = stagePath(options.outputDir);
+	const previousDir = priorPath(options.outputDir);
 	try {
-		writeStage(stageDir, lock, manifest, options.outputDir);
-		if (options.failBeforeSwap) throw new Error("render.staged_failure");
+		writeStage(stageDir, lock, manifest, options.outputDir, previous);
+		writeMarker(options.outputDir, {
+			schemaVersion: "golem.render-swap/v1",
+			state: "prepared",
+			manifestSha256: lock.manifestSha256,
+		});
 		const hadPreviousTarget = fs.existsSync(options.outputDir);
-		if (hadPreviousTarget) fs.renameSync(options.outputDir, previousDir);
+		if (hadPreviousTarget) {
+			fs.renameSync(options.outputDir, previousDir);
+			writeMarker(options.outputDir, {
+				schemaVersion: "golem.render-swap/v1",
+				state: "prior-moved",
+				manifestSha256: lock.manifestSha256,
+			});
+		}
+		if (options.failBeforeSwap) throw new Error("render.staged_failure");
 		try {
 			fs.renameSync(stageDir, options.outputDir);
+			writeMarker(options.outputDir, {
+				schemaVersion: "golem.render-swap/v1",
+				state: "stage-moved",
+				manifestSha256: lock.manifestSha256,
+			});
 			fs.rmSync(previousDir, { recursive: true, force: true });
+			fs.rmSync(swapPath(options.outputDir), { force: true });
 		} catch (error) {
 			if (hadPreviousTarget && fs.existsSync(previousDir))
 				fs.renameSync(previousDir, options.outputDir);
@@ -191,9 +409,11 @@ export function compileRender(
 			rollback: "not-needed",
 		};
 	} catch (error) {
-		fs.rmSync(stageDir, { recursive: true, force: true });
-		if (fs.existsSync(previousDir) && !fs.existsSync(options.outputDir))
-			fs.renameSync(previousDir, options.outputDir);
+		try {
+			recoverSwap(options.outputDir);
+		} catch {
+			// Keep the marker and both trees for the next deterministic recovery.
+		}
 		throw Object.assign(
 			error instanceof Error ? error : new Error(String(error)),
 			{

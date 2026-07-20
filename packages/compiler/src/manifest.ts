@@ -37,9 +37,11 @@ function normalizeSource(source: RenderSource): RenderSource {
 }
 
 function renderedContents(source: RenderSource): string {
-	return source.managedRegion && !source.contents.endsWith("\n")
-		? `${source.contents}\n`
-		: source.contents;
+	if (!source.managedRegion) return source.contents;
+	const inner = source.contents.endsWith("\n")
+		? source.contents
+		: `${source.contents}\n`;
+	return `${source.managedRegion.begin}\n${inner}${source.managedRegion.end}\n`;
 }
 
 export function createRenderManifest(input: RenderManifest): RenderManifest {

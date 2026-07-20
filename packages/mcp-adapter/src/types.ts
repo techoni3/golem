@@ -1,4 +1,4 @@
-import type { ApiClientBoundary } from "@golem/api-client";
+import type { ApiClientBoundary, ApiClientRequest } from "@golem/api-client";
 
 export interface McpToolContent {
 	readonly type: "text";
@@ -28,9 +28,11 @@ export interface McpToolDefinition {
 	readonly name: string;
 	readonly description: string;
 	readonly inputSchema: Record<string, unknown>;
+	/** GOL-26 API envelopes are the public success/error wire boundary. */
+	readonly resultSchema: Record<string, unknown>;
+	readonly errorSchema: Record<string, unknown>;
 	readonly schema: McpInputSchema;
-	readonly method: "GET" | "POST";
-	path(input: Record<string, unknown>): string;
+	request(input: Record<string, unknown>): ApiClientRequest | undefined;
 }
 
 export interface McpAdapterBoundary {

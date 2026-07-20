@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-07-20 @ 558ca83 — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-20 @ f9f67e6 — maintained via golem:docs-maintenance.
 
 ## Structure
 
@@ -31,8 +31,8 @@ Hooks/shims write beneath `GOLEM_HOME`; dashboard REST/WS and tracker phase are 
 
 ## Constraints
 
-- The nested `mcp/channel` postinstall/lock is a declared temporary legacy closure for GOL-29, not a second canonical workspace lock.
-- `docs/architecture/render-mcp-closure.md` owns the five-target compiler and copied-artifact J1 gate.
+- The nested `mcp/channel` postinstall/lock remains the current rendered closure for GOL-29; the relocatable artifact is a separately verified deferred-cutover candidate, not `.mcp.json`'s entrypoint.
+- `docs/architecture/render-mcp-closure.md` owns the five-target compiler, packed-channel, and isolated-artifact J1 gate.
 - Never peer-bypass, import `tools/**` from production code, or include workspace symlinks/TS5 in the root tarball.
 - TS 7 accepts build-mode `--stopBuildOnErrors`, not `--stopOnBuildErrors`.
 - Claude uses cached render bytes; after substrate edits sync, update, and `/reload-plugins`.

@@ -53,13 +53,18 @@ export interface RenderReceipt {
 	readonly written: readonly string[];
 	readonly rollback: "not-needed" | "preserved-prior-target";
 	readonly refusal?: {
-		readonly code: "render.tampered";
+		readonly code:
+			| "render.tampered"
+			| "render.invalid_lock"
+			| "render.unmanaged_target";
 		readonly outputPath: string;
 	};
 }
 
 export interface CompileRenderOptions {
 	readonly outputDir: string;
+	/** Explicit owner-authorized recovery from a refused managed target. */
+	readonly force?: boolean;
 	readonly failBeforeSwap?: boolean;
 }
 
