@@ -19,8 +19,13 @@ export {
 } from "./launch-agent.js";
 export { stableOpenApiJson } from "./openapi.js";
 export type {
-	ControlPlaneLifecycleOptions,
 	ControlPlaneProjectionPort,
+	ControlPlaneReplayEntry,
+	ControlPlaneReplayPort,
+	ControlPlaneReplayResult,
+} from "./ports.js";
+export type {
+	ControlPlaneLifecycleOptions,
 	StartedControlPlane,
 } from "./server.js";
 export {
@@ -30,6 +35,7 @@ export {
 } from "./server.js";
 export type { ServiceLockStatus } from "./service-lock.js";
 export { serviceLockStatus } from "./service-lock.js";
+export { BoundedReplayWindow } from "./ws-replay.js";
 
 export interface ControlPlaneComposition {
 	readonly runtime: RuntimeBoundary;

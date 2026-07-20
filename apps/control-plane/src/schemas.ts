@@ -3,6 +3,16 @@ import { z } from "zod";
 
 export const ApiErrorResponseSchema = ApiErrorV1Schema;
 
+export const ControlPlaneStreams = [
+	"runtime.live",
+	"runtime.history",
+	"runtime.diagnostics",
+	"projects",
+	"tracker.tree",
+	"tracker.board",
+	"communication.operations",
+] as const;
+
 export const HealthResponseSchema = z
 	.object({
 		schema_version: z.literal("golem.control-plane-health/v1"),
@@ -22,15 +32,7 @@ export const MetaResponseSchema = z
 
 export const ProjectionParamsSchema = z
 	.object({
-		stream: z.enum([
-			"runtime.live",
-			"runtime.history",
-			"runtime.diagnostics",
-			"projects",
-			"tracker.tree",
-			"tracker.board",
-			"communication.operations",
-		]),
+		stream: z.enum(ControlPlaneStreams),
 	})
 	.strict();
 
@@ -60,6 +62,14 @@ export const BrowserEchoResponseSchema = z
 		value: z.string().min(1).max(256),
 	})
 	.strict();
+
+export const OpenApiDocumentSchema = z
+	.object({
+		openapi: z.literal("3.1.1"),
+		info: z.object({ title: z.string(), version: z.string() }).strict(),
+		paths: z.record(z.string(), z.unknown()),
+	})
+	.passthrough();
 
 export type ControlPlaneStream = z.infer<
 	typeof ProjectionParamsSchema

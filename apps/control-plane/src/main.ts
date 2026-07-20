@@ -10,6 +10,11 @@ const stateDirectory = process.env.GOLEM_HOME
 	? path.join(process.env.GOLEM_HOME, "control-plane")
 	: undefined;
 const staticDirectory = process.env.GOLEM_CONTROL_PLANE_STATIC_ROOT;
+const replayWindowValue = Number(process.env.GOLEM_CONTROL_PLANE_REPLAY_WINDOW);
+const replayWindowSize =
+	Number.isInteger(replayWindowValue) && replayWindowValue >= 1
+		? replayWindowValue
+		: undefined;
 
 if (!token || !stateDirectory || !staticDirectory) {
 	process.stderr.write(
@@ -22,6 +27,7 @@ if (!token || !stateDirectory || !staticDirectory) {
 		stateDirectory,
 		staticDirectory,
 		port: controlPlanePortFromEnvironment(process.env.GOLEM_CONTROL_PLANE_PORT),
+		...(replayWindowSize ? { replayWindowSize } : {}),
 	});
 	process.stdout.write(
 		`${JSON.stringify({ type: "ready", origin: service.origin, instance_id: service.instanceId })}\n`,
