@@ -22,6 +22,45 @@ const replayWindowSize =
 	Number.isInteger(replayWindowValue) && replayWindowValue >= 1
 		? replayWindowValue
 		: undefined;
+// Test-only seam: omit the projection port unless a valid revision is
+// explicitly supplied. Normal composition therefore keeps lifecycle's
+// persisted/default projection path instead of replacing it with an empty
+// fixture projection.
+const projectionRevisionRaw =
+	process.env.GOLEM_CONTROL_PLANE_PROJECTION_REVISION;
+const projectionRevisionValue =
+	projectionRevisionRaw === undefined
+		? undefined
+		: Number(projectionRevisionRaw);
+const projectionFixtureRaw = process.env.GOLEM_CONTROL_PLANE_PROJECTION_FIXTURE;
+let projectionFixture: Record<string, unknown> | undefined;
+if (projectionFixtureRaw) {
+	try {
+		const parsed: unknown = JSON.parse(projectionFixtureRaw);
+		if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed))
+			projectionFixture = parsed as Record<string, unknown>;
+	} catch {
+		// Invalid test fixtures fail closed to the normal lifecycle projection.
+	}
+}
+const projectionRevision =
+	projectionRevisionValue !== undefined &&
+	Number.isInteger(projectionRevisionValue) &&
+	projectionRevisionValue >= 0
+		? projectionRevisionValue
+		: 0;
+const testProjection =
+	projectionFixture !== undefined ||
+	(projectionRevisionValue !== undefined &&
+		Number.isInteger(projectionRevisionValue) &&
+		projectionRevisionValue >= 0)
+		? {
+				projection: {
+					read: () => projectionFixture ?? {},
+					revision: () => projectionRevision,
+				},
+			}
+		: {};
 
 if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 	process.stderr.write(
@@ -76,6 +115,7 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 			runtimeIngress: runtime.inbox,
 			runtimeHealth: scheduler,
 			...(replayWindowSize ? { replayWindowSize } : {}),
+			...testProjection,
 		});
 	} catch (error) {
 		await scheduler.stop();

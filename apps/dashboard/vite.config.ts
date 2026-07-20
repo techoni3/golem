@@ -39,7 +39,10 @@ export default defineConfig({
 	build: {
 		emptyOutDir: true,
 		minify: "esbuild",
-		outDir: "../../dashboard/dist",
+		// Keep the current dashboard/dist legacy artifact authoritative for
+		// `golem dashboard`; the typed control-plane shell is a dark parallel
+		// artifact served only by apps/control-plane.
+		outDir: "../../dashboard/dist/control-plane",
 		sourcemap: false,
 	},
 });

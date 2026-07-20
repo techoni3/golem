@@ -1,32 +1,25 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Golem control plane</title>
-    <script>
-      (() => {
-        const key = "golem.ui.theme";
-        const stored = localStorage.getItem(key);
-        const preference = stored === "system" || stored === "light" || stored === "dark"
-          ? stored
-          : "system";
-        const resolved = preference === "system"
-          ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
-          : preference;
-        document.documentElement.dataset.theme = resolved;
-        document.documentElement.dataset.themePreference = preference;
-        document.documentElement.style.colorScheme = resolved;
-      })();
-    </script>
-    <script type="module" crossorigin src="/assets/index-z-bIsFHu.js"></script>
-    <link rel="modulepreload" crossorigin href="/assets/rolldown-runtime-CYP2JPzJ.js">
-    <link rel="modulepreload" crossorigin href="/assets/jsx-runtime-DpUcYbOe.js">
-    <link rel="modulepreload" crossorigin href="/assets/client-Dh6Smgq4.js">
-    <link rel="modulepreload" crossorigin href="/assets/preload-helper-BATLnrmA.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-9VK90pCy.css">
-  </head>
-  <body>
-    <div id="root"></div>
-  </body>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="color-scheme" content="dark light"/>
+  <title>Golem · Dashboard</title>
+  <script>
+    // Apply the saved appearance before CSS is requested so reloads never
+    // paint the dark shell underneath Loam & Linen. Dark remains the default.
+    (() => {
+      try {
+        const theme = localStorage.getItem('golem.tweaks.theme');
+        if (theme === 'loam') document.documentElement.dataset.theme = 'loam';
+      } catch {}
+    })();
+  </script>
+  <script type="module" crossorigin src="/assets/index-D6WW7y69.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/purify.es-Bq2FbTja.js">
+  <link rel="stylesheet" crossorigin href="/assets/index-DbuNuMuT.css">
+</head>
+<body>
+  <div id="root"></div>
+</body>
 </html>

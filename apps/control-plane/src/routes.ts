@@ -5,7 +5,7 @@ import { z } from "zod";
 import {
 	type BrowserSessionAuthority,
 	bearerIsValid,
-	isExpectedBrowserRequest,
+	isExpectedOrigin,
 } from "./auth.js";
 import type { LegacyCompatibilityPublisher } from "./compatibility.js";
 import { fail, sendValidated } from "./errors.js";
@@ -273,7 +273,7 @@ export function registerValidatedRoutes(options: {
 			// subsequent browser mutations still require that session plus CSRF.
 			if (
 				!bearerIsValid(request, options.token) &&
-				!isExpectedBrowserRequest(request)
+				!isExpectedOrigin(request.headers.origin, request)
 			)
 				return fail(
 					request,

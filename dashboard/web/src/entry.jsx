@@ -67,3 +67,5 @@ const legacyApplication = await import('./app.jsx');
 // The typed shell imports this named component through its narrow compatibility
 // adapter. Standalone legacy delivery still reaches this entrypoint directly.
 export const LegacyDashboardApp = legacyApplication.LegacyDashboardApp;
+export const LegacyDashboardPageBody = legacyApplication.LegacyDashboardPageBody;
+export const LegacyDashboardOverlays = legacyApplication.LegacyDashboardOverlays;

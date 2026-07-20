@@ -427,7 +427,7 @@ export async function exerciseBusOfflineReplay() {
 	return "real SQLite bus dedupe, named cursor replay, passive lease commit/release, manual-interest prune, and audit verified";
 }
 
-function createNodeSocket(url, token, sockets) {
+function createNodeSocket(url, token, sockets, frames = []) {
 	const socket = new WebSocket(url, { headers: { authorization: `Bearer ${token}` } });
 	const adapter = {
 		close: () => socket.close(),
@@ -437,7 +437,15 @@ function createNodeSocket(url, token, sockets) {
 		onopen: null,
 	};
 	socket.on("open", () => adapter.onopen?.());
-	socket.on("message", (raw) => adapter.onmessage?.({ data: String(raw) }));
+	socket.on("message", (raw) => {
+		const data = String(raw);
+		try {
+			frames.push(JSON.parse(data));
+		} catch {
+			// The adapter remains the source of protocol validation.
+		}
+		adapter.onmessage?.({ data });
+	});
 	socket.on("error", () => adapter.onerror?.());
 	socket.on("close", () => adapter.onclose?.());
 	sockets.push(adapter);
@@ -455,11 +463,12 @@ export async function exerciseWsGapResync() {
 		fs.writeFileSync(path.join(staticRoot, "index.html"), "<!doctype html><title>temporary dashboard</title>\n");
 		service = spawnGrouped(process.execPath, [controlPlaneProgram], {
 			cwd: repositoryRoot,
-			env: {
-				...home.env,
-				GOLEM_CONTROL_PLANE_TOKEN: token,
-				GOLEM_CONTROL_PLANE_PORT: "0",
-				GOLEM_CONTROL_PLANE_REPLAY_WINDOW: "2",
+				env: {
+					...home.env,
+					GOLEM_CONTROL_PLANE_TOKEN: token,
+					GOLEM_CONTROL_PLANE_PORT: "0",
+					GOLEM_CONTROL_PLANE_PROJECTION_REVISION: "9",
+					GOLEM_CONTROL_PLANE_REPLAY_WINDOW: "2",
 				GOLEM_CONTROL_PLANE_STATIC_ROOT: staticRoot,
 			},
 		});
@@ -471,7 +480,12 @@ export async function exerciseWsGapResync() {
 		}, "ws gap control plane readiness");
 		if ("failure" in ready) throw ready.failure;
 
-		const { createBrowserControlPlaneClient, createProjectionSynchronizer } = await import("../../packages/api-client/dist/index.js");
+		const {
+			applyProjectionDelta,
+			createBrowserControlPlaneClient,
+			createProjectionSynchronizer,
+			replaceProjectionSnapshot,
+		} = await import("../../packages/api-client/dist/index.js");
 		const client = createBrowserControlPlaneClient(ready.origin, {
 			headers: { authorization: `Bearer ${token}` },
 		});
@@ -479,14 +493,34 @@ export async function exerciseWsGapResync() {
 		const snapshots = [];
 		const deltas = [];
 		const sockets = [];
+		const frames = [];
+		let captureRestartedHttpSnapshot = false;
+		let restartedHttpSnapshot;
 		await client.bootstrap();
+		let projectionCache = replaceProjectionSnapshot(
+			undefined,
+			await client.projection("runtime.live"),
+		);
 		synchronizer = createProjectionSynchronizer({
 			client,
 			stream: "runtime.live",
-			socketFactory: (url) => createNodeSocket(url, token, sockets),
+			socketFactory: (url) => createNodeSocket(url, token, sockets, frames),
 			onState: (state) => states.push(state),
-			onSnapshot: (snapshot, source) => snapshots.push({ source, revision: snapshot.resource_revision }),
-			onDelta: (frame) => deltas.push(frame.sequence),
+			onSnapshot: (snapshot, source) => {
+				projectionCache = replaceProjectionSnapshot(projectionCache, snapshot);
+				if (captureRestartedHttpSnapshot && source === "http")
+					restartedHttpSnapshot = snapshot;
+				snapshots.push({ source, revision: snapshot.resource_revision });
+			},
+			onDelta: (frame) => {
+				if (frame.payload.kind !== "delta") return;
+				projectionCache = applyProjectionDelta(
+					projectionCache,
+					frame.resource_revision,
+					frame.payload.delta,
+				);
+				deltas.push(frame.sequence);
+			},
 			retryDelayMs: 250,
 		});
 		synchronizer.start();
@@ -497,6 +531,12 @@ export async function exerciseWsGapResync() {
 		await client.echo("ordered-one");
 		await waitFor(() => (deltas.length === 1 ? true : undefined), "ordered delta");
 		assert.deepEqual(deltas, [1], "the first ordered delta applies exactly once");
+		await new Promise((resolve) => setTimeout(resolve, 350));
+		assert.equal(
+			sockets.length,
+			1,
+			"an ordinary ordered delta does not restart the single socket epoch",
+		);
 		const activeSocket = sockets.at(-1);
 		assert.ok(activeSocket, "journey owns a real authenticated WebSocket");
 		activeSocket.close();
@@ -522,7 +562,88 @@ export async function exerciseWsGapResync() {
 			3,
 			`the resync epoch closes its stale socket without scheduling a competing reconnect; states=${JSON.stringify(states)} snapshots=${JSON.stringify(snapshots)}`,
 		);
-		return "typed WebSocket applies one ordered delta, detects a real compacted replay cursor, refetches the projection, and reconnects from one fresh snapshot";
+
+		const staleSocket = sockets.at(-1);
+		assert.ok(staleSocket, "resync creates one current socket before restart");
+		const formerProjection = projectionCache;
+		const formerInstance = ready.instance_id;
+		const formerPort = new URL(ready.origin).port;
+		captureRestartedHttpSnapshot = true;
+		await stopProcessGroup(service);
+		service = spawnGrouped(process.execPath, [controlPlaneProgram], {
+			cwd: repositoryRoot,
+			env: {
+				...home.env,
+				GOLEM_CONTROL_PLANE_TOKEN: token,
+				GOLEM_CONTROL_PLANE_PORT: formerPort,
+				GOLEM_CONTROL_PLANE_PROJECTION_REVISION: "0",
+				GOLEM_CONTROL_PLANE_REPLAY_WINDOW: "2",
+				GOLEM_CONTROL_PLANE_STATIC_ROOT: staticRoot,
+			},
+		});
+		const restartedReady = await waitFor(() => {
+			const message = parseReady(service.stdout());
+			if (message) return message;
+			if (exited(service))
+				return {
+					failure: processFailure(
+						"restarted ws gap control plane exited before ready",
+						service,
+					),
+				};
+			return undefined;
+		}, "restarted control plane readiness");
+		if ("failure" in restartedReady) throw restartedReady.failure;
+		assert.equal(
+			new URL(restartedReady.origin).port,
+			formerPort,
+			"the restarted control plane owns the same loopback port",
+		);
+		assert.notEqual(
+			restartedReady.instance_id,
+			formerInstance,
+			"the restarted child exposes a new control-plane instance",
+		);
+		await waitFor(
+			() =>
+				restartedHttpSnapshot &&
+				frames.some(
+					(frame) =>
+						frame.instance_id === restartedReady.instance_id &&
+						frame.payload?.kind === "resync_required" &&
+						frame.payload.reason === "instance_changed",
+					) &&
+				projectionCache.resource_revision < formerProjection.resource_revision &&
+				snapshots.at(-1)?.source === "ws"
+					? true
+					: undefined,
+			"real instance_changed resync and lower-revision HTTP snapshot",
+			4_000,
+		);
+		assert.equal(
+			restartedHttpSnapshot.resource_revision < formerProjection.resource_revision,
+			true,
+			"the restarted child serves a lower authoritative HTTP revision",
+		);
+		assert.deepEqual(
+			projectionCache,
+			restartedHttpSnapshot,
+			"the app's projection cache consumer replaces the former payload with the real HTTP snapshot",
+		);
+		assert.equal(
+			sockets.length,
+			5,
+			`the real restart yields one instance-change socket, one fresh socket, and no competitor; states=${JSON.stringify(states)} snapshots=${JSON.stringify(snapshots)}`,
+		);
+		staleSocket.onmessage?.({ data: "not a current epoch frame" });
+		staleSocket.onclose?.();
+		await new Promise((resolve) => setTimeout(resolve, 350));
+		assert.equal(
+			sockets.length,
+			5,
+			"the retained old callback cannot mutate or reconnect over the real replacement epoch",
+		);
+		return "typed WebSocket keeps one socket for ordered deltas, restarts the real control plane on the same port, replaces the app cache with its lower HTTP revision, and rejects stale epoch callbacks";
 	} finally {
 		if (synchronizer) synchronizer.stop();
 		if (service && !exited(service)) await stopProcessGroup(service);

@@ -14,15 +14,61 @@ import {
 	waitFor,
 } from "@golem/testkit";
 import { acquireChrome } from "../../dashboard/scripts/_chrome.mjs";
+import { upsertSessionRegistration } from "../../lib/session-registry.js";
+import { openTrackerDb } from "../../dashboard/server/tracker-db.js";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const serviceProgram = path.join(repositoryRoot, "apps/control-plane/dist/main.js");
+const legacyDashboardProgram = path.join(repositoryRoot, "dashboard/server/index.js");
 const invalidResponseProgram = path.join(
 	repositoryRoot,
 	"test/control-plane/invalid-response-child.mjs",
 );
-const dashboardStaticRoot = path.join(repositoryRoot, "dashboard/dist");
+const dashboardStaticRoot = path.join(repositoryRoot, "dashboard/dist/control-plane");
+const legacyDashboardRoot = path.join(repositoryRoot, "dashboard/dist");
 const controlPlaneToken = "control-plane-local-test-token";
+const representativeProjection = JSON.stringify({
+	projects: [
+		{
+			id: "injected-project",
+			project_id: "injected-project-abc123",
+			name: "Injected Project",
+			color: "#7c3aed",
+			glyph: "I",
+			milestones: [],
+		},
+	],
+	native_sessions: [
+		{
+			session_id: "injected-session",
+			name: "Injected Session",
+			project_id: "injected-project-abc123",
+			harness: "codex",
+			alive: true,
+			status: "busy",
+			reachable: true,
+			started_at: "2026-01-01T00:00:00.000Z",
+			updated_at: "2026-01-01T00:00:01.000Z",
+		},
+	],
+	channels: [],
+	recent_milestones: [],
+	tickets: [
+		{
+			id: "control-plane-ticket",
+			display_id: "GOL-999",
+			title: "Injected Ticket",
+			body: "Injected typed projection ticket",
+			kind: "work-item",
+			state: "open",
+			project_id: "injected-project-abc123",
+			assignee: null,
+			created_at: "2026-01-01T00:00:00.000Z",
+			updated_at: "2026-01-01T00:00:01.000Z",
+		},
+	],
+	streams: [],
+});
 
 function exited(group) {
 	return group.child.exitCode !== null || group.child.signalCode !== null;
@@ -52,6 +98,7 @@ async function start(home, program = serviceProgram) {
 			...home.env,
 			GOLEM_CONTROL_PLANE_TOKEN: controlPlaneToken,
 			GOLEM_CONTROL_PLANE_PORT: "0",
+			GOLEM_CONTROL_PLANE_PROJECTION_FIXTURE: representativeProjection,
 			GOLEM_CONTROL_PLANE_REPLAY_WINDOW: "2",
 			GOLEM_CONTROL_PLANE_STATIC_ROOT: dashboardStaticRoot,
 		},
@@ -68,6 +115,85 @@ async function start(home, program = serviceProgram) {
 	} catch (error) {
 		await stopProcessGroup(group);
 		throw error;
+	}
+}
+
+async function startLegacyDashboard(home) {
+	const port = await new Promise((resolve, reject) => {
+		const probe = http.createServer();
+		probe.once("error", reject);
+		probe.listen(0, "127.0.0.1", () => {
+			const address = probe.address();
+			if (!address || typeof address === "string") {
+				probe.close(() => reject(new Error("legacy dashboard port probe returned no address")));
+				return;
+			}
+			probe.close((error) => (error ? reject(error) : resolve(address.port)));
+		});
+	});
+	const group = spawnGrouped(process.execPath, [legacyDashboardProgram], {
+		cwd: repositoryRoot,
+		env: {
+			...home.env,
+			GOLEM_ROOT: repositoryRoot,
+			GOLEM_PROJECTS_ROOT: path.join(home.root, "projects"),
+			GOLEM_IDEAS_ROOT: path.join(home.root, "ideas"),
+			HOST: "127.0.0.1",
+			PORT: String(port),
+		},
+	});
+	try {
+		const ready = await waitFor(() => {
+			if (fs.existsSync(path.join(home.golemHome, "dashboard.json")))
+				return { origin: `http://127.0.0.1:${port}` };
+			if (exited(group))
+				return {
+					failure: processFailure("legacy dashboard exited before readiness", group),
+				};
+			return undefined;
+		}, "legacy dashboard readiness");
+		if ("failure" in ready) throw ready.failure;
+		return { group, ...ready };
+	} catch (error) {
+		await stopProcessGroup(group);
+		throw error;
+	}
+}
+
+async function seedLegacyDashboardData(home) {
+	const projectRoot = path.join(home.root, "projects", "persisted-legacy-project");
+	fs.mkdirSync(projectRoot, { recursive: true });
+	fs.writeFileSync(
+		path.join(projectRoot, "CLAUDE.md"),
+		"# Persisted Legacy Project\n\nA real project seeded through the legacy dashboard registries.\n",
+	);
+	const registration = await upsertSessionRegistration({
+		sessionId: "persisted-legacy-session",
+		cwd: projectRoot,
+		harness: "codex",
+		model: "gpt-5",
+		name: "Persisted Legacy Session",
+		observedAt: new Date().toISOString(),
+		projectsFile: path.join(home.golemHome, "projects.json"),
+		sessionsFile: path.join(home.golemHome, "sessions.json"),
+	});
+	const tracker = openTrackerDb(home.trackerDb);
+	try {
+		const ticket = tracker.createTicket({
+			project_id: registration.project_id,
+			kind: "work-item",
+			title: "Persisted Legacy Ticket",
+			body: "A real ticket persisted through the legacy tracker database.",
+			created_by: "legacy-browser-journey",
+		});
+		return {
+			projectName: "Persisted Legacy Project",
+			sessionName: "Persisted Legacy Session",
+			ticketTitle: ticket.title,
+			ticketId: ticket.display_id,
+		};
+	} finally {
+		tracker.close();
 	}
 }
 
@@ -180,11 +306,45 @@ function setCookie(response) {
 	return value.split(";", 1)[0];
 }
 
-async function assertBrowserShell(origin) {
+async function assertBrowserShell(origin, legacyOrigin, legacyData) {
 	const chrome = await acquireChrome();
 	try {
 		const context = await chrome.browser.newContext();
 		try {
+			const legacyPage = await context.newPage();
+			const legacyRequests = [];
+			const legacySockets = [];
+			legacyPage.on("request", (request) => legacyRequests.push(request.url()));
+			legacyPage.on("websocket", (socket) => legacySockets.push(socket.url()));
+			await legacyPage.goto(`${legacyOrigin}/`, { waitUntil: "domcontentloaded" });
+			await legacyPage.getByRole("heading", { name: "Command Center" }).waitFor({ state: "visible", timeout: 4_000 });
+			await legacyPage.locator(".cc-work-name", { hasText: legacyData.projectName }).waitFor({ state: "visible", timeout: 4_000 });
+			await legacyPage.locator(".native-session-name", { hasText: legacyData.sessionName }).waitFor({ state: "visible", timeout: 4_000 });
+			assert.equal(
+				legacyRequests.some((request) => new URL(request).pathname.startsWith("/api/v1/")),
+				false,
+				"the authoritative legacy browser path does not require a typed bootstrap route",
+			);
+			assert.equal(
+				legacySockets.some((socket) => new URL(socket).pathname === "/ws"),
+				true,
+				"the authoritative legacy browser path consumes its real legacy WebSocket route",
+			);
+			assert.equal(await legacyPage.getByText("connecting…", { exact: true }).count(), 0, "legacy app leaves its snapshot loading state");
+			assert.equal(
+				await legacyPage.locator(".td-error, .settings-alert.error, .communication-error, .ct-error").count(),
+				0,
+				"legacy app has no terminal visible error state",
+			);
+			await legacyPage.getByRole("link", { name: "Tracker" }).click();
+			await legacyPage.locator(".tracker-board").waitFor({ state: "visible", timeout: 4_000 });
+			await legacyPage.locator(".ticket-title", { hasText: legacyData.ticketTitle }).waitFor({ state: "visible", timeout: 4_000 });
+			assert.equal(
+				await legacyPage.getByText(legacyData.ticketId, { exact: true }).count(),
+				1,
+				"legacy tracker visibly renders the persisted ticket id",
+			);
+
 			const page = await context.newPage();
 			await page.goto(`${origin}/?ticket=control-plane-ticket`, { waitUntil: "domcontentloaded" });
 			const shippedScripts = await page.evaluate(async () =>
@@ -203,32 +363,79 @@ async function assertBrowserShell(origin) {
 			);
 			assert.equal(await page.locator("#root").count(), 1, "typed dashboard static shell is served by the control plane");
 			await page.getByTestId("dashboard-shell").waitFor({ state: "visible", timeout: 4_000 });
-			await page.getByRole("dialog", { name: "Ticket details" }).waitFor({ state: "visible", timeout: 4_000 });
-			assert.equal(await page.locator("[data-compatibility-island='legacy-current-pages'] .app").count(), 1, "typed shell mounts the current legacy page implementation through one explicit island");
+			await page.getByRole("dialog", { name: "Ticket GOL-999" }).waitFor({ state: "visible", timeout: 4_000 });
+			await page.getByText("Injected Project", { exact: true }).waitFor({ state: "visible", timeout: 4_000 });
+			await page.getByText("Injected Session", { exact: true }).waitFor({ state: "visible", timeout: 4_000 });
+			await page.getByText("Injected Ticket", { exact: true }).waitFor({ state: "visible", timeout: 4_000 });
+			assert.equal(
+				await page.locator(".cc-work-name", { hasText: "Injected Project" }).count(),
+				1,
+				"typed control-plane path renders the injected project from its projection",
+			);
+			assert.equal(
+				await page.getByRole("button", { name: "Open agent Injected Session details" }).count(),
+				1,
+				"typed control-plane path renders the injected session from its projection",
+			);
+			assert.equal(
+				await page.locator(".td-title", { hasText: "Injected Ticket" }).count(),
+				1,
+				"typed control-plane path renders the injected ticket from its projection",
+			);
+			assert.equal(await page.locator("[data-compatibility-island='legacy-current-pages'] .page").count(), 1, "typed shell mounts the selected real legacy page body through one explicit island");
+			assert.equal(await page.locator("[data-compatibility-island='legacy-current-pages'] .app").count(), 0, "the legacy App shell is never mounted inside the typed shell");
+			assert.equal(await page.getByText("connecting…", { exact: true }).count(), 0, "the adapter replays the initial typed projection after Store loads, so the real page leaves its legacy connecting placeholder");
+			assert.equal(await page.getByRole("navigation").count(), 1, "typed Router owns the sole navigation landmark");
 			await page.keyboard.press("Escape");
 			await page.waitForFunction(() => !window.location.search.includes("ticket="), undefined, { timeout: 4_000 });
 			await page.getByRole("link", { name: "Tracker" }).click();
 			await page.locator(".tracker-board").waitFor({ state: "visible", timeout: 4_000 });
 			assert.match(page.url(), /\/tracker$/u, "typed Router keeps the legacy navigation URL deep-linkable");
+			const priorUrl = page.url();
 			const create = page.getByRole("button", { name: "+ New ticket" });
 			await create.focus();
 			await page.keyboard.press("Enter");
 			await page.locator(".drawer-compose.open").waitFor({ state: "visible", timeout: 4_000 });
+			await page.goBack();
+			await page.waitForFunction(() => !window.location.search.includes("compose="), undefined, { timeout: 4_000 });
+			assert.equal(page.url(), priorUrl, "Back closes the typed overlay to the exact prior URL");
+			await page.goForward();
+			await page.locator(".drawer-compose.open").waitFor({ state: "visible", timeout: 4_000 });
+			assert.match(page.url(), /[?&]compose=/u, "Forward reopens the same typed overlay history entry");
 			await page.keyboard.press("Escape");
 			await page.waitForFunction(() => !window.location.search.includes("compose="), undefined, { timeout: 4_000 });
-			const tracker = page.getByRole("link", { name: "Tracker" });
-			await tracker.focus();
-			await page.evaluate(() => window.Router.openTicket("control-plane-ticket"));
-			await page.getByRole("dialog", { name: "Ticket details" }).waitFor({ state: "visible", timeout: 4_000 });
-			await page.keyboard.press("Escape");
+			assert.equal(page.url(), priorUrl, "explicit close returns to the exact prior URL");
 			assert.equal(
-				await tracker.evaluate((element) => document.activeElement === element),
+				await create.evaluate((element) => document.activeElement === element),
 				true,
-				"the current ticket drawer restores focus to its real invoking legacy trigger",
+				"the typed overlay owner restores focus to the real legacy compose trigger",
 			);
 			for (const [width, height] of [[360, 800], [768, 900], [1280, 900]]) {
 				await page.setViewportSize({ width, height });
 				assert.equal(await page.getByTestId("dashboard-shell").isVisible(), true, `shell remains reachable at ${width}px`);
+				const layout = await page.evaluate(() => ({
+					documentWidth: document.documentElement.scrollWidth,
+					viewportWidth: window.innerWidth,
+				}));
+				assert.equal(
+					layout.documentWidth <= layout.viewportWidth,
+					true,
+					`dashboard shell has no unintended horizontal overflow at ${width}px`,
+				);
+				await page.getByRole("link", { name: "Tracker" }).focus();
+				assert.equal(
+					await page.getByRole("link", { name: "Tracker" }).evaluate(
+						(element) => document.activeElement === element,
+					),
+					true,
+					`real tracker control remains keyboard-reachable at ${width}px`,
+				);
+				await create.focus();
+				assert.equal(
+					await create.evaluate((element) => document.activeElement === element),
+					true,
+					`real compose control remains keyboard-reachable at ${width}px`,
+				);
 			}
 			await page.emulateMedia({ colorScheme: "dark" });
 			await page.evaluate(() => window.localStorage.setItem("golem.ui.theme", "system"));
@@ -250,12 +457,31 @@ async function assertBrowserShell(origin) {
 export async function exerciseControlPlaneShell() {
 	const home = createTemporaryHome("golem-j6-control-plane-");
 	const invalidHome = createTemporaryHome("golem-j6-invalid-response-");
+	const legacyHome = createTemporaryHome("golem-j6-legacy-dashboard-");
 	let first;
+	let legacyDashboard;
+	let legacyData;
 	let duplicate;
 	let recovered;
 	let invalidResponse;
 	let expiringService;
 	try {
+		assert.equal(fs.existsSync(path.join(legacyDashboardRoot, "index.html")), true, "legacy generated root artifact exists");
+		assert.equal(fs.existsSync(path.join(dashboardStaticRoot, "index.html")), true, "typed control-plane generated root artifact exists");
+		legacyData = await seedLegacyDashboardData(legacyHome);
+		legacyDashboard = await startLegacyDashboard(legacyHome);
+		const legacyIndex = await fetch(`${legacyDashboard.origin}/`);
+		assert.equal(legacyIndex.status, 200, "standard legacy dashboard root boots");
+		const legacyHtml = await legacyIndex.text();
+		assert.match(legacyHtml, /Golem · Dashboard/u, "legacy root keeps its authoritative title");
+		assert.doesNotMatch(legacyHtml, /Golem control plane/u, "legacy root is not replaced by the typed shell");
+		const legacyDashboardSnapshot = await requestJson(`${legacyDashboard.origin}/api/snapshot`);
+		assert.equal(legacyDashboardSnapshot.response.status, 200, "legacy dashboard keeps its real snapshot route");
+		assert.deepEqual(
+			Object.keys(legacyDashboardSnapshot.body).sort(),
+			["channels", "chat", "native_sessions", "projects", "recent_milestones", "streams", "tickets", "workspaces"].sort(),
+			"legacy snapshot retains its established top-level shape",
+		);
 		first = await start(home);
 		assert.match(first.origin, /^http:\/\/127\.0\.0\.1:\d+$/u);
 		assert.match(first.instance_id, /^cpi_/u);
@@ -335,19 +561,34 @@ export async function exerciseControlPlaneShell() {
 		});
 		assert.equal(wrongBrowserOrigin.response.status, 403, "a wrong browser Origin cannot mint a session");
 		assert.equal(wrongBrowserOrigin.body.code, "origin.invalid");
-
+		const nonLoopbackBrowserOrigin = await requestJson(`${first.origin}/api/v1/browser/session`, {
+			method: "POST",
+			headers: { origin: "http://example.invalid" },
+		});
+		assert.equal(nonLoopbackBrowserOrigin.response.status, 403, "a non-loopback browser Origin cannot mint a session");
+		assert.equal(nonLoopbackBrowserOrigin.body.code, "origin.invalid");
 		const bootstrap = await requestJson(`${first.origin}/api/v1/browser/session`, {
 			method: "POST",
-			headers: { authorization: `Bearer ${controlPlaneToken}` },
+			headers: { origin: first.origin },
 		});
-		assert.equal(bootstrap.response.status, 200);
+		assert.equal(bootstrap.response.status, 200, "a strict same-origin browser POST mints one session");
 		assert.equal(
 			bootstrap.body.schema_version,
 			"golem.control-plane-browser-session/v1",
-			"bearer mutation succeeds without a browser Origin",
 		);
 		const cookie = setCookie(bootstrap.response);
 		assert.match(cookie, /^golem_control_plane_session=/u);
+
+		const bearerBootstrap = await requestJson(`${first.origin}/api/v1/browser/session`, {
+			method: "POST",
+			headers: { authorization: `Bearer ${controlPlaneToken}` },
+		});
+		assert.equal(bearerBootstrap.response.status, 200);
+		assert.equal(
+			bearerBootstrap.body.schema_version,
+			"golem.control-plane-browser-session/v1",
+			"bearer mutation succeeds without a browser Origin",
+		);
 		const invalidRequest = await requestJson(`${first.origin}/api/v1/browser/echo`, {
 			method: "POST",
 			headers: {
@@ -453,7 +694,7 @@ export async function exerciseControlPlaneShell() {
 			},
 			"cross-port browser session Origin",
 		);
-		await assertBrowserShell(first.origin);
+		await assertBrowserShell(first.origin, legacyDashboard.origin, legacyData);
 		const echoed = await requestJson(`${first.origin}/api/v1/browser/echo`, {
 			method: "POST",
 			headers: {
@@ -758,10 +999,13 @@ export async function exerciseControlPlaneShell() {
 		if (duplicate && !exited(duplicate)) await stopProcessGroup(duplicate);
 		if (recovered) await stopProcessGroup(recovered.group);
 		if (first) await stopProcessGroup(first.group);
+		if (legacyDashboard) await stopProcessGroup(legacyDashboard.group);
 		assert.equal(fs.existsSync(path.join(home.golemHome, "control-plane", "control-plane.lock")), false, "SIGTERM cleanup releases the service lock");
 		home.cleanup();
 		assert.equal(fs.existsSync(home.root), false, "control-plane journey removes its temporary GOLEM_HOME");
 		invalidHome.cleanup();
 		assert.equal(fs.existsSync(invalidHome.root), false, "invalid-response child removes its temporary GOLEM_HOME");
+		legacyHome.cleanup();
+		assert.equal(fs.existsSync(legacyHome.root), false, "legacy dashboard removes its temporary GOLEM_HOME");
 	}
 }

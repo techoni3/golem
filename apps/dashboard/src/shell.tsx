@@ -1,14 +1,22 @@
 import {
+	applyProjectionDelta,
 	type BrowserControlPlaneClient,
 	type ControlPlaneStream,
 	createBrowserControlPlaneClient,
 	createProjectionSynchronizer,
 	type ProjectionConnectionState,
+	replaceProjectionSnapshot,
 } from "@golem/api-client";
 import { InlineAlert, Select, Skeleton, StatePanel, useTheme } from "@golem/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as React from "react";
-import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
+import {
+	BrowserRouter,
+	Link,
+	Route,
+	Routes,
+	useLocation,
+} from "react-router-dom";
 
 import { LegacyCompatibilityIsland } from "./legacy-compatibility.js";
 import styles from "./shell.module.css";
@@ -35,12 +43,6 @@ const legacyRoutePaths = [
 type ProjectionResponse = Awaited<
 	ReturnType<BrowserControlPlaneClient["projection"]>
 >;
-
-function objectValue(value: unknown): Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value)
-		? (value as Record<string, unknown>)
-		: {};
-}
 
 function useControlPlaneClient(): BrowserControlPlaneClient {
 	return React.useMemo(
@@ -72,31 +74,19 @@ function useLiveProjection(
 			stream: projectionStream,
 			onState: setConnection,
 			onSnapshot: (snapshot) => {
-				queryClient.setQueryData<ProjectionResponse>(
-					projectionKey,
-					(current) =>
-						current && current.resource_revision > snapshot.resource_revision
-							? current
-							: snapshot,
+				// A synchronizer snapshot is authoritative for its current epoch. A
+				// restarted control plane can validly restart resource revisions, so
+				// only ordered same-instance deltas are monotonic.
+				queryClient.setQueryData<ProjectionResponse>(projectionKey, (current) =>
+					replaceProjectionSnapshot(current, snapshot),
 				);
 			},
 			onDelta: (frame) => {
 				if (frame.payload.kind !== "delta") return;
 				const delta = frame.payload.delta;
-				queryClient.setQueryData<ProjectionResponse>(
-					projectionKey,
-					(current) => {
-						if (!current || frame.resource_revision < current.resource_revision)
-							return current;
-						return {
-							...current,
-							resource_revision: frame.resource_revision,
-							payload: {
-								...objectValue(current.payload),
-								...objectValue(delta),
-							},
-						};
-					},
+				const resourceRevision = frame.resource_revision;
+				queryClient.setQueryData<ProjectionResponse>(projectionKey, (current) =>
+					applyProjectionDelta(current, resourceRevision, delta),
 				);
 			},
 		});
@@ -193,6 +183,15 @@ function Shell() {
 	});
 	const { preference, setPreference } = useTheme();
 	const location = useLocation();
+	const navigation = [
+		["Dashboard", "/"],
+		["Tracker", "/tracker"],
+		["Specs", "/specs"],
+		["Projects", "/projects"],
+		["Agents", "/agents"],
+		["Logs", "/logs"],
+		["Settings", "/settings"],
+	] as const;
 
 	return (
 		<div className={styles.shell} data-testid="dashboard-shell">
@@ -217,12 +216,25 @@ function Shell() {
 					value={preference}
 				/>
 			</header>
+			<nav aria-label="Dashboard" className={styles.typedNavigation}>
+				{navigation.map(([label, to]) => (
+					<Link key={to} to={to}>
+						{label}
+					</Link>
+				))}
+			</nav>
 			<main className={styles.main} id="dashboard-content" tabIndex={-1}>
 				{bootstrap.isError ? (
 					<StatePanel
 						description="Browser authentication could not be initialized from this origin."
 						kind="error"
 						title="Authentication unavailable"
+					/>
+				) : meta.isError ? (
+					<StatePanel
+						description="The control plane metadata could not be loaded. Reload after the service is ready."
+						kind="error"
+						title="Metadata unavailable"
 					/>
 				) : (
 					<RouteContent
