@@ -9,6 +9,9 @@
 			"import": "./dist/index.js"
 		}
 	},
+	"scripts": {
+		"build": "tsc -b"
+	},
 	"devDependencies": {
 		"esbuild": "0.28.1"
 	}

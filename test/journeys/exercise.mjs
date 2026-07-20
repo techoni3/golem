@@ -22,6 +22,7 @@ import {
 	waitFor,
 } from "@golem/testkit";
 import { normalizeLegacyObservation } from "../parity/normalization.mjs";
+import { exerciseRenderMcpClosure } from "../render-mcp-closure.mjs";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright-core");
@@ -371,4 +372,5 @@ export const exercises = Object.freeze({
 	"testkit-cleanup-drill": exerciseCleanupDrill,
 	"testkit-browser": exerciseBrowser,
 	"legacy-parity-baseline": exerciseLegacyParityBaseline,
+	"render-mcp-closure": exerciseRenderMcpClosure,
 });

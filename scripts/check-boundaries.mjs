@@ -163,6 +163,16 @@ function forbiddenRule(owner, specifier) {
 	) {
 		return "client-to-repository";
 	}
+	if (
+		owner === "@golem/mcp-adapter" &&
+		(specifier === "@golem/domain" ||
+			specifier === "@golem/runtime" ||
+			specifier === "@golem/tracker" ||
+			specifier === "@golem/compat" ||
+			isAdapter(specifier))
+	) {
+		return "mcp-adapter-to-domain";
+	}
 	if (owner !== "@golem/compat" && specifier === "@golem/compat")
 		return "canonical-to-compat";
 	if (

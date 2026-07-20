@@ -9,8 +9,15 @@
 			"import": "./dist/index.js"
 		}
 	},
+	"scripts": {
+		"build": "tsc -b && node ./scripts/build-artifact.mjs"
+	},
 	"dependencies": {
 		"@golem/api-client": "file:../api-client",
+		"@golem/contracts": "file:../contracts",
 		"@modelcontextprotocol/sdk": "1.29.0"
+	},
+	"devDependencies": {
+		"esbuild": "0.25.12"
 	}
 }
