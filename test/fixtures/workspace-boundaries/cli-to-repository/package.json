@@ -1,0 +1,4 @@
+{
+  "name": "@golem/cli",
+  "expectedBoundaryRule": "client-to-repository"
+}

@@ -723,7 +723,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           id: { type: 'string', description: 'Display ticket id, e.g. GOL-244. Legacy TKT refs still resolve.' },
           phase: { type: 'string', description: 'Target phase (kind-dependent), e.g. queued|building|blocked|built|verifying|verified|rejected|done.' },
           reason: { type: 'string', description: 'Reason required by blocked/parked transitions.' },
-          skip_reason: { type: 'string', description: 'Explicit lifecycle skip reason; reserved for the manager-authorized escape hatch once phase enforcement lands.' },
+          skip_reason: { type: 'string', description: 'Rejected on this MCP compatibility surface unless a server-owned verified authority is provisioned.' },
         },
         required: ['id', 'phase'],
       },
@@ -1331,10 +1331,16 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         if (!args.id) throw new Error('ticket_transition: id is required');
         if (!args.phase) throw new Error('ticket_transition: phase is required');
         if (!sessionId) throw new Error('ticket_transition: no current session id to record as actor');
+        // MCP has no verified manager/human exceptional-close capability in
+        // this compatibility surface. A request-shaped skip reason is never
+        // forwarded as authority; callers must use the server-owned close
+        // composition when that capability is explicitly provisioned.
+        if (args.skip_reason !== undefined) {
+          throw new Error('exceptional close requires a verified authenticated authority');
+        }
         return await jsonResult(await tracker.transitionTicket(args.id, {
           phase: args.phase,
           reason: args.reason,
-          skip_reason: args.skip_reason,
           actor: sessionId,
         }));
       }

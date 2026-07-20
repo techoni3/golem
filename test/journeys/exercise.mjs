@@ -44,6 +44,7 @@ const runtimeEngineJourney = path.join(repositoryRoot, "test/runtime/materialize
 const dashboardDownJourney = path.join(repositoryRoot, "test/runtime/dashboard-down-inbox-replay.test.mjs");
 const deliveryBusJourney = path.join(repositoryRoot, "test/tracker/delivery-bus.test.mjs");
 const controlPlaneProgram = path.join(repositoryRoot, "apps/control-plane/dist/main.js");
+const trackerCoreJourney = path.join(repositoryRoot, "test/tracker/tracker-core.test.mjs");
 const chromeExecutable = process.env.GOLEM_CHROME_EXECUTABLE || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
 class JourneyDiagnosticError extends Error {
@@ -651,6 +652,31 @@ export async function exerciseWsGapResync() {
 	}
 }
 
+export async function exerciseTrackerCoreCompatibility() {
+	const home = createTemporaryHome("golem-j4-tracker-core-runner-");
+	const group = spawnGrouped(
+		process.execPath,
+		["--test", "--test-concurrency=1", trackerCoreJourney],
+		{ cwd: repositoryRoot, env: home.env },
+	);
+	try {
+		await waitFor(
+			() => (exited(group) ? true : undefined),
+			"tracker core compatibility journey exit",
+			30_000,
+		);
+		if (group.child.exitCode !== 0)
+			throw processFailure(
+				`tracker core compatibility journey exited ${group.child.exitCode}`,
+				group,
+			);
+		return "real legacy tracker migration, SQLite repository, Fastify compatibility facade, MCP HTTP client, canonical phases, concurrent display ids, and transactional audit/outbox verified";
+	} finally {
+		if (!exited(group)) await stopProcessGroup(group);
+		cleanupHome(home);
+	}
+}
+
 export async function exerciseBrowser() {
 	const home = createTemporaryHome("golem-j8-browser-");
 	const artifactRoot = path.join(home.root, "browser-artifacts");
@@ -712,6 +738,7 @@ export const exercises = Object.freeze({
 	"delivery-queue-crash-matrix": exerciseDeliveryQueueCrashMatrix,
 	"bus-offline-replay": exerciseBusOfflineReplay,
 	"ws-gap-resync": exerciseWsGapResync,
+	"tracker-core-compatibility": exerciseTrackerCoreCompatibility,
 	"testkit-browser": exerciseBrowser,
 	"legacy-parity-baseline": exerciseLegacyParityBaseline,
 	"render-mcp-closure": exerciseRenderMcpClosure,

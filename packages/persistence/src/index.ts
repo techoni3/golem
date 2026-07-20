@@ -1,8 +1,11 @@
 /**
- * Public persistence boundary. It exports contracts and migration facts only;
- * opening a writable database is reserved for the control-plane composition.
+ * Public persistence boundary. Full writable runtime/tracker ownership remains
+ * private to control-plane composition; the only opener here is the narrow,
+ * migration-neutral tracker attachment used after the legacy tracker opener.
  */
 export { runtimeMigrations, trackerMigrations } from "./schema.js";
+export type { TrackerCoreCapabilityHandle } from "./tracker-core-capability.js";
+export { openTrackerCoreCapability } from "./tracker-core-capability.js";
 export type {
 	CapabilityQualification,
 	ClaimedOutboxRecord,
@@ -43,6 +46,22 @@ export type {
 	SessionAliasKind,
 	TrackerAppendBusEventResult,
 	TrackerBusEvent,
+	TrackerCoreActorContext,
+	TrackerCoreAuditRecord,
+	TrackerCoreComment,
+	TrackerCoreExceptionalClose,
+	TrackerCoreLink,
+	TrackerCoreLinkRelation,
+	TrackerCoreMutationMetadata,
+	TrackerCorePhaseEvidence,
+	TrackerCorePriority,
+	TrackerCoreResourceType,
+	TrackerCoreRuntimeReference,
+	TrackerCoreState,
+	TrackerCoreStorageCapability,
+	TrackerCoreStream,
+	TrackerCoreWorkItem,
+	TrackerCoreWorkItemKind,
 	TrackerCreateEnvelopeResult,
 	TrackerDeliveryEligibility,
 	TrackerDeliveryEnvelope,

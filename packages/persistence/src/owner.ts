@@ -24,6 +24,7 @@ import {
 	hasTrackerTables,
 	sha256,
 } from "./schema.js";
+import { TrackerCoreRepository } from "./tracker-core-repository.js";
 import { TrackerRepository } from "./tracker-repository.js";
 import {
 	type ClaimedOutboxRecord,
@@ -41,6 +42,7 @@ import {
 	type RuntimeMaterializationResult,
 	type RuntimeTransactionInput,
 	type RuntimeTransactionResult,
+	type TrackerCoreStorageCapability,
 	type TrackerStorageCapability,
 } from "./types.js";
 
@@ -75,6 +77,7 @@ class PersistenceOwner implements PersistenceWriteCapability {
 	readonly #trackerSql: Kysely<TrackerTables>;
 	readonly #runtimeRepository: RuntimeRepository;
 	readonly #trackerRepository: TrackerRepository;
+	readonly #trackerCoreRepository: TrackerCoreRepository;
 	readonly #paths: Readonly<PersistencePaths>;
 	readonly #ownerId: string;
 	readonly #clock: PersistenceClock;
@@ -133,6 +136,10 @@ class PersistenceOwner implements PersistenceWriteCapability {
 			}
 			this.#runtimeRepository = new RuntimeRepository(runtime, this.#clock);
 			this.#trackerRepository = new TrackerRepository(tracker);
+			this.#trackerCoreRepository = new TrackerCoreRepository(
+				this.#trackerSql,
+				tracker,
+			);
 		} catch (error) {
 			safeClose(runtime);
 			safeClose(tracker);
@@ -173,7 +180,9 @@ class PersistenceOwner implements PersistenceWriteCapability {
 				`${scope} migration plan changed while preparing the source database`,
 			);
 		const result = applyPlan(database, databasePath, plan, this.#clock);
-		if (scope === "tracker") this.#trackerBaseline = "managed";
+		if (scope === "tracker") {
+			this.#trackerBaseline = "managed";
+		}
 		return result;
 	}
 
@@ -223,6 +232,10 @@ class PersistenceOwner implements PersistenceWriteCapability {
 
 	trackerStorage(): TrackerStorageCapability {
 		return this.#trackerRepository;
+	}
+
+	trackerCoreStorage(): TrackerCoreStorageCapability {
+		return this.#trackerCoreRepository;
 	}
 
 	status(): PersistenceStatus {

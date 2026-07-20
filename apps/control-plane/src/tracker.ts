@@ -1,8 +1,11 @@
 import type { PersistenceWriteCapability } from "@golem/persistence";
 import {
+	createTrackerCoreServices,
 	createTrackerServices,
 	type DeliveryEligibilityPort,
 	type TrackerClock,
+	type TrackerCoreActorContext,
+	type TrackerCoreServices,
 	type TrackerServices,
 } from "@golem/tracker";
 
@@ -19,5 +22,27 @@ export function composeControlPlaneTrackerServices(options: {
 		storage: options.writer.trackerStorage(),
 		eligibility: options.eligibility,
 		clock: options.clock,
+	});
+}
+
+/**
+ * Separate composition seam for tickets/comments/phases. It exposes the
+ * legacy-shape facade to a route adapter without letting that adapter obtain a
+ * raw database connection or make runtime readiness decisions.
+ */
+export function composeControlPlaneTrackerCoreServices(options: {
+	readonly writer: PersistenceWriteCapability;
+	readonly clock: TrackerClock;
+	readonly trustedExceptionalCloseContext?: TrackerCoreActorContext;
+}): TrackerCoreServices {
+	return createTrackerCoreServices({
+		storage: options.writer.trackerCoreStorage(),
+		clock: options.clock,
+		...(options.trustedExceptionalCloseContext === undefined
+			? {}
+			: {
+					trustedExceptionalCloseContext:
+						options.trustedExceptionalCloseContext,
+				}),
 	});
 }

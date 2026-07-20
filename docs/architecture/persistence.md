@@ -1,7 +1,8 @@
 # Single-owner SQLite persistence
 
 `packages/persistence` owns the contract for writable `runtime.db` and
-`tracker.db`, but its public index exposes only contracts and migration facts.
+`tracker.db`; its public index exposes contracts, migration facts, and one
+tracker-only typed attachment capability.
 The private `@golem/persistence/control-plane` constructor is mechanically
 permitted only to the internal `@golem/control-plane` composition module; the
 control-plane public entry does not re-export it and other workspaces cannot
@@ -15,6 +16,12 @@ managed store with foreign keys, WAL, a 2500ms busy timeout, and
 `synchronous=FULL`, then exposes explicit transactions and status through that
 narrow capability. An unmanaged legacy tracker is inspection-only until its
 explicit baseline apply, so even its journal mode is not rewritten on open.
+
+The shipped dashboard first opens its normal legacy tracker facade, then
+attaches a tracker-only, migration-neutral typed capability before route
+registration. It never opens `runtime.db`, acquires the persistence owner, or
+auto-applies a tracker plan; REST/MCP mutations share the canonical live rows,
+resource revisions, and event ledger through that attachment.
 
 The databases are separate connections and are never attached or committed as
 one transaction. A runtime mutation writes its raw deduplicated event,
@@ -60,12 +67,15 @@ the clone and its temporary backup without writing the source database.
 
 The existing tracker file is inspected without mutation when it has legacy
 tables. An explicit `tracker/001-baseline` application adds Golem
-migration/audit metadata and `tracker/002-durable-delivery-bus` adds only
-namespaced envelope, bus, subscription, passive-cursor, and audit tables, so
-legacy tracker rows remain intact. Fresh tracker files receive both migrations
-automatically. The private owner exposes a typed tracker storage capability to
-control-plane composition, never a raw tracker connection. Persistence receives
-an injected clock. Outbox consumers claim a bounded batch with a lease, replay only expired
+migration/audit metadata, `tracker/002-durable-delivery-bus` adds namespaced
+delivery/bus tables, and `tracker/003-live-tracker-core` creates the canonical
+live tracker rows on a fresh managed database. Typed core services use the
+legacy `tickets`, `comments`, `links`, `streams`, and `events` tables directly;
+no import or second work-item store exists. Fresh tracker files receive all
+three tracker migrations automatically. Resource CAS and outbox evidence derive
+from canonical `events.id`. The private owner exposes typed delivery and
+tracker-core storage capabilities to control-plane composition, never a raw
+tracker connection. Persistence receives an injected clock. Outbox consumers claim a bounded batch with a lease, replay only expired
 claims, acknowledge with the active claim token, and record exponential
 `next_attempt_at` backoff through a bounded observable permanent failure; this
 preserves at-least-once cross-store delivery without claiming one cross-file

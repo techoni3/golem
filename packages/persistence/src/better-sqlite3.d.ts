@@ -23,7 +23,9 @@ declare module "better-sqlite3" {
 		prepare<Row = Record<string, unknown>>(source: string): Statement<Row>;
 		transaction<Args extends readonly unknown[], Result>(
 			fn: (...arguments_: Args) => Result,
-		): (...arguments_: Args) => Result;
+		): ((...arguments_: Args) => Result) & {
+			readonly immediate: (...arguments_: Args) => Result;
+		};
 		close(): void;
 	}
 }

@@ -191,17 +191,22 @@ function hydrateTicket(row) {
 /**
  * Open (and migrate) the tracker DB.
  * @param {string} [dbPath] defaults to defaultDbPath()
+ * @param {{ trackerCore?: object }} [options] optional typed core capability
  * @returns the data-access object documented in the WS1 spec.
  */
-export function openTrackerDb(dbPath = defaultDbPath()) {
+export function openTrackerDb(dbPath = defaultDbPath(), options = {}) {
   // Ensure the parent dir exists for a file-backed DB (skip for :memory:).
   if (dbPath !== ':memory:') {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   }
   const db = new Database(dbPath);
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
+  if (!options?.skipPragmas) db.pragma('journal_mode = WAL');
+  if (!options?.skipPragmas) db.pragma('foreign_keys = ON');
   db.pragma('busy_timeout = 5000');
+  // The shipped facade remains the row/payload authority. Control-plane
+  // composition may attach a narrow typed capability so mutations route
+  // through the extracted services without exposing a database handle.
+  let trackerCore = options?.trackerCore ?? null;
 
   function migrate() {
     db.exec(`
@@ -766,6 +771,7 @@ WHERE state_changed_at IS NULL`).run();
     // existing DBs (where the ALTER TABLE above just added the columns).
     db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_state_rank ON tickets(state, rank)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_tickets_done_at ON tickets(done_at) WHERE done_at IS NOT NULL`);
+
     // Update schema_version to the current version.
     db.prepare('UPDATE meta SET value = ? WHERE key = ?').run(String(SCHEMA_VERSION), 'schema_version');
 }
@@ -1854,8 +1860,8 @@ WHERE state_changed_at IS NULL`).run();
   // ---- public API -------------------------------------------------------
 
   const api = {
-    init() {
-      migrate();
+    init({ migrateDb = true } = {}) {
+      if (migrateDb) migrate();
       prepare();
       commentDispatch = createCommentDispatchService({
         db,
@@ -2021,7 +2027,10 @@ WHERE state_changed_at IS NULL`).run();
       if (req.closingBrief && !hasComment(/closing\s+brief/i) && !input.closingBrief) missing.push('closingBrief');
       if (req.managerDispatch && !ticket.dispatched_to && !input.managerDispatch) missing.push('managerDispatch');
       if (req.verificationReport && !hasComment(/verification|verify-done|smoke|test/i) && !input.verificationReport) missing.push('verificationReport');
-      if (req.verifiedOrSkipReason && current !== 'verified' && !String(input.skip_reason || input.reason || '').trim()) missing.push('verifiedOrSkipReason');
+      // Exceptional close is owned by the typed capability. The legacy
+      // fallback may consume verified evidence only; request-body reason,
+      // skip_reason, actor, or booleans never authorize built -> done.
+      if (req.verifiedOrSkipReason && current !== 'verified') missing.push('verifiedOrSkipReason');
       if (req.answerComment && comments.length === 0 && !input.answerComment) missing.push('answerComment');
       if (req.decisionComment && !hasComment(/decision|decided/i) && !input.decisionComment) missing.push('decisionComment');
       if (req.children || req.childrenTerminal || req.childStarted) {
@@ -2363,8 +2372,13 @@ WHERE state_changed_at IS NULL`).run();
         if (updates.state === 'done') updates.done_at = ts;
         if (updates.state === 'archived') updates.archived_at = ts;
       }
+      const changedFields = Object.keys(updates).filter((key) =>
+        !['state_changed_at', 'done_at', 'archived_at'].includes(key) &&
+        updates[key] !== existing[key]
+      );
 
       const txn = db.transaction(() => {
+        let emittedEvent = false;
         if (Object.keys(updates).length) {
           const setClause = Object.keys(updates)
             .map((k) => `${k} = @${k}`)
@@ -2385,6 +2399,7 @@ WHERE state_changed_at IS NULL`).run();
             actor,
             data: { from: existing.state, to: updates.state, from_phase: existing.phase, to_phase: updates.phase ?? existing.phase },
           });
+          emittedEvent = true;
           commentDispatch.markAddressedForTicketActivity(id, actor);
         } else if ('phase' in updates && updates.phase !== existing.phase) {
           recordEvent({
@@ -2394,12 +2409,14 @@ WHERE state_changed_at IS NULL`).run();
             actor,
             data: { from: existing.phase, to: updates.phase, state: updates.state ?? existing.state },
           });
+          emittedEvent = true;
           commentDispatch.markAddressedForTicketActivity(id, actor);
         }
         const terminalPhase = updates.phase ?? null;
         if (['built', 'verified', 'rejected', 'done'].includes(terminalPhase) && actor && actor !== 'human') {
           const completion = recordEvent({ ticket_id: id, project_id: existing.project_id, type: 'dispatch_completion_stamped', actor,
             data: { phase: terminalPhase } });
+          emittedEvent = true;
           db.prepare(`UPDATE message_envelopes SET completed_at = COALESCE(completed_at, @ts),
               completed_event_id = COALESCE(completed_event_id, @event_id)
             WHERE ticket_id = @ticket_id AND recipient_session_id = @actor
@@ -2412,6 +2429,20 @@ WHERE state_changed_at IS NULL`).run();
             type: 'assigned',
             actor,
             data: { from: existing.assignee, to: updates.assignee },
+          });
+          emittedEvent = true;
+        }
+        // The attached compatibility wrapper delegates to the typed core and
+        // never reaches this path. For an un-attached legacy writer, ordinary
+        // field edits still need one canonical event so event-backed revisions
+        // advance transactionally without duplicating specialized events.
+        if (!emittedEvent && changedFields.length > 0) {
+          recordEvent({
+            ticket_id: id,
+            project_id: existing.project_id,
+            type: 'updated',
+            actor,
+            data: { fields: changedFields.sort() },
           });
         }
         return stmts.getTicket.get(id);
@@ -3282,5 +3313,235 @@ WHERE state_changed_at IS NULL`).run();
     },
   };
 
-  return api.init();
+  // C1 compatibility hook: dashboard routes continue calling this shipped
+  // facade, while the attached capability owns typed mutations. Reads are
+  // hydrated by this facade so pending dispatch, children, labels, and event
+  // payload fields remain exactly the legacy contract.
+  const legacyCreateTicket = api.createTicket;
+  const legacyGetTicket = api.getTicket;
+  const legacyUpdateTicket = api.updateTicket;
+  const legacyTransitionTicket = api.transitionTicket;
+  const legacyAddComment = api.addComment;
+  const legacyGetComment = api.getComment;
+  const legacyUpdateComment = api.updateComment;
+  const legacyCreateStream = api.createStream;
+  const legacyUpdateStream = api.updateStream;
+  const legacyAddLink = api.addLink;
+  const legacyRemoveLink = api.removeLink;
+
+  api.attachTrackerCore = (core) => {
+    trackerCore = core ?? null;
+    return api;
+  };
+  api.createTicket = (input = {}) => {
+    if (!trackerCore?.createTicket) return legacyCreateTicket(input);
+    const created = trackerCore.createTicket({
+      projectId: input.project_id,
+      kind: input.kind,
+      title: input.title,
+      body: input.body,
+      priority: input.priority,
+      labels: input.labels,
+      streamId: input.stream_id,
+      parentId: input.parent_id,
+      assignee: input.assignee,
+      rank: input.rank,
+      wave: input.wave,
+      actor: input.created_by ?? input.actor ?? 'human:dashboard',
+    });
+    return legacyGetTicket(created.id) ?? created;
+  };
+  api.getTicket = (id) => {
+    if (!trackerCore?.getTicket) return legacyGetTicket(id);
+    return legacyGetTicket(id);
+  };
+
+  const mapAttachedTransitionError = (error, current, targetPhase) => {
+    if (error?.code !== 'tracker.phase.invalid') return error;
+    const fromPhase = current?.phase ?? phaseFromLegacyState(current?.kind, current?.state);
+    if (typeof error.message === 'string' && error.message.startsWith('cannot transition ')) {
+      return new Error(`transitionTicket: illegal transition ${fromPhase} -> ${targetPhase}`);
+    }
+    const required = typeof error.message === 'string'
+      ? error.message.match(/^phase [^ ]+ requires (.+)$/)?.[1]
+      : null;
+    if (required) return new Error(`transitionTicket: missing required artifact(s): ${required}`);
+    return error;
+  };
+
+  const transitionAttachedTicket = (id, input = {}, current = trackerCore?.getTicket?.(id)) => {
+    if (!current) throw new Error(`transitionTicket: ticket '${id}' not found`);
+    const targetPhase = input.phase ?? phaseFromLegacyState(current.kind, input.state);
+    const normalizedPhase = api.normalizePhase(current.kind, targetPhase, 'transitionTicket');
+    try {
+      const transitioned = trackerCore.updateTicket({
+        id,
+        expectedRevision: input.expected_revision ?? input.revision ?? current.revision,
+        patch: { phase: normalizedPhase },
+        reason: input.reason,
+        actor: input.actor ?? 'human:dashboard',
+      });
+      return transitioned ? (legacyGetTicket(transitioned.id) ?? transitioned) : null;
+    } catch (error) {
+      throw mapAttachedTransitionError(error, current, normalizedPhase);
+    }
+  };
+
+  api.updateTicket = (id, input = {}) => {
+    if (!trackerCore?.updateTicket) return legacyUpdateTicket(id, input);
+    const current = trackerCore.getTicket(id);
+    if (!current) throw new Error(`updateTicket: ticket '${id}' not found`);
+    const nextKind = input.kind ?? current.kind;
+    const requestedPhase = input.phase ?? (
+      input.state === undefined && input.kind === undefined
+        ? current.phase
+        : phaseFromLegacyState(nextKind, input.state ?? current.state)
+    );
+    const normalizedPhase = api.normalizePhase(nextKind, requestedPhase, 'updateTicket');
+    const patch = {
+        ...(input.kind === undefined ? {} : { kind: input.kind }),
+        ...(input.state === undefined ? {} : { state: input.state }),
+        ...(input.phase === undefined && input.state === undefined && input.kind === undefined
+          ? {}
+          : { phase: normalizedPhase }),
+        ...(input.title === undefined ? {} : { title: input.title }),
+        ...(input.body === undefined ? {} : { body: input.body }),
+        ...(input.priority === undefined ? {} : { priority: input.priority }),
+        ...(input.labels === undefined ? {} : { labels: input.labels }),
+        ...(input.stream_id === undefined ? {} : { streamId: input.stream_id }),
+        ...(input.parent_id === undefined ? {} : { parentId: input.parent_id }),
+        ...(input.assignee === undefined ? {} : { assignee: input.assignee }),
+        ...(input.rank === undefined ? {} : { rank: input.rank }),
+        ...(input.wave === undefined ? {} : { wave: input.wave }),
+    };
+    if (Object.keys(patch).length === 0) return legacyGetTicket(id) ?? current;
+    try {
+      const updated = trackerCore.updateTicket({
+        id,
+        expectedRevision: input.expected_revision ?? input.revision ?? current.revision,
+        patch,
+        reason: input.reason,
+        actor: input.actor ?? 'human:dashboard',
+      });
+      return updated ? (legacyGetTicket(updated.id) ?? updated) : null;
+    } catch (error) {
+      throw mapAttachedTransitionError(error, current, normalizedPhase);
+    }
+  };
+  api.transitionTicket = (id, input = {}) => {
+    if (!trackerCore?.transitionTicket) return legacyTransitionTicket(id, input);
+    return transitionAttachedTicket(id, input);
+  };
+  api.exceptionalCloseTicket = (input = {}) => {
+    if (!trackerCore?.exceptionalCloseTicket) {
+      throw new Error('exceptionalCloseTicket: trusted typed authority is not attached');
+    }
+    // Keep the public compatibility command deliberately small. Actor,
+    // role, authenticated/source flags, and nested contexts are never
+    // accepted from request JSON; the attached dashboard capability owns the
+    // verified authority context. Reject forged authority rather than silently
+    // accepting it as if it were server-authenticated.
+    const invalid = (message) => {
+      const error = new Error(message);
+      error.code = 'tracker.phase.invalid';
+      throw error;
+    };
+    const allowed = new Set(['id', 'expectedRevision', 'reason']);
+    const forged = Object.keys(input).filter((key) => !allowed.has(key));
+    if (forged.length) invalid('exceptionalCloseTicket: authority fields are server-owned');
+    const id = typeof input.id === 'string' ? input.id.trim() : '';
+    const expectedRevision = input.expectedRevision;
+    if (!id || !Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
+      invalid('exceptionalCloseTicket: id and expectedRevision are required');
+    }
+    if (typeof input.reason !== 'string' || !input.reason.trim()) {
+      invalid('exceptionalCloseTicket: reason is required');
+    }
+    const closed = trackerCore.exceptionalCloseTicket({
+      id,
+      expectedRevision,
+      reason: input.reason,
+    });
+    return legacyGetTicket(closed.id) ?? closed;
+  };
+  api.addComment = (ticketId, input = {}) => {
+    if (!trackerCore?.addComment) return legacyAddComment(ticketId, input);
+    const comment = input.parent_id && trackerCore.replyComment
+      ? trackerCore.replyComment({
+        ticketId,
+        parentId: input.parent_id,
+        author: input.author ?? input.actor ?? 'human:dashboard',
+        body: input.body,
+      })
+      : trackerCore.addComment({
+      ticketId,
+      author: input.author ?? input.actor ?? 'human:dashboard',
+      body: input.body,
+      anchor: input.anchor,
+      tag: input.tag,
+      status: input.status,
+    });
+    return legacyGetComment(comment.id) ?? comment;
+  };
+  api.updateComment = (ticketId, commentId, input = {}) => {
+    if (!trackerCore?.updateComment) return legacyUpdateComment(ticketId, commentId, input);
+    const updated = trackerCore.updateComment({
+      ticketId,
+      commentId,
+      patch: input,
+      actor: input.actor ?? 'human:dashboard',
+    });
+    return updated ? (legacyGetComment(updated.id) ?? updated) : null;
+  };
+  api.createStream = (input = {}) => {
+    if (!trackerCore?.upsertStream) return legacyCreateStream(input);
+    const stream = trackerCore.upsertStream({
+      id: input.id,
+      projectId: input.project_id,
+      name: input.name,
+      mode: input.mode,
+      description: input.description,
+      expectedRevision: input.expected_revision,
+      actor: input.actor ?? 'human:dashboard',
+    });
+    if (!stream) throw new Error('stream revision conflict');
+    return stream;
+  };
+  api.updateStream = (id, input = {}) => {
+    if (!trackerCore?.upsertStream) return legacyUpdateStream(id, input);
+    const existing = stmts.getStream.get(id);
+    if (!existing) return legacyUpdateStream(id, input);
+    const typedCurrent = trackerCore.listStreams(existing.project_id).find((stream) => stream.id === id);
+    const updated = trackerCore.upsertStream({
+      id,
+      projectId: existing.project_id,
+      name: input.name ?? existing.name,
+      mode: input.mode ?? existing.mode,
+      description: input.description ?? existing.description,
+      expectedRevision: input.expected_revision ?? typedCurrent?.revision ?? 1,
+      actor: input.actor ?? 'human:dashboard',
+    });
+    if (!updated) throw new Error('stream revision conflict');
+    return updated;
+  };
+  api.addLink = (fromTicket, toTicket, type, input = {}) => {
+    if (!trackerCore?.linkTicket) return legacyAddLink(fromTicket, toTicket, type);
+    return trackerCore.linkTicket({
+      ticketId: fromTicket,
+      targetTicketId: toTicket,
+      relation: type,
+      actor: input.actor ?? 'human:dashboard',
+    });
+  };
+  api.removeLink = (fromTicket, toTicket, type, input = {}) => {
+    if (!trackerCore?.deleteLink) return legacyRemoveLink(fromTicket, toTicket, type);
+    return trackerCore.deleteLink({
+      ticketId: fromTicket,
+      targetTicketId: toTicket,
+      relation: type,
+      actor: input.actor ?? 'human:dashboard',
+    });
+  };
+
+  return api.init({ migrateDb: options?.skipMigrate !== true });
 }

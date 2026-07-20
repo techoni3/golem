@@ -5,7 +5,7 @@ import type { DatabaseScope, MigrationDefinition } from "./types.js";
 
 export const busyTimeoutMs = 2_500;
 export const latestRuntimeVersion = 1;
-export const latestTrackerVersion = 2;
+export const latestTrackerVersion = 3;
 
 function migrationChecksum(value: string): string {
 	return crypto.createHash("sha256").update(value).digest("hex");
@@ -389,6 +389,58 @@ CREATE TABLE tracker_delivery_audit (
   created_at TEXT NOT NULL
 );
 CREATE INDEX tracker_delivery_audit_subject ON tracker_delivery_audit(subject_id, created_at);
+`,
+	),
+	migration(
+		"tracker/003-live-tracker-core",
+		`
+CREATE TABLE IF NOT EXISTS tickets (
+  id TEXT PRIMARY KEY, seq INTEGER NOT NULL, project_id TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'work-item', title TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '', state TEXT NOT NULL DEFAULT 'todo',
+  phase TEXT, priority TEXT, labels TEXT NOT NULL DEFAULT '[]',
+  stream_id TEXT, parent_id TEXT, wave INTEGER, assignee TEXT,
+  created_by TEXT NOT NULL DEFAULT 'human', dispatched_to TEXT,
+  dispatched_at TEXT, source_ref TEXT, created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL, rank INTEGER NOT NULL DEFAULT 0,
+  state_changed_at TEXT, done_at TEXT, archived_at TEXT,
+  pseq INTEGER, display_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_tickets_project ON tickets(project_id);
+CREATE INDEX IF NOT EXISTS idx_tickets_state ON tickets(state);
+CREATE INDEX IF NOT EXISTS idx_tickets_assignee ON tickets(assignee);
+CREATE INDEX IF NOT EXISTS idx_tickets_dispatched_to ON tickets(dispatched_to);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_display ON tickets(display_id) WHERE display_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS comments (
+  id TEXT PRIMARY KEY, ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  author TEXT NOT NULL, body TEXT NOT NULL, quote TEXT, prefix TEXT,
+  suffix TEXT, section TEXT, section_id TEXT, tag TEXT NOT NULL DEFAULT 'note',
+  status TEXT NOT NULL DEFAULT 'open', dispatch_state TEXT NOT NULL DEFAULT 'undispatched',
+  parent_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_comments_ticket ON comments(ticket_id);
+CREATE TABLE IF NOT EXISTS streams (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL, name TEXT NOT NULL,
+  mode TEXT NOT NULL DEFAULT 'parallel', description TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_streams_project ON streams(project_id);
+CREATE TABLE IF NOT EXISTS links (
+  from_ticket TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  to_ticket TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  type TEXT NOT NULL, PRIMARY KEY(from_ticket, to_ticket, type)
+);
+CREATE TABLE IF NOT EXISTS events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, event_uuid TEXT, ticket_id TEXT,
+  project_id TEXT, topic TEXT, class TEXT NOT NULL DEFAULT 'tracker',
+  type TEXT NOT NULL, actor TEXT, actor_kind TEXT NOT NULL DEFAULT 'system',
+  actor_label TEXT, data TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_events_ticket ON events(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_events_project ON events(project_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_events_uuid ON events(event_uuid) WHERE event_uuid IS NOT NULL;
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS project_prefixes (project_id TEXT PRIMARY KEY, prefix TEXT NOT NULL UNIQUE);
 `,
 	),
 ];

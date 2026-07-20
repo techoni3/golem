@@ -1,3 +1,4 @@
+import type { Generated } from "kysely";
 import type {
 	CapabilityQualification,
 	CommandStatus,
@@ -30,13 +31,19 @@ export interface SqliteStatement<Row = Record<string, unknown>> {
 	all(...parameters: readonly unknown[]): readonly Row[];
 }
 
+export type SqliteTransaction<Args extends readonly unknown[], Result> = ((
+	...arguments_: Args
+) => Result) & {
+	readonly immediate: (...arguments_: Args) => Result;
+};
+
 export interface SqliteConnection {
 	pragma(source: string, options?: { readonly simple?: boolean }): unknown;
 	exec(source: string): unknown;
 	prepare<Row = Record<string, unknown>>(source: string): SqliteStatement<Row>;
 	transaction<Args extends readonly unknown[], Result>(
 		fn: (...arguments_: Args) => Result,
-	): (...arguments_: Args) => Result;
+	): SqliteTransaction<Args, Result>;
 	close(): void;
 }
 
@@ -384,5 +391,107 @@ export interface TrackerTables {
 		readonly subject_id: string;
 		readonly details_json: string;
 		readonly created_at: string;
+	};
+	/** Live legacy-compatible tracker authority; never mirrored into shadow rows. */
+	readonly tickets: {
+		readonly id: string;
+		readonly seq: number;
+		readonly display_id: string;
+		readonly pseq: number;
+		readonly project_id: string;
+		readonly kind: string;
+		readonly title: string;
+		readonly body: string;
+		readonly priority: string | null;
+		readonly labels: string;
+		readonly stream_id: string | null;
+		readonly parent_id: string | null;
+		readonly assignee: string | null;
+		readonly state: string;
+		readonly phase: string;
+		readonly rank: number;
+		readonly wave: number | null;
+		readonly created_by: string;
+		readonly dispatched_to: string | null;
+		readonly dispatched_at: string | null;
+		readonly source_ref: string | null;
+		readonly created_at: string;
+		readonly updated_at: string;
+		readonly state_changed_at: string | null;
+		readonly done_at: string | null;
+		readonly archived_at: string | null;
+	};
+	readonly comments: {
+		readonly id: string;
+		readonly ticket_id: string;
+		readonly parent_id: string | null;
+		readonly author: string;
+		readonly body: string;
+		readonly quote: string | null;
+		readonly prefix: string | null;
+		readonly suffix: string | null;
+		readonly section: string | null;
+		readonly section_id: string | null;
+		readonly tag: string;
+		readonly status: string;
+		readonly dispatch_state: string;
+		readonly created_at: string;
+		readonly updated_at: string;
+	};
+	readonly links: {
+		readonly from_ticket: string;
+		readonly to_ticket: string;
+		readonly type: string;
+	};
+	readonly streams: {
+		readonly id: string;
+		readonly project_id: string;
+		readonly name: string;
+		readonly mode: string;
+		readonly description: string;
+		readonly created_at: string;
+		readonly updated_at: string;
+	};
+	readonly events: {
+		readonly id: Generated<number>;
+		readonly event_uuid: string | null;
+		readonly ticket_id: string | null;
+		readonly project_id: string | null;
+		readonly topic: string | null;
+		readonly class: string;
+		readonly type: string;
+		readonly actor: string | null;
+		readonly actor_kind: string;
+		readonly actor_label: string;
+		readonly data: string;
+		readonly created_at: string;
+	};
+	readonly meta: {
+		readonly key: string;
+		readonly value: string;
+	};
+	readonly project_prefixes: {
+		readonly project_id: string;
+		readonly prefix: string;
+	};
+	readonly comment_dispatches: {
+		readonly id: string;
+		readonly comment_id: string;
+		readonly ticket_id: string;
+		readonly project_id: string;
+		readonly session_id: string;
+		readonly batch_id: string | null;
+		readonly status: string;
+		readonly created_at: string;
+		readonly delivered_at: string | null;
+		readonly addressed_at: string | null;
+	};
+	readonly message_envelopes: {
+		readonly id: string;
+		readonly ticket_id: string | null;
+		readonly recipient_session_id: string | null;
+		readonly delivery_attempted_at: string | null;
+		readonly completed_at: string | null;
+		readonly completed_event_id: number | null;
 	};
 }

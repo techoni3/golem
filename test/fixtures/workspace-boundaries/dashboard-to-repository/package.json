@@ -1,0 +1,4 @@
+{
+  "name": "@golem/dashboard",
+  "expectedBoundaryRule": "client-to-repository"
+}

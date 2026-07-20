@@ -1,0 +1,4 @@
+{
+  "name": "@golem/mcp-adapter",
+  "expectedBoundaryRule": "client-to-repository"
+}

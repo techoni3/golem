@@ -86,6 +86,13 @@ export const scenarios = [
 		regression: "offline subscriptions lose ordered cursor replay, passive slots start unsolicited turns, or pruning drops manual interest",
 	}),
 	registerScenario({
+		id: "tracker-core-compatibility",
+		journey: "J4",
+		tier: "pr",
+		regression:
+			"a tracker core extraction loses display ids, phase artifacts, transactional audit/outbox, or MCP-compatible ticket/comment/link/stream semantics",
+	}),
+	registerScenario({
 		id: "testkit-browser",
 		journey: "J8",
 		tier: "release",

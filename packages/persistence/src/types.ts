@@ -431,6 +431,234 @@ export interface TrackerStorageCapability {
 	}[];
 }
 
+/**
+ * GOL-35 tracker-core rows are distinct from durable delivery. They remain on
+ * the persistence boundary so UI, CLI, MCP, and adapters cannot open a SQLite
+ * handle or instantiate a repository.
+ */
+export type TrackerCoreWorkItemKind =
+	| "spec"
+	| "work-item"
+	| "question"
+	| "decision"
+	| "fix";
+/** Existing tracker priority vocabulary is intentionally preserved verbatim. */
+export type TrackerCorePriority = "P0" | "P1" | "P2" | "P3" | null;
+export type TrackerCoreState =
+	| "todo"
+	| "in_progress"
+	| "blocked"
+	| "review"
+	| "done"
+	| "archived";
+export type TrackerCoreLinkRelation = "blocks" | "relates" | "duplicates";
+export type TrackerCoreResourceType = "ticket" | "comment" | "link" | "stream";
+
+export interface TrackerCoreRuntimeReference {
+	readonly projectId: string;
+	readonly sessionId?: string;
+	readonly generationId?: string;
+}
+
+export interface TrackerCoreWorkItem {
+	readonly id: string;
+	readonly displayId: string;
+	readonly projectId: string;
+	readonly kind: TrackerCoreWorkItemKind;
+	readonly title: string;
+	readonly body: string;
+	readonly priority: TrackerCorePriority;
+	readonly labels: readonly string[];
+	readonly streamId?: string;
+	readonly parentId?: string;
+	readonly assignee?: string;
+	readonly dispatchedTo?: string;
+	readonly dispatchedAt?: string;
+	readonly state: TrackerCoreState;
+	readonly phase: string;
+	readonly rank: number;
+	readonly wave?: number;
+	readonly runtimeReference?: TrackerCoreRuntimeReference;
+	readonly revision: number;
+	readonly createdBy: string;
+	readonly createdAt: string;
+	readonly updatedAt: string;
+}
+
+export interface TrackerCorePhaseEvidence {
+	readonly closingBrief: boolean;
+	readonly verificationReport: boolean;
+	readonly answerComment: boolean;
+	readonly decisionComment: boolean;
+	readonly reason: boolean;
+	readonly groundingSummary: boolean;
+	readonly design: boolean;
+	readonly concerns: boolean;
+	readonly humanFinalise: boolean;
+	readonly children: boolean;
+	readonly childrenTerminal: boolean;
+	readonly waves: boolean;
+	readonly childStarted: boolean;
+	readonly managerDispatch: boolean;
+	/** A manager-authored durable authorization for an exceptional skip. */
+	readonly managerSkip: boolean;
+}
+
+export interface TrackerCoreComment {
+	readonly id: string;
+	readonly ticketId: string;
+	readonly parentId?: string;
+	readonly author: string;
+	readonly body: string;
+	readonly anchor?: Readonly<Record<string, unknown>>;
+	readonly tag: string;
+	readonly status: string;
+	readonly dispatchState: string;
+	readonly revision: number;
+	readonly createdAt: string;
+	readonly updatedAt: string;
+}
+
+export interface TrackerCoreLink {
+	readonly id: string;
+	readonly ticketId: string;
+	readonly targetTicketId: string;
+	readonly relation: TrackerCoreLinkRelation;
+	readonly actor: string;
+	readonly createdAt: string;
+}
+
+export interface TrackerCoreStream {
+	readonly id: string;
+	readonly projectId: string;
+	readonly name: string;
+	readonly mode: "sequential" | "parallel";
+	readonly description: string;
+	readonly revision: number;
+	readonly createdAt: string;
+	readonly updatedAt: string;
+}
+
+export interface TrackerCoreAuditRecord {
+	readonly id: string;
+	readonly actor: string;
+	readonly action: string;
+	readonly resourceType: TrackerCoreResourceType;
+	readonly resourceId: string;
+	readonly revision: number;
+	readonly details: Readonly<Record<string, unknown>>;
+	readonly createdAt: string;
+}
+
+export interface TrackerCoreMutationMetadata {
+	readonly actor: string;
+	readonly eventId: string;
+	readonly outboxId: string;
+	readonly auditId: string;
+	readonly now: string;
+}
+
+/**
+ * Trusted authority supplied by the authenticated dashboard/MCP composition
+ * boundary. Request-body actor strings are deliberately not this type and
+ * cannot authorize an exceptional close.
+ */
+export interface TrackerCoreActorContext {
+	readonly actor: string;
+	readonly role: "human" | "manager";
+	readonly authenticated: true;
+	readonly source: "dashboard" | "mcp" | "journey";
+}
+
+export interface TrackerCoreExceptionalClose {
+	readonly reason: string;
+	readonly actorContext: TrackerCoreActorContext;
+}
+
+export interface TrackerCoreStorageCapability {
+	allocateDisplayId(prefix: "GOL" | "TKT"): string;
+	createWorkItem(input: {
+		readonly workItem: TrackerCoreWorkItem;
+		readonly mutation: TrackerCoreMutationMetadata;
+	}): TrackerCoreWorkItem;
+	getWorkItem(id: string): TrackerCoreWorkItem | undefined;
+	phaseEvidence(id: string): TrackerCorePhaseEvidence;
+	listWorkItems(input?: {
+		readonly projectId?: string;
+		readonly kind?: TrackerCoreWorkItemKind;
+		readonly phase?: string;
+		readonly assignee?: string;
+	}): readonly TrackerCoreWorkItem[];
+	searchWorkItems(
+		query: string,
+		projectId?: string,
+	): readonly TrackerCoreWorkItem[];
+	updateWorkItem(input: {
+		readonly id: string;
+		readonly expectedRevision: number;
+		readonly patch: Partial<
+			Pick<
+				TrackerCoreWorkItem,
+				| "kind"
+				| "state"
+				| "phase"
+				| "title"
+				| "body"
+				| "priority"
+				| "labels"
+				| "streamId"
+				| "parentId"
+				| "assignee"
+				| "rank"
+				| "wave"
+				| "runtimeReference"
+			>
+		>;
+		readonly mutation: TrackerCoreMutationMetadata;
+		readonly exceptionalClose?: TrackerCoreExceptionalClose;
+	}): TrackerCoreWorkItem | undefined;
+	transitionWorkItem(input: {
+		readonly id: string;
+		readonly expectedRevision: number;
+		readonly phase: string;
+		readonly state: TrackerCoreState;
+		readonly artifacts: Readonly<Record<string, unknown>>;
+		readonly mutation: TrackerCoreMutationMetadata;
+	}): TrackerCoreWorkItem | undefined;
+	createComment(input: {
+		readonly comment: TrackerCoreComment;
+		readonly mutation: TrackerCoreMutationMetadata;
+	}): TrackerCoreComment;
+	updateComment(input: {
+		readonly ticketId: string;
+		readonly commentId: string;
+		readonly patch: Partial<
+			Pick<TrackerCoreComment, "body" | "tag" | "status" | "dispatchState">
+		>;
+		readonly mutation: TrackerCoreMutationMetadata;
+	}): TrackerCoreComment | undefined;
+	getComment(id: string): TrackerCoreComment | undefined;
+	listComments(ticketId: string): readonly TrackerCoreComment[];
+	createLink(input: {
+		readonly link: TrackerCoreLink;
+		readonly mutation: TrackerCoreMutationMetadata;
+	}): TrackerCoreLink;
+	deleteLink(input: {
+		readonly ticketId: string;
+		readonly targetTicketId: string;
+		readonly relation: TrackerCoreLinkRelation;
+		readonly mutation: TrackerCoreMutationMetadata;
+	}): boolean;
+	listLinks(ticketId: string): readonly TrackerCoreLink[];
+	upsertStream(input: {
+		readonly stream: TrackerCoreStream;
+		readonly expectedRevision?: number;
+		readonly mutation: TrackerCoreMutationMetadata;
+	}): TrackerCoreStream | undefined;
+	listStreams(projectId?: string): readonly TrackerCoreStream[];
+	auditCore(): readonly TrackerCoreAuditRecord[];
+}
+
 export interface RuntimeOutboxFailure {
 	readonly status: "pending" | "permanent_failure";
 	readonly attempts: number;
@@ -514,6 +742,8 @@ export interface PersistenceWriteCapability {
 	runtimeOutboxHealth(): RuntimeOutboxHealth;
 	/** Typed tracker store; no raw connection leaves the single owner. */
 	trackerStorage(): TrackerStorageCapability;
+	/** Typed work-item/phase repository capability for @golem/tracker only. */
+	trackerCoreStorage(): TrackerCoreStorageCapability;
 	status(): PersistenceStatus;
 	close(): Promise<void>;
 }

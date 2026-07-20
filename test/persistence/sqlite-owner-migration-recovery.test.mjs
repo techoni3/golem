@@ -13,6 +13,7 @@ import {
 } from "@golem/persistence";
 import { createTemporaryHome, waitFor } from "@golem/testkit";
 import { openControlPlanePersistence } from "../../apps/control-plane/dist/persistence.js";
+import { openTrackerDb } from "../../dashboard/server/tracker-db.js";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const ownerChild = path.join(repositoryRoot, "test/persistence/owner-child.mjs");
@@ -171,20 +172,37 @@ function eventInput(id, failpoint) {
 }
 
 function createRepresentativeTracker(target) {
-	const database = new Database(target);
+	const tracker = openTrackerDb(target);
 	try {
-		database.exec(`
-CREATE TABLE tickets (id TEXT PRIMARY KEY, title TEXT NOT NULL, phase TEXT NOT NULL);
-CREATE TABLE comments (id TEXT PRIMARY KEY, ticket_id TEXT NOT NULL, body TEXT NOT NULL);
-CREATE TABLE streams (id TEXT PRIMARY KEY, name TEXT NOT NULL);
-CREATE TABLE message_envelopes (id TEXT PRIMARY KEY, ticket_id TEXT);
-INSERT INTO tickets VALUES ('GOL-legacy', 'legacy ticket', 'built');
-INSERT INTO comments VALUES ('comment-legacy', 'GOL-legacy', 'preserve me');
-INSERT INTO streams VALUES ('stream-legacy', 'legacy stream');
-INSERT INTO message_envelopes VALUES ('envelope-legacy', 'GOL-legacy');
-`);
+		const ticket = tracker.createTicket({
+			project_id: "legacy-project",
+			kind: "spec",
+			title: "legacy ticket",
+			body: "preserve me",
+			priority: "P0",
+			labels: ["legacy"],
+			created_by: "human:legacy",
+			wave: 2,
+		});
+		tracker.addComment(ticket.id, {
+			author: "human:legacy",
+			body: "legacy comment",
+			section: "acceptance",
+			tag: "confirmed",
+		});
+		tracker.createStream({
+			project_id: "legacy-project",
+			name: "legacy stream",
+			mode: "parallel",
+			description: "preserve stream",
+		});
+		tracker.createDispatchEnvelope(ticket.id, {
+			session_id: "session:legacy",
+			payload: "preserve envelope",
+			actor: "human:legacy",
+		});
 	} finally {
-		database.close();
+		tracker.close();
 	}
 }
 
@@ -263,7 +281,7 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 				},
 				{
 					runtimeVersion: 1,
-					trackerVersion: 2,
+					trackerVersion: 3,
 					foreignKeys: true,
 					journal: "wal",
 					busy: 2500,
@@ -984,14 +1002,22 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 		assert.equal(trackerDryRun.requiresBackup, true);
 		assert.deepEqual(
 			trackerDryRun.pending.map((migration) => migration.id),
-			["tracker/001-baseline", "tracker/002-durable-delivery-bus"],
+			[
+				"tracker/001-baseline",
+				"tracker/002-durable-delivery-bus",
+				"tracker/003-live-tracker-core",
+			],
 		);
 		assert.deepEqual(
 			trackerDryRun.dryRun,
 			{
 				integrity: "ok",
 				foreignKeyViolations: 0,
-				applied: ["tracker/001-baseline", "tracker/002-durable-delivery-bus"],
+				applied: [
+					"tracker/001-baseline",
+					"tracker/002-durable-delivery-bus",
+					"tracker/003-live-tracker-core",
+				],
 			},
 			"dry-run clones, applies, and verifies the tracker migration before source apply",
 		);
@@ -1020,7 +1046,11 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 			"apply refuses a plan that was not the approved dry-run",
 		);
 		const trackerApply = owner.apply("tracker", trackerDryRun.planHash);
-		assert.deepEqual(trackerApply.applied, ["tracker/001-baseline", "tracker/002-durable-delivery-bus"]);
+		assert.deepEqual(trackerApply.applied, [
+			"tracker/001-baseline",
+			"tracker/002-durable-delivery-bus",
+			"tracker/003-live-tracker-core",
+		]);
 		assert.equal(fs.existsSync(trackerApply.backupPath), true, "apply verifies a pre-migration backup");
 		assert.deepEqual(
 			inspectDatabase(home.trackerDb, (after) => ({

@@ -14,6 +14,7 @@
 	},
 	"dependencies": {
 		"@golem/contracts": "file:../contracts",
-		"@golem/domain": "file:../domain"
+		"@golem/domain": "file:../domain",
+		"@golem/persistence": "file:../persistence"
 	}
 }

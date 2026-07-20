@@ -393,9 +393,53 @@ async function validateFixtures(root) {
 	return results.sort();
 }
 
+async function validateLegacyClientEntrypoints(root) {
+	const roots = [join(root, "cli"), join(root, "mcp", "channel")];
+	const forbidden = new Set([
+		"@golem/persistence",
+		"@golem/persistence/control-plane",
+		"better-sqlite3",
+		"kysely",
+	]);
+	const files = [];
+	for (const entryRoot of roots) {
+		async function visit(current) {
+			for (const entry of await readdir(current, { withFileTypes: true })) {
+				if (entry.name === "node_modules" || entry.name === "dist") continue;
+				const target = join(current, entry.name);
+				if (entry.isDirectory()) await visit(target);
+				else if (/\.(?:[cm]?[jt]s|[jt]sx)$/u.test(entry.name))
+					files.push(target);
+			}
+		}
+		await visit(entryRoot);
+	}
+	for (const file of files) {
+		const source = await readFile(file, "utf8");
+		const specifiers = [
+			...imports(source),
+			...Array.from(
+				source.matchAll(/require\(\s*["']([^"']+)["']\s*\)/gu),
+				(match) => match[1],
+			),
+		];
+		for (const specifier of specifiers) {
+			if (
+				forbidden.has(specifier) ||
+				specifier.includes("packages/persistence/src")
+			)
+				throw new Error(
+					`legacy CLI/MCP entrypoint must not import a tracker repository: ${relative(root, file)} -> ${specifier}`,
+				);
+		}
+	}
+	return files.length;
+}
+
 await validateTopology(repositoryRoot);
 const graph = await validateGraph(repositoryRoot);
 const fixtures = await validateFixtures(repositoryRoot);
+const legacyClientFiles = await validateLegacyClientEntrypoints(repositoryRoot);
 process.stdout.write(
-	`boundary check passed: ${graph.length} workspaces, ${fixtures.length} rejection fixtures\n`,
+	`boundary check passed: ${graph.length} workspaces, ${fixtures.length} rejection fixtures, ${legacyClientFiles} legacy client sources\n`,
 );

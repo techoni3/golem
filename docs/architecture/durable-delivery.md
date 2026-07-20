@@ -17,7 +17,9 @@ or delivery qualification moves the active claim back to retrying, so stale
 transport is never attempted.
 
 `tracker/002-durable-delivery-bus` adds namespaced tables alongside an existing
-legacy tracker schema. Envelopes have stable IDs and idempotency keys with a
+legacy tracker schema. `tracker/003-live-tracker-core` creates the canonical
+typed core rows on a fresh managed database; it does not alter delivery
+ownership. Envelopes have stable IDs and idempotency keys with a
 payload fingerprint; exact duplicates return their original fact while a
 conflicting ID or idempotency key is rejected. A claim is a SQL
 compare-and-swap with an owner, opaque token, and lease. Only the matching token

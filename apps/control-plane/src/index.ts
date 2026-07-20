@@ -49,6 +49,11 @@ export {
 } from "./server.js";
 export type { ServiceLockStatus } from "./service-lock.js";
 export { serviceLockStatus } from "./service-lock.js";
+export {
+	composeControlPlaneTrackerCoreServices,
+	composeControlPlaneTrackerServices,
+} from "./tracker.js";
+export { registerTrackerCoreCompatibilityRoutes } from "./tracker-core-routes.js";
 export { BoundedReplayWindow } from "./ws-replay.js";
 
 export interface ControlPlaneComposition {

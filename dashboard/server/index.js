@@ -21,6 +21,7 @@ import { registerSubstrateRoutes } from './substrate.js';
 import { teamAssists } from './team-assist.js';
 import { golemHome, dashboardJsonPath, journalDirFor, sessionsJsonPath } from '../../lib/golem-home.js';
 import { createRole, deleteRole, getRole, listRoleCards, roleChangeBrief, roleMission, setSessionRole, updateRoleMeta, writeRoleCard } from '../../lib/session-role.js';
+import { attachTrackerCore } from './tracker-core-attachment.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const WEB_SOURCE_ROOT = path.resolve(__dirname, '..', 'web');
@@ -473,10 +474,13 @@ async function main() {
   const chat = createChat();
   chat.start();
 
-  // WS2: the dashboard is the SINGLE WRITER of the tracker DB. Open it once
-  // here (it auto-inits / migrates). GOLEM_TRACKER_DB override flows through
-  // openTrackerDb → defaultDbPath. Closed in shutdown() below.
-  const tracker = openTrackerDb();
+  // Open the legacy tracker first. It remains the schema/migration authority;
+  // the typed capability is attached afterwards through a tracker-only,
+  // migration-neutral connection before any routes are registered.
+  const trackerClock = Object.freeze({ now: () => new Date().toISOString() });
+  const trackerPath = process.env.GOLEM_TRACKER_DB || path.join(golemHome(), 'tracker.db');
+  const tracker = openTrackerDb(trackerPath);
+  const trackerCoreAttachment = attachTrackerCore(tracker, trackerPath, trackerClock);
   tracker.recomputeAllCommentDispatchStates();
 
   // Load the dashboard state (projects, plans, milestones, channels). State
@@ -2476,6 +2480,7 @@ async function main() {
       chat.stop();
       await state.close();
       tracker.close();
+      await trackerCoreAttachment.close();
       await fastify.close();
     } finally {
       process.exit(0);
