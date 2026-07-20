@@ -23,6 +23,7 @@ import {
 } from "@golem/testkit";
 import { normalizeLegacyObservation } from "../parity/normalization.mjs";
 import { exerciseRenderMcpClosure } from "../render-mcp-closure.mjs";
+import { exerciseDomainReplay } from "./domain-replay.mjs";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright-core");
@@ -366,6 +367,7 @@ export function diagnosticFor(error, context) {
 }
 
 export const exercises = Object.freeze({
+	"domain-replay": exerciseDomainReplay,
 	"testkit-smoke": exerciseSmoke,
 	"testkit-fake-harness": exerciseFakeHarness,
 	"testkit-semantic-parity": exerciseSemanticParity,

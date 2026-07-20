@@ -2,6 +2,12 @@ import { registerScenario } from "@golem/testkit";
 
 export const scenarios = [
 	registerScenario({
+		id: "domain-replay",
+		journey: "J2",
+		tier: "pr",
+		regression: "cross-harness identity, lifecycle, ordering, fencing, or readiness drift creates ghosts or stale owners",
+	}),
+	registerScenario({
 		id: "testkit-smoke",
 		journey: "J3",
 		tier: "pr",

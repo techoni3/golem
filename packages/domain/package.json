@@ -9,6 +9,9 @@
 			"import": "./dist/index.js"
 		}
 	},
+	"scripts": {
+		"build": "npm run build -w @golem/contracts && tsc -b"
+	},
 	"dependencies": {
 		"@golem/contracts": "file:../contracts"
 	}
