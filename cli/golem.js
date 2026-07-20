@@ -20,7 +20,7 @@ import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, re
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, resolve, join, relative } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { golemHome, legacyConfigDir, migratedHomeDir, trackerDbPath, renderDirFor, projectsJsonPath, sessionsJsonPath } from '../lib/golem-home.js';
 import { projectIdFor } from '../lib/project-id.js';
 import { SESSION_ROLES, pushRoleBriefDirect, setSessionRole } from '../lib/session-role.js';
@@ -1533,6 +1533,28 @@ function cmdRemoved(name) {
   fatal(2, `Error: \`${name}\` is a v3 subcommand that has been removed in golem v4.\n\nRun \`golem help\` for the surviving commands.`);
 }
 
+/**
+ * The typed registry is the canonical parser for new harness verbs and
+ * read-only resolution. Legacy commands remain in this compatibility entry
+ * point until their adapters are retired; this one-hop import keeps the
+ * native Codex implementation and its exit behaviour unchanged.
+ */
+async function runTypedCli(args) {
+  const entry = resolve(GOLEM_ROOT, 'dist', 'apps', 'cli', 'golem.js');
+  if (!existsSync(entry)) return false;
+  const typed = await import(pathToFileURL(entry).href);
+  const code = await typed.runCli(args);
+  if (code) process.exitCode = code;
+  return true;
+}
+
+function hasTypedCodexOptions(args) {
+  return args.some((arg) => arg === '--dry-run' || arg === '--explain' || arg === '--json'
+    || arg === '--model' || arg.startsWith('--model=')
+    || arg === '--backend' || arg.startsWith('--backend=')
+    || arg === '--preset' || arg.startsWith('--preset='));
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const cmd = args[0] ?? 'help';
@@ -1543,11 +1565,16 @@ async function main() {
     return;
   }
 
+  if (args.includes('--json-schema')) {
+    if (await runTypedCli(args)) return;
+    fatal(1, 'typed CLI build is unavailable; run `npm run build -w apps/cli`');
+  }
+
   switch (cmd) {
     case 'help':
     case '-h':
     case '--help':
-      cmdHelp();
+      if (!(await runTypedCli(['help']))) cmdHelp();
       break;
     case 'status':
       await cmdStatus(rest);
@@ -1562,7 +1589,14 @@ async function main() {
       await cmdCodexSupervisor(rest);
       break;
     case 'codex':
+      if (hasTypedCodexOptions(rest) && await runTypedCli(['codex', ...rest])) break;
       await cmdCodex(rest);
+      break;
+    case 'opencode':
+    case 'claude':
+      if (!(await runTypedCli([cmd, ...rest]))) {
+        fatal(1, 'typed CLI build is unavailable; run `npm run build -w apps/cli`');
+      }
       break;
     case 'role':
       await cmdRole(rest);
@@ -1580,6 +1614,7 @@ async function main() {
       await cmdDoctor();
       break;
     default:
+      if (cmd.startsWith('@') && await runTypedCli([cmd, ...rest])) break;
       fatal(2, `Unknown command: ${cmd}\n\nRun \`golem help\` for available commands.`);
   }
 }

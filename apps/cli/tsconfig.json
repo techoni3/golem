@@ -1,6 +1,10 @@
 {
 	"extends": "../../tsconfig.package.json",
-	"compilerOptions": { "outDir": "./dist", "rootDir": "./src" },
+	"compilerOptions": {
+		"outDir": "../../dist/apps/cli",
+		"rootDir": "./src",
+		"types": ["node"]
+	},
 	"references": [
 		{ "path": "../../packages/api-client" },
 		{ "path": "../../packages/compiler" },

@@ -460,12 +460,15 @@ current operational source for bind, restart, API, and tracker behavior.
 
 ## CLI reference
 
-`golem help` prints built-in usage, but its sync-target summary currently omits
-Codex and Pi. The table below follows the command dispatch and target list in the
-packaged source rather than treating that summary as exhaustive.
+`golem help` is generated from the typed registry; compatibility commands remain
+served by the root entry point while harness resolution uses one parser and
+metadata table.
 
 | Command | Purpose |
 | --- | --- |
+| `golem codex [preset]` | Resolve the managed Codex preset; bare `golem codex` retains the managed TUI compatibility path. |
+| `golem opencode [preset]` / `golem claude [preset]` | Resolve canonical harness presets; unqualified adapters fail before spawn. |
+| `golem @preset` | Resolve a globally named preset through the same registry. |
 | `golem dashboard [--public]` | Start the dashboard in the foreground. |
 | `golem dashboard:restart [--public]` | Stop the registered dashboard and start a detached replacement. |
 | `golem status [--json]` | Probe dashboard health and print its URL. |
@@ -475,6 +478,10 @@ packaged source rather than treating that summary as exhaustive.
 | `golem sessions dedup [--apply]` | Group rows by non-empty name and keep the freshest live row, or the freshest ended row when none are live. Dry-run by default; `--apply` marks every other un-ended duplicate ended. Unnamed rows are untouched. |
 | `golem migrate-home` | Explicitly back up and move the resolved legacy/XDG config path (normally `~/.config/golem`) to `~/.golem`, leave a compatibility symlink, and restart the dashboard. |
 | `golem help` | Print usage. |
+
+`--dry-run`, `--explain`, `--json`, `--model`, `--backend`, `--preset`, and
+`--cwd` are shared harness options. Exact native arguments after `--` are
+preserved. There is intentionally no `golem launch` command.
 
 Useful render forms:
 
@@ -726,6 +733,7 @@ dashboard restart, or other shared-state commands from a parallel worktree.
 | `substrate/` | Source of truth for roles, agents, skills, instructions, hooks, and plugin metadata. |
 | `plugin/` | Generated Claude Code render; do not hand-edit. |
 | `cli/golem.js` | Thin command entry point. |
+| `apps/cli/src/` | Typed Commander registry, deterministic formatters/errors, and harness resolution boundary. |
 | `lib/` | State resolution, compiler, adapters, roles, lint, identity, and runtime helpers. |
 | `dashboard/server/` | Fastify REST/WebSocket service and sole SQLite tracker owner. |
 | `dashboard/web/` | React source for the dashboard. |

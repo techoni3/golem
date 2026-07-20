@@ -30,6 +30,8 @@
     "./opencode-shim": "./shims/opencode/index.js"
   },
   "files": [
+    "dist/apps/cli/",
+    "apps/cli/",
     "cli/",
     "dashboard/server/",
     "dashboard/dist/",
@@ -75,6 +77,7 @@
 		"test:tracker-core": "npm run build -w @golem/persistence -w @golem/tracker -w @golem/testkit -w @golem/control-plane && node --test --test-concurrency=1 test/tracker/tracker-core.test.mjs",
     "test:launcher-resolution": "npm run build -w @golem/launcher && node --test test/launcher-resolution.test.mjs",
     "test:launcher-process": "npm run build -w @golem/launcher -w @golem/testkit && node --test --test-concurrency=1 test/launcher-process.test.mjs",
+    "test:cli": "npm run build -w apps/cli && node --test --test-concurrency=1 test/cli/registry.test.mjs",
     "migration:plan": "npm run build -w @golem/compat && node packages/compat/bin/migration-plan.mjs",
     "test:migration-plan": "npm run build -w @golem/compat -w @golem/testkit && node --test --test-concurrency=1 test/migration-plan.test.mjs",
     "test:testkit": "npm run build -w @golem/testkit && node --test --test-concurrency=1 test/journeys/testkit.test.mjs",
@@ -82,7 +85,7 @@
     "db:fixtures:check": "npm run build -w @golem/persistence -w @golem/control-plane && node --test --test-concurrency=1 test/persistence/sqlite-owner-migration-recovery.test.mjs",
     "test:browser": "npm run build -w @golem/testkit -w @golem/control-plane -w @golem/api-client && node test/browser/run.mjs",
     "postinstall": "npm --prefix mcp/channel ci --omit=dev --workspaces=false",
-    "prepack": "npm run build -w @golem/compiler -w @golem/mcp-adapter",
+    "prepack": "npm run build -w @golem/compiler -w @golem/mcp-adapter -w apps/cli",
     "test:release": "node test/release-smoke.mjs",
     "verify:render": "npm run test:journey -- --scenario render-mcp-closure",
     "dashboard": "node dashboard/server/index.js",

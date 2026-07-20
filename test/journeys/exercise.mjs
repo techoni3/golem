@@ -740,6 +740,48 @@ export async function exerciseMigrationDryRunAmbiguity() {
 	return runMigrationPlanReplay();
 }
 
+const typedCliEntry = path.join(repositoryRoot, "dist/apps/cli/golem.js");
+
+function runTypedCliFixture(home, args) {
+	return spawnSync(process.execPath, [typedCliEntry, ...args], {
+		cwd: repositoryRoot,
+		env: { ...process.env, GOLEM_HOME: home },
+		encoding: "utf8",
+	});
+}
+
+export async function exerciseCliCommandParity() {
+	const home = fs.mkdtempSync(path.join(os.tmpdir(), "golem-j5-cli-parity-"));
+	try {
+		const before = fs.readdirSync(home);
+		const help = runTypedCliFixture(home, ["help"]);
+		assert.equal(help.status, 0);
+		assert.match(help.stdout, /codex \[options\]/);
+		assert.match(help.stdout, /opencode \[options\]/);
+		assert.doesNotMatch(help.stdout, /^\s+launch(?:\s|$)/mu);
+		const schema = runTypedCliFixture(home, ["--json-schema"]);
+		assert.equal(schema.status, 0);
+		const metadata = JSON.parse(schema.stdout);
+		assert.equal(metadata.schemaVersion, "golem.cli-registry/v1");
+		assert.equal(metadata.commands.some((command) => command.name === "launch"), false);
+		const local = runTypedCliFixture(home, ["claude", "local", "--dry-run", "--json"]);
+		assert.equal(local.status, 0, local.stderr);
+		const localPlan = JSON.parse(local.stdout);
+		assert.equal(localPlan.ok, true);
+		assert.equal(localPlan.launch.status, "launchable");
+		assert.equal(localPlan.delivery.mode, "native_channel");
+		assert.equal(localPlan.delivery.readiness, "not_ready");
+		assert.notEqual(localPlan.capabilityFacts.deliveryFlow, "push");
+		const explained = runTypedCliFixture(home, ["claude", "local", "--explain"]);
+		assert.equal(explained.status, 0, explained.stderr);
+		assert.match(explained.stdout, /launch launchable; delivery native_channel\/unknown\/not_ready/u);
+		assert.deepEqual(fs.readdirSync(home), before, "help and schema generation perform no writes");
+		return "one Commander registry generated help/metadata with canonical harness verbs, compatibility names, no launch command, and zero home writes";
+	} finally {
+		fs.rmSync(home, { recursive: true, force: true });
+	}
+}
+
 export function diagnosticFor(error, context) {
 	const description = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 	const temporaryRoot = context?.temporaryRoot || context?.root || (error instanceof JourneyDiagnosticError ? error.temporaryRoot : undefined);
@@ -748,12 +790,13 @@ export function diagnosticFor(error, context) {
 }
 
 export const exercises = Object.freeze({
+	"cli-command-parity": exerciseCliCommandParity,
+	"compact-launch-dry-run-matrix": exerciseCompactLaunchDryRunMatrix,
 	"domain-replay": exerciseDomainReplay,
 	"project-identity-git-worktree-relocation": exerciseProjectIdentityGitWorktreeRelocation,
 	"project-register-concurrency": exerciseProjectRegisterConcurrency,
 	"launcher-resolution-matrix": exerciseLauncherResolution,
 	"launcher-launchability-delivery-split": exerciseLauncherLaunchabilityDeliverySplit,
-	"compact-launch-dry-run-matrix": exerciseCompactLaunchDryRunMatrix,
 	"native-spawn-safety": exerciseNativeSpawnSafety,
 	"launcher-signal-cleanup": exerciseLauncherSignalCleanup,
 	"migration-dry-run-ambiguity": exerciseMigrationDryRunAmbiguity,
