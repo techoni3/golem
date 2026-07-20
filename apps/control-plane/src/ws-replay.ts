@@ -6,6 +6,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { bearerIsValid, isExpectedHost } from "./auth.js";
 import type {
 	ControlPlaneReplayEntry,
+	ControlPlaneReplayListener,
 	ControlPlaneReplayPort,
 	ControlPlaneReplayResult,
 } from "./ports.js";
@@ -21,6 +22,7 @@ export class BoundedReplayWindow implements ControlPlaneReplayPort {
 	readonly #capacity: number;
 	readonly #entries = new Map<ControlPlaneStream, ControlPlaneReplayEntry[]>();
 	readonly #nextSequence = new Map<ControlPlaneStream, number>();
+	readonly #listeners = new Set<ControlPlaneReplayListener>();
 
 	constructor(capacity = 32) {
 		if (!Number.isInteger(capacity) || capacity < 1 || capacity > 256)
@@ -66,19 +68,26 @@ export class BoundedReplayWindow implements ControlPlaneReplayPort {
 			);
 		const entries = this.#entries.get(stream) ?? [];
 		const prior = entries.at(-1);
+		if (prior && resourceRevision < prior.resourceRevision)
+			throw new Error(
+				"replay resource revision must not regress below the canonical prior revision",
+			);
 		const entry = Object.freeze({
 			sequence: this.#nextSequence.get(stream) ?? 1,
-			resourceRevision: Math.max(
-				resourceRevision,
-				(prior?.resourceRevision ?? -1) + 1,
-			),
+			resourceRevision,
 			delta: Object.freeze({ ...delta }),
 		});
 		this.#nextSequence.set(stream, entry.sequence + 1);
 		entries.push(entry);
 		while (entries.length > this.#capacity) entries.shift();
 		this.#entries.set(stream, entries);
+		for (const listener of this.#listeners) listener(stream, entry);
 		return entry;
+	}
+
+	subscribe(listener: ControlPlaneReplayListener): () => void {
+		this.#listeners.add(listener);
+		return () => this.#listeners.delete(listener);
 	}
 }
 
@@ -112,9 +121,35 @@ export function registerWsReplay(options: {
 	readonly read: (stream: ControlPlaneStream) => Record<string, unknown>;
 	readonly revision: (stream: ControlPlaneStream) => number;
 	readonly sockets: Set<ControlPlaneSocket>;
-}): void {
+}): () => void {
+	const streams = new Map<ControlPlaneSocket, ControlPlaneStream>();
+	const unsubscribe = options.replay.subscribe((stream, entry) => {
+		for (const socket of options.sockets) {
+			if (streams.get(socket) !== stream) continue;
+			try {
+				socket.send(
+					JSON.stringify(
+						frame(
+							options.instanceId,
+							stream,
+							entry.sequence,
+							entry.resourceRevision,
+							{
+								kind: "delta",
+								cursor: String(entry.sequence),
+								delta: entry.delta,
+							},
+						),
+					),
+				);
+			} catch {
+				options.sockets.delete(socket);
+				streams.delete(socket);
+			}
+		}
+	});
 	options.app.get(
-		"/ws",
+		"/api/v1/ws",
 		{ websocket: true },
 		(socket: ControlPlaneSocket, request) => {
 			if (
@@ -144,7 +179,7 @@ export function registerWsReplay(options: {
 						options.instanceId,
 						stream,
 						snapshot.sequence,
-						Math.max(snapshot.resourceRevision, options.revision(stream)),
+						options.revision(stream),
 						{
 							kind: "snapshot",
 							cursor: String(snapshot.sequence),
@@ -186,8 +221,16 @@ export function registerWsReplay(options: {
 							);
 			}
 			options.sockets.add(socket);
-			socket.once("close", () => options.sockets.delete(socket));
+			streams.set(socket, stream);
+			socket.once("close", () => {
+				options.sockets.delete(socket);
+				streams.delete(socket);
+			});
 			for (const message of messages) socket.send(JSON.stringify(message));
 		},
 	);
+	return () => {
+		unsubscribe();
+		streams.clear();
+	};
 }

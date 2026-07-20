@@ -11,6 +11,11 @@ export interface ControlPlaneReplayEntry {
 	readonly delta: Record<string, unknown>;
 }
 
+export type ControlPlaneReplayListener = (
+	stream: ControlPlaneStream,
+	entry: ControlPlaneReplayEntry,
+) => void;
+
 export type ControlPlaneReplayResult =
 	| {
 			readonly kind: "resume";
@@ -33,4 +38,5 @@ export interface ControlPlaneReplayPort {
 		resourceRevision: number,
 		delta: Record<string, unknown>,
 	): ControlPlaneReplayEntry;
+	subscribe(listener: ControlPlaneReplayListener): () => void;
 }

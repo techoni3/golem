@@ -3,6 +3,29 @@ import { z } from "zod";
 
 export const ApiErrorResponseSchema = ApiErrorV1Schema;
 
+/**
+ * Fastify draft-07 and OpenAPI 3.1 share this non-recursive JSON projection.
+ * The Zod contract remains authoritative for runtime parsing; `details` is a
+ * JSON object, whose values are already constrained to JSON by transport.
+ */
+export const ApiErrorResponseJsonSchema: Readonly<Record<string, unknown>> =
+	Object.freeze({
+		type: "object",
+		additionalProperties: false,
+		required: ["schema_version", "code", "message", "correlation_id"],
+		properties: {
+			schema_version: { type: "string", const: "golem.api-error/v1" },
+			code: { type: "string", minLength: 1, maxLength: 128 },
+			message: { type: "string", minLength: 1, maxLength: 1024 },
+			correlation_id: { type: "string", minLength: 1, maxLength: 128 },
+			details: {
+				type: "object",
+				propertyNames: { type: "string" },
+				additionalProperties: true,
+			},
+		},
+	});
+
 export const ControlPlaneStreams = [
 	"runtime.live",
 	"runtime.history",

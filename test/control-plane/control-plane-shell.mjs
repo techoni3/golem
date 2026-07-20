@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createRequire } from "node:module";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -14,9 +13,8 @@ import {
 	stopProcessGroup,
 	waitFor,
 } from "@golem/testkit";
+import { acquireChrome } from "../../dashboard/scripts/_chrome.mjs";
 
-const require = createRequire(import.meta.url);
-const { chromium } = require("playwright-core");
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const serviceProgram = path.join(repositoryRoot, "apps/control-plane/dist/main.js");
 const invalidResponseProgram = path.join(
@@ -24,7 +22,6 @@ const invalidResponseProgram = path.join(
 	"test/control-plane/invalid-response-child.mjs",
 );
 const dashboardStaticRoot = path.join(repositoryRoot, "dashboard/dist");
-const chromeExecutable = process.env.GOLEM_CHROME_EXECUTABLE || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const controlPlaneToken = "control-plane-local-test-token";
 
 function exited(group) {
@@ -98,27 +95,49 @@ function requestWithHost(origin, host) {
 	});
 }
 
-function receiveFrame(url) {
+function connectSocket(url, headers = undefined) {
 	return new Promise((resolve, reject) => {
-		const socket = new WebSocket(url, { headers: { authorization: `Bearer ${controlPlaneToken}` } });
+		const socket = new WebSocket(url, headers ? { headers } : undefined);
+		const frames = [];
 		const timeout = setTimeout(() => {
 			socket.terminate();
-			reject(new Error("control-plane WebSocket timed out"));
+			reject(new Error("control-plane WebSocket timed out before connect"));
 		}, 4_000);
-		socket.once("message", (raw) => {
-			clearTimeout(timeout);
-			socket.close();
+		socket.on("message", (raw) => {
 			try {
-				resolve(JSON.parse(String(raw)));
-			} catch (error) {
-				reject(error);
+				frames.push(JSON.parse(String(raw)));
+			} catch {
+				// Protocol assertions below diagnose missing or malformed frames.
 			}
+		});
+		socket.once("open", () => {
+			clearTimeout(timeout);
+			resolve({ socket, frames });
 		});
 		socket.once("error", (error) => {
 			clearTimeout(timeout);
 			reject(error);
 		});
 	});
+}
+
+async function waitForFrame(connection, predicate, label) {
+	return waitFor(
+		() => connection.frames.find(predicate),
+		label,
+		4_000,
+	);
+}
+
+async function receiveTypedFrame(url) {
+	const connection = await connectSocket(url, {
+		authorization: `Bearer ${controlPlaneToken}`,
+	});
+	try {
+		return await waitForFrame(connection, () => true, "typed WebSocket frame");
+	} finally {
+		connection.socket.close();
+	}
 }
 
 function setCookie(response) {
@@ -133,25 +152,35 @@ function setCookie(response) {
 	return value.split(";", 1)[0];
 }
 
-async function assertBrowserShell(origin) {
-	if (!fs.existsSync(chromeExecutable))
-		throw new Error(`headless Chrome fixture is unavailable: ${chromeExecutable}`);
-	const browser = await chromium.launch({
-		headless: true,
-		executablePath: chromeExecutable,
-		args: ["--no-first-run", "--no-default-browser-check", "--disable-default-apps", "--no-sandbox"],
-	});
+async function assertBrowserShell(origin, publishLegacyDelta) {
+	const chrome = await acquireChrome();
 	try {
-		const context = await browser.newContext();
+		const context = await chrome.browser.newContext();
 		try {
 			const page = await context.newPage();
 			await page.goto(origin, { waitUntil: "domcontentloaded" });
 			assert.equal(await page.locator("#root").count(), 1, "legacy dashboard static shell is served by the control plane");
+			await page.waitForFunction(
+				() =>
+					window.Store?.getState?.().connection === "connected" &&
+					window.Store.getState().ready === true,
+				undefined,
+				{ timeout: 4_000 },
+			);
+			await publishLegacyDelta();
+			await page.waitForFunction(
+				() =>
+					window.Store
+						?.getState?.()
+						.projects.some((project) => project.id === "control-plane-browser-echo"),
+				undefined,
+				{ timeout: 4_000 },
+			);
 		} finally {
 			await context.close();
 		}
 	} finally {
-		await browser.close();
+		await chrome.cleanup();
 	}
 }
 
@@ -168,6 +197,18 @@ export async function exerciseControlPlaneShell() {
 		assert.match(first.instance_id, /^cpi_/u);
 		const controlPlane = await import(
 			"../../apps/control-plane/dist/index.js"
+		);
+		const suppliedRevisionWindow = new controlPlane.BoundedReplayWindow(2);
+		assert.equal(
+			suppliedRevisionWindow.publish("runtime.live", 2, { value: "canonical" })
+				.resourceRevision,
+			2,
+			"the transport retains the supplied canonical revision without rewriting it",
+		);
+		assert.throws(
+			() => suppliedRevisionWindow.publish("runtime.live", 1, { value: "regression" }),
+			/resource revision must not regress/u,
+			"a regressing canonical revision is rejected instead of fabricated",
 		);
 		const serviceLock = await import(
 			"../../apps/control-plane/dist/service-lock.js"
@@ -260,21 +301,69 @@ export async function exerciseControlPlaneShell() {
 			body: JSON.stringify({ value: "missing-csrf" }),
 		});
 		assert.equal(missingCsrf.response.status, 403);
-		const snapshot = await receiveFrame(`${first.origin.replace("http", "ws")}/ws?stream=runtime.live`);
+		const wsOrigin = first.origin.replace("http", "ws");
+		const legacy = await connectSocket(`${wsOrigin}/ws`);
+		const legacySnapshot = await waitForFrame(
+			legacy,
+			(frame) => frame.type === "snapshot",
+			"headerless legacy WebSocket snapshot",
+		);
+		assert.ok(legacySnapshot.payload, "legacy snapshot keeps a top-level type/payload contract");
+		legacy.socket.send(JSON.stringify({ type: "ping" }));
+		assert.equal(
+			(await waitForFrame(legacy, (frame) => frame.type === "pong", "legacy WebSocket pong")).type,
+			"pong",
+			"legacy keepalive remains a top-level type frame",
+		);
+
+		const typed = await connectSocket(`${wsOrigin}/api/v1/ws?stream=runtime.live`, {
+			authorization: `Bearer ${controlPlaneToken}`,
+		});
+		const snapshot = await waitForFrame(
+			typed,
+			(frame) => frame.payload?.kind === "snapshot",
+			"authenticated typed WebSocket snapshot",
+		);
 		assert.equal(snapshot.schema_version, "golem.websocket-frame/v1");
 		assert.equal(snapshot.payload.kind, "snapshot");
-		const echoed = await requestJson(`${first.origin}/api/v1/browser/echo`, {
-			method: "POST",
-			headers: { cookie, origin: first.origin, "x-golem-csrf": bootstrap.body.csrf_token, "content-type": "application/json" },
-			body: JSON.stringify({ value: "browser-shell" }),
+		await assertBrowserShell(first.origin, async () => {
+			const echoed = await requestJson(`${first.origin}/api/v1/browser/echo`, {
+				method: "POST",
+				headers: {
+					authorization: `Bearer ${controlPlaneToken}`,
+					"content-type": "application/json",
+				},
+				body: JSON.stringify({ value: "browser-shell" }),
+			});
+			assert.equal(echoed.response.status, 200, "bearer mutation succeeds without Origin");
+			assert.equal(echoed.body.value, "browser-shell");
 		});
-		assert.equal(echoed.response.status, 200);
-		assert.equal(echoed.body.value, "browser-shell");
+		const liveDelta = await waitForFrame(
+			typed,
+			(frame) => frame.payload?.kind === "delta",
+			"immediate typed WebSocket broadcast after mutation",
+		);
+		assert.equal(
+			liveDelta.resource_revision,
+			snapshot.resource_revision,
+			"transport sequence advances without inventing a canonical resource revision",
+		);
+		assert.equal(
+			(await waitForFrame(
+				legacy,
+				(frame) => frame.type === "projects-list",
+				"legacy dashboard delta",
+			)).type,
+			"projects-list",
+			"the injected compatibility source broadcasts legacy deltas",
+		);
+		typed.socket.close();
+		legacy.socket.close();
 
-		const delta = await receiveFrame(`${first.origin.replace("http", "ws")}/ws?stream=runtime.live&instance_id=${snapshot.instance_id}&cursor=${snapshot.payload.cursor}`);
+		const delta = await receiveTypedFrame(`${wsOrigin}/api/v1/ws?stream=runtime.live&instance_id=${snapshot.instance_id}&cursor=${snapshot.payload.cursor}`);
 		assert.equal(delta.payload.kind, "delta");
-		assert.ok(delta.sequence > snapshot.sequence, "a valid WebSocket resume advances a monotonic sequence");
-		assert.ok(delta.resource_revision >= snapshot.resource_revision, "a valid WebSocket resume advances a monotonic resource revision");
+		assert.ok(delta.sequence > snapshot.sequence, "a valid WebSocket resume advances a monotonic transport sequence");
+		assert.equal(delta.resource_revision, snapshot.resource_revision, "replay keeps the supplied canonical revision exactly");
 		for (const value of ["replay-one", "replay-two"]) {
 			const published = await requestJson(`${first.origin}/api/v1/browser/echo`, {
 				method: "POST",
@@ -283,7 +372,7 @@ export async function exerciseControlPlaneShell() {
 			});
 			assert.equal(published.response.status, 200);
 		}
-		const compacted = await receiveFrame(`${first.origin.replace("http", "ws")}/ws?stream=runtime.live&instance_id=${snapshot.instance_id}&cursor=${snapshot.payload.cursor}`);
+		const compacted = await receiveTypedFrame(`${wsOrigin}/api/v1/ws?stream=runtime.live&instance_id=${snapshot.instance_id}&cursor=${snapshot.payload.cursor}`);
 		assert.equal(compacted.payload.kind, "resync_required");
 		assert.equal(compacted.payload.reason, "cursor_compacted", "bounded replay identifies a compacted cursor gap");
 
@@ -309,7 +398,7 @@ export async function exerciseControlPlaneShell() {
 		first = undefined;
 		recovered = await start(home);
 		assert.notEqual(recovered.instance_id, snapshot.instance_id, "a restarted owner receives a fresh control-plane instance identity");
-		const restarted = await receiveFrame(`${recovered.origin.replace("http", "ws")}/ws?stream=runtime.live&instance_id=${snapshot.instance_id}&cursor=${snapshot.payload.cursor}`);
+		const restarted = await receiveTypedFrame(`${recovered.origin.replace("http", "ws")}/api/v1/ws?stream=runtime.live&instance_id=${snapshot.instance_id}&cursor=${snapshot.payload.cursor}`);
 		assert.equal(restarted.payload.kind, "resync_required");
 		assert.equal(restarted.payload.reason, "instance_changed", "a restarted instance requires a fresh snapshot rather than replaying an old cursor");
 
@@ -347,6 +436,39 @@ export async function exerciseControlPlaneShell() {
 		const launchOptions = { uid: process.getuid(), runner };
 		const initialLaunch = controlPlane.installLaunchAgent(launchDirectory, definition, launchOptions);
 		assert.match(fs.readFileSync(initialLaunch.path, "utf8"), /<false\/>/u, "LaunchAgent plan never auto-starts the service");
+		assert.equal(
+			fs.statSync(initialLaunch.path).mode & 0o777,
+			0o600,
+			"durable LaunchAgent plans retain the private on-disk mode",
+		);
+		const originalLaunch = fs.readFileSync(initialLaunch.path, "utf8");
+		assert.throws(
+			() =>
+				controlPlane.updateLaunchAgent(
+					launchDirectory,
+					{ ...definition, arguments: [serviceProgram, "--interrupted"] },
+					{
+						...launchOptions,
+						writeFault: {
+							afterRename: () => {
+								throw new Error("fixture interrupted after rename");
+							},
+						},
+					},
+				),
+			/fixture interrupted after rename/u,
+			"an interrupted rename/fsync boundary restores the durable backup",
+		);
+		assert.equal(
+			fs.readFileSync(initialLaunch.path, "utf8"),
+			originalLaunch,
+			"interrupted LaunchAgent replacement restores the prior plist bytes",
+		);
+		assert.equal(
+			fs.readdirSync(launchDirectory).some((entry) => entry.endsWith(".tmp")),
+			false,
+			"interrupted writes leave no promotable temporary plist",
+		);
 		const updatedLaunch = controlPlane.updateLaunchAgent(launchDirectory, {
 			...definition,
 			arguments: [serviceProgram, "--foreground"],
@@ -404,8 +526,7 @@ export async function exerciseControlPlaneShell() {
 		assert.equal(dashboardHelp.status, 0, dashboardHelp.stderr);
 		assert.match(dashboardHelp.stdout, /Usage: golem dashboard/u, "legacy dashboard --help remains a non-starting compatibility entrypoint");
 
-		await assertBrowserShell(recovered.origin);
-		return "real Fastify process validates generated-client auth, cookie+CSRF and typed errors; proves snapshot/resume/gap/restart WebSocket replay, concrete legacy/static compatibility, nonce-safe crash lock recovery, explicit atomic LaunchAgent commands, and graceful cleanup";
+		return "real Fastify process validates generated-client auth, cookie+CSRF and typed errors; proves headerless legacy shell ingestion plus live typed/replay/restart WebSockets, nonce-safe crash lock recovery, durable LaunchAgent swap rollback, and graceful cleanup";
 	} finally {
 		if (invalidResponse) await stopProcessGroup(invalidResponse.group);
 		if (duplicate && !exited(duplicate)) await stopProcessGroup(duplicate);

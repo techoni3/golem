@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
 import { type BrowserSessionAuthority, bearerIsValid } from "./auth.js";
+import type { LegacyCompatibilityPublisher } from "./compatibility.js";
 import { fail, sendValidated } from "./errors.js";
 import { controlPlaneOpenApiDocument } from "./openapi.js";
 import type {
@@ -9,6 +10,7 @@ import type {
 	ControlPlaneReplayPort,
 } from "./ports.js";
 import {
+	ApiErrorResponseJsonSchema,
 	BrowserEchoBodySchema,
 	BrowserEchoResponseSchema,
 	BrowserSessionResponseSchema,
@@ -46,14 +48,16 @@ export function registerValidatedRoutes(options: {
 	readonly instanceId: string;
 	readonly projection: ControlPlaneProjectionPort;
 	readonly replay: ControlPlaneReplayPort;
+	readonly legacy: LegacyCompatibilityPublisher;
 	readonly sessions: BrowserSessionAuthority;
 	readonly invalidResponseForTest?: boolean;
 }): void {
 	const responseSchemas = {
-		400: jsonSchema(z.object({}).passthrough()),
-		401: jsonSchema(z.object({}).passthrough()),
-		403: jsonSchema(z.object({}).passthrough()),
-		500: jsonSchema(z.object({}).passthrough()),
+		400: ApiErrorResponseJsonSchema,
+		401: ApiErrorResponseJsonSchema,
+		403: ApiErrorResponseJsonSchema,
+		409: ApiErrorResponseJsonSchema,
+		500: ApiErrorResponseJsonSchema,
 	};
 
 	options.app.get(
@@ -220,15 +224,41 @@ export function registerValidatedRoutes(options: {
 					"request.invalid",
 					"browser echo body is invalid",
 				);
-			options.replay.publish(
-				"runtime.live",
-				options.projection.revision("runtime.live"),
-				{
-					kind: "browser_echoed",
-					value: parsed.data.value,
-					transport: bearer ? "bearer" : "browser",
-				},
-			);
+			try {
+				options.replay.publish(
+					"runtime.live",
+					options.projection.revision("runtime.live"),
+					{
+						kind: "browser_echoed",
+						value: parsed.data.value,
+						transport: bearer ? "bearer" : "browser",
+					},
+				);
+			} catch (error) {
+				if (
+					error instanceof Error &&
+					error.message.includes("resource revision must not regress")
+				)
+					return fail(
+						request,
+						reply,
+						409,
+						"revision.regressed",
+						"canonical resource revision regressed",
+					);
+				throw error;
+			}
+			options.legacy.publish({
+				type: "projects-list",
+				projects: [
+					{
+						id: "control-plane-browser-echo",
+						name: parsed.data.value,
+						path: null,
+						phase: "drafting",
+					},
+				],
+			});
 			return sendValidated(request, reply, BrowserEchoResponseSchema, {
 				schema_version: "golem.control-plane-browser-echo/v1",
 				value: parsed.data.value,

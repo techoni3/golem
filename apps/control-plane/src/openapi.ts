@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+	ApiErrorResponseJsonSchema,
 	BrowserEchoBodySchema,
 	BrowserEchoResponseSchema,
 	BrowserSessionResponseSchema,
@@ -19,25 +20,14 @@ function schema(value: z.ZodType): JsonRecord {
 	}) as JsonRecord;
 }
 
-const error: JsonRecord = {
-	type: "object",
-	additionalProperties: false,
-	required: ["schema_version", "code", "message", "correlation_id"],
-	properties: {
-		schema_version: { const: "golem.api-error/v1" },
-		code: { type: "string" },
-		message: { type: "string" },
-		correlation_id: { type: "string" },
-		details: { type: "object", additionalProperties: true },
-	},
-};
-
 function response(description: string, value: z.ZodType): JsonRecord {
 	return {
 		description,
 		content: { "application/json": { schema: schema(value) } },
 	};
 }
+
+const error = ApiErrorResponseJsonSchema;
 
 export function controlPlaneOpenApiDocument(): JsonRecord {
 	return {
@@ -127,6 +117,10 @@ export function controlPlaneOpenApiDocument(): JsonRecord {
 						},
 						"403": {
 							description: "csrf failed",
+							content: { "application/json": { schema: error } },
+						},
+						"409": {
+							description: "canonical revision regressed",
 							content: { "application/json": { schema: error } },
 						},
 					},

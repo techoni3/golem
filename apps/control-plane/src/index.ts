@@ -1,6 +1,15 @@
 import type { RuntimeBoundary } from "@golem/runtime";
 import type { TrackerBoundary } from "@golem/tracker";
 
+export {
+	createLegacyCompatibilitySource,
+	type LegacyCompatibilityFrame,
+	type LegacyCompatibilityPort,
+	type LegacyCompatibilityPublisher,
+	type LegacyCompatibilitySource,
+	registerLegacyWebSocket,
+	registerStaticCompatibility,
+} from "./compatibility.js";
 export type {
 	LaunchAgentDefinition,
 	LaunchAgentInstall,

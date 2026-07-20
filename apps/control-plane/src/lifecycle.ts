@@ -6,7 +6,12 @@ import websocket from "@fastify/websocket";
 import Fastify from "fastify";
 
 import { createBrowserSessionAuthority, isExpectedHost } from "./auth.js";
-import { registerStaticCompatibility } from "./compatibility.js";
+import {
+	createLegacyCompatibilitySource,
+	type LegacyCompatibilityPort,
+	registerLegacyWebSocket,
+	registerStaticCompatibility,
+} from "./compatibility.js";
 import { fail, registerErrorEnvelope } from "./errors.js";
 import type {
 	ControlPlaneProjectionPort,
@@ -29,6 +34,7 @@ export interface ControlPlaneLifecycleOptions {
 	readonly port?: number;
 	readonly projection?: ControlPlaneProjectionPort;
 	readonly replay?: ControlPlaneReplayPort;
+	readonly legacyCompatibility?: LegacyCompatibilityPort;
 	readonly replayWindowSize?: number;
 	readonly invalidResponseForTest?: boolean;
 }
@@ -66,6 +72,8 @@ export async function startControlPlane(
 	const projection = options.projection ?? defaultProjection();
 	const replay =
 		options.replay ?? new BoundedReplayWindow(options.replayWindowSize ?? 32);
+	const legacyCompatibility =
+		options.legacyCompatibility ?? createLegacyCompatibilitySource();
 	const sessions = createBrowserSessionAuthority();
 	const sockets = new Set<ControlPlaneSocket>();
 	const app = Fastify({
@@ -80,6 +88,8 @@ export async function startControlPlane(
 		disableRequestLogging: true,
 	});
 	let closed = false;
+	let closeTypedReplay: () => void = () => {};
+	let closeLegacyWebSocket: () => void = () => {};
 
 	try {
 		await app.register(websocket);
@@ -100,12 +110,13 @@ export async function startControlPlane(
 			instanceId,
 			projection,
 			replay,
+			legacy: legacyCompatibility,
 			sessions,
 			...(options.invalidResponseForTest === undefined
 				? {}
 				: { invalidResponseForTest: options.invalidResponseForTest }),
 		});
-		registerWsReplay({
+		closeTypedReplay = registerWsReplay({
 			app,
 			instanceId,
 			token: options.token,
@@ -113,6 +124,10 @@ export async function startControlPlane(
 			read: (stream: ControlPlaneStream) => projection.read(stream),
 			revision: (stream: ControlPlaneStream) => projection.revision(stream),
 			sockets,
+		});
+		closeLegacyWebSocket = registerLegacyWebSocket({
+			app,
+			source: legacyCompatibility,
 		});
 		await registerStaticCompatibility({
 			app,
@@ -130,6 +145,8 @@ export async function startControlPlane(
 			close: async () => {
 				if (closed) return;
 				closed = true;
+				closeTypedReplay();
+				closeLegacyWebSocket();
 				for (const socket of sockets)
 					socket.close(1001, "service shutting down");
 				await app.close();
@@ -137,6 +154,8 @@ export async function startControlPlane(
 			},
 		});
 	} catch (error) {
+		closeTypedReplay();
+		closeLegacyWebSocket();
 		lock.release();
 		throw error;
 	}

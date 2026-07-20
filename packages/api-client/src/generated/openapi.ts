@@ -400,6 +400,24 @@ export interface operations {
                     };
                 };
             };
+            /** @description canonical revision regressed */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
         };
     };
 }

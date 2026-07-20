@@ -29,6 +29,10 @@ export interface LaunchctlBoundary {
 export interface LaunchAgentCommandOptions {
 	readonly uid: number;
 	readonly runner?: LaunchctlBoundary;
+	/** Journey-only fault boundary after rename, before target-directory fsync. */
+	readonly writeFault?: {
+		afterRename(): void;
+	};
 }
 
 export interface LaunchAgentStatus {
@@ -58,18 +62,44 @@ function plistPath(directory: string, label: string): string {
 	return path.join(directory, `${label}.plist`);
 }
 
-function atomicWrite(target: string, value: string): void {
-	const temporary = `${target}.${crypto.randomUUID()}.tmp`;
+function fsyncDirectory(directory: string): void {
+	const descriptor = fs.openSync(directory, "r");
 	try {
-		fs.writeFileSync(temporary, value, { encoding: "utf8", mode: 0o600 });
-		fs.renameSync(temporary, target);
+		fs.fsyncSync(descriptor);
+	} finally {
+		fs.closeSync(descriptor);
+	}
+}
+
+function removeDurably(target: string): void {
+	try {
+		fs.unlinkSync(target);
+		fsyncDirectory(path.dirname(target));
 	} catch (error) {
-		try {
-			fs.unlinkSync(temporary);
-		} catch {
-			// Preserve the write failure; the temporary file stays in the caller's
-			// private directory and is never promoted to the plist target.
-		}
+		if (!isCode(error, "ENOENT")) throw error;
+	}
+}
+
+function atomicWrite(
+	target: string,
+	value: string,
+	options?: { readonly mode?: number; readonly afterRename?: () => void },
+): void {
+	const temporary = `${target}.${crypto.randomUUID()}.tmp`;
+	let descriptor: number | undefined;
+	try {
+		descriptor = fs.openSync(temporary, "wx", options?.mode ?? 0o600);
+		fs.writeFileSync(descriptor, value, "utf8");
+		fs.fchmodSync(descriptor, options?.mode ?? 0o600);
+		fs.fsyncSync(descriptor);
+		fs.closeSync(descriptor);
+		descriptor = undefined;
+		fs.renameSync(temporary, target);
+		options?.afterRename?.();
+		fsyncDirectory(path.dirname(target));
+	} catch (error) {
+		if (descriptor !== undefined) fs.closeSync(descriptor);
+		removeDurably(temporary);
 		throw error;
 	}
 }
@@ -143,21 +173,27 @@ export function renderLaunchAgent(definition: LaunchAgentDefinition): string {
 function writeDefinition(
 	directory: string,
 	definition: LaunchAgentDefinition,
+	options?: LaunchAgentCommandOptions,
 ): LaunchAgentInstall {
 	fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
 	const target = plistPath(directory, definition.label);
 	const backupPath = `${target}.previous`;
 	const hadExisting = fs.existsSync(target);
-	if (hadExisting)
-		fs.copyFileSync(target, backupPath, fs.constants.COPYFILE_FICLONE);
+	const prior = hadExisting ? fs.readFileSync(target, "utf8") : undefined;
+	if (prior !== undefined) atomicWrite(backupPath, prior);
 	try {
-		atomicWrite(target, renderLaunchAgent(definition));
+		atomicWrite(target, renderLaunchAgent(definition), {
+			...(options?.writeFault
+				? { afterRename: options.writeFault.afterRename }
+				: {}),
+		});
 		return hadExisting
 			? Object.freeze({ path: target, backupPath })
 			: Object.freeze({ path: target });
 	} catch (error) {
 		if (hadExisting && fs.existsSync(backupPath))
 			atomicWrite(target, fs.readFileSync(backupPath, "utf8"));
+		else removeDurably(target);
 		throw error;
 	}
 }
@@ -168,7 +204,7 @@ export function installLaunchAgent(
 	definition: LaunchAgentDefinition,
 	options?: LaunchAgentCommandOptions,
 ): LaunchAgentInstall {
-	const install = writeDefinition(directory, definition);
+	const install = writeDefinition(directory, definition, options);
 	if (!options) return install;
 	try {
 		mustSucceed(
@@ -188,7 +224,7 @@ export function updateLaunchAgent(
 	definition: LaunchAgentDefinition,
 	options?: LaunchAgentCommandOptions,
 ): LaunchAgentInstall {
-	const install = writeDefinition(directory, definition);
+	const install = writeDefinition(directory, definition, options);
 	if (!options) return install;
 	try {
 		run(options, ["bootout", launchTarget(definition.label, options.uid)]);
@@ -209,13 +245,7 @@ export function rollbackLaunchAgent(
 ): void {
 	if (install.backupPath && fs.existsSync(install.backupPath))
 		atomicWrite(install.path, fs.readFileSync(install.backupPath, "utf8"));
-	else {
-		try {
-			fs.unlinkSync(install.path);
-		} catch (error) {
-			if (!isCode(error, "ENOENT")) throw error;
-		}
-	}
+	else removeDurably(install.path);
 	if (!options || !fs.existsSync(install.path)) return;
 	const label = path.basename(install.path).replace(/\.plist$/u, "");
 	run(options, ["bootout", launchTarget(label, options.uid)]);
