@@ -9,6 +9,7 @@
 		--g-surface-raised: #ffffff;
 		--g-surface-sunken: #edf1f6;
 		--g-surface-overlay: #111827;
+		--g-scrim-modal: rgb(19 32 52 / 50%);
 		--g-text: #172033;
 		--g-text-secondary: #3e4b63;
 		--g-text-muted: #5d687c;
@@ -54,6 +55,7 @@
 		--g-surface-raised: #202a3b;
 		--g-surface-sunken: #111827;
 		--g-surface-overlay: #e8edf8;
+		--g-scrim-modal: rgb(0 0 0 / 64%);
 		--g-text: #f2f5fb;
 		--g-text-secondary: #c2cbdb;
 		--g-text-muted: #a7b1c3;
@@ -98,6 +100,7 @@
 		:root {
 			--g-focus-width: 4px;
 			--g-border: currentcolor;
+			--g-scrim-modal: rgb(0 0 0 / 72%);
 		}
 	}
 
