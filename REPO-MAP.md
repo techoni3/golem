@@ -1,31 +1,31 @@
 # REPO-MAP.md
-> Last verified: 2026-07-20 @ fd9d288 — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-20 @ 06cdb65 — maintained via golem:docs-maintenance.
 
 ## Structure
 
 - `apps/` — private TypeScript seams; legacy entrypoints remain authoritative until vertical-slice cutover.
-- `packages/` — strict private boundaries; `contracts` owns Zod v1 wire schemas and generated JSON Schema snapshots.
+- `packages/` — strict boundaries: `contracts` owns Zod v1 schemas; `testkit` and `test/journeys/` own serial real-process proof.
 - `tools/openapi-codegen/` — isolated TS5/OpenAPI source generator, never runtime or public packaging.
 - `substrate/` is source; `plugin/` and `dashboard/dist/` are generated products.
-- `cli/`, `lib/`, `dashboard/server/`, `mcp/channel/`, and `shims/` are current public/compatibility surfaces; `test/` contains journey fixtures.
+- `cli/`, `lib/`, `dashboard/server/`, `mcp/channel/`, and `shims/` are public/compatibility surfaces; `test/` has journey fixtures.
 
 ## Workspace and entrypoints
 
 ### Root `package.json`, `tsconfig*.json`, and `biome.json`
 
-- One npm 11 root lock owns `apps/`, `packages/`, and `tools/`. Application references use pinned TS 7; untouched JS stays `allowJs` with `checkJs:false`.
-- `typecheck`, `build`, `check:boundaries`, `lint`, `clean`, and `api:*` are the typed-scaffold contract. `clean` removes only named workspace outputs.
-- `packages/api-client` owns runtime `openapi-fetch@0.17.0`. The codegen workspace owns exact `typescript@5.9.3` and `openapi-typescript@7.13.0`; root commands delegate without `npx`.
+- One npm 11 lock owns `apps/`, `packages/`, and `tools/`; applications use TS 7 while untouched JS stays unchecked.
+- `typecheck`, `build`, boundaries, lint, clean, and `api:*` are the typed-scaffold contract; clean removes named outputs only.
+- `api-client` owns runtime `openapi-fetch@0.17.0`; codegen owns exact TS 5.9.3/OpenAPI Typescript 7.13.0 without `npx`.
 - `contracts:*` regenerates/checks the deterministic v1 registry; `test:contracts` is its single table-driven JSON-wire journey.
+- `testkit` owns temp-home containment, child termination, stable summaries, semantic comparison, and fresh-context headless fixtures; loopback denial is `UNMET` (see `docs/architecture/testing.md`).
 
 ### `scripts/check-boundaries.mjs`
 
-- Reads manifest dependency metadata and source imports (including root JS/MJS tool entrypoints), then rejects domain→persistence/Fastify/React/adapter, adapter→database, client→repository, canonical→compat, and tool/application edges.
-- Its nine committed direction fixtures include a metadata-only dependency and a root-level codegen MJS case; they are the regression proof, not mock-heavy unit fan-out.
+- Rejects manifest and source-import direction violations. Nine committed fixtures cover metadata-only dependencies and root codegen MJS, instead of mock fan-out.
 
 ## Data flow
 
-Current hooks/shims write registries beneath `GOLEM_HOME`; `dashboard/server/index.js` owns REST/WS while `tracker-db.js`/`phase-machine.js` keep phase authoritative. Typed direction: contracts → domain/runtime/tracker → control plane → API client → CLI/MCP/dashboard. Compat may consume canonical services; canonical packages never import compat, storage, UI, harness, or tool code.
+Hooks/shims write beneath `GOLEM_HOME`; dashboard REST/WS and tracker phase remain authoritative. Typed direction is contracts → domain/runtime/tracker → control plane → client → CLI/MCP/dashboard; canonical packages never import compat, storage, UI, harness, or tools.
 
 ## Constraints
 
