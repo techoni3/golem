@@ -32,6 +32,12 @@ export const scenarios = [
 		regression: "browser checks reuse a signed-in profile or retain success artifacts",
 	}),
 	registerScenario({
+		id: "control-plane-auth-ws-lifecycle",
+		journey: "J6",
+		tier: "integration",
+		regression: "the typed control plane accepts an unsafe caller, loses revision resync, serves no dashboard shell, or leaks its service lock",
+	}),
+	registerScenario({
 		id: "legacy-parity-baseline",
 		journey: "J4",
 		tier: "integration",

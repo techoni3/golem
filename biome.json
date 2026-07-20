@@ -9,7 +9,9 @@
       "!**/dist/**",
       "!**/node_modules/**",
       "!dashboard/dist/**",
+      "!apps/control-plane/generated/**",
       "!packages/contracts/generated/**",
+		"!packages/api-client/src/generated/**",
       "!plugin/**",
       "!test/fixtures/**"
     ]

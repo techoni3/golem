@@ -1,0 +1,13 @@
+# Typed control-plane shell
+
+`apps/control-plane` is the foreground-only Fastify 5 composition shell for the future typed control plane. It is intentionally not a replacement for the legacy dashboard server: `/api/health`, `/api/meta`, `/ws`, tracker routes, and runtime routes remain in their existing compatibility owners until their vertical-slice tickets migrate them.
+
+The shell binds only to `127.0.0.1` and requires an explicit bearer token. Its browser bootstrap endpoint additionally issues an HttpOnly, `SameSite=Strict` loopback session cookie and a CSRF token; mutating typed routes reject an unsafe `Host` or `Origin`. Error responses use the versioned `ApiErrorV1` envelope and typed HTTP response bodies are parsed through the GOL-26 Zod registry.
+
+The only shipped v1 shell surfaces are liveness/readiness, metadata, empty projection ports, browser bootstrap/echo, and `/ws`. WebSocket messages carry the GOL-26 instance id, stream sequence, resource revision, and a snapshot, delta, or explicit resync reason. A changed instance id never resumes a stale cursor.
+
+`apps/control-plane/generated/openapi.json` is the deterministic artifact from the shell’s Zod route schema. `tools/openapi-codegen` consumes that artifact using only its isolated TypeScript 5/OpenAPI Typescript toolchain and writes `packages/api-client/src/generated/openapi.ts`; `packages/api-client` is the runtime `openapi-fetch` consumer. `npm run api:generate` regenerates and `npm run api:check` proves freshness. Production code never imports the tool workspace.
+
+At startup the foreground process acquires `GOLEM_HOME/control-plane/control-plane.lock`. A live owner rejects a second process; a stale owner PID is reclaimed on the next start. SIGINT/SIGTERM close WebSocket clients, close Fastify, and release the lock. The LaunchAgent helpers only render/install/update/rollback a caller-selected plist and set `RunAtLoad` false—there is no postinstall or implicit user-service start. Static requests serve the existing `dashboard/dist` shell, preserving its legacy API ownership.
+
+The one `control-plane-auth-ws-lifecycle` J6 scenario runs the compiled process under a temporary `GOLEM_HOME`; it verifies authenticated generated-client HTTP, browser cookie/CSRF, WS snapshot/delta/resync, host protection, static headless shell, exclusive/stale lock behavior, and temporary LaunchAgent rollback. It must report `UNMET` if the sandbox prevents a real loopback listener.

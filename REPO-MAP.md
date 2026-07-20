@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-07-20 @ 20dbaea — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-20 @ 558ca83 — maintained via golem:docs-maintenance.
 
 ## Structure
 
@@ -19,6 +19,8 @@
 - `contracts:*` regenerates/checks the deterministic v1 registry; `test:contracts` is its single table-driven JSON-wire journey.
 - `testkit` owns temp-home containment, child termination, stable summaries, semantic comparison, and fresh-context headless fixtures; loopback denial is `UNMET` (see `docs/architecture/testing.md`).
 - `packages/ui` owns ordered semantic token layers/React Aria wrappers; `apps/dashboard/src/design-lab` is its isolated consumer (`test:ui-primitives`).
+- `apps/control-plane` owns the foreground-only Fastify 5 typed shell: loopback auth, typed error/response handling, `/api/v1` OpenAPI artifact, revisioned WS resync, static legacy dashboard shell, and explicit service/LaunchAgent lifecycle (see `docs/architecture/control-plane.md`).
+- `packages/api-client/src/generated/openapi.ts` is generated only from `apps/control-plane/generated/openapi.json`; `api:generate` writes it and `api:check` rejects drift using the isolated codegen toolchain.
 
 ### `scripts/check-boundaries.mjs`
 
@@ -27,7 +29,7 @@
 
 ## Data flow
 
-Hooks/shims write beneath `GOLEM_HOME`; dashboard REST/WS and tracker phase remain authoritative. Typed direction is contracts → domain/runtime/tracker → control plane → client → CLI/MCP/dashboard; canonical packages never import compat, storage, UI, harness, or tools.
+Hooks/shims write beneath `GOLEM_HOME`; dashboard REST/WS and tracker phase remain authoritative. The control-plane shell owns only `/api/v1` and `/ws` typed transport; legacy dashboard REST/WS routes are not migrated by its composition seam. Typed direction is contracts → domain/runtime/tracker → control plane → client → CLI/MCP/dashboard; canonical packages never import compat, storage, UI, harness, or tools.
 
 ## Constraints
 
