@@ -421,18 +421,26 @@ export async function exerciseLauncherSignalCleanup() {
 		await childIsGone(ready.worker_pid);
 
 		const timeoutLog = path.join(home.root, "timeout.ndjson");
-		const timed = await executeLaunch(executionInput(home, directPlan, timeoutLog, "stubborn-tree", { timeoutMs: 50 }));
+		const timed = await executeLaunch(
+			executionInput(home, directPlan, timeoutLog, "stubborn-tree"),
+		);
 		assert.equal(timed.kind, "running");
 		if (timed.kind !== "running") throw new Error("timeout launch did not start");
 		ownedLaunches.add(timed.running);
-		const timeoutExit = await timed.running.wait();
-		assert.equal(timeoutExit.timedOut, true, "timeout terminates the owned process group");
-		assert.equal(timeoutExit.signal, "SIGKILL", "SIGTERM-resistant root receives bounded SIGKILL");
-		const timeoutReady = await waitForRow(timeoutLog, (row) => row.event === "ready", "timeout fixture readiness");
+		const timeoutReady = await waitForRow(
+			timeoutLog,
+			(row) =>
+				row.event === "ready" &&
+				row.root_sigterm_resistance_ready === true,
+			"SIGTERM-resistance readiness before TERM-to-KILL timeout",
+		);
+		const timeoutExit = await timed.running.stop(50);
+		assert.equal(timeoutExit.signal, "SIGKILL", "observably SIGTERM-resistant root receives bounded SIGKILL");
 		await waitForRow(timeoutLog, (row) => row.event === "signal" && row.signal === "SIGTERM", "timeout termination");
+		assert.equal(timeoutReady.root_sigterm_resistance_ready, true, "TERM-to-KILL grace starts only after the fixture confirms resistance");
 		assert.equal(typeof timeoutReady.worker_pid, "number");
 		await childIsGone(timeoutReady.worker_pid);
-		return "SIGINT/SIGWINCH forwarding, listener restoration, TERM-to-KILL timeout, and descendant cleanup verified";
+		return "SIGINT/SIGWINCH forwarding, listener restoration, readiness-gated TERM-to-KILL timeout, and descendant cleanup verified";
 	} finally {
 		await Promise.all(
 			[...ownedLaunches].map(async (running) => {

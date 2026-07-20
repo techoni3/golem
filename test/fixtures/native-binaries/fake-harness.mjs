@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 
 const args = process.argv.slice(2);
 const mode = args[args.indexOf("--mode") + 1] || "ready";
+const sigtermResistant = mode === "stubborn-tree";
 const logPath = process.env.TESTKIT_FAKE_LOG;
 const escapePath = process.env.TESTKIT_ESCAPE_PATH;
 if (!logPath) throw new Error("TESTKIT_FAKE_LOG is required");
@@ -32,8 +33,8 @@ process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => { stdin += chunk; });
 process.stdin.on("end", () => record("stdin", { stdin }));
 process.once("SIGTERM", () => {
-	record("signal", { signal: "SIGTERM" });
-	if (mode !== "stubborn-tree") process.exit(0);
+	record("signal", { signal: "SIGTERM", resisted: sigtermResistant });
+	if (!sigtermResistant) process.exit(0);
 });
 process.once("SIGINT", () => { record("signal", { signal: "SIGINT" }); process.exit(0); });
 process.on("SIGWINCH", () => record("signal", { signal: "SIGWINCH" }));
@@ -67,7 +68,13 @@ if (mode === "delayed") {
 		],
 		{ stdio: "ignore" },
 	);
-	record("ready", { worker_pid: worker.pid });
+	// This record is emitted only after the root's SIGTERM handler above has
+	// been installed and the descendant process exists. The J5 timeout arm is
+	// intentionally gated on this fact, not on an elapsed startup delay.
+	record("ready", {
+		worker_pid: worker.pid,
+		root_sigterm_resistance_ready: sigtermResistant,
+	});
 	process.stdout.write("ready\n");
 	process.stderr.write("fixture-stderr\n");
 	setInterval(() => {}, 1_000);
