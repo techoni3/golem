@@ -11,7 +11,6 @@ import {
 	readFileSync,
 	renameSync,
 	rmSync,
-	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import os from "node:os";
@@ -282,6 +281,7 @@ async function assertRelocatableArtifact(root) {
 function assertPackedSyncTargets(root) {
 	const packDir = path.join(root, "packed-release");
 	const extractDir = path.join(root, "packed-extract");
+	const installPrefix = path.join(root, "packed-install");
 	mkdirSync(packDir, { recursive: true });
 	execFileSync("npm", ["pack", "--pack-destination", packDir, "--silent"], {
 		cwd: repositoryRoot,
@@ -300,44 +300,84 @@ function assertPackedSyncTargets(root) {
 	assert(existsSync(path.join(packedChannel, "package-lock.json")), "packed release retains the current channel lock");
 	assert(existsSync(path.join(packedRoot, "packages", "mcp-adapter", "dist", "golem-mcp.mjs")), "packed release also carries the relocatable artifact candidate");
 	assert.equal(existsSync(path.join(packedRoot, "node_modules")), false, "packed release has no bundled dependency tree");
-	symlinkSync(path.join(repositoryRoot, "node_modules"), path.join(packedRoot, "node_modules"), "dir");
-	execFileSync("npm", ["ci", "--omit=dev", "--workspaces=false"], {
-		// npm discovers the parent workspace when only --prefix is supplied,
-		// which can accidentally satisfy this from the packed root. Running in
-		// the channel package proves its own lock installs the nested closure.
-		cwd: packedChannel,
+
+	// The shipped CLI must resolve only through a real package install. In
+	// particular, do not symlink the checkout's root node_modules into the
+	// unpacked tarball: that masks an omitted production dependency.
+	execFileSync("npm", ["install", "--prefix", installPrefix, "--omit=dev", path.join(packDir, tarball), "--silent"], {
+		cwd: root,
 		env: {
 			...process.env,
-			npm_config_cache: path.join(root, "packed-channel-npm-cache"),
+			npm_config_cache: path.join(root, "packed-install-npm-cache"),
+			NODE_PATH: "",
 		},
 		encoding: "utf8",
 	});
-	assert(existsSync(path.join(packedChannel, "node_modules", "@modelcontextprotocol", "sdk")), "packed channel install restores its locked runtime closure");
+	const installedRoot = path.join(installPrefix, "node_modules", "@laveesingh", "golem");
+	const installedCli = path.join(installedRoot, "cli", "golem.js");
+	const installedChannel = path.join(installedRoot, "mcp", "channel");
+	assert(existsSync(installedCli), "fresh install exposes the shipped CLI");
+	assert.equal(readFileSync(installedCli, "utf8").includes(repositoryRoot), false, "installed CLI does not embed a checkout path");
+	assert(existsSync(path.join(installPrefix, "node_modules", "gray-matter")), "fresh install resolves declared root production dependencies");
+	assert(existsSync(path.join(installedChannel, "node_modules", "@modelcontextprotocol", "sdk")), "installed postinstall restores the nested channel closure");
+
 	const home = path.join(root, "packed-home");
-	for (const target of ["cc", "cc-marketplace", "codex", "opencode", "pi"]) {
-		const outputDir = path.join(home, "renders", target);
-		execFileSync(process.execPath, ["cli/golem.js", "sync", "--target", target, "--out", outputDir], {
-			cwd: packedRoot,
-			env: { ...process.env, GOLEM_HOME: home, NODE_PATH: "" },
-			encoding: "utf8",
-		});
-		const pluginRoot = target === "codex" ? path.join(outputDir, "plugins", "golem") : outputDir;
-		if (target === "cc" || target === "codex") {
-			assert(existsSync(path.join(pluginRoot, "mcp", "channel", "index.js")), `${target} sync retains the legacy channel entrypoint`);
-			assert(existsSync(path.join(pluginRoot, "mcp", "channel", "node_modules", "@modelcontextprotocol", "sdk")), `${target} sync retains the nested channel closure`);
-			assert(existsSync(path.join(pluginRoot, "mcp", "golem-mcp.mjs")), `${target} sync carries the relocatable artifact candidate`);
-			assert.match(readFileSync(path.join(pluginRoot, ".mcp.json"), "utf8"), /mcp\/channel\/index\.js/);
-		}
+	const xdg = path.join(root, "packed-xdg");
+	const userHome = path.join(root, "packed-user-home");
+	mkdirSync(home, { recursive: true });
+	mkdirSync(xdg, { recursive: true });
+	mkdirSync(userHome, { recursive: true });
+	writeFileSync(path.join(home, "config.json"), `${JSON.stringify({ harnesses: { opencode: { enabled: true } } }, null, 2)}\n`);
+	const installedEnv = { ...process.env, GOLEM_HOME: home, HOME: userHome, XDG_CONFIG_HOME: xdg, NODE_PATH: "" };
+	const invokeInstalled = (args) => execFileSync(process.execPath, [installedCli, ...args], {
+		cwd: installedRoot,
+		env: installedEnv,
+		encoding: "utf8",
+	});
+	const lockFor = () => JSON.parse(readFileSync(path.join(home, "substrate.lock"), "utf8"));
+	const assertTargetLock = (target, outputDir) => {
+		const entry = lockFor().targets?.[`${target}::${outputDir}`];
+		assert(entry?.files && Object.keys(entry.files).length > 0, `${target} records a concrete output lock`);
+	};
+	const outputs = {
+		cc: path.join(home, "renders", "cc-plugin"),
+		"cc-marketplace": path.join(home, "renders", "cc-marketplace"),
+		codex: path.join(home, "renders", "codex"),
+		pi: path.join(home, "renders", "pi"),
+	};
+	for (const [target, outputDir] of Object.entries(outputs)) {
+		const output = invokeInstalled(["sync", "--target", target, "--out", outputDir]);
+		assert.match(output, new RegExp(`golem sync --target ${target}`), `${target} installed CLI reports a real sync`);
+		assertTargetLock(target, outputDir);
 	}
-	const ccOutput = path.join(home, "renders", "cc");
+	assert(existsSync(path.join(outputs.cc, "README.md")), "cc creates its concrete plugin output");
+	assert(existsSync(path.join(outputs["cc-marketplace"], ".claude-plugin", "marketplace.json")), "cc-marketplace creates its concrete marketplace output");
+	assert(existsSync(path.join(outputs.codex, "plugins", "golem", ".codex-plugin", "plugin.json")), "codex creates its concrete plugin output");
+	assert(existsSync(path.join(outputs.pi, "golem.ts")), "pi creates its concrete extension output");
+	for (const target of ["cc", "codex"]) {
+		const pluginRoot = target === "codex" ? path.join(outputs.codex, "plugins", "golem") : outputs.cc;
+		assert(existsSync(path.join(pluginRoot, "mcp", "channel", "index.js")), `${target} sync retains the legacy channel entrypoint`);
+		assert(existsSync(path.join(pluginRoot, "mcp", "channel", "node_modules", "@modelcontextprotocol", "sdk")), `${target} sync retains the nested channel closure`);
+		assert(existsSync(path.join(pluginRoot, "mcp", "golem-mcp.mjs")), `${target} sync carries the relocatable artifact candidate`);
+		assert.match(readFileSync(path.join(pluginRoot, ".mcp.json"), "utf8"), /mcp\/channel\/index\.js/);
+	}
+
+	const opencodeOutput = invokeInstalled(["sync", "--target", "opencode"]);
+	assert.doesNotMatch(opencodeOutput, /harness is disabled/, "temporary config enables opencode for the packed matrix");
+	const opencodeAgents = path.join(xdg, "opencode", "agent");
+	const opencodeSkills = path.join(home, "renders", "opencode", "skills");
+	assert(existsSync(path.join(opencodeAgents, "worker.md")), "opencode creates its concrete agent output");
+	assert(existsSync(path.join(opencodeSkills, "building", "SKILL.md")), "opencode creates its concrete skills output");
+	assert(existsSync(path.join(xdg, "opencode", "opencode.jsonc")), "opencode creates its managed config output");
+	assertTargetLock("opencode", opencodeAgents);
+	assertTargetLock("opencode", opencodeSkills);
+	assertTargetLock("opencode-instructions", xdg);
+
+	const ccOutput = outputs.cc;
 	const packedOwner = path.join(ccOutput, "owner-preserved-by-cli-force.txt");
 	writeFileSync(packedOwner, "unowned packed force bytes\n");
 	writeFileSync(path.join(ccOutput, "README.md"), "tampered packed README\n");
-	execFileSync(process.execPath, ["cli/golem.js", "sync", "--target", "cc", "--out", ccOutput, "--force"], {
-		cwd: packedRoot,
-		env: { ...process.env, GOLEM_HOME: home, NODE_PATH: "" },
-		encoding: "utf8",
-	});
+	invokeInstalled(["sync", "--target", "cc", "--out", ccOutput, "--force"]);
 	assert.equal(readFileSync(packedOwner, "utf8"), "unowned packed force bytes\n", "packed CLI --force repairs only owned bytes");
 	return { ccOutput, home };
 }
@@ -611,7 +651,7 @@ export async function exerciseRenderMcpClosure() {
 		assert.equal(existsSync(recoveryPrior), false, "recovery consumes prior only after restoring or completing a marked swap");
 
 		await assertRelocatableArtifact(root);
-		return "typed production cc/marketplace/codex/opencode/pi manifests and packed sync retain the live legacy channel closure while carrying a deferred artifact candidate; an independent retained 22-tool table proves public schemas/routes/defaults and trusted caller injection; normal/force lock recovery preserves owner bytes; the packed channel registers and cleans up its route; and a copied bearer-authenticated artifact initializes, lists, reads, rejects an invalid write, performs a real write, and shuts down without checkout dependencies";
+		return "typed production cc/marketplace/codex/opencode/pi manifests and a freshly installed packed CLI retain the live legacy channel closure while carrying a deferred artifact candidate; an independent retained 22-tool table proves public schemas/routes/defaults and trusted caller injection; normal/force lock recovery preserves owner bytes; the packed channel registers and cleans up its route; and a copied bearer-authenticated artifact initializes, lists, reads, rejects an invalid write, performs a real write, and shuts down without checkout dependencies";
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
