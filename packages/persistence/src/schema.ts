@@ -5,7 +5,7 @@ import type { DatabaseScope, MigrationDefinition } from "./types.js";
 
 export const busyTimeoutMs = 2_500;
 export const latestRuntimeVersion = 1;
-export const latestTrackerVersion = 1;
+export const latestTrackerVersion = 2;
 
 function migrationChecksum(value: string): string {
 	return crypto.createHash("sha256").update(value).digest("hex");
@@ -292,6 +292,103 @@ CREATE TABLE migration_audit (
   backup_path TEXT,
   applied_at TEXT NOT NULL
 );
+`,
+	),
+	migration(
+		"tracker/002-durable-delivery-bus",
+		`
+CREATE TABLE tracker_envelopes (
+  id TEXT PRIMARY KEY CHECK(length(id) > 0),
+  root_id TEXT NOT NULL REFERENCES tracker_envelopes(id),
+  parent_id TEXT REFERENCES tracker_envelopes(id),
+  idempotency_key TEXT NOT NULL UNIQUE CHECK(length(idempotency_key) > 0),
+  fingerprint TEXT NOT NULL,
+  sender_id TEXT NOT NULL,
+  recipient_id TEXT NOT NULL,
+  reply_to_recipient_id TEXT,
+  kind TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  endpoint_json TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('pending', 'claimed', 'delivered', 'acknowledged', 'retrying', 'dead_letter', 'expired', 'cancelled')),
+  attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts >= 0),
+  max_attempts INTEGER NOT NULL DEFAULT 5 CHECK(max_attempts BETWEEN 1 AND 20),
+  deadline_at TEXT,
+  next_attempt_at TEXT,
+  claim_owner TEXT,
+  claim_token TEXT,
+  claim_until TEXT,
+  created_at TEXT NOT NULL,
+  delivered_at TEXT,
+  acknowledged_at TEXT,
+  last_error TEXT,
+  CHECK((status = 'claimed' AND claim_owner IS NOT NULL AND claim_token IS NOT NULL AND claim_until IS NOT NULL) OR status <> 'claimed')
+);
+CREATE INDEX tracker_envelopes_claimable ON tracker_envelopes(status, next_attempt_at, created_at);
+CREATE INDEX tracker_envelopes_recipient ON tracker_envelopes(recipient_id, status);
+CREATE TABLE tracker_envelope_acknowledgements (
+  envelope_id TEXT NOT NULL REFERENCES tracker_envelopes(id) ON DELETE CASCADE,
+  acknowledgement_id TEXT NOT NULL,
+  recipient_id TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  acknowledged_at TEXT NOT NULL,
+  PRIMARY KEY(envelope_id, acknowledgement_id)
+);
+CREATE TABLE tracker_bus_events (
+  sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT NOT NULL UNIQUE,
+  deduplication_key TEXT NOT NULL UNIQUE,
+  fingerprint TEXT NOT NULL,
+  topic TEXT NOT NULL,
+  class TEXT NOT NULL CHECK(class IN ('tracker', 'lifecycle', 'custom')),
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX tracker_bus_events_topic_sequence ON tracker_bus_events(topic, sequence);
+CREATE TABLE tracker_subscriptions (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  recipient_id TEXT NOT NULL,
+  topic TEXT NOT NULL,
+  classes_json TEXT NOT NULL,
+  cursor_sequence INTEGER NOT NULL DEFAULT 0 CHECK(cursor_sequence >= 0),
+  manual INTEGER NOT NULL CHECK(manual IN (0, 1)),
+  status TEXT NOT NULL CHECK(status IN ('active', 'offline', 'suspended')),
+  created_at TEXT NOT NULL,
+  UNIQUE(recipient_id, name)
+);
+CREATE INDEX tracker_subscriptions_topic_cursor ON tracker_subscriptions(topic, cursor_sequence, status);
+CREATE TABLE tracker_passive_slots (
+  sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+  recipient_id TEXT NOT NULL,
+  ticket_id TEXT NOT NULL,
+  category TEXT NOT NULL,
+  baseline_json TEXT NOT NULL,
+  value_json TEXT NOT NULL,
+  event_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(recipient_id, ticket_id, category)
+);
+CREATE INDEX tracker_passive_slots_recipient ON tracker_passive_slots(recipient_id, sequence);
+CREATE TABLE tracker_passive_cursors (
+  recipient_id TEXT PRIMARY KEY,
+  cursor_sequence INTEGER NOT NULL DEFAULT 0 CHECK(cursor_sequence >= 0),
+  pending_json TEXT,
+  pending_to_sequence INTEGER,
+  lease_id TEXT,
+  lease_until TEXT,
+  updated_at TEXT NOT NULL,
+  CHECK((pending_json IS NULL AND pending_to_sequence IS NULL) OR (pending_json IS NOT NULL AND pending_to_sequence IS NOT NULL)),
+  CHECK((lease_id IS NULL AND lease_until IS NULL) OR (lease_id IS NOT NULL AND lease_until IS NOT NULL))
+);
+CREATE TABLE tracker_delivery_audit (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  subject_id TEXT NOT NULL,
+  details_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX tracker_delivery_audit_subject ON tracker_delivery_audit(subject_id, created_at);
 `,
 	),
 ];

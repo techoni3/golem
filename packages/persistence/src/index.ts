@@ -6,6 +6,8 @@ export { runtimeMigrations, trackerMigrations } from "./schema.js";
 export type {
 	CapabilityQualification,
 	ClaimedOutboxRecord,
+	ClaimedTrackerDeliveryEnvelope,
+	ClaimedTrackerPassiveBatch,
 	CommandStatus,
 	DatabaseHealth,
 	DatabaseScope,
@@ -39,6 +41,15 @@ export type {
 	RuntimeTransactionResult,
 	SchemaVersionedProvenance,
 	SessionAliasKind,
+	TrackerAppendBusEventResult,
+	TrackerBusEvent,
+	TrackerCreateEnvelopeResult,
+	TrackerDeliveryEligibility,
+	TrackerDeliveryEnvelope,
+	TrackerJsonObject,
+	TrackerPendingSubscriptionEvents,
+	TrackerStorageCapability,
+	TrackerSubscription,
 } from "./types.js";
 export {
 	PersistenceMigrationError,

@@ -305,4 +305,84 @@ export interface TrackerTables {
 		readonly backup_path: string | null;
 		readonly applied_at: string;
 	};
+	readonly tracker_envelopes: {
+		readonly id: string;
+		readonly root_id: string;
+		readonly parent_id: string | null;
+		readonly idempotency_key: string;
+		readonly fingerprint: string;
+		readonly sender_id: string;
+		readonly recipient_id: string;
+		readonly reply_to_recipient_id: string | null;
+		readonly kind: string;
+		readonly payload_json: string;
+		readonly endpoint_json: string;
+		readonly status: string;
+		readonly attempts: number;
+		readonly max_attempts: number;
+		readonly deadline_at: string | null;
+		readonly next_attempt_at: string | null;
+		readonly claim_owner: string | null;
+		readonly claim_token: string | null;
+		readonly claim_until: string | null;
+		readonly created_at: string;
+		readonly delivered_at: string | null;
+		readonly acknowledged_at: string | null;
+		readonly last_error: string | null;
+	};
+	readonly tracker_envelope_acknowledgements: {
+		readonly envelope_id: string;
+		readonly acknowledgement_id: string;
+		readonly recipient_id: string;
+		readonly payload_json: string;
+		readonly acknowledged_at: string;
+	};
+	readonly tracker_bus_events: {
+		readonly sequence: number;
+		readonly id: string;
+		readonly deduplication_key: string;
+		readonly fingerprint: string;
+		readonly topic: string;
+		readonly class: string;
+		readonly payload_json: string;
+		readonly created_at: string;
+	};
+	readonly tracker_subscriptions: {
+		readonly id: string;
+		readonly name: string;
+		readonly recipient_id: string;
+		readonly topic: string;
+		readonly classes_json: string;
+		readonly cursor_sequence: number;
+		readonly manual: number;
+		readonly status: string;
+		readonly created_at: string;
+	};
+	readonly tracker_passive_slots: {
+		readonly sequence: number;
+		readonly recipient_id: string;
+		readonly ticket_id: string;
+		readonly category: string;
+		readonly baseline_json: string;
+		readonly value_json: string;
+		readonly event_id: string;
+		readonly created_at: string;
+		readonly updated_at: string;
+	};
+	readonly tracker_passive_cursors: {
+		readonly recipient_id: string;
+		readonly cursor_sequence: number;
+		readonly pending_json: string | null;
+		readonly pending_to_sequence: number | null;
+		readonly lease_id: string | null;
+		readonly lease_until: string | null;
+		readonly updated_at: string;
+	};
+	readonly tracker_delivery_audit: {
+		readonly id: string;
+		readonly kind: string;
+		readonly subject_id: string;
+		readonly details_json: string;
+		readonly created_at: string;
+	};
 }

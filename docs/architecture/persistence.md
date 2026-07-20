@@ -59,10 +59,13 @@ temporary SQLite file, applies the same plan there, verifies it, and removes
 the clone and its temporary backup without writing the source database.
 
 The existing tracker file is inspected without mutation when it has legacy
-tables. An explicit `tracker/001-baseline` application adds only Golem
-migration/audit metadata and preserves tracker table rows. Fresh tracker files
-receive the same baseline automatically. Persistence receives an injected
-clock. Outbox consumers claim a bounded batch with a lease, replay only expired
+tables. An explicit `tracker/001-baseline` application adds Golem
+migration/audit metadata and `tracker/002-durable-delivery-bus` adds only
+namespaced envelope, bus, subscription, passive-cursor, and audit tables, so
+legacy tracker rows remain intact. Fresh tracker files receive both migrations
+automatically. The private owner exposes a typed tracker storage capability to
+control-plane composition, never a raw tracker connection. Persistence receives
+an injected clock. Outbox consumers claim a bounded batch with a lease, replay only expired
 claims, acknowledge with the active claim token, and record exponential
 `next_attempt_at` backoff through a bounded observable permanent failure; this
 preserves at-least-once cross-store delivery without claiming one cross-file

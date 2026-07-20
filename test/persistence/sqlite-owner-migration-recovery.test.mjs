@@ -232,7 +232,7 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 				},
 				{
 					runtimeVersion: 1,
-					trackerVersion: 1,
+					trackerVersion: 2,
 					foreignKeys: true,
 					journal: "wal",
 					busy: 2500,
@@ -951,13 +951,16 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 		const trackerDryRun = owner.plan("tracker");
 		assert.equal(trackerDryRun.mode, "dry-run");
 		assert.equal(trackerDryRun.requiresBackup, true);
-		assert.equal(trackerDryRun.pending[0].id, "tracker/001-baseline");
+		assert.deepEqual(
+			trackerDryRun.pending.map((migration) => migration.id),
+			["tracker/001-baseline", "tracker/002-durable-delivery-bus"],
+		);
 		assert.deepEqual(
 			trackerDryRun.dryRun,
 			{
 				integrity: "ok",
 				foreignKeyViolations: 0,
-				applied: ["tracker/001-baseline"],
+				applied: ["tracker/001-baseline", "tracker/002-durable-delivery-bus"],
 			},
 			"dry-run clones, applies, and verifies the tracker migration before source apply",
 		);
@@ -986,7 +989,7 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 			"apply refuses a plan that was not the approved dry-run",
 		);
 		const trackerApply = owner.apply("tracker", trackerDryRun.planHash);
-		assert.equal(trackerApply.applied[0], "tracker/001-baseline");
+		assert.deepEqual(trackerApply.applied, ["tracker/001-baseline", "tracker/002-durable-delivery-bus"]);
 		assert.equal(fs.existsSync(trackerApply.backupPath), true, "apply verifies a pre-migration backup");
 		assert.deepEqual(
 			inspectDatabase(home.trackerDb, (after) => ({

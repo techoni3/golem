@@ -217,6 +217,220 @@ export interface ClaimedOutboxRecord {
 	readonly attempts: number;
 }
 
+/**
+ * Narrow tracker-store facts. This is the only tracker-facing view of the
+ * owner; it intentionally omits SqliteConnection/Kysely and construction.
+ */
+export type TrackerJsonObject = Readonly<Record<string, unknown>>;
+export type TrackerDeliveryReadiness =
+	| "ready"
+	| "held_busy"
+	| "held_waiting"
+	| "pull_only"
+	| "next_turn"
+	| "unsupported"
+	| "unhealthy"
+	| "uninitialized";
+export type TrackerDeliveryMode =
+	| "pull"
+	| "native_channel"
+	| "prompt_bridge"
+	| "managed_app_server"
+	| "next_turn";
+export type TrackerCapabilityQualification =
+	| "supported"
+	| "experimental"
+	| "unsupported"
+	| "unknown";
+
+export interface TrackerDeliveryEligibility {
+	readonly recipientId: string;
+	readonly generationId: string;
+	readonly endpointId: string;
+	readonly ownerFence: number;
+	readonly readiness: TrackerDeliveryReadiness;
+	readonly mode: TrackerDeliveryMode;
+	readonly capabilities: readonly {
+		readonly capability: string;
+		readonly qualification: TrackerCapabilityQualification;
+		readonly observedAt: string;
+	}[];
+}
+
+export interface TrackerDeliveryEnvelope {
+	readonly id: string;
+	readonly rootId: string;
+	readonly parentId?: string;
+	readonly idempotencyKey: string;
+	readonly senderId: string;
+	readonly recipientId: string;
+	readonly replyToRecipientId?: string;
+	readonly kind: string;
+	readonly payload: TrackerJsonObject;
+	readonly endpoint: TrackerDeliveryEligibility;
+	readonly status:
+		| "pending"
+		| "claimed"
+		| "delivered"
+		| "acknowledged"
+		| "retrying"
+		| "dead_letter"
+		| "expired"
+		| "cancelled";
+	readonly attempts: number;
+	readonly maxAttempts: number;
+	readonly deadlineAt?: string;
+	readonly nextAttemptAt?: string;
+	readonly createdAt: string;
+}
+
+export interface ClaimedTrackerDeliveryEnvelope
+	extends TrackerDeliveryEnvelope {
+	readonly claimToken: string;
+	readonly claimOwner: string;
+	readonly claimUntil: string;
+}
+
+export interface TrackerBusEvent {
+	readonly sequence: number;
+	readonly id: string;
+	readonly deduplicationKey: string;
+	readonly topic: string;
+	readonly class: "tracker" | "lifecycle" | "custom";
+	readonly payload: TrackerJsonObject;
+	readonly createdAt: string;
+}
+
+export interface TrackerSubscription {
+	readonly id: string;
+	readonly name: string;
+	readonly recipientId: string;
+	readonly topic: string;
+	readonly classes: readonly TrackerBusEvent["class"][];
+	readonly cursor: number;
+	readonly manual: boolean;
+	readonly status: "active" | "offline" | "suspended";
+	readonly createdAt: string;
+}
+
+export interface TrackerPendingSubscriptionEvents {
+	readonly subscription: TrackerSubscription;
+	readonly events: readonly TrackerBusEvent[];
+	readonly fromSequence: number;
+	readonly toSequence: number;
+}
+
+export interface TrackerPassiveDelta {
+	readonly recipientId: string;
+	readonly ticketId: string;
+	readonly category: string;
+	readonly baseline: TrackerJsonObject;
+	readonly value: TrackerJsonObject;
+	readonly eventId: string;
+}
+
+export interface ClaimedTrackerPassiveBatch {
+	readonly recipientId: string;
+	readonly leaseId: string;
+	readonly leaseUntil: string;
+	readonly cursor: number;
+	readonly body: string;
+	readonly entries: readonly TrackerPassiveDelta[];
+}
+
+export type TrackerCreateEnvelopeResult =
+	| { readonly kind: "created"; readonly envelope: TrackerDeliveryEnvelope }
+	| { readonly kind: "duplicate"; readonly envelope: TrackerDeliveryEnvelope }
+	| { readonly kind: "conflict"; readonly reason: "id" | "idempotency_key" };
+export type TrackerAppendBusEventResult =
+	| { readonly kind: "created"; readonly event: TrackerBusEvent }
+	| { readonly kind: "duplicate"; readonly event: TrackerBusEvent }
+	| { readonly kind: "conflict"; readonly reason: "id" | "deduplication_key" };
+
+export interface TrackerStorageCapability {
+	createEnvelope(input: {
+		readonly envelope: TrackerDeliveryEnvelope;
+		readonly fingerprint: string;
+	}): TrackerCreateEnvelopeResult;
+	claimEnvelopes(input: {
+		readonly workerId: string;
+		readonly now: string;
+		readonly claimUntil: string;
+		readonly limit: number;
+	}): readonly ClaimedTrackerDeliveryEnvelope[];
+	settleEnvelope(input: {
+		readonly id: string;
+		readonly claimToken: string;
+		readonly now: string;
+		readonly status:
+			| "pending"
+			| "delivered"
+			| "retrying"
+			| "dead_letter"
+			| "expired";
+		readonly nextAttemptAt?: string;
+		readonly error?: string;
+	}): TrackerDeliveryEnvelope | undefined;
+	acknowledgeEnvelope(input: {
+		readonly id: string;
+		readonly acknowledgementId: string;
+		readonly recipientId: string;
+		readonly payload: TrackerJsonObject;
+		readonly now: string;
+	}): boolean;
+	createReplyEnvelope(input: {
+		readonly parentId: string;
+		readonly envelope: TrackerDeliveryEnvelope;
+		readonly fingerprint: string;
+	}): TrackerCreateEnvelopeResult;
+	recoverEnvelopes(now: string): readonly TrackerDeliveryEnvelope[];
+	appendBusEvent(input: {
+		readonly event: Omit<TrackerBusEvent, "sequence">;
+		readonly fingerprint: string;
+	}): TrackerAppendBusEventResult;
+	upsertSubscription(input: TrackerSubscription): TrackerSubscription;
+	pendingSubscriptionEvents(input: {
+		readonly id: string;
+		readonly limit: number;
+	}): TrackerPendingSubscriptionEvents | undefined;
+	advanceSubscriptionCursor(input: {
+		readonly id: string;
+		readonly fromSequence: number;
+		readonly toSequence: number;
+	}): boolean;
+	upsertPassiveDelta(
+		input: TrackerPassiveDelta & { readonly now: string },
+	): void;
+	claimPassiveBatch(input: {
+		readonly recipientId: string;
+		readonly leaseId: string;
+		readonly leaseUntil: string;
+		readonly now: string;
+	}): ClaimedTrackerPassiveBatch | undefined;
+	commitPassiveBatch(input: {
+		readonly recipientId: string;
+		readonly leaseId: string;
+		readonly now: string;
+	}): boolean;
+	releasePassiveBatch(input: {
+		readonly recipientId: string;
+		readonly leaseId: string;
+		readonly now: string;
+	}): boolean;
+	prune(input: { readonly now: string; readonly before: string }): {
+		readonly events: number;
+		readonly envelopes: number;
+		readonly auditId: string;
+	};
+	audit(): readonly {
+		readonly id: string;
+		readonly kind: string;
+		readonly subjectId: string;
+		readonly details: TrackerJsonObject;
+		readonly createdAt: string;
+	}[];
+}
+
 export interface RuntimeOutboxFailure {
 	readonly status: "pending" | "permanent_failure";
 	readonly attempts: number;
@@ -298,6 +512,8 @@ export interface PersistenceWriteCapability {
 		error: string,
 	): RuntimeOutboxFailure | undefined;
 	runtimeOutboxHealth(): RuntimeOutboxHealth;
+	/** Typed tracker store; no raw connection leaves the single owner. */
+	trackerStorage(): TrackerStorageCapability;
 	status(): PersistenceStatus;
 	close(): Promise<void>;
 }

@@ -56,6 +56,18 @@ export const scenarios = [
 		regression: "a temporary management/tracker outage drops durable runtime work instead of bounded, idempotent replay",
 	}),
 	registerScenario({
+		id: "delivery-queue-crash-matrix",
+		journey: "J4",
+		tier: "pr",
+		regression: "a claimed durable envelope can be double-settled, lose a retry, or survive a child crash without replay",
+	}),
+	registerScenario({
+		id: "bus-offline-replay",
+		journey: "J4",
+		tier: "pr",
+		regression: "offline subscriptions lose ordered cursor replay, passive slots start unsolicited turns, or pruning drops manual interest",
+	}),
+	registerScenario({
 		id: "testkit-browser",
 		journey: "J8",
 		tier: "release",
