@@ -1,3 +1,15 @@
+import type {
+	CommandStatus,
+	DatabaseScope,
+	DeliveryEnvelopeStatus,
+	DeliveryMode,
+	EndpointLifecycleState,
+	EndpointReadinessState,
+	GenerationLifecycleState,
+	MigrationDecision,
+	MigrationRunStatus,
+} from "./types.js";
+
 export interface SqliteStatement<Row = Record<string, unknown>> {
 	run(...parameters: readonly unknown[]): {
 		readonly changes: number;
@@ -74,9 +86,13 @@ export interface RuntimeTables {
 		readonly project_id: string;
 		readonly ordinal: number;
 		readonly harness: string;
-		readonly lifecycle_state: string;
-		readonly provenance_json: string;
+		readonly lifecycle_state: GenerationLifecycleState;
+		readonly lifecycle_schema_version: "golem.lifecycle/v1";
+		readonly lifecycle_provenance_json: string;
+		readonly field_schema_version: "golem.fields/v1";
+		readonly field_provenance_json: string;
 		readonly source_observed_at: string;
+		readonly received_at: string;
 		readonly activity_at: string | null;
 		readonly materialized_at: string;
 		readonly ended_at: string | null;
@@ -114,11 +130,11 @@ export interface RuntimeTables {
 		readonly generation_id: string;
 		readonly route_kind: string;
 		readonly revision: number;
-		readonly state: string;
+		readonly state: EndpointLifecycleState;
 		readonly owner_fence: number;
 		readonly owner_instance_id: string;
-		readonly delivery_mode: string;
-		readonly readiness_state: string;
+		readonly delivery_mode: DeliveryMode;
+		readonly readiness_state: EndpointReadinessState;
 		readonly control_state: string;
 		readonly claimed_at: string;
 		readonly heartbeat_at: string | null;
@@ -139,7 +155,7 @@ export interface RuntimeTables {
 		readonly adapter_id: string;
 		readonly adapter_version: string;
 		readonly qualification_state: string;
-		readonly delivery_mode: string;
+		readonly delivery_mode: DeliveryMode;
 		readonly evidence_kind: string;
 		readonly evidence_json: string;
 		readonly observed_at: string;
@@ -149,7 +165,7 @@ export interface RuntimeTables {
 		readonly command_id: string;
 		readonly idempotency_key: string;
 		readonly payload_json: string;
-		readonly status: string;
+		readonly status: CommandStatus;
 		readonly created_at: string;
 	};
 	readonly delivery_envelopes: {
@@ -157,7 +173,7 @@ export interface RuntimeTables {
 		readonly command_id: string;
 		readonly endpoint_id: string;
 		readonly payload_json: string;
-		readonly status: string;
+		readonly status: DeliveryEnvelopeStatus;
 		readonly created_at: string;
 	};
 	readonly delivery_acknowledgements: {
@@ -194,16 +210,16 @@ export interface RuntimeTables {
 	};
 	readonly migration_audit: {
 		readonly id: string;
-		readonly scope: string;
+		readonly scope: DatabaseScope;
 		readonly plan_hash: string;
 		readonly backup_path: string | null;
 		readonly applied_at: string;
 	};
 	readonly migration_runs: {
 		readonly id: string;
-		readonly scope: string;
+		readonly scope: DatabaseScope;
 		readonly plan_hash: string;
-		readonly status: string;
+		readonly status: MigrationRunStatus;
 		readonly backup_path: string | null;
 		readonly started_at: string;
 		readonly completed_at: string | null;
@@ -219,7 +235,7 @@ export interface RuntimeTables {
 		readonly id: string;
 		readonly migration_run_id: string;
 		readonly finding_id: string | null;
-		readonly decision: string;
+		readonly decision: MigrationDecision;
 		readonly decided_at: string;
 	};
 	readonly legacy_snapshots: {
@@ -239,7 +255,7 @@ export interface RuntimeTables {
 		readonly session_id: string;
 		readonly project_id: string;
 		readonly harness: string;
-		readonly lifecycle_state: string;
+		readonly lifecycle_state: GenerationLifecycleState;
 		readonly ordinal: number;
 		readonly activity_at: string | null;
 	};
@@ -248,7 +264,7 @@ export interface RuntimeTables {
 		readonly session_id: string;
 		readonly project_id: string;
 		readonly harness: string;
-		readonly lifecycle_state: string;
+		readonly lifecycle_state: GenerationLifecycleState;
 		readonly ordinal: number;
 		readonly source_observed_at: string;
 		readonly activity_at: string | null;
@@ -271,7 +287,7 @@ export interface TrackerTables {
 	};
 	readonly migration_audit: {
 		readonly id: string;
-		readonly scope: string;
+		readonly scope: DatabaseScope;
 		readonly plan_hash: string;
 		readonly backup_path: string | null;
 		readonly applied_at: string;

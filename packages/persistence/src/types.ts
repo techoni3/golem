@@ -4,6 +4,79 @@ export type DatabaseScope = "runtime" | "tracker";
 export type MigrationMode = "apply" | "dry-run";
 export type RuntimeFailpoint = "before_commit" | "after_commit";
 
+/** Exact GOL-15 generation lifecycle; persistence never aliases legacy states. */
+export type GenerationLifecycleState =
+	| "starting"
+	| "idle"
+	| "active"
+	| "waiting"
+	| "ending"
+	| "ended"
+	| "errored"
+	| "superseded";
+
+export type EndpointLifecycleState =
+	| "claiming"
+	| "healthy"
+	| "degraded"
+	| "released"
+	| "expired"
+	| "superseded";
+
+export type EndpointReadinessState =
+	| "ready"
+	| "held_busy"
+	| "held_waiting"
+	| "pull_only"
+	| "next_turn"
+	| "unsupported"
+	| "unhealthy"
+	| "uninitialized";
+
+export type DeliveryMode =
+	| "pull"
+	| "native_channel"
+	| "prompt_bridge"
+	| "managed_app_server"
+	| "next_turn";
+
+/** Closed runtime-v1 recovery/control vocabularies mirrored by SQL CHECKs. */
+export type CommandStatus =
+	| "accepted"
+	| "rejected"
+	| "executing"
+	| "succeeded"
+	| "failed"
+	| "cancelled";
+export type DeliveryEnvelopeStatus =
+	| "pending"
+	| "claimed"
+	| "delivered"
+	| "acknowledged"
+	| "failed"
+	| "cancelled"
+	| "expired";
+export type MigrationRunStatus =
+	| "planned"
+	| "dry_run"
+	| "applying"
+	| "applied"
+	| "failed"
+	| "rolled_back";
+export type MigrationDecision =
+	| "approved"
+	| "rejected"
+	| "deferred"
+	| "applied"
+	| "rolled_back";
+
+export interface SchemaVersionedProvenance<
+	Version extends "golem.lifecycle/v1" | "golem.fields/v1",
+> {
+	readonly schemaVersion: Version;
+	readonly details: Readonly<Record<string, unknown>>;
+}
+
 /** Injected once by the owning process so persistence never invents test time. */
 export interface PersistenceClock {
 	now(): string;
@@ -92,14 +165,9 @@ export interface RuntimeCanonicalMutation {
 		readonly projectId: string;
 		readonly ordinal: number;
 		readonly harness: string;
-		readonly state:
-			| "starting"
-			| "working"
-			| "idle"
-			| "waiting"
-			| "ended"
-			| "errored"
-			| "superseded";
+		readonly state: GenerationLifecycleState;
+		readonly lifecycleProvenance: SchemaVersionedProvenance<"golem.lifecycle/v1">;
+		readonly fieldProvenance: SchemaVersionedProvenance<"golem.fields/v1">;
 	};
 }
 

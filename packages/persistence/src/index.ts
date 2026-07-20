@@ -5,13 +5,21 @@
 export { runtimeMigrations, trackerMigrations } from "./schema.js";
 export type {
 	ClaimedOutboxRecord,
+	CommandStatus,
 	DatabaseHealth,
 	DatabaseScope,
+	DeliveryEnvelopeStatus,
+	DeliveryMode,
 	DryRunEvidence,
+	EndpointLifecycleState,
+	EndpointReadinessState,
+	GenerationLifecycleState,
+	MigrationDecision,
 	MigrationDefinition,
 	MigrationMode,
 	MigrationPlan,
 	MigrationResult,
+	MigrationRunStatus,
 	PersistenceBoundary,
 	PersistenceClock,
 	PersistenceOpenOptions,
@@ -22,6 +30,7 @@ export type {
 	RuntimeFailpoint,
 	RuntimeTransactionInput,
 	RuntimeTransactionResult,
+	SchemaVersionedProvenance,
 } from "./types.js";
 export {
 	PersistenceMigrationError,

@@ -57,6 +57,9 @@ export class RuntimeRepository {
 
 	record(input: RuntimeTransactionInput): RuntimeTransactionResult {
 		const transaction = this.#database.transaction(() => {
+			// Producer time comes from the signal; only receipt/materialization use
+			// the owner-injected clock so delayed delivery remains explainable.
+			const receivedAt = this.#clock.now();
 			const materializedAt = this.#clock.now();
 			const inserted = this.#database
 				.prepare(
@@ -69,7 +72,7 @@ export class RuntimeRepository {
 					json(input.payload),
 					json(input.provenance),
 					input.occurredAt,
-					materializedAt,
+					receivedAt,
 					materializedAt,
 					input.occurredAt,
 				);
@@ -108,7 +111,7 @@ export class RuntimeRepository {
 					);
 				this.#database
 					.prepare(
-						"INSERT OR IGNORE INTO session_generations(generation_id, session_id, project_id, ordinal, harness, lifecycle_state, provenance_json, source_observed_at, activity_at, materialized_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+						"INSERT OR IGNORE INTO session_generations(generation_id, session_id, project_id, ordinal, harness, lifecycle_state, lifecycle_schema_version, lifecycle_provenance_json, field_schema_version, field_provenance_json, source_observed_at, received_at, activity_at, materialized_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 					)
 					.run(
 						generation.generationId,
@@ -117,8 +120,12 @@ export class RuntimeRepository {
 						generation.ordinal,
 						generation.harness,
 						generation.state,
-						json(input.provenance),
+						generation.lifecycleProvenance.schemaVersion,
+						json(generation.lifecycleProvenance.details),
+						generation.fieldProvenance.schemaVersion,
+						json(generation.fieldProvenance.details),
 						input.occurredAt,
+						receivedAt,
 						input.occurredAt,
 						materializedAt,
 						terminal(generation.state) ? materializedAt : null,

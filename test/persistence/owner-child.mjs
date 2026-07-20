@@ -1,7 +1,7 @@
 import {
 	PersistenceOwnerConflictError,
 } from "@golem/persistence";
-import { openControlPlanePersistence } from "@golem/control-plane";
+import { openControlPlanePersistence } from "../../apps/control-plane/dist/persistence.js";
 
 const paths = {
 	runtimePath: process.env.GOLEM_RUNTIME_DB,

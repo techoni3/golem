@@ -120,13 +120,19 @@ function isClient(name) {
 }
 
 function forbiddenRule(owner, specifier) {
+	const packageSpecifier = workspacePackageSpecifier(specifier);
+	if (
+		packageSpecifier === "@golem/control-plane" &&
+		owner !== "@golem/control-plane"
+	) {
+		return "control-plane-composition-only";
+	}
 	if (
 		specifier === "@golem/persistence/control-plane" &&
 		owner !== "@golem/control-plane"
 	) {
 		return "persistence-writer-constructor";
 	}
-	const packageSpecifier = workspacePackageSpecifier(specifier);
 	if (
 		owner !== "@golem/openapi-codegen" &&
 		/(?:^|\/)tools(?:\/|$)/u.test(specifier)

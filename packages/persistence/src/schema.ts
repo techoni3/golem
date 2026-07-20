@@ -49,60 +49,73 @@ CREATE TABLE project_locations (
   location_kind TEXT NOT NULL CHECK(location_kind IN ('canonical', 'worktree', 'relocated', 'legacy')),
   source_observed_at TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  UNIQUE(project_id, location)
+  UNIQUE(project_id, location),
+  UNIQUE(project_id, location_id)
 );
 CREATE TABLE location_aliases (
-  project_id TEXT NOT NULL REFERENCES projects(project_id),
-  location_id TEXT NOT NULL REFERENCES project_locations(location_id),
+  project_id TEXT NOT NULL,
+  location_id TEXT NOT NULL,
   alias_path TEXT NOT NULL,
   alias_kind TEXT NOT NULL CHECK(alias_kind IN ('path', 'symlink', 'worktree', 'legacy')),
   observed_at TEXT NOT NULL,
   provenance_json TEXT NOT NULL,
-  PRIMARY KEY(project_id, alias_path, alias_kind)
+  PRIMARY KEY(project_id, alias_path, alias_kind),
+  FOREIGN KEY(project_id, location_id) REFERENCES project_locations(project_id, location_id)
 );
 CREATE TABLE location_relations (
-  project_id TEXT NOT NULL REFERENCES projects(project_id),
-  location_id TEXT NOT NULL REFERENCES project_locations(location_id),
-  related_location_id TEXT NOT NULL REFERENCES project_locations(location_id),
+  project_id TEXT NOT NULL,
+  location_id TEXT NOT NULL,
+  related_location_id TEXT NOT NULL,
   relation_kind TEXT NOT NULL CHECK(relation_kind IN ('same_project', 'worktree_of', 'relocated_from', 'legacy_source')),
   observed_at TEXT NOT NULL,
   provenance_json TEXT NOT NULL,
   PRIMARY KEY(project_id, location_id, related_location_id, relation_kind),
-  CHECK(location_id <> related_location_id)
+  CHECK(location_id <> related_location_id),
+  FOREIGN KEY(project_id, location_id) REFERENCES project_locations(project_id, location_id),
+  FOREIGN KEY(project_id, related_location_id) REFERENCES project_locations(project_id, location_id)
 );
 CREATE TABLE logical_sessions (
   session_id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(project_id),
   provenance_json TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  UNIQUE(project_id, session_id)
 );
 CREATE TABLE session_generations (
   generation_id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL REFERENCES logical_sessions(session_id),
-  project_id TEXT NOT NULL REFERENCES projects(project_id),
+  session_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
   ordinal INTEGER NOT NULL CHECK(ordinal > 0),
   harness TEXT NOT NULL CHECK(length(harness) > 0),
-  lifecycle_state TEXT NOT NULL CHECK(lifecycle_state IN ('starting', 'working', 'idle', 'waiting', 'ended', 'errored', 'superseded')),
-  provenance_json TEXT NOT NULL,
+  lifecycle_state TEXT NOT NULL CHECK(lifecycle_state IN ('starting', 'idle', 'active', 'waiting', 'ending', 'ended', 'errored', 'superseded')),
+  lifecycle_schema_version TEXT NOT NULL CHECK(lifecycle_schema_version = 'golem.lifecycle/v1'),
+  lifecycle_provenance_json TEXT NOT NULL,
+  field_schema_version TEXT NOT NULL CHECK(field_schema_version = 'golem.fields/v1'),
+  field_provenance_json TEXT NOT NULL,
   source_observed_at TEXT NOT NULL,
+  received_at TEXT NOT NULL,
   activity_at TEXT,
   materialized_at TEXT NOT NULL,
   ended_at TEXT,
   UNIQUE(session_id, ordinal),
+  UNIQUE(project_id, generation_id),
+  FOREIGN KEY(project_id, session_id) REFERENCES logical_sessions(project_id, session_id),
   CHECK((lifecycle_state IN ('ended', 'errored', 'superseded') AND ended_at IS NOT NULL) OR (lifecycle_state NOT IN ('ended', 'errored', 'superseded') AND ended_at IS NULL))
 );
 CREATE TABLE session_aliases (
-  project_id TEXT NOT NULL REFERENCES projects(project_id),
+  project_id TEXT NOT NULL,
   harness TEXT NOT NULL CHECK(length(harness) > 0),
   alias_kind TEXT NOT NULL CHECK(alias_kind IN ('native', 'thread', 'run', 'legacy', 'path')),
   producer_id TEXT NOT NULL CHECK(length(producer_id) > 0),
   alias TEXT NOT NULL CHECK(length(alias) > 0),
-  session_id TEXT NOT NULL REFERENCES logical_sessions(session_id),
-  generation_id TEXT REFERENCES session_generations(generation_id),
+  session_id TEXT NOT NULL,
+  generation_id TEXT,
   source TEXT NOT NULL,
   provenance_json TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  PRIMARY KEY(project_id, harness, alias_kind, producer_id, alias)
+  PRIMARY KEY(project_id, harness, alias_kind, producer_id, alias),
+  FOREIGN KEY(project_id, session_id) REFERENCES logical_sessions(project_id, session_id),
+  FOREIGN KEY(project_id, generation_id) REFERENCES session_generations(project_id, generation_id)
 );
 CREATE TABLE producer_watermarks (
   producer_id TEXT PRIMARY KEY,
@@ -125,11 +138,11 @@ CREATE TABLE endpoint_claims (
   generation_id TEXT NOT NULL REFERENCES session_generations(generation_id),
   route_kind TEXT NOT NULL CHECK(route_kind IN ('control', 'delivery', 'observation')),
   revision INTEGER NOT NULL CHECK(revision >= 0),
-  state TEXT NOT NULL CHECK(state IN ('active', 'superseded', 'released', 'expired')),
+  state TEXT NOT NULL CHECK(state IN ('claiming', 'healthy', 'degraded', 'released', 'expired', 'superseded')),
   owner_fence INTEGER NOT NULL CHECK(owner_fence > 0),
   owner_instance_id TEXT NOT NULL CHECK(length(owner_instance_id) > 0),
-  delivery_mode TEXT NOT NULL CHECK(delivery_mode IN ('push', 'pull', 'next_turn', 'unsupported')),
-  readiness_state TEXT NOT NULL CHECK(readiness_state IN ('ready', 'busy', 'waiting', 'unready', 'offline')),
+  delivery_mode TEXT NOT NULL CHECK(delivery_mode IN ('pull', 'native_channel', 'prompt_bridge', 'managed_app_server', 'next_turn')),
+  readiness_state TEXT NOT NULL CHECK(readiness_state IN ('ready', 'held_busy', 'held_waiting', 'pull_only', 'next_turn', 'unsupported', 'unhealthy', 'uninitialized')),
   control_state TEXT NOT NULL CHECK(control_state IN ('enabled', 'held', 'disabled')),
   claimed_at TEXT NOT NULL,
   heartbeat_at TEXT,
@@ -137,7 +150,7 @@ CREATE TABLE endpoint_claims (
   superseded_at TEXT,
   CHECK((state = 'superseded' AND superseded_at IS NOT NULL) OR (state <> 'superseded'))
 );
-CREATE UNIQUE INDEX endpoint_claims_one_active_route ON endpoint_claims(generation_id, route_kind) WHERE state = 'active';
+CREATE UNIQUE INDEX endpoint_claims_one_live_route ON endpoint_claims(generation_id, route_kind) WHERE state IN ('claiming', 'healthy', 'degraded');
 CREATE UNIQUE INDEX endpoint_claims_fence ON endpoint_claims(generation_id, route_kind, owner_fence);
 CREATE TABLE endpoint_fences (
   generation_id TEXT NOT NULL REFERENCES session_generations(generation_id),
@@ -154,7 +167,7 @@ CREATE TABLE capability_observations (
   adapter_id TEXT NOT NULL,
   adapter_version TEXT NOT NULL,
   qualification_state TEXT NOT NULL CHECK(qualification_state IN ('qualified', 'unqualified', 'expired', 'unknown')),
-  delivery_mode TEXT NOT NULL CHECK(delivery_mode IN ('push', 'pull', 'next_turn', 'unsupported')),
+  delivery_mode TEXT NOT NULL CHECK(delivery_mode IN ('pull', 'native_channel', 'prompt_bridge', 'managed_app_server', 'next_turn')),
   evidence_kind TEXT NOT NULL CHECK(evidence_kind IN ('probe', 'configured', 'observed', 'operator')),
   evidence_json TEXT NOT NULL,
   observed_at TEXT NOT NULL,
@@ -165,7 +178,7 @@ CREATE TABLE commands (
   command_id TEXT PRIMARY KEY,
   idempotency_key TEXT NOT NULL UNIQUE,
   payload_json TEXT NOT NULL,
-  status TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('accepted', 'rejected', 'executing', 'succeeded', 'failed', 'cancelled')),
   created_at TEXT NOT NULL
 );
 CREATE TABLE delivery_envelopes (
@@ -173,7 +186,7 @@ CREATE TABLE delivery_envelopes (
   command_id TEXT NOT NULL REFERENCES commands(command_id),
   endpoint_id TEXT NOT NULL REFERENCES endpoint_claims(endpoint_id),
   payload_json TEXT NOT NULL,
-  status TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('pending', 'claimed', 'delivered', 'acknowledged', 'failed', 'cancelled', 'expired')),
   created_at TEXT NOT NULL
 );
 CREATE TABLE delivery_acknowledgements (
@@ -213,16 +226,16 @@ CREATE TABLE diagnostics (
 );
 CREATE TABLE migration_audit (
   id TEXT PRIMARY KEY,
-  scope TEXT NOT NULL,
+  scope TEXT NOT NULL CHECK(scope IN ('runtime', 'tracker')),
   plan_hash TEXT NOT NULL,
   backup_path TEXT,
   applied_at TEXT NOT NULL
 );
 CREATE TABLE migration_runs (
   id TEXT PRIMARY KEY,
-  scope TEXT NOT NULL,
+  scope TEXT NOT NULL CHECK(scope IN ('runtime', 'tracker')),
   plan_hash TEXT NOT NULL,
-  status TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('planned', 'dry_run', 'applying', 'applied', 'failed', 'rolled_back')),
   backup_path TEXT,
   started_at TEXT NOT NULL,
   completed_at TEXT
@@ -238,7 +251,7 @@ CREATE TABLE migration_decisions (
   id TEXT PRIMARY KEY,
   migration_run_id TEXT NOT NULL REFERENCES migration_runs(id),
   finding_id TEXT REFERENCES migration_findings(id),
-  decision TEXT NOT NULL,
+  decision TEXT NOT NULL CHECK(decision IN ('approved', 'rejected', 'deferred', 'applied', 'rolled_back')),
   decided_at TEXT NOT NULL
 );
 CREATE TABLE legacy_snapshots (
