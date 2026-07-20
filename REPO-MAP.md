@@ -4,7 +4,7 @@
 ## Structure
 
 - `apps/` — private TypeScript seams; legacy entrypoints remain authoritative until vertical-slice cutover.
-- `packages/` — strict boundaries: `contracts` owns Zod v1 schemas; `testkit` and `test/journeys/` own serial real-process proof.
+- `packages/` — strict boundaries: `contracts` owns Zod v1 schemas; `domain` owns pure deterministic policy; `testkit` and `test/journeys/` own serial real-process proof.
 - `tools/openapi-codegen/` — isolated TS5/OpenAPI source generator, never runtime or public packaging.
 - `substrate/` is source; `plugin/` and `dashboard/dist/` are generated products.
 - `cli/`, `lib/`, `dashboard/server/`, `mcp/channel/`, and `shims/` are public/compatibility surfaces; `test/` has journey fixtures.
@@ -17,6 +17,7 @@
 - `typecheck`, `build`, boundaries, lint, clean, and `api:*` are the typed-scaffold contract; clean removes named outputs only.
 - `api-client` owns runtime `openapi-fetch@0.17.0`; codegen owns exact TS 5.9.3/OpenAPI Typescript 7.13.0 without `npx`.
 - `contracts:*` regenerates/checks the deterministic v1 registry; `test:contracts` is its single table-driven JSON-wire journey.
+- `domain` is a pure layered kernel: `identity`/`lifecycle`/`ordering` protect facts, `capabilities`/`readiness` resolve boundary state, `projections`/`explain` expose decisions, and `index` is the thin public seam. Its compact J2 replay is `test:domain`/`domain-replay` (see `docs/architecture/domain-kernel.md`).
 - `testkit` owns temp-home containment, child termination, stable summaries, semantic comparison, and fresh-context headless fixtures; loopback denial is `UNMET` (see `docs/architecture/testing.md`).
 - `packages/ui` owns ordered semantic token layers/React Aria wrappers; `apps/dashboard/src/design-lab` is its isolated consumer (`test:ui-primitives`).
 
@@ -41,4 +42,5 @@ Hooks/shims write beneath `GOLEM_HOME`; dashboard REST/WS and tracker phase rema
 | Task | Files | Verify with |
 |------|-------|-------------|
 | Typed workspace | `apps/`, `packages/`, `tools/`, root configs | Node 24 `npm ci`, `typecheck`, `build`, boundaries, lint |
+| Domain policy | `packages/domain/`, `test/domain/replay.mjs` | Node 24 `npm run test:domain`, `npm run test:journey -- --scenario domain-replay` |
 | Legacy runtime | `cli/`, `dashboard/`, `mcp/channel/`, `shims/` | temp-home legacy baseline |
