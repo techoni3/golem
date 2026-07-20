@@ -26,6 +26,18 @@ export const scenarios = [
 		regression: "launch precedence, capability qualification, or JSONC preservation drifts before process spawn",
 	}),
 	registerScenario({
+		id: "launcher-launchability-delivery-split",
+		journey: "J7",
+		tier: "pr",
+		regression: "a launchable process is rejected by unqualified delivery evidence or an unqualified delivery path is advertised as push-ready",
+	}),
+	registerScenario({
+		id: "compact-launch-dry-run-matrix",
+		journey: "J7",
+		tier: "pr",
+		regression: "the built resolver/CLI bridge disagrees with launchability and delivery truth or leaks credential/path state",
+	}),
+	registerScenario({
 		id: "migration-dry-run-ambiguity",
 		journey: "J7",
 		tier: "integration",

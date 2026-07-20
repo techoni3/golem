@@ -14,6 +14,8 @@ import type {
 	LauncherIssue,
 	LauncherList,
 	LaunchPlan,
+	LaunchPlanBridge,
+	LaunchPreset,
 	LaunchResolution,
 	ResolveLaunchInput,
 } from "./types.js";
@@ -65,6 +67,15 @@ function safeModelSelector(value: string): LauncherIssue | undefined {
 	return undefined;
 }
 
+function missingEnvironmentKey(
+	preset: Pick<LaunchPreset, "env_key_refs">,
+	available: readonly string[] | undefined,
+): string | undefined {
+	if (available === undefined) return undefined;
+	const keys = new Set(available);
+	return preset.env_key_refs.find((key) => !keys.has(key));
+}
+
 export function resolveLaunch(input: ResolveLaunchInput): LaunchResolution {
 	const trace: LaunchExplanation[] = [];
 	const config = mergeLauncherConfig(input);
@@ -98,6 +109,21 @@ export function resolveLaunch(input: ResolveLaunchInput): LaunchResolution {
 		);
 	const modelIssue = safeModelSelector(modelSelector);
 	if (modelIssue) return failure(modelIssue, trace);
+	const missingKey = missingEnvironmentKey(
+		selected.preset,
+		input.availableEnvironmentKeys,
+	);
+	if (missingKey)
+		return failure(
+			issue(
+				"launcher.environment.secret_missing",
+				"A required credential reference is unavailable.",
+				[
+					"Provide the named credential through the configured environment or credential provider.",
+				],
+			),
+			trace,
+		);
 	if (
 		harness !== selected.preset.harness ||
 		mode !== presetMode ||
@@ -137,10 +163,10 @@ export function resolveLaunch(input: ResolveLaunchInput): LaunchResolution {
 	if (!snapshot)
 		return failure(
 			issue(
-				"launcher.capability.unavailable",
-				"No capability snapshot qualifies this harness/backend/model/mode combination.",
+				"launcher.launch.unavailable",
+				"No launch contribution is available for this harness/backend/model/mode combination.",
 				[
-					"Choose a listed capability or run the adapter qualification journey.",
+					"Choose a listed launchable capability or install/configure its adapter.",
 				],
 			),
 			trace,
@@ -151,6 +177,15 @@ export function resolveLaunch(input: ResolveLaunchInput): LaunchResolution {
 		input.qualificationMaxAgeMs ?? defaultQualificationMaxAgeMs,
 	);
 	if (!truth.launchable) {
+		if (snapshot.launchContribution && truth.launch.status === "unavailable")
+			return failure(
+				issue(
+					"launcher.launch.unavailable",
+					"The selected configuration is not launchable.",
+					[truth.launch.remediation],
+				),
+				trace,
+			);
 		const code =
 			truth.status === "registration_only"
 				? "launcher.capability.registration_only"
@@ -172,12 +207,12 @@ export function resolveLaunch(input: ResolveLaunchInput): LaunchResolution {
 		detail: `${snapshot.capability.capability_id}:${truth.status}`,
 	});
 	const warnings: LauncherIssue[] = [];
-	if (truth.status === "experimental")
+	if (truth.delivery.readiness !== "ready")
 		warnings.push(
 			issue(
-				"launcher.capability.experimental",
-				"The capability is version-qualified but remains experimental.",
-				[truth.remediation],
+				"launcher.delivery.not_ready",
+				truth.delivery.reason,
+				[truth.delivery.remediation],
 				"warning",
 			),
 		);
@@ -209,6 +244,8 @@ export function resolveLaunch(input: ResolveLaunchInput): LaunchResolution {
 				: {}),
 			observedAt: snapshot.evidenceObservedAt ?? "",
 		},
+		launch: truth.launch,
+		delivery: truth.delivery,
 		capabilityFacts: {
 			deliveryMode: snapshot.capability.delivery_mode,
 			deliveryFlow: snapshot.deliveryFlow,
@@ -220,6 +257,11 @@ export function resolveLaunch(input: ResolveLaunchInput): LaunchResolution {
 		trace,
 	};
 	return deepFreeze(plan);
+}
+
+/** Project only the two eligibility facts for downstream CLI/API consumers. */
+export function launchPlanBridge(plan: LaunchPlan): LaunchPlanBridge {
+	return deepFreeze({ launch: plan.launch, delivery: plan.delivery });
 }
 
 export function listLauncher(input: {

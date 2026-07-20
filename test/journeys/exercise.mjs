@@ -27,6 +27,8 @@ import { exerciseControlPlaneShell } from "../control-plane/control-plane-shell.
 import { runMigrationPlanReplay } from "../migration/replay.mjs";
 import { exerciseRenderMcpClosure } from "../render-mcp-closure.mjs";
 import { exerciseDomainReplay } from "./domain-replay.mjs";
+import { exerciseCompactLaunchDryRunMatrix } from "./compact-launch-dry-run-matrix.mjs";
+import { exerciseLauncherLaunchabilityDeliverySplit } from "./launcher-launchability-delivery-split.mjs";
 import { exerciseLauncherResolution } from "./launcher-resolution.mjs";
 import {
 	exerciseLauncherSignalCleanup,
@@ -750,6 +752,8 @@ export const exercises = Object.freeze({
 	"project-identity-git-worktree-relocation": exerciseProjectIdentityGitWorktreeRelocation,
 	"project-register-concurrency": exerciseProjectRegisterConcurrency,
 	"launcher-resolution-matrix": exerciseLauncherResolution,
+	"launcher-launchability-delivery-split": exerciseLauncherLaunchabilityDeliverySplit,
+	"compact-launch-dry-run-matrix": exerciseCompactLaunchDryRunMatrix,
 	"native-spawn-safety": exerciseNativeSpawnSafety,
 	"launcher-signal-cleanup": exerciseLauncherSignalCleanup,
 	"migration-dry-run-ambiguity": exerciseMigrationDryRunAmbiguity,

@@ -28,6 +28,8 @@ export type EvidenceSource =
 	| "registration";
 export type EvidencePolicy = "observed" | "version_qualified";
 export type DeliveryFlow = "push" | "pull" | "next_turn";
+export type LaunchStatus = "launchable" | "unavailable";
+export type DeliveryTruthReadiness = "ready" | "not_ready" | "ineligible";
 export type CapabilityTruthStatus =
 	| Qualification
 	| "stale"
@@ -115,13 +117,37 @@ export interface CapabilitySnapshot {
 	readonly evidenceSource: EvidenceSource;
 	readonly evidencePolicy: EvidencePolicy;
 	readonly evidenceObservedAt?: string;
+	/** Adapter-owned launch preflight; delivery qualification never substitutes for it. */
+	readonly launchContribution?: {
+		readonly status: LaunchStatus;
+		readonly reason: string;
+		readonly remediation: string;
+	};
+	readonly deliveryReason?: string;
+	readonly deliveryRemediation?: string;
 	readonly remediation?: string;
+}
+
+export interface LaunchFacts {
+	readonly status: LaunchStatus;
+	readonly reason: string;
+	readonly remediation: string;
+}
+
+export interface DeliveryFacts {
+	readonly mode: DeliveryMode;
+	readonly qualification: Qualification;
+	readonly readiness: DeliveryTruthReadiness;
+	readonly reason: string;
+	readonly remediation: string;
 }
 
 export interface CapabilityTruth {
 	readonly status: CapabilityTruthStatus;
 	readonly launchable: boolean;
 	readonly remediation: string;
+	readonly launch: LaunchFacts;
+	readonly delivery: DeliveryFacts;
 }
 
 export interface LaunchSelection {
@@ -158,6 +184,10 @@ export interface LaunchPlan {
 		readonly version?: string;
 		readonly observedAt: string;
 	};
+	/** Launchability controls spawning and is independent from delivery truth. */
+	readonly launch: LaunchFacts;
+	/** Delivery qualification/readiness never authorizes process creation. */
+	readonly delivery: DeliveryFacts;
 	/** Keep delivery, readiness, app-server, and control distinctions observable. */
 	readonly capabilityFacts: {
 		readonly deliveryMode: DeliveryMode;
@@ -168,6 +198,12 @@ export interface LaunchPlan {
 	};
 	readonly warnings: readonly LauncherIssue[];
 	readonly trace: readonly LaunchExplanation[];
+}
+
+/** Narrow read-only bridge for CLI/doctor projections; it contains no spawn logic. */
+export interface LaunchPlanBridge {
+	readonly launch: LaunchFacts;
+	readonly delivery: DeliveryFacts;
 }
 
 export interface LaunchFailure {
@@ -199,6 +235,8 @@ export interface ResolveLaunchInput {
 	readonly user?: JsoncConfigDocument;
 	readonly project?: JsoncConfigDocument;
 	readonly capabilities?: readonly CapabilitySnapshot[];
+	/** Optional preflight inventory; omitted means credential checking stays in the spawn boundary. */
+	readonly availableEnvironmentKeys?: readonly string[];
 }
 
 export interface LauncherList {
@@ -223,6 +261,8 @@ export interface LauncherList {
 		readonly evidencePolicy: EvidencePolicy;
 		readonly evidenceVersion?: string;
 		readonly observedAt?: string;
+		readonly launch: LaunchFacts;
+		readonly delivery: DeliveryFacts;
 	}[];
 	readonly issues: readonly LauncherIssue[];
 }
@@ -244,6 +284,8 @@ export interface DoctorFact {
 	readonly evidenceVersion?: string;
 	readonly observedAt?: string;
 	readonly remediation: string;
+	readonly launch: LaunchFacts;
+	readonly delivery: DeliveryFacts;
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
