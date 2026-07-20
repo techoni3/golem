@@ -1,0 +1,43 @@
+{
+  "schema_version": "golem-parity-fixture/v6",
+  "purpose": "Sanitized projections for future legacy-versus-replacement comparisons; v6 adds corrected UI-route, installed-toolchain, outside-checkout, and launcher compatibility facts without copying a live Golem home.",
+  "projections": {
+    "project": {
+      "id": "project-alpha",
+      "display_name": "Alpha",
+      "location": "$PATH_1"
+    },
+    "sessions": [
+      {
+        "id": "session-managed",
+        "harness": "codex",
+        "delivery_mode": "managed_app_server",
+        "readiness": "ready"
+      },
+      {
+        "id": "session-direct",
+        "harness": "codex",
+        "delivery_mode": "pull",
+        "readiness": "pull_only"
+      },
+      {
+        "id": "session-pi",
+        "harness": "pi",
+        "delivery_mode": "next_turn",
+        "readiness": "next_turn"
+      }
+    ],
+    "dispatch": {
+      "envelope": "envelope-alpha",
+      "state": "acknowledged",
+      "queue_order": ["first", "second"]
+    },
+    "corrected_contracts": {
+      "comment_dispatch": "spec-only, idempotent enqueue before subscription-or-direct delivery",
+      "unacked_dismissal": ["ticket-updated", "native-sessions-update", "communication-health-updated"],
+      "managed_codex": "codex-cli 0.144.5 installed contract fingerprinted before spawn",
+      "opencode": "rendered checkout NODE_PATH and duplicate-free install/update/uninstall lifecycle",
+      "launcher": "-h and --help compatibility; unsupported custom provider stays ineligible"
+    }
+  }
+}

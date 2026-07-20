@@ -46,6 +46,7 @@
     "test": "node test/session-facts.test.mjs && node test/codex-journey.test.mjs && node test/pi-journey.test.mjs && node test/pi-tracker-integration.test.mjs && node test/sync-enforcement.test.mjs && node shims/opencode/resume-dispatchable.test.mjs && node shims/opencode/passive-delta.test.mjs && node mcp/channel/tracker-client.test.mjs",
     "verify:stack": "node test/stack-certification/run.mjs",
     "test:stack-certification": "node --test test/stack-certification/version-gate.test.mjs",
+    "test:legacy-baseline": "node test/parity/legacy-baseline.mjs",
     "postinstall": "npm ci --omit=dev --prefix mcp/channel",
     "test:release": "node test/release-smoke.mjs",
     "dashboard": "node dashboard/server/index.js",
