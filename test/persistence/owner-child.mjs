@@ -1,6 +1,6 @@
 import {
 	PersistenceOwnerConflictError,
-	openPersistenceForControlPlane,
+	persistenceCompositionPort,
 } from "@golem/persistence";
 
 const paths = {
@@ -13,7 +13,10 @@ if (!paths.runtimePath || !paths.trackerPath)
 
 let owner;
 try {
-	owner = openPersistenceForControlPlane(paths, process.env.GOLEM_OWNER_ID || "journey-child");
+	owner = persistenceCompositionPort.open(
+		paths,
+		process.env.GOLEM_OWNER_ID || "journey-child",
+	);
 	process.stdout.write(`${JSON.stringify({ type: "ready", pid: process.pid })}\n`);
 } catch (error) {
 	if (error instanceof PersistenceOwnerConflictError) {

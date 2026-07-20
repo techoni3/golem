@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -9,14 +9,19 @@ import { fileURLToPath } from "node:url";
 import {
 	PersistenceMigrationError,
 	RuntimeFailpointError,
-	openPersistenceForControlPlane,
+	persistenceCompositionPort,
 } from "@golem/persistence";
 import { createTemporaryHome, waitFor } from "@golem/testkit";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const ownerChild = path.join(repositoryRoot, "test/persistence/owner-child.mjs");
+const boundaryFixture = path.join(
+	repositoryRoot,
+	"test/fixtures/persistence/owner-capability-boundary.mjs",
+);
 const require = createRequire(new URL("../../packages/persistence/package.json", import.meta.url));
 const Database = require("better-sqlite3");
+const openPersistenceForControlPlane = persistenceCompositionPort.open;
 
 function count(database, table) {
 	return database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count;
@@ -26,6 +31,30 @@ function phaseCount(database) {
 	return database
 		.prepare("SELECT COUNT(*) AS count FROM tickets WHERE phase IS NOT NULL AND phase != ''")
 		.get().count;
+}
+
+function inspectDatabase(target, inspect) {
+	const database = new Database(target, { readonly: true, fileMustExist: true });
+	try {
+		return inspect(database);
+	} finally {
+		database.close();
+	}
+}
+
+function tableNames(target) {
+	return inspectDatabase(target, (database) =>
+		database
+			.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+			.all()
+			.map((row) => row.name),
+	);
+}
+
+function integrity(target) {
+	return inspectDatabase(target, (database) =>
+		database.pragma("integrity_check", { simple: true }),
+	);
 }
 
 function childOwner(home, ownerId) {
@@ -106,6 +135,33 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 	let owner;
 	let firstChild;
 	try {
+		const publicDeclarations = fs.readFileSync(
+			path.join(repositoryRoot, "packages/persistence/dist/index.d.ts"),
+			"utf8",
+		);
+		assert.match(
+			publicDeclarations,
+			/persistenceCompositionPort/,
+			"the control-plane receives the narrow write composition port",
+		);
+		assert.doesNotMatch(
+			publicDeclarations,
+			/\b(?:PersistenceOwner|SqliteConnection|Kysely|runtimeSql|trackerSql|openPersistenceForControlPlane)\b/,
+			"public declarations do not leak owner construction or raw database handles",
+		);
+		const forbiddenImport = spawnSync(process.execPath, [boundaryFixture], {
+			cwd: repositoryRoot,
+			encoding: "utf8",
+		});
+		assert.notEqual(
+			forbiddenImport.status,
+			0,
+			"an adversarial package consumer cannot import the private owner or constructor",
+		);
+		assert.match(
+			forbiddenImport.stderr,
+			/ERR_PACKAGE_PATH_NOT_EXPORTED/,
+		);
 		const freshOwner = openPersistenceForControlPlane({
 			runtimePath: fresh.runtimeDb,
 			trackerPath: fresh.trackerDb,
@@ -122,7 +178,7 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 					integrity: freshStatus.tracker.integrity,
 				},
 				{
-					runtimeVersion: 1,
+					runtimeVersion: 2,
 					trackerVersion: 1,
 					foreignKeys: true,
 					journal: "wal",
@@ -147,24 +203,68 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 			envelopes: count(before, "message_envelopes"),
 		};
 		before.close();
+		const trackerBeforeOpen = fs.readFileSync(home.trackerDb);
 
 		owner = openPersistenceForControlPlane({
 			runtimePath: home.runtimeDb,
 			trackerPath: home.trackerDb,
 		});
+		assert.deepEqual(
+			tableNames(home.runtimeDb).filter((name) =>
+				[
+					"producer_watermarks",
+					"metadata_versions",
+					"migration_runs",
+					"migration_findings",
+					"migration_decisions",
+					"legacy_snapshots",
+				].includes(name),
+			),
+			[
+				"legacy_snapshots",
+				"metadata_versions",
+				"migration_decisions",
+				"migration_findings",
+				"migration_runs",
+				"producer_watermarks",
+			],
+			"runtime-v1 metadata, watermark, disposition, and migration decision tables are owned by the v2 migration",
+		);
+		assert.deepEqual(
+			inspectDatabase(home.runtimeDb, (database) =>
+				database.prepare("PRAGMA table_info(runtime_events)").all().map((row) => row.name),
+			),
+			[
+				"event_id",
+				"deduplication_key",
+				"event_kind",
+				"payload_json",
+				"provenance_json",
+				"occurred_at",
+				"received_at",
+				"metadata_version",
+				"disposition",
+			],
+			"runtime event metadata and disposition columns are explicit",
+		);
+		assert.deepEqual(
+			fs.readFileSync(home.trackerDb),
+			trackerBeforeOpen,
+			"opening an unmanaged legacy tracker is inspection-only before the explicit baseline",
+		);
 		const initial = owner.status();
 		assert.deepEqual(
 			{
 				runtime: initial.runtime.userVersion,
 				tracker: initial.tracker.userVersion,
-				foreignKeys: initial.runtime.foreignKeys && initial.tracker.foreignKeys,
+				foreignKeys: initial.runtime.foreignKeys,
 				journal: initial.runtime.journalMode,
 				busy: initial.runtime.busyTimeoutMs,
 				integrity: initial.runtime.integrity,
 				trackerBaseline: initial.tracker.baseline,
 			},
 			{
-				runtime: 1,
+				runtime: 2,
 				tracker: 0,
 				foreignKeys: true,
 				journal: "wal",
@@ -172,28 +272,49 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 				integrity: "ok",
 				trackerBaseline: "unmanaged",
 			},
-			"separate real SQLite files apply runtime v1 while opening tracker data unchanged",
+			"separate real SQLite files apply the runtime-v1 metadata contract while opening tracker data unchanged",
 		);
 		assert.equal(fs.existsSync(`${home.trackerDb}.owner.lock`), false, "runtime lock is not attached to tracker data");
 		assert.equal(fs.existsSync(home.runtimeDb), true);
 		assert.equal(fs.existsSync(home.trackerDb), true);
 
+		const trackerBeforeDryRun = fs.readFileSync(home.trackerDb);
 		const trackerDryRun = owner.plan("tracker");
 		assert.equal(trackerDryRun.mode, "dry-run");
 		assert.equal(trackerDryRun.requiresBackup, true);
 		assert.equal(trackerDryRun.pending[0].id, "tracker/001-baseline");
-		const trackerApply = owner.apply("tracker");
+		assert.deepEqual(
+			trackerDryRun.dryRun,
+			{
+				integrity: "ok",
+				foreignKeyViolations: 0,
+				applied: ["tracker/001-baseline"],
+			},
+			"dry-run clones, applies, and verifies the tracker migration before source apply",
+		);
+		assert.deepEqual(
+			fs.readFileSync(home.trackerDb),
+			trackerBeforeDryRun,
+			"dry-run leaves the source tracker bytes unchanged",
+		);
+		assert.throws(
+			() => owner.apply("tracker", "not-the-approved-plan"),
+			(error) =>
+				error instanceof PersistenceMigrationError &&
+				error.code === "plan_mismatch",
+			"apply refuses a plan that was not the approved dry-run",
+		);
+		const trackerApply = owner.apply("tracker", trackerDryRun.planHash);
 		assert.equal(trackerApply.applied[0], "tracker/001-baseline");
 		assert.equal(fs.existsSync(trackerApply.backupPath), true, "apply verifies a pre-migration backup");
-		const after = owner.tracker;
 		assert.deepEqual(
-			{
+			inspectDatabase(home.trackerDb, (after) => ({
 				tickets: count(after, "tickets"),
 				phases: phaseCount(after),
 				comments: count(after, "comments"),
 				streams: count(after, "streams"),
 				envelopes: count(after, "message_envelopes"),
-			},
+			})),
 			beforeCounts,
 			"tracker baseline records migration ownership without rewriting legacy rows",
 		);
@@ -202,21 +323,71 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 			() => owner.recordRuntimeTransaction(eventInput("before", "before_commit")),
 			RuntimeFailpointError,
 		);
-		assert.equal(count(owner.runtime, "runtime_events"), 0, "pre-commit crash keeps raw event out");
-		assert.equal(count(owner.runtime, "runtime_outbox"), 0, "pre-commit crash keeps outbox out");
+		assert.equal(
+			inspectDatabase(home.runtimeDb, (database) => count(database, "runtime_events")),
+			0,
+			"pre-commit crash keeps raw event out",
+		);
+		assert.equal(
+			inspectDatabase(home.runtimeDb, (database) => count(database, "runtime_outbox")),
+			0,
+			"pre-commit crash keeps outbox out",
+		);
 		assert.throws(
 			() => owner.recordRuntimeTransaction(eventInput("after", "after_commit")),
 			RuntimeFailpointError,
 		);
-		assert.equal(count(owner.runtime, "runtime_events"), 1, "post-commit crash retains source event");
-		assert.equal(count(owner.runtime, "projects"), 1, "post-commit crash retains canonical mutation");
-		assert.equal(count(owner.runtime, "runtime_outbox"), 1, "post-commit crash retains durable cross-db outbox");
-		assert.equal(owner.recordRuntimeTransaction(eventInput("after")).disposition, "duplicate");
-		assert.equal(count(owner.runtime, "runtime_outbox"), 1, "dedupe suppresses a second outbox record");
 		assert.equal(
-			owner.tracker
-				.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'runtime_outbox'")
-				.get().count,
+			inspectDatabase(home.runtimeDb, (database) => count(database, "runtime_events")),
+			1,
+			"post-commit crash retains source event",
+		);
+		assert.equal(
+			inspectDatabase(home.runtimeDb, (database) => count(database, "projects")),
+			1,
+			"post-commit crash retains canonical mutation",
+		);
+		assert.equal(
+			inspectDatabase(home.runtimeDb, (database) => count(database, "runtime_outbox")),
+			1,
+			"post-commit crash retains durable cross-db outbox",
+		);
+		assert.equal(owner.recordRuntimeTransaction(eventInput("after")).disposition, "duplicate");
+		assert.equal(
+			inspectDatabase(home.runtimeDb, (database) => count(database, "runtime_outbox")),
+			1,
+			"dedupe suppresses a second outbox record",
+		);
+		const firstClaim = owner.claimRuntimeOutbox("journey-worker", 1, 1);
+		assert.equal(firstClaim.length, 1, "outbox claim is bounded to the requested row count");
+		assert.throws(
+			() => owner.claimRuntimeOutbox("journey-worker", 101),
+			/limit must be an integer from 1 to 100/,
+			"outbox claims reject unbounded work",
+		);
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		assert.equal(owner.replayRuntimeOutbox(), 1, "expired outbox claims replay deterministically");
+		const replayedClaim = owner.claimRuntimeOutbox("journey-worker", 1);
+		assert.equal(replayedClaim.length, 1);
+		assert.equal(
+			owner.ackRuntimeOutbox(replayedClaim[0].id, replayedClaim[0].claimToken),
+			true,
+			"outbox acknowledgement is guarded by the active claim token",
+		);
+		assert.equal(
+			inspectDatabase(home.runtimeDb, (database) =>
+				database
+					.prepare("SELECT status FROM runtime_outbox WHERE id = ?")
+					.get(replayedClaim[0].id).status,
+			),
+			"published",
+		);
+		assert.equal(
+			inspectDatabase(home.trackerDb, (database) =>
+				database
+					.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'runtime_outbox'")
+					.get().count,
+			),
 			0,
 			"runtime outbox does not claim a cross-file transaction",
 		);
@@ -235,7 +406,11 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 			trackerPath: path.join(home.root, "restored-tracker.db"),
 		});
 		try {
-			assert.equal(count(restored.runtime, "runtime_events"), 1, "restored backup opens with committed rows");
+			assert.equal(
+				inspectDatabase(restoredRuntime, (database) => count(database, "runtime_events")),
+				1,
+				"restored backup opens with committed rows",
+			);
 			assert.equal(restored.status().runtime.integrity, "ok");
 		} finally {
 			await restored.close();
@@ -251,10 +426,24 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 		assert.match(loser.stderr(), /owner_conflict/);
 		await stopChild(firstChild);
 		firstChild = undefined;
+		const crashChild = childOwner(home, "crash-boundary");
+		await waitFor(
+			() => crashChild.stdout().includes('"ready"') ? true : undefined,
+			"crash owner readiness",
+		);
+		if (crashChild.child.pid && process.platform !== "win32")
+			process.kill(-crashChild.child.pid, "SIGKILL");
+		else crashChild.child.kill("SIGKILL");
+		await new Promise((resolve) => crashChild.child.once("exit", resolve));
+		assert.notEqual(crashChild.child.exitCode, 0, "real child crash leaves no graceful shutdown path");
 
 		const restarted = openPersistenceForControlPlane({ runtimePath: home.runtimeDb, trackerPath: home.trackerDb });
 		try {
-			assert.equal(count(restarted.runtime, "runtime_events"), 1, "restart preserves committed event");
+			assert.equal(
+				inspectDatabase(home.runtimeDb, (database) => count(database, "runtime_events")),
+				1,
+				"restart after a child crash reclaims the stale owner lock and preserves the committed event",
+			);
 			assert.equal(restarted.status().runtime.integrity, "ok");
 			assert.equal(restarted.status().runtime.foreignKeyViolations, 0);
 		} finally {
@@ -267,6 +456,7 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 		drift.prepare("INSERT INTO golem_migrations VALUES (?, ?, ?)").run("runtime/001-initial", "not-the-source-checksum", "2026-07-20T00:00:00.000Z");
 		drift.pragma("user_version = 1");
 		drift.close();
+		const driftBytes = fs.readFileSync(driftPath);
 		assert.throws(
 			() => openPersistenceForControlPlane({ runtimePath: driftPath, trackerPath: path.join(home.root, "drift-tracker.db") }),
 			(error) => error instanceof PersistenceMigrationError && error.code === "checksum_drift",
@@ -274,15 +464,68 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 		const driftVerify = new Database(driftPath, { readonly: true });
 		assert.equal(count(driftVerify, "golem_migrations"), 1, "checksum refusal leaves source untouched");
 		driftVerify.close();
+		assert.deepEqual(fs.readFileSync(driftPath), driftBytes);
+		assert.equal(integrity(driftPath), "ok");
 
 		const newerPath = path.join(home.root, "newer-runtime.db");
 		const newer = new Database(newerPath);
 		newer.pragma("user_version = 99");
 		newer.close();
+		const newerBytes = fs.readFileSync(newerPath);
 		assert.throws(
 			() => openPersistenceForControlPlane({ runtimePath: newerPath, trackerPath: path.join(home.root, "newer-tracker.db") }),
 			(error) => error instanceof PersistenceMigrationError && error.code === "schema_too_new",
 		);
+		assert.deepEqual(fs.readFileSync(newerPath), newerBytes);
+		assert.equal(integrity(newerPath), "ok");
+
+		const malformedLedgerPath = path.join(home.root, "malformed-ledger.db");
+		const malformedLedger = new Database(malformedLedgerPath);
+		malformedLedger.exec(
+			"CREATE TABLE golem_migrations (id TEXT PRIMARY KEY, checksum TEXT NOT NULL, applied_at TEXT NOT NULL)",
+		);
+		malformedLedger
+			.prepare("INSERT INTO golem_migrations VALUES (?, ?, ?)")
+			.run("", "checksum", "2026-07-20T00:00:00.000Z");
+		malformedLedger.close();
+		const malformedLedgerBytes = fs.readFileSync(malformedLedgerPath);
+		assert.throws(
+			() =>
+				openPersistenceForControlPlane({
+					runtimePath: malformedLedgerPath,
+					trackerPath: path.join(home.root, "malformed-ledger-tracker.db"),
+				}),
+			(error) =>
+				error instanceof PersistenceMigrationError &&
+				error.code === "migration_ledger_invalid",
+			"malformed migration ledger rows are rejected before source writes",
+		);
+		assert.deepEqual(fs.readFileSync(malformedLedgerPath), malformedLedgerBytes);
+		assert.equal(integrity(malformedLedgerPath), "ok");
+
+		const unknownLedgerPath = path.join(home.root, "unknown-ledger.db");
+		const unknownLedger = new Database(unknownLedgerPath);
+		unknownLedger.exec(
+			"CREATE TABLE golem_migrations (id TEXT PRIMARY KEY, checksum TEXT NOT NULL, applied_at TEXT NOT NULL)",
+		);
+		unknownLedger
+			.prepare("INSERT INTO golem_migrations VALUES (?, ?, ?)")
+			.run("runtime/999-unknown", "checksum", "2026-07-20T00:00:00.000Z");
+		unknownLedger.close();
+		const unknownLedgerBytes = fs.readFileSync(unknownLedgerPath);
+		assert.throws(
+			() =>
+				openPersistenceForControlPlane({
+					runtimePath: unknownLedgerPath,
+					trackerPath: path.join(home.root, "unknown-ledger-tracker.db"),
+				}),
+			(error) =>
+				error instanceof PersistenceMigrationError &&
+				error.code === "schema_too_new",
+			"unknown migration ledger rows are rejected before source writes",
+		);
+		assert.deepEqual(fs.readFileSync(unknownLedgerPath), unknownLedgerBytes);
+		assert.equal(integrity(unknownLedgerPath), "ok");
 
 		const brokenPath = path.join(home.root, "broken-runtime.db");
 		const broken = new Database(brokenPath);
@@ -301,6 +544,11 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 			"a failed migration rolls back every partial source-table change",
 		);
 		brokenVerify.close();
+		assert.equal(
+			fs.existsSync(`${brokenPath}.owner.lock`),
+			false,
+			"constructor failures release the process-owner lock",
+		);
 		const sourceVerify = new Database(trackerSource, { readonly: true });
 		assert.deepEqual(
 			{

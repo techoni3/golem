@@ -1,10 +1,10 @@
 # REPO-MAP.md
-> Last verified: 2026-07-20 @ 558ca83 — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-20 @ 2dd6557 — maintained via golem:docs-maintenance.
 
 ## Structure
 
 - `apps/` — private TypeScript seams; legacy entrypoints remain authoritative until vertical-slice cutover.
-- `packages/` — strict boundaries: `contracts` owns Zod v1 schemas; `persistence` owns the single SQLite writer and checksummed runtime/tracker migrations; `testkit` and `test/journeys/` own serial real-process proof.
+- `packages/` — `contracts` owns wire schemas; `persistence` owns one SQLite writer; `testkit`/`test/journeys/` own serial real-process proof.
 - `tools/openapi-codegen/` — isolated TS5/OpenAPI source generator, never runtime or public packaging.
 - `substrate/` is source; `plugin/` and `dashboard/dist/` are generated products.
 - `cli/`, `lib/`, `dashboard/server/`, `mcp/channel/`, and `shims/` are public/compatibility surfaces; `test/` has journey fixtures.
@@ -13,29 +13,25 @@
 
 ### Root `package.json`, `tsconfig*.json`, and `biome.json`
 
-- One npm 11 lock owns `apps/`, `packages/`, and `tools/`; applications use TS 7 while untouched JS stays unchecked.
-- `typecheck`, `build`, boundaries, lint, clean, and `api:*` are the typed-scaffold contract; clean removes named outputs only.
-- `api-client` owns runtime `openapi-fetch@0.17.0`; codegen owns exact TS 5.9.3/OpenAPI Typescript 7.13.0 without `npx`.
-- `contracts:*` regenerates/checks the deterministic v1 registry; `test:contracts` is its single table-driven JSON-wire journey.
-- `testkit` owns temp-home containment, child termination, stable summaries, semantic comparison, and fresh-context headless fixtures; loopback denial is `UNMET` (see `docs/architecture/testing.md`).
-- `persistence` owns explicit better-sqlite3/Kysely composition, runtime/tracker connection policy, owner locks, verified backups, and a durable runtime outbox; only the control-plane port may construct it.
-- `packages/ui` owns ordered semantic token layers/React Aria wrappers; `apps/dashboard/src/design-lab` is its isolated consumer (`test:ui-primitives`).
+- One npm 11 lock owns `apps/`, `packages/`, and `tools/`; applications use TS 7 while legacy JS stays unchecked. `typecheck`, `build`, boundaries, lint, clean, and `api:*` are the typed-scaffold contract.
+- `api-client` owns runtime `openapi-fetch@0.17.0`; codegen owns private TS 5.9.3/OpenAPI Typescript 7.13.0. `contracts:*` owns the deterministic v1 registry and one JSON-wire journey.
+- `testkit` owns temp-home containment, child cleanup, stable summaries, and fresh-context browser fixtures; denied loopback is `UNMET`.
+- `persistence` owns the private SQLite/Kysely owner, runtime/tracker connection policy, locks, immutable checked migrations, clone-verified dry-runs, backups, and leased runtime outbox; only its control-plane composition port can write.
+- `packages/ui` owns semantic tokens/React Aria wrappers; `apps/dashboard/src/design-lab` is its isolated consumer.
 
 ### `scripts/check-boundaries.mjs`
 
-- Reads dependency metadata/imports (including root JS/MJS), normalizing `@golem/*` subpaths to declared roots before direction checks.
-- Its nine committed direction fixtures include metadata-only, compat-subpath, and root-level codegen MJS cases; they are the regression proof, not mock-heavy unit fan-out.
+- Reads dependency metadata/imports (including root JS/MJS), normalizing `@golem/*` subpaths before direction checks; its nine fixtures are regression proof, not a mock farm.
 
 ## Data flow
 
-Hooks/shims write beneath `GOLEM_HOME`; dashboard REST/WS and tracker phase remain authoritative. Typed direction is contracts → domain/runtime/tracker → control plane → client → CLI/MCP/dashboard; canonical packages never import compat, storage, UI, harness, or tools.
+Hooks/shims write beneath `GOLEM_HOME`; dashboard REST/WS and tracker phase remain authoritative. Typed direction is contracts → runtime/tracker → control plane → client → compatibility surfaces.
 
 ## Constraints
 
-- The nested `mcp/channel` postinstall/lock is a declared temporary legacy closure for GOL-29, not a second canonical workspace lock.
-- Never peer-bypass, import `tools/**` from production code, or include workspace symlinks/TS5 in the root tarball.
-- TS 7 accepts build-mode `--stopBuildOnErrors`, not `--stopOnBuildErrors`.
-- Claude uses cached render bytes; after substrate edits sync, update, and `/reload-plugins`.
+- `mcp/channel`'s nested postinstall/lock is the GOL-29 legacy exception, not a second canonical lock.
+- Never peer-bypass, import `tools/**` from production, or ship workspace symlinks/TS5 in the root tarball.
+- TS 7 uses `--stopBuildOnErrors`; Claude loads cached render bytes after sync/update/reload.
 
 ## Common tasks
 
