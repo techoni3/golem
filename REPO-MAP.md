@@ -1,10 +1,10 @@
 # REPO-MAP.md
-> Last verified: 2026-07-20 @ 20dbaea — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-20 @ 558ca83 — maintained via golem:docs-maintenance.
 
 ## Structure
 
 - `apps/` — private TypeScript seams; legacy entrypoints remain authoritative until vertical-slice cutover.
-- `packages/` — strict boundaries: `contracts` owns Zod v1 schemas; `testkit` and `test/journeys/` own serial real-process proof.
+- `packages/` — strict boundaries: `contracts` owns Zod v1 schemas; `persistence` owns the single SQLite writer and checksummed runtime/tracker migrations; `testkit` and `test/journeys/` own serial real-process proof.
 - `tools/openapi-codegen/` — isolated TS5/OpenAPI source generator, never runtime or public packaging.
 - `substrate/` is source; `plugin/` and `dashboard/dist/` are generated products.
 - `cli/`, `lib/`, `dashboard/server/`, `mcp/channel/`, and `shims/` are public/compatibility surfaces; `test/` has journey fixtures.
@@ -18,6 +18,7 @@
 - `api-client` owns runtime `openapi-fetch@0.17.0`; codegen owns exact TS 5.9.3/OpenAPI Typescript 7.13.0 without `npx`.
 - `contracts:*` regenerates/checks the deterministic v1 registry; `test:contracts` is its single table-driven JSON-wire journey.
 - `testkit` owns temp-home containment, child termination, stable summaries, semantic comparison, and fresh-context headless fixtures; loopback denial is `UNMET` (see `docs/architecture/testing.md`).
+- `persistence` owns explicit better-sqlite3/Kysely composition, runtime/tracker connection policy, owner locks, verified backups, and a durable runtime outbox; only the control-plane port may construct it.
 - `packages/ui` owns ordered semantic token layers/React Aria wrappers; `apps/dashboard/src/design-lab` is its isolated consumer (`test:ui-primitives`).
 
 ### `scripts/check-boundaries.mjs`
@@ -41,4 +42,5 @@ Hooks/shims write beneath `GOLEM_HOME`; dashboard REST/WS and tracker phase rema
 | Task | Files | Verify with |
 |------|-------|-------------|
 | Typed workspace | `apps/`, `packages/`, `tools/`, root configs | Node 24 `npm ci`, `typecheck`, `build`, boundaries, lint |
+| SQLite persistence | `packages/persistence/`, `test/persistence/`, `docs/architecture/persistence.md` | Node 24 `test:persistence`, selected J3, fixtures, boundaries |
 | Legacy runtime | `cli/`, `dashboard/`, `mcp/channel/`, `shims/` | temp-home legacy baseline |

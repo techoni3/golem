@@ -29,6 +29,7 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const serviceFixture = path.join(repositoryRoot, "test/journeys/real-service.mjs");
 const fakeHarness = path.join(repositoryRoot, "test/fixtures/native-binaries/fake-harness.mjs");
 const legacyBaseline = path.join(repositoryRoot, "test/parity/legacy-baseline.mjs");
+const persistenceJourney = path.join(repositoryRoot, "test/persistence/sqlite-owner-migration-recovery.test.mjs");
 const chromeExecutable = process.env.GOLEM_CHROME_EXECUTABLE || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
 class JourneyDiagnosticError extends Error {
@@ -323,6 +324,23 @@ export async function exerciseCleanupDrill() {
 	return "propagated failure terminated root and descendant children, removed its temporary root, and rejected a real fixture escape";
 }
 
+export async function exerciseSqliteOwnerMigrationRecovery() {
+	const home = createTemporaryHome("golem-j3-persistence-runner-");
+	const group = spawnGrouped(process.execPath, ["--test", "--test-concurrency=1", persistenceJourney], {
+		cwd: repositoryRoot,
+		env: home.env,
+	});
+	try {
+		await waitFor(() => exited(group) ? true : undefined, "SQLite owner/migration journey exit", 30_000);
+		if (group.child.exitCode !== 0)
+			throw processFailure(`SQLite owner/migration journey exited ${group.child.exitCode}`, group);
+		return "real SQLite owner race, immutable migration checksums, crash failpoints, tracker baseline, backup, and restart recovery verified";
+	} finally {
+		if (!exited(group)) await stopProcessGroup(group);
+		cleanupHome(home);
+	}
+}
+
 export async function exerciseBrowser() {
 	const home = createTemporaryHome("golem-j8-browser-");
 	const artifactRoot = path.join(home.root, "browser-artifacts");
@@ -369,6 +387,7 @@ export const exercises = Object.freeze({
 	"testkit-fake-harness": exerciseFakeHarness,
 	"testkit-semantic-parity": exerciseSemanticParity,
 	"testkit-cleanup-drill": exerciseCleanupDrill,
+	"sqlite-owner-migration-recovery": exerciseSqliteOwnerMigrationRecovery,
 	"testkit-browser": exerciseBrowser,
 	"legacy-parity-baseline": exerciseLegacyParityBaseline,
 });
