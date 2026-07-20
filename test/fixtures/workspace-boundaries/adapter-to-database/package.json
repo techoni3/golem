@@ -1,0 +1,4 @@
+{
+  "name": "@golem/adapter-claude",
+  "expectedBoundaryRule": "adapter-to-database"
+}

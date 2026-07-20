@@ -1,0 +1,4 @@
+{
+  "name": "@golem/runtime",
+  "expectedBoundaryRule": "canonical-to-compat"
+}
