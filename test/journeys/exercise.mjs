@@ -25,6 +25,7 @@ import { normalizeLegacyObservation } from "../parity/normalization.mjs";
 import { exerciseControlPlaneShell } from "../control-plane/control-plane-shell.mjs";
 import { exerciseRenderMcpClosure } from "../render-mcp-closure.mjs";
 import { exerciseDomainReplay } from "./domain-replay.mjs";
+import { exerciseLauncherResolution } from "./launcher-resolution.mjs";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright-core");
@@ -387,6 +388,7 @@ export function diagnosticFor(error, context) {
 
 export const exercises = Object.freeze({
 	"domain-replay": exerciseDomainReplay,
+	"launcher-resolution-matrix": exerciseLauncherResolution,
 	"testkit-smoke": exerciseSmoke,
 	"testkit-fake-harness": exerciseFakeHarness,
 	"testkit-semantic-parity": exerciseSemanticParity,

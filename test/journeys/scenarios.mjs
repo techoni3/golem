@@ -8,6 +8,12 @@ export const scenarios = [
 		regression: "cross-harness identity, lifecycle, ordering, fencing, or readiness drift creates ghosts or stale owners",
 	}),
 	registerScenario({
+		id: "launcher-resolution-matrix",
+		journey: "J7",
+		tier: "pr",
+		regression: "launch precedence, capability qualification, or JSONC preservation drifts before process spawn",
+	}),
+	registerScenario({
 		id: "testkit-smoke",
 		journey: "J3",
 		tier: "pr",

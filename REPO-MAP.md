@@ -4,7 +4,7 @@
 ## Structure
 
 - `apps/` are private TypeScript seams; legacy entrypoints remain authoritative until vertical-slice cutover.
-- `packages/` are strictly directed: `contracts` owns schemas, `domain` pure policy, `persistence` the single SQLite writer, `compiler` deterministic manifests, `mcp-adapter` schema validation/API delegation, `api-client` generated HTTP types, and `testkit`/journeys serial real-boundary proof.
+- `packages/` are strictly directed: `contracts` owns schemas, `domain` pure policy, `persistence` the single SQLite writer, `launcher` redacted configuration/capability plans, `compiler` deterministic manifests, `mcp-adapter` schema validation/API delegation, `api-client` generated HTTP types, and `testkit`/journeys serial real-boundary proof.
 - `tools/openapi-codegen/` is isolated TS5 source generation, never runtime or public packaging.
 - `substrate/` is source; `plugin/` and `dashboard/dist/` are generated products. `cli/`, `lib/`, `dashboard/server/`, `mcp/channel/`, and `shims/` are compatibility surfaces.
 
@@ -15,6 +15,7 @@
 - `api-client` owns runtime `openapi-fetch@0.17.0`; codegen owns exact TS 5.9.3/OpenAPI Typescript 7.13.0 without `npx`.
 - `domain` is the pure layered kernel; its compact J2 replay is `test:domain`/`domain-replay`.
 - `persistence` owns private SQLite/Kysely, canonical node/edge, alias/harness/capability/lifecycle schemas, checked migrations, recovery, backup, injected clock, and bounded outbox; writer construction stays internal to control-plane.
+- `launcher` rejects conflicting preset overrides and owns redacted JSONC plus fail-closed capability plans; backup/temp/commit/rollback is save-only.
 - `apps/control-plane` is the thin foreground Fastify composition façade. Typed `/api/v1/ws` accepts bearer CLI/MCP callers without Origin; bounded HttpOnly browser sessions require exact Origin/Host/protocol/port; headerless legacy `/ws` uses only an injected compatibility source.
 - `testkit` owns temp-home/child cleanup, stable summaries, semantic comparison, and fresh headless fixtures; loopback denial is `UNMET`.
 - `packages/ui` owns semantic tokens/React Aria; `apps/dashboard/src/design-lab` is its isolated consumer.
@@ -41,4 +42,5 @@ Canonical alias kinds and optional session resolution originate in contracts; do
 | Domain policy | `packages/domain/`, `test/domain/replay.mjs` | Node 24 `test:domain`, J2 `domain-replay` |
 | SQLite persistence | `packages/persistence/`, `test/persistence/`, `docs/architecture/persistence.md` | Node 24 `test:persistence`, selected J3, fixtures, boundaries |
 | Control plane | `apps/control-plane`, `packages/api-client`, J6 | Node 24 `api:generate`, `api:check`, J6, browser shell |
+| Launcher resolution | `packages/launcher/`, `test/launcher/replay.mjs` | Node 24 J7 `launcher-resolution-matrix` |
 | Legacy runtime | `cli/`, `dashboard/`, `mcp/channel/`, `shims/` | temp-home legacy baseline |
