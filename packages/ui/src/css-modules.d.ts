@@ -1,0 +1,48 @@
+declare module "*.module.css" {
+	const styles: {
+		alert: string;
+		badge: string;
+		button: string;
+		buttondanger: string;
+		buttonprimary: string;
+		buttonquiet: string;
+		buttonsecondary: string;
+		checkboxMark: string;
+		comboRow: string;
+		description: string;
+		dialog: string;
+		drawer: string;
+		error: string;
+		field: string;
+		input: string;
+		link: string;
+		listBox: string;
+		menu: string;
+		modal: string;
+		modalOverlay: string;
+		passport: string;
+		passportContent: string;
+		passportRole: string;
+		popover: string;
+		selectButton: string;
+		skeleton: string;
+		srOnly: string;
+		statePanel: string;
+		switch: string;
+		switchTrack: string;
+		tabList: string;
+		tabPanels: string;
+		table: string;
+		tabs: string;
+		toast: string;
+		toggle: string;
+		tooltip: string;
+		toneaccent: string;
+		tonedanger: string;
+		toneinfo: string;
+		toneneutral: string;
+		tonesuccess: string;
+		tonewarning: string;
+	};
+	export default styles;
+}
