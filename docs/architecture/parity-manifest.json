@@ -1,17 +1,52 @@
 {
-  "schema_version": "golem-legacy-parity/v5",
+  "schema_version": "golem-legacy-parity/v6",
   "status": "frozen-baseline",
   "source": "GOL-13 corrected parity inventory; GOL-20 cutover contract; GOL-21 journey matrix",
   "golden_update_policy": "Change this manifest or a fixture only with a version bump and an explicit compatibility reason in the commit and tracker evidence.",
+  "compatibility_reason": "GOL-24 focused repair: freeze omitted corrected GOL-13 route, installed-toolchain, outside-checkout lifecycle, and launcher semantics; replace credentialed managed-readiness J4 with a credential-free local boundary.",
   "normalization_contract": {
     "library": "test/parity/normalization.mjs",
     "removes": ["timestamps", "PIDs", "ephemeral ports", "absolute paths", "UUID randomness", "credentials", "object-key ordering"],
     "preserves": ["identifier equality", "semantic array order", "lifecycle", "delivery mode", "readiness", "queue order"],
     "unordered_arrays": ["capabilities", "labels", "roles", "scopes", "tags"]
   },
+  "corrected_parity_contracts": {
+    "ui_post_routes": {
+      "comment_dispatch": {
+        "route": "POST /api/comments/:cid/dispatch",
+        "callers": ["dashboard/web/src/api.js:244", "dashboard/web/src/components/ticket-drawer.jsx:479"],
+        "preserve": ["comment-and-parent-ticket resolution", "spec-only guard", "assigned-or-fallback target resolution", "enqueue before delivery", "subscription-covered or direct delivery/error result", "duplicate/idempotency cutover coverage"]
+      },
+      "unacked_dismissal": {
+        "route": "POST /api/tickets/:id/unacked/:deliveryEventId/dismiss",
+        "callers": ["dashboard/web/src/api.js:254-255", "dashboard/web/src/components/communication-drawer.jsx:113"],
+        "preserve": ["human dashboard actor default", "dismissUnackedDispatchWarning settlement", "ticket-updated invalidation", "native-sessions-update invalidation", "communication-health-updated invalidation", "REST/WebSocket/health requery"]
+      }
+    },
+    "managed_codex": {
+      "current_owner": "lib/codex-supervisor.js + lib/codex-tui-bridge.js + lib/codex-app-server-contract.js",
+      "installed_contract": {
+        "package": "codex-cli",
+        "version": "0.144.5",
+        "schema_leaf_count": 30,
+        "schema_fingerprint": "8fea722bf38d19e54265e4650f36e9329bac40d334c1c287d12bb6d21c8eac71",
+        "verification": "verifyCodexAppServerContract before supervisor spawn"
+      }
+    },
+    "opencode_outside_checkout": {
+      "command": "mcp/channel/index.js resolved from the installed/rendered checkout",
+      "node_path": "<checkout>/mcp/channel/node_modules",
+      "plugin": "file://<checkout>/shims/opencode/index.js",
+      "lifecycle": ["install outside checkout", "update replaces prior managed entry", "uninstall removes managed entry", "no stale source path", "no duplicate plugin entry"]
+    },
+    "launcher_compatibility": {
+      "help_aliases": ["golem -h", "golem --help", "golem codex-supervisor -h", "golem codex -h", "golem sessions -h", "golem sessions dedup -h", "golem role -h"],
+      "golemx": "compatibility path remains truthful; unsupported_custom_base_url is ineligible and never claims readiness"
+    }
+  },
   "capabilities": [
     {"id":"dashboard-lifecycle","current_owner":"cli/golem.js + dashboard/server/index.js","target_owner":"apps/cli + apps/control-plane","user_outcome":"Start, diagnose, and distinguish dashboard process/API/delivery health.","evidence_journey":"J6","regression":"A running process is reported healthy while its API or delivery path is unavailable.","status":"retained","cutover_gate":"Temporary-home health and dashboard projection journey."},
-    {"id":"managed-codex","current_owner":"lib/codex-supervisor.js + lib/codex-tui-bridge.js","target_owner":"packages/adapters/codex","user_outcome":"Managed Codex preserves approvals, canonical thread recovery, and qualified push delivery.","evidence_journey":"J4","regression":"A stale supervisor or mismatched App Server contract accepts a control turn.","status":"retained","cutover_gate":"Version/fingerprint fail-closed, restart, duplicate-envelope, and TUI-thread journey."},
+    {"id":"managed-codex","current_owner":"lib/codex-supervisor.js + lib/codex-tui-bridge.js + lib/codex-app-server-contract.js","target_owner":"packages/adapters/codex","user_outcome":"Managed Codex preserves approvals, canonical thread recovery, and qualified push delivery.","evidence_journey":"J4","regression":"A stale supervisor or mismatched App Server contract accepts a control turn.","status":"retained","cutover_gate":"Version/fingerprint fail-closed, restart, duplicate-envelope, and TUI-thread journey."},
     {"id":"ordinary-codex","current_owner":"shims/codex/hook.mjs + compiler codex adapter","target_owner":"packages/adapters/codex","user_outcome":"Direct Codex registers useful facts and MCP tools without a false push claim.","evidence_journey":"J4","regression":"Pull-only direct Codex is advertised as dispatch-ready.","status":"retained","cutover_gate":"Render, registration, and pull-only capability journey."},
     {"id":"claude-plugin-render","current_owner":"substrate/ + lib/compiler/adapters/cc.js","target_owner":"packages/compiler + packages/adapters/claude","user_outcome":"Claude install/update uses generated source and detects render drift.","evidence_journey":"J1","regression":"A stale or hand-edited render silently installs.","status":"retained","cutover_gate":"Temporary render, tamper, refresh, and rollback journey."},
     {"id":"claude-channel","current_owner":"substrate/hooks + mcp/channel/index.js","target_owner":"packages/adapters/claude + packages/mcp-adapter","user_outcome":"A qualified Claude consumer receives addressed work; unqualified clients remain truthful.","evidence_journey":"J4","regression":"Transport registration is mistaken for model consumption readiness.","status":"retained","cutover_gate":"Authenticated channel and model-consumption qualification journey."},
