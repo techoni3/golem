@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-07-20 @ 06cdb65 — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-20 @ 4fdae77 — maintained via golem:docs-maintenance.
 
 ## Structure
 
@@ -18,6 +18,7 @@
 - `api-client` owns runtime `openapi-fetch@0.17.0`; codegen owns exact TS 5.9.3/OpenAPI Typescript 7.13.0 without `npx`.
 - `contracts:*` regenerates/checks the deterministic v1 registry; `test:contracts` is its single table-driven JSON-wire journey.
 - `testkit` owns temp-home containment, child termination, stable summaries, semantic comparison, and fresh-context headless fixtures; loopback denial is `UNMET` (see `docs/architecture/testing.md`).
+- `packages/ui` owns tokens/React Aria wrappers; `apps/dashboard/src/design-lab` is its isolated consumer (`test:ui-primitives`).
 
 ### `scripts/check-boundaries.mjs`
 
