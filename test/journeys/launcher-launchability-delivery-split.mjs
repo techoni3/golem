@@ -116,6 +116,40 @@ export async function exerciseLauncherLaunchabilityDeliverySplit() {
 		])
 			assert.equal(hostilePublicJson.includes(marker), false, `adapter marker leaked ${marker}`);
 
+		const sensitiveObjectPayload = {
+			token: "object-marker-token",
+			credential: { value: "object-marker-credential" },
+			password: 42,
+			api_key: ["object-marker-api-key"],
+			owner_token: false,
+			OPENAI_API_KEY: { nested: "object-marker-openai-api-key" },
+			accessToken: null,
+		};
+		const sanitizedObjectJson = stableLaunchPlanJson({ sensitiveObjectPayload });
+		const sanitizedObject = JSON.parse(sanitizedObjectJson).sensitiveObjectPayload;
+		for (const key of [
+			"token",
+			"credential",
+			"password",
+			"api_key",
+			"owner_token",
+			"OPENAI_API_KEY",
+			"accessToken",
+		]) {
+			assert.equal(
+				sanitizedObject[key],
+				"Adapter diagnostic redacted.",
+				`sensitive object key ${key} was not replaced`,
+			);
+		}
+		for (const marker of [
+			"object-marker-token",
+			"object-marker-credential",
+			"object-marker-api-key",
+			"object-marker-openai-api-key",
+		])
+			assert.equal(sanitizedObjectJson.includes(marker), false, `object marker leaked ${marker}`);
+
 		const hostileLaunch = {
 			...hostileDelivery,
 			capability: { ...hostileDelivery.capability, capability_id: "fixture-hostile-launch" },

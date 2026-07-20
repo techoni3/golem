@@ -112,8 +112,12 @@ export function redactDeliveryFacts(value: {
 
 /** Clone a public JSON projection while applying the same diagnostic boundary. */
 export function sanitizePublicValue(value: unknown, key?: string): unknown {
+	// Sensitive identifiers are opaque at the public boundary: replace their
+	// values regardless of runtime type, including nested objects/arrays and
+	// primitive values that could otherwise bypass string-only redaction.
+	if (key && isSensitiveIdentifier(key)) return REDACTED_DIAGNOSTIC;
 	if (typeof value === "string") {
-		if (key && (diagnosticKey.test(key) || isSensitiveIdentifier(key))) {
+		if (key && diagnosticKey.test(key)) {
 			const kind = /remediation/iu.test(key) ? "remediation" : "reason";
 			return redactDiagnostic(value, kind);
 		}
