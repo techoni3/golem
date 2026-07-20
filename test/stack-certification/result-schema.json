@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Golem stack certification result",
+  "type": "object",
+  "required": ["schema_version", "overall", "platform", "toolchain", "rows", "platform_matrix"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "overall": { "enum": ["PASS", "FAIL"] },
+    "platform": {
+      "type": "object",
+      "required": ["os", "arch"],
+      "properties": {
+        "os": { "type": "string" },
+        "arch": { "type": "string" }
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "required": ["node", "npm"],
+      "properties": {
+        "node": { "type": "string" },
+        "npm": { "type": "string" }
+      }
+    },
+    "rows": {
+      "type": "array",
+      "minItems": 9,
+      "items": {
+        "type": "object",
+        "required": ["id", "status", "evidence"],
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "enum": ["PASS", "FAIL"] },
+          "evidence": { "type": "string" },
+          "details": {
+            "type": "object",
+            "properties": {
+              "command": { "type": "string" },
+              "code": { "type": ["integer", "null"] },
+              "signal": { "type": ["string", "null"] },
+              "timed_out": { "type": "boolean" },
+              "timeout_ms": { "type": ["integer", "null"] },
+              "kill_grace_ms": { "type": ["integer", "null"] },
+              "elapsed_ms": { "type": "integer", "minimum": 0 },
+              "output_tail": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "platform_matrix": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["os", "arch", "status"],
+        "properties": {
+          "os": { "const": "darwin" },
+          "arch": { "enum": ["arm64", "x64"] },
+          "status": { "enum": ["PASS", "FAIL", "UNMET"] }
+        }
+      }
+    }
+  }
+}
