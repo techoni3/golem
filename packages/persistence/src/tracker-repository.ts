@@ -366,46 +366,49 @@ export class TrackerRepository implements TrackerStorageCapability {
 		readonly claimUntil: string;
 		readonly limit: number;
 	}): readonly ClaimedTrackerDeliveryEnvelope[] {
-		return this.#database.transaction(
-			(): readonly ClaimedTrackerDeliveryEnvelope[] => {
-				this.#recover(input.now);
-				const candidates = this.#database
-					.prepare<EnvelopeRow>(
-						"SELECT * FROM tracker_envelopes WHERE status IN ('pending', 'retrying') AND (next_attempt_at IS NULL OR next_attempt_at <= ?) AND (deadline_at IS NULL OR deadline_at > ?) AND attempts < max_attempts ORDER BY created_at, id LIMIT ?",
+		this.#database.exec("BEGIN IMMEDIATE");
+		try {
+			this.#recover(input.now);
+			const candidates = this.#database
+				.prepare<EnvelopeRow>(
+					"SELECT * FROM tracker_envelopes WHERE status IN ('pending', 'retrying') AND (next_attempt_at IS NULL OR next_attempt_at <= ?) AND (deadline_at IS NULL OR deadline_at > ?) AND attempts < max_attempts ORDER BY created_at, id LIMIT ?",
+				)
+				.all(input.now, input.now, input.limit);
+			const claims: ClaimedTrackerDeliveryEnvelope[] = [];
+			for (const candidate of candidates) {
+				const token = crypto.randomUUID();
+				const changed = this.#database
+					.prepare(
+						"UPDATE tracker_envelopes SET status = 'claimed', attempts = attempts + 1, claim_owner = ?, claim_token = ?, claim_until = ?, next_attempt_at = NULL WHERE id = ? AND status IN ('pending', 'retrying') AND (next_attempt_at IS NULL OR next_attempt_at <= ?)",
 					)
-					.all(input.now, input.now, input.limit);
-				const claims: ClaimedTrackerDeliveryEnvelope[] = [];
-				for (const candidate of candidates) {
-					const token = crypto.randomUUID();
-					const changed = this.#database
-						.prepare(
-							"UPDATE tracker_envelopes SET status = 'claimed', attempts = attempts + 1, claim_owner = ?, claim_token = ?, claim_until = ?, next_attempt_at = NULL WHERE id = ? AND status IN ('pending', 'retrying') AND (next_attempt_at IS NULL OR next_attempt_at <= ?)",
-						)
-						.run(
-							input.workerId,
-							token,
-							input.claimUntil,
-							candidate.id,
-							input.now,
-						).changes;
-					if (changed !== 1) continue;
-					const row = this.#database
-						.prepare<EnvelopeRow>(
-							"SELECT * FROM tracker_envelopes WHERE id = ?",
-						)
-						.get(candidate.id);
-					if (!row) throw new Error("claimed tracker envelope disappeared");
-					claims.push(hydrateClaim(row));
-					this.#audit(
-						"envelope.claimed",
+					.run(
+						input.workerId,
+						token,
+						input.claimUntil,
 						candidate.id,
-						{ worker_id: input.workerId },
 						input.now,
-					);
-				}
-				return Object.freeze(claims);
-			},
-		)();
+					).changes;
+				if (changed !== 1) continue;
+				const row = this.#database
+					.prepare<EnvelopeRow>("SELECT * FROM tracker_envelopes WHERE id = ?")
+					.get(candidate.id);
+				if (!row) throw new Error("claimed tracker envelope disappeared");
+				claims.push(hydrateClaim(row));
+				this.#audit(
+					"envelope.claimed",
+					candidate.id,
+					{ worker_id: input.workerId },
+					input.now,
+				);
+			}
+			this.#database.exec("COMMIT");
+			return Object.freeze(claims);
+		} catch (error) {
+			try {
+				this.#database.exec("ROLLBACK");
+			} catch {}
+			throw error;
+		}
 	}
 
 	settleEnvelope(input: {

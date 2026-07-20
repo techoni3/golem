@@ -252,26 +252,12 @@ export function createDurableDeliveryService(options: {
 					"delivery claim requires a worker id and positive lease",
 				);
 			const now = options.clock.now();
-			let rows: readonly ClaimedDeliveryEnvelope[];
-			try {
-				rows = options.storage.claimEnvelopes({
-					workerId,
-					now,
-					claimUntil: options.clock.after(leaseMs),
-					limit: boundedLimit(limit),
-				});
-			} catch (error) {
-				if (
-					!(
-						error &&
-						typeof error === "object" &&
-						"code" in error &&
-						error.code === "SQLITE_BUSY"
-					)
-				)
-					throw error;
-				rows = [];
-			}
+			const rows = options.storage.claimEnvelopes({
+				workerId,
+				now,
+				claimUntil: options.clock.after(leaseMs),
+				limit: boundedLimit(limit),
+			});
 			return Object.freeze(rows.map(wrapClaim));
 		},
 		recover() {

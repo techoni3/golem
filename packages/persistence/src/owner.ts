@@ -18,7 +18,12 @@ import {
 } from "./lock.js";
 import { applyPlan, dryRunPlan, planFor } from "./migrations.js";
 import { RuntimeRepository } from "./repositories.js";
-import { configure, hasManagedTrackerSchema, hasTrackerTables, sha256 } from "./schema.js";
+import {
+	configure,
+	hasManagedTrackerSchema,
+	hasTrackerTables,
+	sha256,
+} from "./schema.js";
 import { TrackerRepository } from "./tracker-repository.js";
 import {
 	type ClaimedOutboxRecord,
@@ -100,6 +105,7 @@ class PersistenceOwner implements PersistenceWriteCapability {
 			ensureParent(paths.trackerPath);
 			runtime = new Database(paths.runtimePath);
 			tracker = new Database(paths.trackerPath);
+			tracker.pragma("busy_timeout = 1000");
 			this.#runtime = runtime;
 			this.#tracker = tracker;
 			this.#runtimeSql = new Kysely<RuntimeTables>({
@@ -113,9 +119,10 @@ class PersistenceOwner implements PersistenceWriteCapability {
 				}),
 			});
 			const runtimePlan = planFor(runtime, "runtime", "apply");
-			this.#trackerBaseline = hasTrackerTables(tracker) && !hasManagedTrackerSchema(tracker)
-				? "unmanaged"
-				: "managed";
+			this.#trackerBaseline =
+				hasTrackerTables(tracker) && !hasManagedTrackerSchema(tracker)
+					? "unmanaged"
+					: "managed";
 			configure(runtime);
 			applyPlan(runtime, paths.runtimePath, runtimePlan, this.#clock);
 			if (this.#trackerBaseline === "managed") {
