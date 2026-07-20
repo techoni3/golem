@@ -26,10 +26,12 @@ bypass, or committed fixture lockfile). npm 11 uses its nested install strategy
 so the private tool's exact compiler and generator remain workspace-local. The
 probe supplies a temporary `HOME`, `GOLEM_HOME`, XDG config/cache, npm user
 config, and npm cache; it neither reads nor mutates user runtime state. Install
-resolution has a 180,000 ms total
-deadline. On expiry it sends the detached process group `SIGTERM`, waits 5,000
-ms, then sends `SIGKILL`; the resulting row details retain timing, signal, and
-captured command output. SIGINT/SIGTERM follows the same cleanup discipline.
+resolution has a 180,000 ms total deadline; every other spawned certification
+command has a 60,000 ms deadline. On expiry the detached process group receives
+`SIGTERM`, then `SIGKILL` after 5,000 ms even if its leader exits first; the
+resulting row details retain timing, signal, and captured command output.
+SIGINT/SIGTERM follows the same process-group and temporary-root cleanup
+discipline.
 
 `test/stack-certification/result-schema.json` is the durable result shape. It
 contains the host OS/architecture and tool versions, a PASS/FAIL row for every

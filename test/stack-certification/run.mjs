@@ -23,6 +23,7 @@ const wantsJson = process.argv.includes('--json');
 const keepTemporaryFiles = process.argv.includes('--keep');
 export const INSTALL_TIMEOUT_MS = 180_000;
 export const INSTALL_KILL_GRACE_MS = 5_000;
+export const CERTIFICATION_TIMEOUT_MS = 60_000;
 const outputLimit = 12_000;
 let activeTemporaryRoot = null;
 const activeChildren = new Set();
@@ -33,8 +34,13 @@ function appendTail(current, chunk) {
   return next.length > outputLimit ? next.slice(-outputLimit) : next;
 }
 
-function terminateProcessGroup(child, signal) {
-  if (!child.pid || child.exitCode !== null) return;
+function configuredTimeout(name, fallback) {
+  const configured = Number(process.env[name]);
+  return Number.isFinite(configured) && configured > 0 ? configured : fallback;
+}
+
+function terminateProcessGroup(child, signal, allowExitedLeader = false) {
+  if (!child.pid || (!allowExitedLeader && child.exitCode !== null)) return;
   try {
     if (process.platform === 'win32') child.kill(signal);
     else process.kill(-child.pid, signal);
@@ -45,6 +51,8 @@ function terminateProcessGroup(child, signal) {
 
 function command(commandName, args, options = {}) {
   return new Promise((resolve) => {
+    const timeoutMs = options.timeoutMs ?? configuredTimeout('STACK_CERTIFICATION_TEST_COMMAND_TIMEOUT_MS', CERTIFICATION_TIMEOUT_MS);
+    const killGraceMs = options.killGraceMs ?? configuredTimeout('STACK_CERTIFICATION_TEST_KILL_GRACE_MS', INSTALL_KILL_GRACE_MS);
     const child = spawn(commandName, args, {
       cwd: options.cwd,
       env: options.env,
@@ -57,9 +65,11 @@ function command(commandName, args, options = {}) {
     let timedOut = false;
     let timeoutTimer;
     let forceTimer;
+    let pendingResult = null;
+    let forceKillCompleted = false;
     let finished = false;
     const startedAt = Date.now();
-    const finish = (result) => {
+    const finalize = (result) => {
       if (finished) return;
       finished = true;
       clearTimeout(timeoutTimer);
@@ -71,10 +81,17 @@ function command(commandName, args, options = {}) {
         stderr,
         elapsed_ms: Date.now() - startedAt,
         timed_out: timedOut,
-        timeout_ms: options.timeoutMs ?? null,
-        kill_grace_ms: options.killGraceMs ?? null,
+        timeout_ms: timeoutMs,
+        kill_grace_ms: killGraceMs,
         ...result,
       });
+    };
+    const finish = (result) => {
+      if (timedOut && !forceKillCompleted) {
+        pendingResult ??= result;
+        return;
+      }
+      finalize(result);
     };
     child.stdout.on('data', (chunk) => { stdout = appendTail(stdout, String(chunk)); });
     child.stderr.on('data', (chunk) => { stderr = appendTail(stderr, String(chunk)); });
@@ -82,12 +99,16 @@ function command(commandName, args, options = {}) {
     child.on('close', (code, signal) => {
       finish({ code, signal, spawn_error: null });
     });
-    if (options.timeoutMs) {
+    if (timeoutMs) {
       timeoutTimer = setTimeout(() => {
         timedOut = true;
         terminateProcessGroup(child, 'SIGTERM');
-        forceTimer = setTimeout(() => terminateProcessGroup(child, 'SIGKILL'), options.killGraceMs ?? INSTALL_KILL_GRACE_MS);
-      }, options.timeoutMs);
+        forceTimer = setTimeout(() => {
+          terminateProcessGroup(child, 'SIGKILL', true);
+          forceKillCompleted = true;
+          finalize(pendingResult ?? { code: null, signal: 'SIGKILL', spawn_error: null });
+        }, killGraceMs);
+      }, timeoutMs);
     }
   });
 }
@@ -186,8 +207,8 @@ function requireSuccess(result) {
 
 async function installFixture(fixtureRoot, env) {
   const npmCommand = process.env.STACK_CERTIFICATION_NPM_COMMAND || 'npm';
-  const timeoutMs = Number(process.env.STACK_CERTIFICATION_TEST_INSTALL_TIMEOUT_MS || INSTALL_TIMEOUT_MS);
-  const killGraceMs = Number(process.env.STACK_CERTIFICATION_TEST_KILL_GRACE_MS || INSTALL_KILL_GRACE_MS);
+  const timeoutMs = configuredTimeout('STACK_CERTIFICATION_TEST_INSTALL_TIMEOUT_MS', INSTALL_TIMEOUT_MS);
+  const killGraceMs = configuredTimeout('STACK_CERTIFICATION_TEST_KILL_GRACE_MS', INSTALL_KILL_GRACE_MS);
   const result = await command(npmCommand, ['install', '--no-audit', '--no-fund', '--install-strategy=nested'], {
     cwd: fixtureRoot,
     env: {
@@ -341,9 +362,10 @@ function render(result) {
 }
 
 async function cleanupAfterSignal(signal) {
-  for (const child of activeChildren) terminateProcessGroup(child, 'SIGTERM');
-  await new Promise((resolve) => setTimeout(resolve, INSTALL_KILL_GRACE_MS));
-  for (const child of activeChildren) terminateProcessGroup(child, 'SIGKILL');
+  const children = [...activeChildren];
+  for (const child of children) terminateProcessGroup(child, 'SIGTERM');
+  await new Promise((resolve) => setTimeout(resolve, configuredTimeout('STACK_CERTIFICATION_TEST_KILL_GRACE_MS', INSTALL_KILL_GRACE_MS)));
+  for (const child of children) terminateProcessGroup(child, 'SIGKILL', true);
   if (activeTemporaryRoot && !keepTemporaryFiles) {
     await rm(activeTemporaryRoot, { recursive: true, force: true });
     activeTemporaryRoot = null;

@@ -26,15 +26,39 @@ function run(command, args, cwd, env = process.env) {
   });
 }
 
-function receiveJson(socket) {
+function receiveJson(socket, label, timeoutMs = 10_000) {
   return new Promise((resolve, reject) => {
-    socket.once('message', (raw) => resolve(JSON.parse(String(raw))));
-    socket.once('error', reject);
+    let settled = false;
+    let timer;
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.off('message', onMessage);
+      socket.off('error', onError);
+      socket.off('close', onClose);
+      if (error) reject(error);
+      else resolve(value);
+    };
+    const onMessage = (raw) => {
+      try {
+        finish(null, JSON.parse(String(raw)));
+      } catch (error) {
+        finish(new Error(`${label} returned invalid JSON: ${error.message}`));
+      }
+    };
+    const onError = (error) => finish(new Error(`${label} failed: ${error.message}`));
+    const onClose = (code) => finish(new Error(`${label} closed before a message (code ${code})`));
+    timer = setTimeout(() => finish(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+    socket.once('message', onMessage);
+    socket.once('error', onError);
+    socket.once('close', onClose);
   });
 }
 
 export async function certifyContractBoundary({ fixtureRoot, generatedRoot, env }) {
   const app = Fastify({ logger: false });
+  let socket;
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
   await app.register(swagger, {
@@ -96,16 +120,18 @@ export async function certifyContractBoundary({ fixtureRoot, generatedRoot, env 
     const broken = await fetch(`${baseUrl}/broken-response`);
     assert.equal(broken.status, 500);
 
-    const socket = new WebSocket(`${baseUrl.replace(/^http/, 'ws')}/events`);
-    await once(socket, 'open');
-    const snapshot = await receiveJson(socket);
+    socket = new WebSocket(`${baseUrl.replace(/^http/, 'ws')}/events`);
+    const snapshotPromise = receiveJson(socket, 'WebSocket snapshot');
+    await Promise.race([once(socket, 'open'), snapshotPromise]);
+    const snapshot = await snapshotPromise;
     assert.deepEqual(snapshot, { event: 'snapshot', cursor: 'c1' });
+    const resumedPromise = receiveJson(socket, 'WebSocket resume');
     socket.send(JSON.stringify({ action: 'resume', cursor: 'c1' }));
-    const resumed = await receiveJson(socket);
+    const resumed = await resumedPromise;
     assert.deepEqual(resumed, { event: 'resumed', cursor: 'c1' });
-    socket.close();
     return { baseUrl, openapiPaths: Object.keys(spec.paths), generatedClient: 'root-typescript-7', websocket: resumed.event };
   } finally {
+    try { socket?.close(); } catch { /* cleanup only */ }
     await app.close();
     await rm(artifactRoot, { force: true, recursive: true });
   }
