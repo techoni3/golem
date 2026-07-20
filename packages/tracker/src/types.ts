@@ -210,6 +210,7 @@ export interface TrackerStoragePort {
 	}): DeliveryEnvelope | undefined;
 	acknowledgeEnvelope(input: {
 		readonly id: string;
+		readonly claimToken: string;
 		readonly acknowledgementId: string;
 		readonly recipientId: string;
 		readonly payload: JsonObject;
@@ -217,6 +218,7 @@ export interface TrackerStoragePort {
 	}): boolean;
 	createReplyEnvelope(input: {
 		readonly parentId: string;
+		readonly claimToken: string;
 		readonly envelope: DeliveryEnvelope;
 		readonly fingerprint: string;
 	}): CreateEnvelopeResult;

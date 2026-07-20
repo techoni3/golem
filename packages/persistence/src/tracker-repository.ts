@@ -209,6 +209,14 @@ function json(value: unknown): string {
 	return JSON.stringify(value);
 }
 
+function redactDiagnostic(value: string): string {
+	return value
+		.replace(/\bBearer\s+[A-Za-z0-9._-]+/giu, "Bearer [REDACTED]")
+		.replace(/\b([A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY))=\S+/gu, "$1=[REDACTED]")
+		.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/giu, "$1[REDACTED]@")
+		.slice(0, 1_024);
+}
+
 /** Private SQLite implementation, instantiated only by PersistenceOwner. */
 export class TrackerRepository implements TrackerStorageCapability {
 	readonly #database: SqliteConnection;
@@ -417,14 +425,17 @@ export class TrackerRepository implements TrackerStorageCapability {
 			(): TrackerDeliveryEnvelope | undefined => {
 				const changed = this.#database
 					.prepare(
-						"UPDATE tracker_envelopes SET status = ?, claim_owner = NULL, claim_token = NULL, claim_until = NULL, next_attempt_at = ?, delivered_at = CASE WHEN ? = 'delivered' THEN ? ELSE delivered_at END, last_error = ? WHERE id = ? AND status = 'claimed' AND claim_token = ?",
+						"UPDATE tracker_envelopes SET status = ?, claim_owner = CASE WHEN ? = 'delivered' THEN claim_owner ELSE NULL END, claim_token = CASE WHEN ? = 'delivered' THEN claim_token ELSE NULL END, claim_until = CASE WHEN ? = 'delivered' THEN claim_until ELSE NULL END, next_attempt_at = ?, delivered_at = CASE WHEN ? = 'delivered' THEN ? ELSE delivered_at END, last_error = ? WHERE id = ? AND status = 'claimed' AND claim_token = ?",
 					)
 					.run(
+						input.status,
+						input.status,
+						input.status,
 						input.status,
 						input.nextAttemptAt ?? null,
 						input.status,
 						input.now,
-						input.error?.slice(0, 1_024) ?? null,
+						input.error ? redactDiagnostic(input.error) : null,
 						input.id,
 						input.claimToken,
 					).changes;
@@ -436,7 +447,7 @@ export class TrackerRepository implements TrackerStorageCapability {
 				this.#audit(
 					`envelope.${input.status}`,
 					input.id,
-					{ error: input.error ?? null },
+					{ error: input.error ? redactDiagnostic(input.error) : null },
 					input.now,
 				);
 				return hydrateEnvelope(row);
@@ -446,6 +457,7 @@ export class TrackerRepository implements TrackerStorageCapability {
 
 	acknowledgeEnvelope(input: {
 		readonly id: string;
+		readonly claimToken: string;
 		readonly acknowledgementId: string;
 		readonly recipientId: string;
 		readonly payload: TrackerJsonObject;
@@ -455,10 +467,19 @@ export class TrackerRepository implements TrackerStorageCapability {
 			const row = this.#database
 				.prepare<EnvelopeRow>("SELECT * FROM tracker_envelopes WHERE id = ?")
 				.get(input.id);
+			if (!row || row.recipient_id !== input.recipientId) return false;
+			const existing = this.#database
+				.prepare<{ readonly payload_json: string }>(
+					"SELECT payload_json FROM tracker_envelope_acknowledgements WHERE envelope_id = ? AND acknowledgement_id = ?",
+				)
+				.get(input.id, input.acknowledgementId);
+			if (row.status === "acknowledged")
+				return Boolean(
+					existing && existing.payload_json === json(input.payload),
+				);
 			if (
-				!row ||
-				row.recipient_id !== input.recipientId ||
-				!["claimed", "delivered", "acknowledged"].includes(row.status)
+				!["claimed", "delivered"].includes(row.status) ||
+				row.claim_token !== input.claimToken
 			)
 				return false;
 			const inserted = this.#database
@@ -472,12 +493,13 @@ export class TrackerRepository implements TrackerStorageCapability {
 					json(input.payload),
 					input.now,
 				).changes;
-			if (inserted === 0) return true;
-			this.#database
+			if (inserted === 0) return existing?.payload_json === json(input.payload);
+			const settled = this.#database
 				.prepare(
-					"UPDATE tracker_envelopes SET status = 'acknowledged', acknowledged_at = COALESCE(acknowledged_at, ?), claim_owner = NULL, claim_token = NULL, claim_until = NULL WHERE id = ? AND recipient_id = ? AND status IN ('claimed', 'delivered')",
+					"UPDATE tracker_envelopes SET status = 'acknowledged', acknowledged_at = COALESCE(acknowledged_at, ?), claim_owner = NULL, claim_token = NULL, claim_until = NULL WHERE id = ? AND recipient_id = ? AND status IN ('claimed', 'delivered') AND claim_token = ?",
 				)
-				.run(input.now, input.id, input.recipientId);
+				.run(input.now, input.id, input.recipientId, input.claimToken).changes;
+			if (settled !== 1) return false;
 			this.#audit(
 				"envelope.acknowledged",
 				input.id,
@@ -490,6 +512,7 @@ export class TrackerRepository implements TrackerStorageCapability {
 
 	createReplyEnvelope(input: {
 		readonly parentId: string;
+		readonly claimToken: string;
 		readonly envelope: TrackerDeliveryEnvelope;
 		readonly fingerprint: string;
 	}): TrackerCreateEnvelopeResult {
@@ -501,7 +524,8 @@ export class TrackerRepository implements TrackerStorageCapability {
 			if (
 				parent.reply_to_recipient_id !== input.envelope.recipientId ||
 				parent.recipient_id !== input.envelope.senderId ||
-				!["claimed", "delivered", "acknowledged"].includes(parent.status)
+				!["claimed", "delivered"].includes(parent.status) ||
+				parent.claim_token !== input.claimToken
 			)
 				throw new Error(
 					"reply envelope does not match its durable reply route",
@@ -569,7 +593,7 @@ export class TrackerRepository implements TrackerStorageCapability {
 		return this.#database.transaction(() => {
 			this.#database
 				.prepare(
-					"INSERT INTO tracker_subscriptions(id, name, recipient_id, topic, classes_json, cursor_sequence, manual, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(recipient_id, name) DO UPDATE SET topic = excluded.topic, classes_json = excluded.classes_json, cursor_sequence = excluded.cursor_sequence, manual = excluded.manual, status = excluded.status",
+					"INSERT INTO tracker_subscriptions(id, name, recipient_id, topic, classes_json, cursor_sequence, manual, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(recipient_id, name) DO UPDATE SET topic = excluded.topic, classes_json = excluded.classes_json, cursor_sequence = MAX(tracker_subscriptions.cursor_sequence, excluded.cursor_sequence), manual = excluded.manual, status = excluded.status",
 				)
 				.run(
 					input.id,
@@ -656,7 +680,7 @@ export class TrackerRepository implements TrackerStorageCapability {
 		this.#database.transaction(() => {
 			this.#database
 				.prepare(
-					"INSERT INTO tracker_passive_slots(recipient_id, ticket_id, category, baseline_json, value_json, event_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(recipient_id, ticket_id, category) DO UPDATE SET value_json = excluded.value_json, event_id = excluded.event_id, updated_at = excluded.updated_at",
+					"INSERT INTO tracker_passive_slots(recipient_id, ticket_id, category, baseline_json, value_json, event_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(recipient_id, ticket_id, category) DO UPDATE SET sequence = (SELECT COALESCE(MAX(sequence), 0) + 1 FROM tracker_passive_slots), value_json = excluded.value_json, event_id = excluded.event_id, updated_at = excluded.updated_at",
 				)
 				.run(
 					input.recipientId,
@@ -828,12 +852,12 @@ export class TrackerRepository implements TrackerStorageCapability {
 		return this.#database.transaction(() => {
 			const events = this.#database
 				.prepare(
-					"DELETE FROM tracker_bus_events WHERE created_at < ? AND NOT EXISTS (SELECT 1 FROM tracker_subscriptions s WHERE s.topic = tracker_bus_events.topic AND s.status = 'active' AND s.manual = 1 AND s.cursor_sequence < tracker_bus_events.sequence)",
+					"DELETE FROM tracker_bus_events WHERE created_at < ? AND NOT EXISTS (SELECT 1 FROM tracker_subscriptions s WHERE s.topic = tracker_bus_events.topic AND s.status IN ('active', 'offline') AND s.cursor_sequence < tracker_bus_events.sequence)",
 				)
 				.run(input.before).changes;
 			const envelopes = this.#database
 				.prepare(
-					"DELETE FROM tracker_envelopes WHERE created_at < ? AND status IN ('acknowledged', 'dead_letter', 'expired', 'cancelled')",
+					"DELETE FROM tracker_envelopes WHERE created_at < ? AND status IN ('acknowledged', 'expired', 'cancelled') AND NOT EXISTS (SELECT 1 FROM tracker_envelopes child WHERE child.parent_id = tracker_envelopes.id)",
 				)
 				.run(input.before).changes;
 			const auditId = crypto.randomUUID();

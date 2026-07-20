@@ -87,7 +87,7 @@ function envelope(id, recipientId, extra = {}) {
 	};
 }
 
-test("J4 durable envelope CAS, bus cursors, passive slots, prune audit, and crash replay", async () => {
+test("delivery queue crash matrix", async () => {
 	const home = createTemporaryHome("golem-j4-delivery-");
 	const clock = createFixtureClock();
 	const eligibility = createEligibility(clock);
@@ -107,16 +107,18 @@ test("J4 durable envelope CAS, bus cursors, passive slots, prune audit, and cras
 			EnvelopeConflictError,
 			"a reused idempotency key with different payload is rejected",
 		);
+		assert.throws(() => services.delivery.enqueue(envelope("env-semantic", "recipient-a", { idempotencyKey: "key-env-1", deadlineAt: clock.after(1) })), EnvelopeConflictError, "deadline is semantic idempotency input");
+		assert.equal(services.delivery.enqueue(envelope("env-1", "recipient-a", { payload: { message: "env-1" } })).id, first.id, "canonical payload order/shape preserves duplicate identity");
 
 		const [firstClaim] = services.delivery.claim("worker-a", 1, 5_000);
 		assert(firstClaim, "one worker claims the only pending envelope");
 		assert.equal(services.delivery.claim("worker-b", 1, 5_000).length, 0, "CAS claim prevents a second owner");
 		assert.equal(firstClaim.prepare().kind, "deliver", "current endpoint fence permits transport");
 		firstClaim.delivered();
-		assert.equal(firstClaim.acknowledge("ack-1", { accepted: true }), true, "ack is recorded against the current recipient");
-		assert.equal(firstClaim.acknowledge("ack-1", { accepted: true }), true, "duplicate acknowledgement is idempotent");
 		const reply = firstClaim.reply({ id: "env-1-reply", idempotencyKey: "key-env-1-reply", payload: { result: "ok" } });
 		assert.equal(reply.parentId, first.id, "reply retains immutable parent/root route");
+		assert.equal(firstClaim.acknowledge("ack-1", { accepted: true }), true, "ack is recorded against the current claim");
+		assert.equal(firstClaim.acknowledge("ack-1", { accepted: true }), true, "duplicate acknowledgement is idempotent");
 		const [replyClaim] = services.delivery.claim("worker-reply", 1, 5_000);
 		assert(replyClaim, "reply becomes its own durable envelope");
 		replyClaim.delivered();
@@ -130,8 +132,20 @@ test("J4 durable envelope CAS, bus cursors, passive slots, prune audit, and cras
 		clock.advance(1_000);
 		const [retryClaim] = services.delivery.claim("worker-retry", 1, 5_000);
 		assert(retryClaim, "stale claim is eligible for a bounded retry");
-		const failed = retryClaim.fail("transport unavailable", 1_000);
+		const failed = retryClaim.fail("Bearer ghp-abcdef123456", 1_000);
 		assert.equal(failed.status, "dead_letter", "second bounded failure is observable permanent failure");
+		assert.equal(services.audit().some((row) => JSON.stringify(row.details).includes("ghp-abcdef123456")), false, "audit redacts transport credentials");
+
+		services.delivery.enqueue(envelope("env-lease", "recipient-lease"));
+		const [oldClaim] = services.delivery.claim("worker-old", 1, 100);
+		assert(oldClaim, "old worker owns the initial lease");
+		clock.advance(101);
+		const [newClaim] = services.delivery.claim("worker-new", 1, 5_000);
+		assert(newClaim, "a new worker reclaims only the expired lease");
+		assert.equal(oldClaim.acknowledge("stale-ack"), false, "expired claim cannot acknowledge after recovery");
+		assert.throws(() => oldClaim.reply({ id: "stale-reply", idempotencyKey: "stale-reply", payload: {} }), /claim|reply/i, "expired claim cannot create a reply");
+		newClaim.delivered();
+		newClaim.acknowledge("fresh-ack");
 
 		services.delivery.enqueue(envelope("env-deadline", "recipient-deadline", { deadlineAt: clock.after(5) }));
 		clock.advance(6);
@@ -152,7 +166,12 @@ test("J4 durable envelope CAS, bus cursors, passive slots, prune audit, and cras
 		const offline = services.subscriptions.subscribe({ id: "sub-offline", name: "offline", recipientId: "recipient-b", topic: "ticket/GOL-36", status: "offline" });
 		services.bus.append({ id: "bus-3", deduplicationKey: "dedupe-bus-3", topic: "ticket/GOL-36", class: "lifecycle", payload: { action: "updated" } });
 		assert.equal(services.subscriptions.pending(offline.id), undefined, "offline subscription advances no unsolicited turn");
-		assert.equal(services.prune(clock.after(1)).events, 1, "manual-interest cursor protects the unconsumed lifecycle event while allowing consumed history to prune");
+		assert.equal(services.prune(clock.after(1)).events, 0, "offline unread event is protected from prune");
+		const reactivated = services.subscriptions.subscribe({ name: "offline", recipientId: "recipient-b", topic: "ticket/GOL-36", status: "active" });
+		assert.deepEqual(services.subscriptions.pending(reactivated.id)?.events.map((row) => row.id), ["bus-1", "bus-3"], "reactivated offline cursor replays ordered unread events");
+		assert.equal(services.subscriptions.commit(reactivated.id, 0, 2), true, "reactivated cursor commits monotonically");
+		assert.equal(services.subscriptions.subscribe({ name: "offline", recipientId: "recipient-b", topic: "ticket/GOL-36", cursor: 0 }).cursor, 2, "ordinary upsert cannot rewind cursor");
+		assert.equal(services.prune(clock.after(1)).events, 1, "consumed history prunes only after all active/offline cursors advance");
 		const remaining = services.subscriptions.pending(manual.id);
 		assert.equal(services.subscriptions.commit(manual.id, event.sequence, remaining?.toSequence ?? event.sequence), true, "manual cursor records the later lifecycle event");
 		assert.equal(services.prune(clock.after(2)).events, 1, "prune removes lifecycle history only after the manual cursor commits it");
@@ -160,12 +179,13 @@ test("J4 durable envelope CAS, bus cursors, passive slots, prune audit, and cras
 		services.passive.append({ recipientId: "recipient-passive", ticketId: "GOL-36", category: "status", baseline: { state: "open" }, value: { state: "built" }, eventId: "passive-1" });
 		const passive = services.passive.claim("recipient-passive", 5_000);
 		assert(passive, "passive slot produces a lease-backed batch only when explicitly claimed");
+		services.passive.append({ recipientId: "recipient-passive", ticketId: "GOL-36", category: "status", baseline: { state: "open" }, value: { state: "done" }, eventId: "passive-2" });
 		assert.equal(services.delivery.claim("worker-passive", 1, 5_000).length, 0, "passive slots do not create an unsolicited delivery turn");
 		assert.equal(services.passive.release("recipient-passive", passive.leaseId), true, "released passive lease remains replayable");
 		const replayedPassive = services.passive.claim("recipient-passive", 5_000);
 		assert(replayedPassive, "released batch replays its same coalesced slot");
 		assert.equal(services.passive.commit("recipient-passive", replayedPassive.leaseId), true, "commit deletes only the lease-owned batch");
-		assert.equal(services.passive.claim("recipient-passive"), undefined, "committed passive batch does not replay");
+		assert.deepEqual(services.passive.claim("recipient-passive")?.entries.map((entry) => entry.value), [{ state: "done" }], "update during lease survives into the next passive batch");
 		assert(services.audit().some((row) => row.kind === "tracker.pruned"), "prune leaves an audit fact");
 
 		services.delivery.enqueue(envelope("env-crash", "recipient-crash"));
@@ -204,5 +224,29 @@ test("J4 durable envelope CAS, bus cursors, passive slots, prune audit, and cras
 		if (writer) await writer.close();
 		home.cleanup();
 		assert.equal(fs.existsSync(home.root), false, "J4 leaves no temporary GOLEM_HOME state");
+	}
+});
+
+test("bus offline replay", async () => {
+	const home = createTemporaryHome("golem-j4-bus-offline-");
+	const clock = createFixtureClock();
+	const eligibility = createEligibility(clock);
+	let writer;
+	try {
+		const opened = openServices(home, clock, eligibility, "bus-offline");
+		writer = opened.writer;
+		const offline = opened.services.subscriptions.subscribe({ id: "offline-replay", name: "offline-replay", recipientId: "recipient-offline", topic: "ticket/GOL-36", status: "offline" });
+		opened.services.bus.append({ id: "offline-event-1", deduplicationKey: "offline-dedupe-1", topic: "ticket/GOL-36", class: "tracker", payload: { ordinal: 1 } });
+		opened.services.bus.append({ id: "offline-event-2", deduplicationKey: "offline-dedupe-2", topic: "ticket/GOL-36", class: "lifecycle", payload: { ordinal: 2 } });
+		assert.equal(opened.services.subscriptions.pending(offline.id), undefined, "offline subscriber receives no unsolicited turn");
+		assert.equal(opened.services.prune(clock.after(1)).events, 0, "offline unread cursor protects both events");
+		const active = opened.services.subscriptions.subscribe({ name: "offline-replay", recipientId: "recipient-offline", topic: "ticket/GOL-36", status: "active" });
+		const pending = opened.services.subscriptions.pending(active.id);
+		assert.deepEqual(pending?.events.map((event) => event.id), ["offline-event-1", "offline-event-2"], "reactivation replays events in durable sequence");
+		assert.equal(opened.services.subscriptions.commit(active.id, 0, pending?.toSequence ?? 0), true, "cursor commit is CAS-bound and monotonic");
+		assert.equal(opened.services.subscriptions.subscribe({ name: "offline-replay", recipientId: "recipient-offline", topic: "ticket/GOL-36", cursor: 0 }).cursor, 2, "resubscribe does not rewind committed cursor");
+	} finally {
+		if (writer) await writer.close();
+		home.cleanup();
 	}
 });

@@ -14,8 +14,14 @@ import {
 const defaultLeaseMs = 30_000;
 const defaultMaxAttempts = 5;
 
-function fingerprint(value: unknown): string {
-	return JSON.stringify(value);
+function canonicalJson(value: unknown): string {
+	if (value === null || typeof value !== "object") return JSON.stringify(value);
+	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+	const object = value as Record<string, unknown>;
+	return `{${Object.keys(object)
+		.sort()
+		.map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`)
+		.join(",")}}`;
 }
 
 function cloneEndpoint(endpoint: DeliveryEligibility): DeliveryEligibility {
@@ -107,12 +113,15 @@ export function createDurableDeliveryService(options: {
 		});
 		const result = options.storage.createEnvelope({
 			envelope,
-			fingerprint: fingerprint({
+			fingerprint: canonicalJson({
 				idempotencyKey: input.idempotencyKey,
 				senderId: input.senderId,
 				recipientId: input.recipientId,
 				kind: input.kind,
 				payload: input.payload,
+				deadlineAt: input.deadlineAt ?? null,
+				maxAttempts,
+				replyToRecipientId: input.replyToRecipientId ?? null,
 			}),
 		});
 		if (result.kind === "conflict")
@@ -158,6 +167,7 @@ export function createDurableDeliveryService(options: {
 			acknowledge(acknowledgementId: string, payload: JsonObject = {}) {
 				return options.storage.acknowledgeEnvelope({
 					id: envelope.id,
+					claimToken: envelope.claimToken,
 					acknowledgementId,
 					recipientId: envelope.recipientId,
 					payload,
@@ -194,8 +204,9 @@ export function createDurableDeliveryService(options: {
 				});
 				const result = options.storage.createReplyEnvelope({
 					parentId: envelope.id,
+					claimToken: envelope.claimToken,
 					envelope: child,
-					fingerprint: fingerprint({
+					fingerprint: canonicalJson({
 						parentId: envelope.id,
 						idempotencyKey: input.idempotencyKey,
 						payload: input.payload,
