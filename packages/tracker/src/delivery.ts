@@ -130,6 +130,11 @@ export function createDurableDeliveryService(options: {
 	}
 
 	function wrapClaim(envelope: ClaimedDeliveryEnvelope): EnvelopeClaim {
+		let prepared = false;
+		const requirePrepared = (): void => {
+			if (!prepared)
+				throw new Error("delivery claim requires successful current prepare");
+		};
 		const settle = (
 			status: "pending" | "delivered" | "retrying" | "dead_letter" | "expired",
 			error?: string,
@@ -150,8 +155,11 @@ export function createDurableDeliveryService(options: {
 			envelope,
 			prepare() {
 				const current = options.eligibility.resolve(envelope.recipientId);
-				if (endpointMatches(envelope.endpoint, current))
+				if (endpointMatches(envelope.endpoint, current)) {
+					prepared = true;
 					return Object.freeze({ kind: "deliver" as const, envelope });
+				}
+				prepared = false;
 				settle(
 					"retrying",
 					"endpoint eligibility changed",
@@ -165,6 +173,7 @@ export function createDurableDeliveryService(options: {
 				});
 			},
 			acknowledge(acknowledgementId: string, payload: JsonObject = {}) {
+				requirePrepared();
 				return options.storage.acknowledgeEnvelope({
 					id: envelope.id,
 					claimToken: envelope.claimToken,
@@ -179,6 +188,7 @@ export function createDurableDeliveryService(options: {
 				readonly idempotencyKey: string;
 				readonly payload: JsonObject;
 			}) {
+				requirePrepared();
 				if (!envelope.replyToRecipientId)
 					throw new Error("delivery envelope has no reply route");
 				const endpoint = options.eligibility.resolve(
@@ -217,6 +227,7 @@ export function createDurableDeliveryService(options: {
 				return result.envelope;
 			},
 			fail(error: string, retryAfterMs = retryAfter(envelope.attempts)) {
+				requirePrepared();
 				if (!error.trim())
 					throw new Error("delivery failure requires an error");
 				const exhausted = envelope.attempts >= envelope.maxAttempts;
@@ -227,6 +238,7 @@ export function createDurableDeliveryService(options: {
 				);
 			},
 			delivered() {
+				requirePrepared();
 				return settle("delivered");
 			},
 		});

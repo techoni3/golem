@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -87,6 +87,17 @@ function envelope(id, recipientId, extra = {}) {
 	};
 }
 
+function claimChild(home, now, workerId) {
+	return new Promise((resolve, reject) => {
+		const child = spawn(process.execPath, [worker], { cwd: repositoryRoot, env: { ...home.env, GOLEM_TRACKER_FIXTURE_NOW: now, GOLEM_TRACKER_FIXTURE_WORKER: workerId }, stdio: ["ignore", "pipe", "pipe"] });
+		let stdout = ""; let stderr = "";
+		child.stdout.on("data", (chunk) => { stdout += chunk; });
+		child.stderr.on("data", (chunk) => { stderr += chunk; });
+		child.once("error", reject);
+		child.once("close", (code) => code === 0 ? resolve(JSON.parse(stdout)) : reject(new Error(`claim child ${workerId} exited ${code}: ${stderr}`)));
+	});
+}
+
 test("delivery queue crash matrix", async () => {
 	const home = createTemporaryHome("golem-j4-delivery-");
 	const clock = createFixtureClock();
@@ -121,6 +132,7 @@ test("delivery queue crash matrix", async () => {
 		assert.equal(firstClaim.acknowledge("ack-1", { accepted: true }), true, "duplicate acknowledgement is idempotent");
 		const [replyClaim] = services.delivery.claim("worker-reply", 1, 5_000);
 		assert(replyClaim, "reply becomes its own durable envelope");
+		assert.equal(replyClaim.prepare().kind, "deliver");
 		replyClaim.delivered();
 		replyClaim.acknowledge("ack-reply");
 
@@ -129,10 +141,16 @@ test("delivery queue crash matrix", async () => {
 		assert(staleClaim, "stale-fence envelope is claimed before transport");
 		eligibility.advance("recipient-stale");
 		assert.deepEqual(staleClaim.prepare(), { kind: "stale", reason: "endpoint_changed" }, "fence change blocks transport and returns the claim to retrying");
+		assert.throws(() => staleClaim.delivered(), /successful current prepare/, "stale-fence caller cannot bypass prepare to settle transport");
 		clock.advance(1_000);
 		const [retryClaim] = services.delivery.claim("worker-retry", 1, 5_000);
 		assert(retryClaim, "stale claim is eligible for a bounded retry");
-		const failed = retryClaim.fail("Bearer ghp-abcdef123456", 1_000);
+		assert.equal(retryClaim.prepare().kind, "stale", "retry still rechecks its original stale fence");
+		services.delivery.enqueue(envelope("env-fail", "recipient-fail", { maxAttempts: 1 }));
+		const [failureClaim] = services.delivery.claim("worker-fail", 1, 5_000);
+		assert(failureClaim);
+		assert.equal(failureClaim.prepare().kind, "deliver");
+		const failed = failureClaim.fail("Bearer ghp-abcdef123456", 1_000);
 		assert.equal(failed.status, "dead_letter", "second bounded failure is observable permanent failure");
 		assert.equal(services.audit().some((row) => JSON.stringify(row.details).includes("ghp-abcdef123456")), false, "audit redacts transport credentials");
 
@@ -142,8 +160,9 @@ test("delivery queue crash matrix", async () => {
 		clock.advance(101);
 		const [newClaim] = services.delivery.claim("worker-new", 1, 5_000);
 		assert(newClaim, "a new worker reclaims only the expired lease");
-		assert.equal(oldClaim.acknowledge("stale-ack"), false, "expired claim cannot acknowledge after recovery");
+		assert.throws(() => oldClaim.acknowledge("stale-ack"), /successful current prepare/, "expired claim cannot acknowledge after recovery");
 		assert.throws(() => oldClaim.reply({ id: "stale-reply", idempotencyKey: "stale-reply", payload: {} }), /claim|reply/i, "expired claim cannot create a reply");
+		assert.equal(newClaim.prepare().kind, "deliver");
 		newClaim.delivered();
 		newClaim.acknowledge("fresh-ack");
 
@@ -191,22 +210,15 @@ test("delivery queue crash matrix", async () => {
 		services.delivery.enqueue(envelope("env-crash", "recipient-crash"));
 		await writer.close();
 		writer = undefined;
-		const child = spawnSync(process.execPath, [worker], {
-			cwd: repositoryRoot,
-			encoding: "utf8",
-			env: {
-				...home.env,
-				GOLEM_TRACKER_FIXTURE_NOW: clock.now(),
-				GOLEM_TRACKER_FIXTURE_RECIPIENT: "recipient-crash",
-			},
-		});
-		assert.equal(child.status, 0, `crash worker must claim then exit: ${child.stderr}`);
-		assert.match(child.stdout, /env-crash/, "real child process claims the persisted envelope");
+		const [childA, childB] = await Promise.all([claimChild(home, clock.now(), "process-a"), claimChild(home, clock.now(), "process-b")]);
+		assert.equal([childA, childB].filter((result) => result.claimed).length, 1, "simultaneous independent SQLite claimers elect exactly one owner without raw SQLITE_BUSY");
+		assert.equal([childA, childB].some((result) => result.busy), false, "contended child returns a clean no-claim result");
 		clock.advance(5_001);
 		({ writer, services } = openServices(home, clock, eligibility, "delivery-recovery"));
 		assert.equal(services.delivery.recover().some((row) => row.id === "env-crash" && row.status === "retrying"), true, "restart replays the dead child lease without double settlement");
 		const [recovered] = services.delivery.claim("worker-recovered", 1, 5_000);
 		assert(recovered, "recovered envelope is claimed exactly once after its lease expires");
+		assert.equal(recovered.prepare().kind, "deliver");
 		recovered.delivered();
 		recovered.acknowledge("ack-crash");
 		await writer.close();
