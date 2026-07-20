@@ -26,6 +26,10 @@ import { exerciseControlPlaneShell } from "../control-plane/control-plane-shell.
 import { exerciseRenderMcpClosure } from "../render-mcp-closure.mjs";
 import { exerciseDomainReplay } from "./domain-replay.mjs";
 import { exerciseLauncherResolution } from "./launcher-resolution.mjs";
+import {
+	exerciseLauncherSignalCleanup,
+	exerciseNativeSpawnSafety,
+} from "./native-spawn-safety.mjs";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright-core");
@@ -428,6 +432,8 @@ export function diagnosticFor(error, context) {
 export const exercises = Object.freeze({
 	"domain-replay": exerciseDomainReplay,
 	"launcher-resolution-matrix": exerciseLauncherResolution,
+	"native-spawn-safety": exerciseNativeSpawnSafety,
+	"launcher-signal-cleanup": exerciseLauncherSignalCleanup,
 	"testkit-smoke": exerciseSmoke,
 	"testkit-fake-harness": exerciseFakeHarness,
 	"testkit-semantic-parity": exerciseSemanticParity,

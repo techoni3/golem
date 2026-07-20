@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-07-20 @ e69f622 — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-20 @ e69f622 + GOL-37 execution boundary — maintained via golem:docs-maintenance.
 
 ## Structure
 
@@ -14,6 +14,7 @@
 - `runtime` gives producers only a filesystem spool. The service owns lease/attempt recovery, no-clobber archive or redacted quarantine, atomic facts/watermarks/outbox, and bounded materializer+outbox health; producer processes never open SQLite.
 - The control plane owns typed `/api/v1`, browser/bearer authority, `/api/v1/ws`, static legacy dashboard, and headerless legacy `/ws`. Legacy dashboard/server code is compatibility, not a canonical package dependency.
 - `tracker` receives typed storage/eligibility ports only; it never treats a JSON registry as endpoint authority.
+- `launcher` owns redacted qualified-plan execution: trusted binary discovery, shell-free argv/environment, readiness-gated automatic timeout, and owned child groups. See `docs/architecture/launcher-execution.md` (J5).
 
 ## Constraints
 

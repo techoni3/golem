@@ -1,3 +1,8 @@
+export type {
+	ResolvedUpstreamBinary,
+	UpstreamDiscoveryInput,
+} from "./binaries/discovery.js";
+export { discoverUpstreamBinary } from "./binaries/discovery.js";
 export {
 	builtInCapabilities,
 	capabilityTruth,
@@ -10,6 +15,12 @@ export {
 	planConfigWrite,
 	writeJsoncConfig,
 } from "./config.js";
+export type {
+	AdapterEnvironmentContribution,
+	EnvironmentBuildInput,
+	SanitizedEnvironment,
+} from "./environment/sanitize.js";
+export { buildSanitizedEnvironment } from "./environment/sanitize.js";
 export {
 	failure,
 	issue,
@@ -17,6 +28,23 @@ export {
 	stableLaunchPlanJson,
 } from "./explain.js";
 export { builtInPresets, mergeLauncherConfig } from "./presets.js";
+export { LauncherExecutionError } from "./process/errors.js";
+export type {
+	AdapterSpawnContribution,
+	CapturedLaunchOutput,
+	ControlPlaneEnsurePort,
+	LaunchExecution,
+	LaunchExecutionInput,
+	LaunchExit,
+	LauncherSignal,
+	RunningLaunch,
+} from "./process/execute.js";
+export { executeLaunch } from "./process/execute.js";
+export type { LaunchRecord } from "./records/launch-record.js";
+export {
+	launchRecord,
+	stableLaunchRecordJson,
+} from "./records/launch-record.js";
 export { doctorFacts, listLauncher, resolveLaunch } from "./resolve.js";
 export type {
 	Backend,
