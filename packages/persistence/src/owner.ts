@@ -18,7 +18,7 @@ import {
 } from "./lock.js";
 import { applyPlan, dryRunPlan, planFor } from "./migrations.js";
 import { RuntimeRepository } from "./repositories.js";
-import { configure, hasTrackerTables, sha256 } from "./schema.js";
+import { configure, hasManagedTrackerSchema, hasTrackerTables, sha256 } from "./schema.js";
 import { TrackerRepository } from "./tracker-repository.js";
 import {
 	type ClaimedOutboxRecord,
@@ -113,7 +113,7 @@ class PersistenceOwner implements PersistenceWriteCapability {
 				}),
 			});
 			const runtimePlan = planFor(runtime, "runtime", "apply");
-			this.#trackerBaseline = hasTrackerTables(tracker)
+			this.#trackerBaseline = hasTrackerTables(tracker) && !hasManagedTrackerSchema(tracker)
 				? "unmanaged"
 				: "managed";
 			configure(runtime);

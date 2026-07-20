@@ -87,9 +87,9 @@ function envelope(id, recipientId, extra = {}) {
 	};
 }
 
-function claimChild(home, now, workerId) {
+function claimChild(home, now, workerId, barrier) {
 	return new Promise((resolve, reject) => {
-		const child = spawn(process.execPath, [worker], { cwd: repositoryRoot, env: { ...home.env, GOLEM_TRACKER_FIXTURE_NOW: now, GOLEM_TRACKER_FIXTURE_WORKER: workerId }, stdio: ["ignore", "pipe", "pipe"] });
+		const child = spawn(process.execPath, [worker], { cwd: repositoryRoot, env: { ...home.env, GOLEM_TRACKER_FIXTURE_NOW: now, GOLEM_TRACKER_FIXTURE_WORKER: workerId, GOLEM_TRACKER_FIXTURE_ROOT: home.root, GOLEM_TRACKER_FIXTURE_BARRIER: barrier }, stdio: ["ignore", "pipe", "pipe"] });
 		let stdout = ""; let stderr = "";
 		child.stdout.on("data", (chunk) => { stdout += chunk; });
 		child.stderr.on("data", (chunk) => { stderr += chunk; });
@@ -210,9 +210,12 @@ test("delivery queue crash matrix", async () => {
 		services.delivery.enqueue(envelope("env-crash", "recipient-crash"));
 		await writer.close();
 		writer = undefined;
-		const [childA, childB] = await Promise.all([claimChild(home, clock.now(), "process-a"), claimChild(home, clock.now(), "process-b")]);
+		const barrier = path.join(home.root, "claim.barrier");
+		const childAPromise = claimChild(home, clock.now(), "process-a", barrier);
+		const childBPromise = claimChild(home, clock.now(), "process-b", barrier);
+		fs.writeFileSync(barrier, "go");
+		const [childA, childB] = await Promise.all([childAPromise, childBPromise]);
 		assert.equal([childA, childB].filter((result) => result.claimed).length, 1, "simultaneous independent SQLite claimers elect exactly one owner without raw SQLITE_BUSY");
-		assert.equal([childA, childB].some((result) => result.busy), false, "contended child returns a clean no-claim result");
 		clock.advance(5_001);
 		({ writer, services } = openServices(home, clock, eligibility, "delivery-recovery"));
 		assert.equal(services.delivery.recover().some((row) => row.id === "env-crash" && row.status === "retrying"), true, "restart replays the dead child lease without double settlement");

@@ -1,30 +1,21 @@
-import { createRequire } from "node:module";
+import fs from "node:fs";
+import path from "node:path";
 
-const trackerPath = process.env.GOLEM_TRACKER_DB;
+import { composeControlPlaneTrackerServices } from "../../apps/control-plane/dist/tracker.js";
+import { openControlPlanePersistence } from "../../apps/control-plane/dist/persistence.js";
+
 const now = process.env.GOLEM_TRACKER_FIXTURE_NOW;
-const worker = process.env.GOLEM_TRACKER_FIXTURE_WORKER ?? "delivery-child";
-if (!trackerPath || !now) process.exit(64);
-
-const require = createRequire(import.meta.url);
-const Database = require("better-sqlite3");
-const database = new Database(trackerPath);
-database.pragma("busy_timeout = 1000");
+const trackerPath = process.env.GOLEM_TRACKER_DB;
+const root = process.env.GOLEM_TRACKER_FIXTURE_ROOT;
+const worker = process.env.GOLEM_TRACKER_FIXTURE_WORKER;
+const barrier = process.env.GOLEM_TRACKER_FIXTURE_BARRIER;
+if (!now || !trackerPath || !root || !worker || !barrier) process.exit(64);
+const until = Date.now() + 5_000;
+while (!fs.existsSync(barrier) && Date.now() < until) {}
+const clock = { now: () => now, after: (milliseconds) => new Date(Date.parse(now) + milliseconds).toISOString() };
+const owner = openControlPlanePersistence({ runtimePath: path.join(root, `${worker}.runtime.db`), trackerPath, lockPath: path.join(root, `${worker}.owner.lock`) }, { clock, ownerId: worker });
 try {
-	database.exec("BEGIN IMMEDIATE");
-	const candidate = database
-		.prepare("SELECT id FROM tracker_envelopes WHERE status IN ('pending', 'retrying') AND (next_attempt_at IS NULL OR next_attempt_at <= ?) ORDER BY created_at, id LIMIT 1")
-		.get(now);
-	let claimed = false;
-	if (candidate) {
-		claimed = database
-			.prepare("UPDATE tracker_envelopes SET status = 'claimed', attempts = attempts + 1, claim_owner = ?, claim_token = ?, claim_until = ? WHERE id = ? AND status IN ('pending', 'retrying')")
-			.run(worker, `${worker}-token`, new Date(Date.parse(now) + 5000).toISOString(), candidate.id).changes === 1;
-	}
-	database.exec("COMMIT");
-	process.stdout.write(`${JSON.stringify({ claimed, id: candidate?.id ?? null, worker })}\n`);
-} catch (error) {
-	try { database.exec("ROLLBACK"); } catch {}
-	process.stdout.write(`${JSON.stringify({ claimed: false, busy: true, worker, error: error instanceof Error ? error.code : "unknown" })}\n`);
-} finally {
-	database.close();
-}
+	const services = composeControlPlaneTrackerServices({ writer: owner, clock, eligibility: { resolve: (recipientId) => ({ recipientId, generationId: `gen_${recipientId}`, endpointId: `endpoint_${recipientId}`, ownerFence: 1, readiness: "ready", mode: "next_turn", capabilities: [{ capability: "delivery", qualification: "supported", observedAt: now }] }) } });
+	const [claim] = services.delivery.claim(worker, 1, 5_000);
+	process.stdout.write(`${JSON.stringify({ claimed: Boolean(claim), id: claim?.envelope.id ?? null })}\n`);
+} finally { await owner.close(); }

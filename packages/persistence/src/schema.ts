@@ -448,6 +448,15 @@ export function hasTrackerTables(database: SqliteConnection): boolean {
 	return (result?.count ?? 0) > 0;
 }
 
+/** Legacy tracker data has tables but no checked Golem ledger; do not mutate it on open. */
+export function hasManagedTrackerSchema(database: SqliteConnection): boolean {
+	return (
+		tableExists(database, "golem_migrations") &&
+		tableExists(database, "tracker_envelopes") &&
+		tableExists(database, "tracker_bus_events")
+	);
+}
+
 export function sha256(value: string): string {
 	return crypto.createHash("sha256").update(value).digest("hex");
 }
