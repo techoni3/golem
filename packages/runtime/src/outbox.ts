@@ -10,6 +10,10 @@ export interface RuntimeOutboxDestination {
 export interface RuntimeOutboxDrainResult {
 	readonly claimed: number;
 	readonly acknowledged: number;
+	/** Delivery succeeded but its durable acknowledgement CAS lost authority. */
+	readonly acknowledgementConflicts: number;
+	/** A delivery failure could not be recorded because its claim CAS was stale. */
+	readonly failureConflicts: number;
 	readonly deferred: number;
 	readonly permanentFailures: number;
 }
@@ -40,6 +44,8 @@ export class RuntimeOutboxDrainer {
 		const result = {
 			claimed: claimed.length,
 			acknowledged: 0,
+			acknowledgementConflicts: 0,
+			failureConflicts: 0,
 			deferred: 0,
 			permanentFailures: 0,
 		};
@@ -53,13 +59,15 @@ export class RuntimeOutboxDrainer {
 				);
 				if (failure?.status === "permanent_failure")
 					result.permanentFailures += 1;
-				else result.deferred += 1;
+				else if (failure) result.deferred += 1;
+				else result.failureConflicts += 1;
 				continue;
 			}
 			try {
 				await destination.deliver({ id: entry.id, payload: entry.payload });
 				if (this.#writer.ackRuntimeOutbox(entry.id, entry.claimToken))
 					result.acknowledged += 1;
+				else result.acknowledgementConflicts += 1;
 			} catch (error) {
 				const failure = this.#writer.failRuntimeOutbox(
 					entry.id,
@@ -68,7 +76,8 @@ export class RuntimeOutboxDrainer {
 				);
 				if (failure?.status === "permanent_failure")
 					result.permanentFailures += 1;
-				else result.deferred += 1;
+				else if (failure) result.deferred += 1;
+				else result.failureConflicts += 1;
 			}
 		}
 		return Object.freeze(result);

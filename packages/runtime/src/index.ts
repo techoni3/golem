@@ -30,3 +30,8 @@ export {
 	RuntimeOutboxDrainer,
 	type RuntimeOutboxDrainResult,
 } from "./outbox.js";
+export {
+	type RuntimeEngineHealth,
+	RuntimeEngineScheduler,
+	type RuntimeEngineTick,
+} from "./scheduler.js";

@@ -9,6 +9,7 @@ import { controlPlaneOpenApiDocument } from "./openapi.js";
 import type {
 	ControlPlaneProjectionPort,
 	ControlPlaneReplayPort,
+	RuntimeHealthPort,
 	RuntimeIngressPort,
 } from "./ports.js";
 import {
@@ -55,6 +56,7 @@ export function registerValidatedRoutes(options: {
 	readonly legacy: LegacyCompatibilityPublisher;
 	readonly sessions: BrowserSessionAuthority;
 	readonly runtimeIngress?: RuntimeIngressPort;
+	readonly runtimeHealth?: RuntimeHealthPort;
 	readonly invalidResponseForTest?: boolean;
 }): void {
 	const responseSchemas = {
@@ -87,6 +89,9 @@ export function registerValidatedRoutes(options: {
 							schema_version: "golem.control-plane-health/v1",
 							status: "live",
 							instance_id: options.instanceId,
+							...(options.runtimeHealth
+								? { runtime: options.runtimeHealth.health() }
+								: {}),
 						},
 			),
 	);
@@ -104,6 +109,9 @@ export function registerValidatedRoutes(options: {
 				schema_version: "golem.control-plane-health/v1",
 				status: "ready",
 				instance_id: options.instanceId,
+				...(options.runtimeHealth
+					? { runtime: options.runtimeHealth.health() }
+					: {}),
 			});
 		},
 	);

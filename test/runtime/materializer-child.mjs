@@ -5,6 +5,7 @@ const home = process.env.GOLEM_RUNTIME_TEST_HOME;
 const runtimePath = process.env.GOLEM_RUNTIME_TEST_DB;
 const trackerPath = process.env.GOLEM_RUNTIME_TEST_TRACKER_DB;
 const failpoint = process.env.GOLEM_RUNTIME_TEST_FAILPOINT;
+const claimLeaseMs = Number(process.env.GOLEM_RUNTIME_TEST_CLAIM_LEASE_MS);
 
 if (!home || !runtimePath || !trackerPath || !failpoint)
 	throw new Error("runtime crash fixture requires temporary home, database paths, and a failpoint");
@@ -19,7 +20,13 @@ if (failpoint === "before_publish") {
 }
 
 const owner = openControlPlanePersistence({ runtimePath, trackerPath });
-const { materializer } = createRuntimeMaterializer({ home, writer: owner });
+const { materializer } = createRuntimeMaterializer({
+	home,
+	writer: owner,
+	...(Number.isInteger(claimLeaseMs) && claimLeaseMs > 0
+		? { inboxOptions: { claimLeaseMs } }
+		: {}),
+});
 try {
 	materializer.drain({ limit: 1, failpoint });
 	throw new Error(`runtime crash fixture did not hit ${failpoint}`);

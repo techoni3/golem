@@ -20,6 +20,7 @@ import { fail, registerErrorEnvelope } from "./errors.js";
 import type {
 	ControlPlaneProjectionPort,
 	ControlPlaneReplayPort,
+	RuntimeHealthPort,
 	RuntimeIngressPort,
 } from "./ports.js";
 import { registerValidatedRoutes } from "./routes.js";
@@ -42,6 +43,7 @@ export interface ControlPlaneLifecycleOptions {
 	readonly legacyCompatibility?: LegacyCompatibilityPort;
 	/** Optional until the Wave-5 runtime composition becomes the service main. */
 	readonly runtimeIngress?: RuntimeIngressPort;
+	readonly runtimeHealth?: RuntimeHealthPort;
 	/** Injectable only for bounded composition and deterministic journey clocks. */
 	readonly browserSessions?: BrowserSessionAuthority;
 	readonly replayWindowSize?: number;
@@ -123,6 +125,9 @@ export async function startControlPlane(
 			sessions,
 			...(options.runtimeIngress
 				? { runtimeIngress: options.runtimeIngress }
+				: {}),
+			...(options.runtimeHealth
+				? { runtimeHealth: options.runtimeHealth }
 				: {}),
 			...(options.invalidResponseForTest === undefined
 				? {}

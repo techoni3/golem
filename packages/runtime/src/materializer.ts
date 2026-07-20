@@ -6,9 +6,14 @@ import {
 import type {
 	PersistenceWriteCapability,
 	RuntimeCanonicalMutation,
+	RuntimeMaterializationResult,
 } from "@golem/persistence";
 
-import { type ClaimedInboxEntry, RuntimeInbox } from "./inbox.js";
+import {
+	type ClaimedInboxEntry,
+	RuntimeInbox,
+	type RuntimeInboxOptions,
+} from "./inbox.js";
 
 export interface RuntimeMaterializerHandlerResult {
 	readonly disposition: "accepted" | "illegal";
@@ -36,6 +41,7 @@ export interface MaterializerDrainResult {
 	readonly stale: number;
 	readonly illegal: number;
 	readonly quarantined: number;
+	readonly retrying: number;
 }
 
 export type MaterializerFailpoint =
@@ -119,6 +125,10 @@ export class RuntimeMaterializer {
 		this.#handlers = handlers;
 	}
 
+	get inbox(): RuntimeInbox {
+		return this.#inbox;
+	}
+
 	drain(
 		options: {
 			readonly limit?: number;
@@ -135,6 +145,7 @@ export class RuntimeMaterializer {
 			stale: 0,
 			illegal: 0,
 			quarantined: 0,
+			retrying: 0,
 		};
 		for (const entry of claimed) {
 			if (options.failpoint === "after_claim")
@@ -148,7 +159,13 @@ export class RuntimeMaterializer {
 	#materializeClaim(
 		entry: ClaimedInboxEntry,
 		failpoint: MaterializerFailpoint | undefined,
-	): "materialized" | "duplicated" | "stale" | "illegal" | "quarantined" {
+	):
+		| "materialized"
+		| "duplicated"
+		| "stale"
+		| "illegal"
+		| "quarantined"
+		| "retrying" {
 		if (entry.raw.byteLength > 1_048_576) {
 			this.#inbox.quarantine(entry, "oversized");
 			return "quarantined";
@@ -172,25 +189,34 @@ export class RuntimeMaterializer {
 		}
 		if (failpoint === "before_transaction")
 			throw new Error("runtime materializer failpoint before_transaction");
-		const decision = handler.materialize(parsed.data);
-		const outcome = this.#writer.materializeRuntimeEvent({
-			eventId: parsed.data.event_id,
-			deduplicationKey: parsed.data.deduplication_key,
-			eventKind: parsed.data.event_kind,
-			payload: parsed.data.payload,
-			provenance: parsed.data.provenance,
-			occurredAt: parsed.data.clocks.source_observed_at,
-			producer: {
-				id: parsed.data.producer_instance_id,
-				...(parsed.data.producer_sequence === undefined
-					? {}
-					: { sequence: parsed.data.producer_sequence }),
-			},
-			disposition: decision.disposition,
-			explanation: decision.explanation,
-			...(decision.mutation ? { mutation: decision.mutation } : {}),
-			...(decision.outbox ? { outbox: decision.outbox } : {}),
-		});
+		let outcome: RuntimeMaterializationResult;
+		try {
+			const decision = handler.materialize(parsed.data);
+			outcome = this.#writer.materializeRuntimeEvent({
+				eventId: parsed.data.event_id,
+				deduplicationKey: parsed.data.deduplication_key,
+				eventKind: parsed.data.event_kind,
+				payload: parsed.data.payload,
+				provenance: parsed.data.provenance,
+				occurredAt: parsed.data.clocks.source_observed_at,
+				producer: {
+					id: parsed.data.producer_instance_id,
+					...(parsed.data.producer_sequence === undefined
+						? {}
+						: { sequence: parsed.data.producer_sequence }),
+				},
+				disposition: decision.disposition,
+				explanation: decision.explanation,
+				...(decision.mutation ? { mutation: decision.mutation } : {}),
+				...(decision.outbox ? { outbox: decision.outbox } : {}),
+			});
+		} catch (error) {
+			const retry = this.#inbox.retry(
+				entry,
+				error instanceof Error ? error.message : String(error),
+			);
+			return retry;
+		}
 		if (failpoint === "after_commit")
 			throw new Error("runtime materializer failpoint after_commit");
 		if (failpoint === "before_archive")
@@ -213,11 +239,12 @@ export function createRuntimeMaterializer(options: {
 	readonly home: string;
 	readonly writer: PersistenceWriteCapability;
 	readonly handlers?: readonly RuntimeMaterializerHandler[];
+	readonly inboxOptions?: RuntimeInboxOptions;
 }): {
 	readonly inbox: RuntimeInbox;
 	readonly materializer: RuntimeMaterializer;
 } {
-	const inbox = new RuntimeInbox(options.home);
+	const inbox = new RuntimeInbox(options.home, options.inboxOptions);
 	return Object.freeze({
 		inbox,
 		materializer: new RuntimeMaterializer({

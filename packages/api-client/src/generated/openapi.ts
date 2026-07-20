@@ -269,6 +269,30 @@ export interface operations {
                         /** @enum {string} */
                         readonly status: "live" | "ready";
                         readonly instance_id: string;
+                        readonly runtime?: {
+                            readonly inbox: {
+                                readonly pending: number;
+                                readonly processing: number;
+                                readonly archived: number;
+                                readonly quarantined: number;
+                                readonly retrying: number;
+                                readonly oldestPendingAgeMs?: number;
+                                readonly oldestRetryAgeMs?: number;
+                            };
+                            readonly outbox: {
+                                readonly pending: number;
+                                readonly claimed: number;
+                                readonly published: number;
+                                readonly permanentFailures: number;
+                                readonly oldestRetryAgeMs?: number;
+                                /** Format: date-time */
+                                readonly lastSuccessAt?: string;
+                            };
+                            /** Format: date-time */
+                            readonly lastSuccessfulMaterializationAt?: string;
+                            /** @constant */
+                            readonly lastTickError?: "runtime tick deferred";
+                        };
                     };
                 };
             };
@@ -295,6 +319,30 @@ export interface operations {
                         /** @enum {string} */
                         readonly status: "live" | "ready";
                         readonly instance_id: string;
+                        readonly runtime?: {
+                            readonly inbox: {
+                                readonly pending: number;
+                                readonly processing: number;
+                                readonly archived: number;
+                                readonly quarantined: number;
+                                readonly retrying: number;
+                                readonly oldestPendingAgeMs?: number;
+                                readonly oldestRetryAgeMs?: number;
+                            };
+                            readonly outbox: {
+                                readonly pending: number;
+                                readonly claimed: number;
+                                readonly published: number;
+                                readonly permanentFailures: number;
+                                readonly oldestRetryAgeMs?: number;
+                                /** Format: date-time */
+                                readonly lastSuccessAt?: string;
+                            };
+                            /** Format: date-time */
+                            readonly lastSuccessfulMaterializationAt?: string;
+                            /** @constant */
+                            readonly lastTickError?: "runtime tick deferred";
+                        };
                     };
                 };
             };

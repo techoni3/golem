@@ -205,6 +205,10 @@ class PersistenceOwner implements PersistenceWriteCapability {
 		return this.#runtimeRepository.fail(id, claimToken, error);
 	}
 
+	runtimeOutboxHealth() {
+		return this.#runtimeRepository.health();
+	}
+
 	status(): PersistenceStatus {
 		return Object.freeze({
 			owner: {

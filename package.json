@@ -69,7 +69,7 @@
     "test:contracts": "npm run contracts:check && node --test test/contracts/contracts-v1.test.mjs",
     "test:domain": "npm run build -w @golem/domain && node --test test/domain/kernel-replay.test.mjs",
 		"test:persistence": "npm run build -w @golem/persistence -w @golem/control-plane && node --test --test-concurrency=1 test/persistence/sqlite-owner-migration-recovery.test.mjs",
-		"test:runtime-engine": "npm run build -w @golem/testkit -w @golem/runtime -w @golem/persistence -w @golem/control-plane && node --test --test-concurrency=1 test/runtime/materializer-crash-matrix.test.mjs",
+		"test:runtime-engine": "npm run build -w @golem/testkit -w @golem/runtime -w @golem/persistence -w @golem/control-plane && node --test --test-concurrency=1 test/runtime/materializer-crash-matrix.test.mjs test/runtime/dashboard-down-inbox-replay.test.mjs",
     "test:launcher-resolution": "npm run build -w @golem/launcher && node --test test/launcher-resolution.test.mjs",
     "test:testkit": "npm run build -w @golem/testkit && node --test --test-concurrency=1 test/journeys/testkit.test.mjs",
 		"test:journey": "npm run build -w @golem/compiler -w @golem/mcp-adapter -w @golem/domain -w @golem/launcher -w @golem/testkit -w @golem/persistence -w @golem/runtime -w @golem/control-plane -w @golem/api-client && node test/journeys/run.mjs",

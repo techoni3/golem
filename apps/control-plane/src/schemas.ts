@@ -41,6 +41,34 @@ export const HealthResponseSchema = z
 		schema_version: z.literal("golem.control-plane-health/v1"),
 		status: z.enum(["live", "ready"]),
 		instance_id: z.string().regex(/^cpi_[0-9a-f-]{36}$/iu),
+		runtime: z
+			.object({
+				inbox: z
+					.object({
+						pending: z.number().int().nonnegative(),
+						processing: z.number().int().nonnegative(),
+						archived: z.number().int().nonnegative(),
+						quarantined: z.number().int().nonnegative(),
+						retrying: z.number().int().nonnegative(),
+						oldestPendingAgeMs: z.number().nonnegative().optional(),
+						oldestRetryAgeMs: z.number().nonnegative().optional(),
+					})
+					.strict(),
+				outbox: z
+					.object({
+						pending: z.number().int().nonnegative(),
+						claimed: z.number().int().nonnegative(),
+						published: z.number().int().nonnegative(),
+						permanentFailures: z.number().int().nonnegative(),
+						oldestRetryAgeMs: z.number().nonnegative().optional(),
+						lastSuccessAt: z.string().datetime().optional(),
+					})
+					.strict(),
+				lastSuccessfulMaterializationAt: z.string().datetime().optional(),
+				lastTickError: z.literal("runtime tick deferred").optional(),
+			})
+			.strict()
+			.optional(),
 	})
 	.strict();
 

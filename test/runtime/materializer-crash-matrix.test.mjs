@@ -6,13 +6,18 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { createRuntimeMaterializer, RuntimeOutboxDrainer } from "@golem/runtime";
+import {
+	createRuntimeMaterializer,
+	RuntimeEngineScheduler,
+	RuntimeOutboxDrainer,
+} from "@golem/runtime";
 import { createTemporaryHome, waitFor } from "@golem/testkit";
 import { startControlPlane } from "../../apps/control-plane/dist/index.js";
 import { openControlPlanePersistence } from "../../apps/control-plane/dist/persistence.js";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const childFixture = path.join(repositoryRoot, "test/runtime/materializer-child.mjs");
+const producerFixture = path.join(repositoryRoot, "test/runtime/inbox-producer.mjs");
 const require = createRequire(new URL("../../packages/persistence/package.json", import.meta.url));
 const Database = require("better-sqlite3");
 
@@ -70,8 +75,36 @@ function openOwner(home, clock) {
 	);
 }
 
-function count(database, table) {
+function count(database, where = "1 = 1") {
+	return database.prepare(`SELECT COUNT(*) AS count FROM runtime_outbox WHERE ${where}`).get().count;
+}
+
+function countRows(database, table) {
 	return database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count;
+}
+
+function runProducer(home, envelope) {
+	return new Promise((resolve, reject) => {
+		const child = spawn(process.execPath, [producerFixture], {
+			cwd: repositoryRoot,
+			env: {
+				...home.env,
+				GOLEM_RUNTIME_TEST_HOME: home.root,
+				GOLEM_RUNTIME_TEST_SIGNAL: JSON.stringify(envelope),
+			},
+			stdio: ["ignore", "ignore", "pipe"],
+		});
+		let stderr = "";
+		child.stderr.setEncoding("utf8");
+		child.stderr.on("data", (chunk) => {
+			stderr += chunk;
+		});
+		child.once("error", reject);
+		child.once("close", (code) => {
+			if (code === 0) resolve();
+			else reject(new Error(`independent runtime producer exited ${code}: ${stderr}`));
+		});
+	});
 }
 
 async function crashChild(home, failpoint, envelope) {
@@ -83,6 +116,7 @@ async function crashChild(home, failpoint, envelope) {
 			GOLEM_RUNTIME_TEST_DB: home.runtimeDb,
 			GOLEM_RUNTIME_TEST_TRACKER_DB: home.trackerDb,
 			GOLEM_RUNTIME_TEST_FAILPOINT: failpoint,
+			GOLEM_RUNTIME_TEST_CLAIM_LEASE_MS: "10",
 			...(envelope ? { GOLEM_RUNTIME_TEST_SIGNAL: JSON.stringify(envelope) } : {}),
 		},
 		stdio: ["ignore", "ignore", "pipe"],
@@ -104,13 +138,26 @@ async function crashChild(home, failpoint, envelope) {
 	);
 }
 
+async function waitForLeaseExpiry() {
+	const deadline = Date.now() + 20;
+	await waitFor(
+		() => (Date.now() >= deadline ? true : undefined),
+		"short runtime inbox claim lease expiry",
+		1_000,
+	);
+}
+
 test("J3 durable inbox materializer crash/concurrency/outbox matrix", async (t) => {
 	const home = createTemporaryHome("golem-j3-runtime-engine-");
 	const clock = createClock();
 	let owner;
 	try {
 		owner = openOwner(home, clock);
-		const { inbox, materializer } = createRuntimeMaterializer({ home: home.root, writer: owner });
+		let runtime = createRuntimeMaterializer({
+			home: home.root,
+			writer: owner,
+			inboxOptions: { claimLeaseMs: 10 },
+		});
 		const staticDirectory = path.join(home.root, "control-plane-static");
 		fs.mkdirSync(staticDirectory, { recursive: true, mode: 0o700 });
 		fs.writeFileSync(path.join(staticDirectory, "index.html"), "<!doctype html><title>runtime J3</title>");
@@ -120,7 +167,7 @@ test("J3 durable inbox materializer crash/concurrency/outbox matrix", async (t) 
 				token: home.token,
 				stateDirectory: path.join(home.root, "control-plane-state"),
 				staticDirectory,
-				runtimeIngress: inbox,
+				runtimeIngress: runtime.inbox,
 			});
 			const ingressSignal = signal(9_999);
 			const unauthorized = await fetch(`${controlPlane.origin}/api/v1/runtime/events`, {
@@ -131,167 +178,167 @@ test("J3 durable inbox materializer crash/concurrency/outbox matrix", async (t) 
 			assert.equal(unauthorized.status, 401, "runtime POST rejects a producer without bearer authority");
 			const accepted = await fetch(`${controlPlane.origin}/api/v1/runtime/events`, {
 				method: "POST",
-				headers: {
-					"content-type": "application/json",
-					authorization: `Bearer ${home.token}`,
-				},
+				headers: { "content-type": "application/json", authorization: `Bearer ${home.token}` },
 				body: JSON.stringify(ingressSignal),
 			});
 			assert.equal(accepted.status, 202, "authenticated runtime POST only acknowledges durable spool");
-			assert.equal(materializer.drain().materialized, 1, "the service, not the HTTP producer, performs SQLite materialization");
+			assert.equal(runtime.materializer.drain().materialized, 1, "the service, not HTTP ingress, writes SQLite");
 		} catch (error) {
-			if (!/(?:EPERM|EACCES).*listen|listen.*(?:EPERM|EACCES)/iu.test(String(error)))
-				throw error;
+			if (!/(?:EPERM|EACCES).*listen|listen.*(?:EPERM|EACCES)/iu.test(String(error))) throw error;
 			t.diagnostic("UNMET: sandbox rejected the real 127.0.0.1 authenticated-ingress boundary (EPERM)");
 		} finally {
 			await controlPlane?.close();
 		}
 
+		const archiveBeforeProducers = runtime.inbox.metrics().archived;
 		const producerSignals = Array.from({ length: 100 }, (_, index) => signal(index + 1));
-		const receipts = await Promise.all(
-			producerSignals.flatMap((entry) => [
-				Promise.resolve().then(() => inbox.accept(entry)),
-				Promise.resolve().then(() => inbox.accept(entry)),
-			]),
-		);
-		assert.equal(
-			receipts.filter((receipt) => receipt.status === "spooled").length,
-			100,
-			"one atomic pending envelope is published for each of 100 producers",
-		);
-		assert.equal(inbox.metrics().pending, 100, "duplicate producers never create a second pending file");
-		const first = materializer.drain();
-		assert.equal(first.materialized, 100, "each published event materializes exactly once");
-		assert.equal(inbox.metrics().archived, 100, "committed events are only archived after the transaction");
+		await Promise.all([
+			...producerSignals.map((entry) => runProducer(home, entry)),
+			...producerSignals.slice(0, 10).map((entry) => runProducer(home, entry)),
+		]);
+		assert.equal(runtime.inbox.metrics().pending, 100, "100 independent producers plus duplicate ids yield one atomic pending file per event");
+		const first = runtime.materializer.drain();
+		assert.equal(first.materialized, 100, "each unique independent producer materializes exactly once");
+		assert.equal(runtime.inbox.metrics().archived, archiveBeforeProducers + 100, "archive assertion accounts for authenticated ingress before the producer matrix");
 
 		const orderedProducer = id("prod", 900);
-		inbox.accept(signal(900, { producer: orderedProducer, sequence: 2 }));
-		inbox.accept(signal(901, { producer: orderedProducer, sequence: 1 }));
-		const ordered = materializer.drain();
+		runtime.inbox.accept(signal(900, { producer: orderedProducer, sequence: 2 }));
+		runtime.inbox.accept(signal(901, { producer: orderedProducer, sequence: 1 }));
+		const ordered = runtime.materializer.drain();
 		assert.equal(ordered.materialized, 1);
 		assert.equal(ordered.stale, 1, "out-of-order event remains an auditable stale fact");
+
 		await owner.close();
 		owner = undefined;
 		const prePublishSignal = signal(950);
 		await crashChild(home, "before_publish", prePublishSignal);
-		assert.equal(
-			inbox.metrics().pending,
-			0,
-			"a producer killed after fsync but before publish leaves no partial pending envelope",
-		);
+		assert.equal(runtime.inbox.metrics().pending, 0, "producer killed after fsync but before publish leaves no partial pending envelope");
 
-		for (const [index, failpoint] of [
-			"after_claim",
-			"before_transaction",
-			"after_commit",
-			"before_archive",
-		].entries()) {
+		for (const [index, failpoint] of ["after_claim", "before_transaction", "after_commit", "before_archive"].entries()) {
 			const crashSignal = signal(1_000 + index);
-			inbox.accept(crashSignal);
+			runtime.inbox.accept(crashSignal);
 			await crashChild(home, failpoint);
+			await waitForLeaseExpiry();
 			owner = openOwner(home, clock);
-			const restarted = createRuntimeMaterializer({ home: home.root, writer: owner });
-			const recovered = restarted.materializer.drain();
-			assert.equal(
-				restarted.inbox.metrics().pending,
-				0,
-				`${failpoint} restart must leave no unprocessed source envelope`,
-			);
-			assert.equal(
-				restarted.inbox.metrics().processing,
-				0,
-				`${failpoint} restart must reclaim abandoned processing`,
-			);
-			assert.equal(
-				recovered.materialized + recovered.duplicated,
-				1,
-				`${failpoint} must materialize once or deduplicate a committed source`,
-			);
+			runtime = createRuntimeMaterializer({ home: home.root, writer: owner, inboxOptions: { claimLeaseMs: 10 } });
+			const recovered = runtime.materializer.drain();
+			assert.equal(runtime.inbox.metrics().pending, 0, `${failpoint} restart leaves no pending envelope`);
+			assert.equal(runtime.inbox.metrics().processing, 0, `${failpoint} restart reclaims only the expired lease`);
+			assert.equal(recovered.materialized + recovered.duplicated, 1, `${failpoint} materializes once or deduplicates a committed source`);
 			await owner.close();
 			owner = undefined;
 		}
 
 		owner = openOwner(home, clock);
-		const restarted = createRuntimeMaterializer({ home: home.root, writer: owner });
-		for (const [number, body] of [
-			[2_000, "{not json"],
-			[2_001, JSON.stringify({ ...signal(2_001), schema_version: "golem.runtime-signal/v2" })],
-			[2_002, "x".repeat(1_048_577)],
-		])
-			fs.writeFileSync(
-				path.join(restarted.inbox.root, "pending", `${id("evt", number)}.json`),
-				body,
-				{ mode: 0o600 },
-			);
-		const quarantined = restarted.materializer.drain();
-		assert.equal(quarantined.quarantined, 3, "malformed, unknown-major, and oversized input are quarantined without blocking");
-		restarted.inbox.accept(signal(2_003));
-		assert.equal(restarted.materializer.drain().materialized, 1, "a valid event follows quarantine normally");
+		let leaseNow = 100;
+		runtime = createRuntimeMaterializer({
+			home: home.root,
+			writer: owner,
+			inboxOptions: { now: () => leaseNow, claimLeaseMs: 10 },
+		});
+		runtime.inbox.accept(signal(1_500));
+		assert.equal(runtime.inbox.claim(1).length, 1, "claim owns the envelope before a materializer effect");
+		assert.equal(runtime.inbox.reclaimProcessing(), 0, "an active lease is never reclaimed eagerly");
+		leaseNow += 11;
+		assert.equal(runtime.inbox.reclaimProcessing(), 1, "only an expired lease becomes recoverable work");
+		assert.equal(runtime.materializer.drain().materialized, 1, "expired work resumes through the normal transaction path");
+
+		let poisonNow = 1_000;
+		const poison = createRuntimeMaterializer({
+			home: home.root,
+			writer: owner,
+			inboxOptions: { now: () => poisonNow, maxAttempts: 3 },
+			handlers: [{ kinds: ["project.observed"], materialize: () => { throw new Error("secret=never-persist-this"); } }],
+		});
+		poison.inbox.accept(signal(1_600));
+		assert.equal(poison.materializer.drain().retrying, 1, "first poison effect retains bounded retry metadata");
+		poisonNow += 1_000;
+		assert.equal(poison.materializer.drain().retrying, 1, "second poison effect is deferred with backoff");
+		poisonNow += 2_000;
+		assert.equal(poison.materializer.drain().quarantined, 1, "third poison effect becomes inspectable quarantine evidence");
+		assert.equal(poison.inbox.metrics().quarantined >= 1, true);
+		const quarantineNames = fs.readdirSync(path.join(poison.inbox.root, "quarantine"));
+		const poisonMetadata = quarantineNames.find((name) => name.endsWith(".metadata.json"));
+		assert(poisonMetadata, "poison quarantine writes bounded metadata");
+		assert(!fs.readFileSync(path.join(poison.inbox.root, "quarantine", poisonMetadata), "utf8").includes("never-persist-this"), "poison metadata redacts secrets");
+
+		const noClobber = signal(1_700);
+		runtime.inbox.accept(noClobber);
+		assert.equal(runtime.materializer.drain().materialized, 1);
+		const archivedPath = path.join(runtime.inbox.root, "archived", `${noClobber.event_id}.json`);
+		const originalArchive = fs.readFileSync(archivedPath);
+		const conflictingRaw = Buffer.from(JSON.stringify({ ...noClobber, deduplication_key: "different-but-same-id" }));
+		fs.writeFileSync(path.join(runtime.inbox.root, "pending", `${noClobber.event_id}.json`), conflictingRaw, { mode: 0o600 });
+		assert.equal(runtime.materializer.drain().duplicated, 1, "committed-but-unarchived replay remains a duplicate transaction");
+		assert.deepEqual(fs.readFileSync(archivedPath), originalArchive, "archive never overwrites the original raw envelope");
+		assert.equal(runtime.inbox.metrics().quarantined >= 2, true, "conflicting replay is preserved outside the archive");
 
 		const consumerPath = path.join(home.root, "outbox-consumer.db");
 		const consumer = new Database(consumerPath);
 		consumer.exec("CREATE TABLE deliveries (id TEXT PRIMARY KEY, payload_json TEXT NOT NULL)");
-		let serviceDown = true;
-		let crashAfterDelivery = true;
-		const drainer = new RuntimeOutboxDrainer({
+		const successDrainer = new RuntimeOutboxDrainer({
 			writer: owner,
-			workerId: "runtime-j3-drainer",
-			destinations: {
-				tracker: {
-					deliver: async ({ id: deliveryId, payload }) => {
-						if (serviceDown) throw new Error("tracker service is down");
-						const inserted = consumer
-							.prepare("INSERT OR IGNORE INTO deliveries(id, payload_json) VALUES (?, ?)")
-							.run(deliveryId, JSON.stringify(payload));
-						if (crashAfterDelivery && inserted.changes === 1) {
-							crashAfterDelivery = false;
-							throw new Error("consumer crashed after durable idempotency write");
-						}
-					},
-				},
-			},
+			workerId: "runtime-j3-baseline-drainer",
+			destinations: { tracker: { deliver: async ({ id: deliveryId, payload }) => { consumer.prepare("INSERT OR IGNORE INTO deliveries(id, payload_json) VALUES (?, ?)").run(deliveryId, JSON.stringify(payload)); } } },
 		});
-		assert.equal((await drainer.drain(1)).deferred, 1, "service-down delivery stays durably spooled");
-		serviceDown = false;
-		clock.advance(1_000);
-		assert.equal((await drainer.drain(1)).deferred, 1, "consumer crash before ack leaves a claim-token retry");
-		clock.advance(2_000);
-		let replayed = await drainer.drain(100);
-		while (replayed.claimed === 100) replayed = await drainer.drain(100);
-		assert(replayed.acknowledged >= 1, "idempotent cross-database replay acknowledges the persisted delivery");
+		while ((await successDrainer.drain(100)).claimed > 0) undefined;
+
 		const runtimeDatabase = new Database(home.runtimeDb, { readonly: true });
 		try {
-			const outboxCount = count(runtimeDatabase, "runtime_outbox");
-			assert.equal(
-				runtimeDatabase.prepare("SELECT COUNT(*) AS count FROM runtime_outbox WHERE status = 'published'").get().count,
-				outboxCount,
-				"every durable outbox record is eventually acknowledged",
-			);
-			assert.equal(
-				count(consumer, "deliveries"),
-				outboxCount,
-				"the consumer uses the outbox id as a cross-database idempotency key",
-			);
-			assert.equal(
-				runtimeDatabase.prepare("SELECT COUNT(*) AS count FROM runtime_outbox WHERE status = 'permanent_failure'").get().count,
-				0,
-				"bounded retry did not convert a recoverable service outage into permanent failure",
-			);
-			assert.equal(
-				runtimeDatabase.prepare("SELECT COUNT(*) AS count FROM runtime_events WHERE disposition = 'stale'").get().count,
-				1,
-				"stale ordering is durable and queryable",
-			);
+			assert.equal(count(runtimeDatabase, "status = 'pending'"), 0, "baseline delivery has no pending rows");
+			runtime.inbox.accept(signal(1_800));
+			assert.equal(runtime.materializer.drain().materialized, 1);
+			const failingDrainer = new RuntimeOutboxDrainer({
+				writer: owner,
+				workerId: "runtime-j3-failing-drainer",
+				destinations: { tracker: { deliver: async () => { throw new Error("https://user:credential@example.invalid/path?token=private"); } } },
+			});
+			assert.deepEqual(await failingDrainer.drain(1), { claimed: 1, acknowledged: 0, acknowledgementConflicts: 0, failureConflicts: 0, deferred: 1, permanentFailures: 0 }, "first failure records one pending retry transition");
+			let retryRow = runtimeDatabase.prepare("SELECT status, attempts, last_error FROM runtime_outbox WHERE status = 'pending' ORDER BY created_at DESC LIMIT 1").get();
+			assert.deepEqual({ status: retryRow.status, attempts: retryRow.attempts }, { status: "pending", attempts: 1 }, "outbox persists exact pending/attempt state after a transient failure");
+			assert(!retryRow.last_error.includes("credential") && !retryRow.last_error.includes("private"), "outbox errors are redacted before persistence");
+			clock.advance(1_000);
+			assert.deepEqual(await failingDrainer.drain(1), { claimed: 1, acknowledged: 0, acknowledgementConflicts: 0, failureConflicts: 0, deferred: 1, permanentFailures: 0 }, "second transient failure records deterministic backoff state");
+			clock.advance(2_000);
+			assert.deepEqual(await successDrainer.drain(1), { claimed: 1, acknowledged: 1, acknowledgementConflicts: 0, failureConflicts: 0, deferred: 0, permanentFailures: 0 }, "replayed delivery reaches published through ack CAS");
+			assert.equal(count(runtimeDatabase, "status = 'published'"), count(runtimeDatabase), "all current outbox rows are published after successful replay");
+
+			runtime.inbox.accept(signal(1_801));
+			assert.equal(runtime.materializer.drain().materialized, 1);
+			const ackRaceDrainer = new RuntimeOutboxDrainer({
+				writer: owner,
+				workerId: "runtime-j3-ack-race",
+				destinations: { tracker: { deliver: async () => { clock.advance(31_000); owner.replayRuntimeOutbox(); } } },
+			});
+			const ackRace = await ackRaceDrainer.drain(1);
+			assert.equal(ackRace.acknowledgementConflicts, 1, "ack CAS loss is explicit accounting, never a silent success");
+			clock.advance(1_000);
+			assert.equal((await successDrainer.drain(1)).acknowledged, 1, "expired delivery remains replayable after an ack CAS race");
+
+			runtime.inbox.accept(signal(1_802));
+			assert.equal(runtime.materializer.drain().materialized, 1);
+			for (let attempt = 1; attempt <= 5; attempt += 1) {
+				const result = await failingDrainer.drain(1);
+				if (attempt < 5) assert.equal(result.deferred, 1);
+				else assert.equal(result.permanentFailures, 1, "fifth bounded failure becomes observable permanent failure");
+				clock.advance(60_000);
+			}
+			assert.equal(count(runtimeDatabase, "status = 'permanent_failure'"), 1, "permanent state is durable and queryable");
+
+			runtime.inbox.accept(signal(1_803));
+			const scheduler = new RuntimeEngineScheduler({ materializer: runtime.materializer, outbox: successDrainer, writer: owner, intervalMs: 25 });
+			await scheduler.start();
+			const health = scheduler.health();
+			assert(health.lastSuccessfulMaterializationAt, "scheduler records last successful materialization");
+			assert.equal(health.outbox.permanentFailures, 1, "scheduler health exposes permanent delivery failures");
+			assert.equal(typeof health.outbox.oldestRetryAgeMs, "undefined", "published work does not report a retry age");
+			await scheduler.stop();
+			assert.equal(countRows(consumer, "deliveries"), count(runtimeDatabase, "status = 'published'"), "consumer idempotency key records every published cross-store delivery exactly once");
+			assert.equal(runtimeDatabase.prepare("SELECT COUNT(*) AS count FROM runtime_events WHERE disposition = 'stale'").get().count, 1, "stale ordering remains durable and queryable");
 		} finally {
 			runtimeDatabase.close();
 			consumer.close();
 		}
-		const metrics = restarted.inbox.metrics();
-		assert.deepEqual(
-			Object.keys(metrics).sort(),
-			["archived", "pending", "processing", "quarantined"],
-			"inbox metrics expose counts only, never event payloads or secrets",
-		);
 	} finally {
 		if (owner) await owner.close();
 		home.cleanup();

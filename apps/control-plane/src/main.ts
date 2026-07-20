@@ -1,6 +1,10 @@
 import path from "node:path";
 
-import { createRuntimeMaterializer } from "@golem/runtime";
+import {
+	createRuntimeMaterializer,
+	RuntimeEngineScheduler,
+	RuntimeOutboxDrainer,
+} from "@golem/runtime";
 import { openControlPlanePersistence } from "./persistence.js";
 import {
 	controlPlanePortFromEnvironment,
@@ -30,21 +34,36 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 		trackerPath: path.join(golemHome, "tracker.db"),
 	});
 	const runtime = createRuntimeMaterializer({ home: golemHome, writer: owner });
+	const outbox = new RuntimeOutboxDrainer({
+		writer: owner,
+		workerId: `control-plane-${process.pid}`,
+		destinations: {
+			// Wave 5 intentionally has no tracker/management transport adapter.
+			// The bounded durable scheduler records retry/permanent state rather
+			// than pretending this cross-store delivery is already atomic.
+			tracker: {
+				deliver: async () => {
+					throw new Error("runtime tracker destination is not configured");
+				},
+			},
+			management: {
+				deliver: async () => {
+					throw new Error("runtime management destination is not configured");
+				},
+			},
+		},
+	});
+	const scheduler = new RuntimeEngineScheduler({
+		materializer: runtime.materializer,
+		outbox,
+		writer: owner,
+	});
 	try {
-		runtime.materializer.drain();
+		await scheduler.start();
 	} catch (error) {
 		await owner.close();
 		throw error;
 	}
-	const materializerTimer = setInterval(() => {
-		try {
-			runtime.materializer.drain();
-		} catch {
-			// The source remains under processing/pending for a restart or next tick;
-			// do not log envelopes, payloads, or bearer material here.
-			process.stderr.write("runtime materializer tick deferred\n");
-		}
-	}, 250);
 	let service: Awaited<ReturnType<typeof startControlPlane>>;
 	try {
 		service = await startControlPlane({
@@ -55,10 +74,11 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 				process.env.GOLEM_CONTROL_PLANE_PORT,
 			),
 			runtimeIngress: runtime.inbox,
+			runtimeHealth: scheduler,
 			...(replayWindowSize ? { replayWindowSize } : {}),
 		});
 	} catch (error) {
-		clearInterval(materializerTimer);
+		await scheduler.stop();
 		await owner.close();
 		throw error;
 	}
@@ -69,7 +89,7 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 	const stop = async () => {
 		if (stopping) return;
 		stopping = true;
-		clearInterval(materializerTimer);
+		await scheduler.stop();
 		await service.close();
 		await owner.close();
 	};

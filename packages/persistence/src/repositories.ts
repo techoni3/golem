@@ -8,6 +8,7 @@ import type {
 	RuntimeMaterializationInput,
 	RuntimeMaterializationResult,
 	RuntimeOutboxFailure,
+	RuntimeOutboxHealth,
 	RuntimeTransactionInput,
 	RuntimeTransactionResult,
 } from "./types.js";
@@ -30,6 +31,17 @@ function boundedLimit(limit: number): number {
 
 function retryDelayMs(attempts: number): number {
 	return Math.min(60_000, 1_000 * 2 ** Math.max(0, attempts - 1));
+}
+
+function redactOutboxError(value: string): string {
+	return value
+		.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/giu, "$1[REDACTED]@")
+		.replace(
+			/\b(token|authorization|password|secret)=([^\s&]+)/giu,
+			"$1=[REDACTED]",
+		)
+		.replace(/\/[A-Za-z0-9._~\-/]{12,}/gu, "[PATH]")
+		.slice(0, 512);
 }
 
 function terminal(state: string): boolean {
@@ -309,7 +321,7 @@ export class RuntimeRepository {
 			.run(
 				permanent ? "permanent_failure" : "pending",
 				nextAttemptAt ?? null,
-				error.slice(0, 1_024),
+				redactOutboxError(error),
 				permanent ? at : null,
 				id,
 				claimToken,
@@ -407,5 +419,37 @@ export class RuntimeRepository {
 		return this.#database.transaction(() =>
 			this.#failClaim(id, claimToken, error),
 		)();
+	}
+
+	health(): RuntimeOutboxHealth {
+		const now = this.#clock.now();
+		const row = this.#database
+			.prepare<{
+				readonly pending: number;
+				readonly claimed: number;
+				readonly published: number;
+				readonly permanent_failures: number;
+				readonly oldest_retry_at: string | null;
+				readonly last_success_at: string | null;
+			}>(
+				"SELECT SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending, SUM(CASE WHEN status = 'claimed' THEN 1 ELSE 0 END) AS claimed, SUM(CASE WHEN status = 'published' THEN 1 ELSE 0 END) AS published, SUM(CASE WHEN status = 'permanent_failure' THEN 1 ELSE 0 END) AS permanent_failures, MIN(CASE WHEN status = 'pending' AND next_attempt_at IS NOT NULL THEN next_attempt_at END) AS oldest_retry_at, MAX(published_at) AS last_success_at FROM runtime_outbox",
+			)
+			.get();
+		const oldestRetryAt = row?.oldest_retry_at ?? undefined;
+		return Object.freeze({
+			pending: Number(row?.pending ?? 0),
+			claimed: Number(row?.claimed ?? 0),
+			published: Number(row?.published ?? 0),
+			permanentFailures: Number(row?.permanent_failures ?? 0),
+			...(oldestRetryAt
+				? {
+						oldestRetryAgeMs: Math.max(
+							0,
+							Date.parse(now) - Date.parse(oldestRetryAt),
+						),
+					}
+				: {}),
+			...(row?.last_success_at ? { lastSuccessAt: row.last_success_at } : {}),
+		});
 	}
 }

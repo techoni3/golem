@@ -224,6 +224,16 @@ export interface RuntimeOutboxFailure {
 	readonly permanentFailureAt?: string;
 }
 
+/** Bounded, redacted operational facts; never includes an outbox payload. */
+export interface RuntimeOutboxHealth {
+	readonly pending: number;
+	readonly claimed: number;
+	readonly published: number;
+	readonly permanentFailures: number;
+	readonly oldestRetryAgeMs?: number;
+	readonly lastSuccessAt?: string;
+}
+
 export class PersistenceMigrationError extends Error {
 	readonly code:
 		| "checksum_drift"
@@ -287,6 +297,7 @@ export interface PersistenceWriteCapability {
 		claimToken: string,
 		error: string,
 	): RuntimeOutboxFailure | undefined;
+	runtimeOutboxHealth(): RuntimeOutboxHealth;
 	status(): PersistenceStatus;
 	close(): Promise<void>;
 }

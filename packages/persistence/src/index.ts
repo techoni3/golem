@@ -33,6 +33,8 @@ export type {
 	RuntimeFailpoint,
 	RuntimeMaterializationInput,
 	RuntimeMaterializationResult,
+	RuntimeOutboxFailure,
+	RuntimeOutboxHealth,
 	RuntimeTransactionInput,
 	RuntimeTransactionResult,
 	SchemaVersionedProvenance,
