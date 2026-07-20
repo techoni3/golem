@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-07-20 @ bfcc466 (GOL-34 correction pending commit) — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-20 @ e69f622 — maintained via golem:docs-maintenance.
 
 ## Structure
 
