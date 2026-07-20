@@ -1,4 +1,13 @@
+import type { RuntimeSignalV1 } from "@golem/contracts";
 import type { ControlPlaneStream } from "./schemas.js";
+
+/** Producers may submit a durable envelope but never obtain persistence. */
+export interface RuntimeIngressPort {
+	ingest(signal: RuntimeSignalV1): {
+		readonly eventId: string;
+		readonly status: "spooled" | "already_pending";
+	};
+}
 
 export interface ControlPlaneProjectionPort {
 	read(stream: ControlPlaneStream): Record<string, unknown>;

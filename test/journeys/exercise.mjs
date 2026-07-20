@@ -34,6 +34,7 @@ const serviceFixture = path.join(repositoryRoot, "test/journeys/real-service.mjs
 const fakeHarness = path.join(repositoryRoot, "test/fixtures/native-binaries/fake-harness.mjs");
 const legacyBaseline = path.join(repositoryRoot, "test/parity/legacy-baseline.mjs");
 const persistenceJourney = path.join(repositoryRoot, "test/persistence/sqlite-owner-migration-recovery.test.mjs");
+const runtimeEngineJourney = path.join(repositoryRoot, "test/runtime/materializer-crash-matrix.test.mjs");
 const chromeExecutable = process.env.GOLEM_CHROME_EXECUTABLE || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
 class JourneyDiagnosticError extends Error {
@@ -345,6 +346,25 @@ export async function exerciseSqliteOwnerMigrationRecovery() {
 	}
 }
 
+export async function exerciseMaterializerCrashMatrix() {
+	const home = createTemporaryHome("golem-j3-runtime-engine-runner-");
+	const group = spawnGrouped(process.execPath, ["--test", "--test-concurrency=1", runtimeEngineJourney], {
+		cwd: repositoryRoot,
+		env: home.env,
+	});
+	try {
+		await waitFor(() => exited(group) ? true : undefined, "runtime materializer crash matrix exit", 30_000);
+		if (group.child.exitCode !== 0)
+			throw processFailure(`runtime materializer crash matrix exited ${group.child.exitCode}`, group);
+		if (group.stdout().includes("UNMET: sandbox rejected the real 127.0.0.1"))
+			throw new Error("listen EPERM: sandbox rejected the real 127.0.0.1 authenticated-ingress boundary");
+		return "100 concurrent producers, duplicate dedupe, child crash/restart recovery, quarantine, stale watermarks, and idempotent cross-store outbox replay verified";
+	} finally {
+		if (!exited(group)) await stopProcessGroup(group);
+		cleanupHome(home);
+	}
+}
+
 export async function exerciseBrowser() {
 	const home = createTemporaryHome("golem-j8-browser-");
 	const artifactRoot = path.join(home.root, "browser-artifacts");
@@ -394,6 +414,8 @@ export const exercises = Object.freeze({
 	"testkit-semantic-parity": exerciseSemanticParity,
 	"testkit-cleanup-drill": exerciseCleanupDrill,
 	"sqlite-owner-migration-recovery": exerciseSqliteOwnerMigrationRecovery,
+	"materializer-crash-matrix": exerciseMaterializerCrashMatrix,
+	"dashboard-down-inbox-replay": exerciseMaterializerCrashMatrix,
 	"testkit-browser": exerciseBrowser,
 	"legacy-parity-baseline": exerciseLegacyParityBaseline,
 	"render-mcp-closure": exerciseRenderMcpClosure,

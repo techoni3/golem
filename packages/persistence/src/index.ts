@@ -31,6 +31,8 @@ export type {
 	ProjectLocationRelation,
 	RuntimeCanonicalMutation,
 	RuntimeFailpoint,
+	RuntimeMaterializationInput,
+	RuntimeMaterializationResult,
 	RuntimeTransactionInput,
 	RuntimeTransactionResult,
 	SchemaVersionedProvenance,

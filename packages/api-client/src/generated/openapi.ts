@@ -4,6 +4,22 @@
  */
 
 export interface paths {
+    readonly "/api/v1/runtime/events": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["controlPlaneRuntimeIngest"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/health/live": {
         readonly parameters: {
             readonly query?: never;
@@ -112,6 +128,126 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    readonly controlPlaneRuntimeIngest: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": {
+                    /** @constant */
+                    readonly schema_version: "golem.runtime-signal/v1";
+                    readonly event_id: string;
+                    /** @enum {string} */
+                    readonly event_kind: "project.observed" | "session.started" | "session.resumed" | "session.activity" | "session.idle" | "session.waiting" | "session.metadata_patched" | "session.ended" | "endpoint.claimed" | "endpoint.heartbeat" | "endpoint.readiness_changed" | "endpoint.released" | "capabilities.reported";
+                    readonly producer: string;
+                    readonly producer_instance_id: string;
+                    /** @enum {string} */
+                    readonly harness: "claude" | "codex" | "opencode" | "pi";
+                    readonly producer_sequence?: number;
+                    readonly correlation_id: string;
+                    readonly causation_id?: string;
+                    readonly deduplication_key: string;
+                    readonly owner_fence?: string;
+                    readonly clocks: {
+                        /** Format: date-time */
+                        readonly source_observed_at: string;
+                        /** Format: date-time */
+                        readonly source_event_at?: string;
+                        /** Format: date-time */
+                        readonly received_at: string;
+                        /** Format: date-time */
+                        readonly materialized_at?: string;
+                    };
+                    readonly provenance: {
+                        /** @enum {string} */
+                        readonly source: "adapter" | "api" | "launcher" | "legacy_import" | "migration";
+                        readonly evidence_id?: string;
+                        /** @enum {string} */
+                        readonly confidence: "verified" | "observed" | "inferred" | "legacy";
+                    };
+                    readonly clear_fields: readonly string[];
+                    readonly payload: {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        readonly responses: {
+            /** @description durably spooled */
+            readonly 202: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.runtime-ingest-receipt/v1";
+                        readonly event_id: string;
+                        /** @enum {string} */
+                        readonly status: "spooled" | "already_pending";
+                    };
+                };
+            };
+            /** @description invalid runtime signal */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description runtime ingress unavailable */
+            readonly 503: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
     readonly controlPlaneLive: {
         readonly parameters: {
             readonly query?: never;

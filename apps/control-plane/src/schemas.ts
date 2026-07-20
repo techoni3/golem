@@ -1,4 +1,4 @@
-import { ApiErrorV1Schema } from "@golem/contracts";
+import { ApiErrorV1Schema, RuntimeSignalKinds } from "@golem/contracts";
 import { z } from "zod";
 
 export const ApiErrorResponseSchema = ApiErrorV1Schema;
@@ -83,6 +83,59 @@ export const BrowserEchoResponseSchema = z
 	.object({
 		schema_version: z.literal("golem.control-plane-browser-echo/v1"),
 		value: z.string().min(1).max(256),
+	})
+	.strict();
+
+export const RuntimeIngestReceiptSchema = z
+	.object({
+		schema_version: z.literal("golem.runtime-ingest-receipt/v1"),
+		event_id: z.string().min(1).max(256),
+		status: z.enum(["spooled", "already_pending"]),
+	})
+	.strict();
+
+/**
+ * OpenAPI-safe transport shape for the generated client. The authoritative
+ * discriminated payload validation stays in RuntimeSignalV1Schema at the
+ * route/materializer boundary; Zod's recursive JSON-value schema is not an
+ * OpenAPI component and must not leave dangling $defs in generated clients.
+ */
+export const RuntimeIngestRequestSchema = z
+	.object({
+		schema_version: z.literal("golem.runtime-signal/v1"),
+		event_id: z.string().min(1).max(256),
+		event_kind: z.enum(RuntimeSignalKinds),
+		producer: z.string().min(1).max(128),
+		producer_instance_id: z.string().min(1).max(256),
+		harness: z.enum(["claude", "codex", "opencode", "pi"]),
+		producer_sequence: z.number().int().nonnegative().optional(),
+		correlation_id: z.string().min(1).max(128),
+		causation_id: z.string().min(1).max(256).optional(),
+		deduplication_key: z.string().min(1).max(256),
+		owner_fence: z.string().min(1).max(256).optional(),
+		clocks: z
+			.object({
+				source_observed_at: z.iso.datetime({ offset: true }),
+				source_event_at: z.iso.datetime({ offset: true }).optional(),
+				received_at: z.iso.datetime({ offset: true }),
+				materialized_at: z.iso.datetime({ offset: true }).optional(),
+			})
+			.strict(),
+		provenance: z
+			.object({
+				source: z.enum([
+					"adapter",
+					"api",
+					"launcher",
+					"legacy_import",
+					"migration",
+				]),
+				evidence_id: z.string().min(1).max(256).optional(),
+				confidence: z.enum(["verified", "observed", "inferred", "legacy"]),
+			})
+			.strict(),
+		clear_fields: z.array(z.string().min(1).max(160)).max(64),
+		payload: z.record(z.string(), z.unknown()),
 	})
 	.strict();
 

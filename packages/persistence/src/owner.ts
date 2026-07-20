@@ -31,6 +31,8 @@ import {
 	type PersistencePaths,
 	type PersistenceStatus,
 	type PersistenceWriteCapability,
+	type RuntimeMaterializationInput,
+	type RuntimeMaterializationResult,
 	type RuntimeTransactionInput,
 	type RuntimeTransactionResult,
 } from "./types.js";
@@ -175,6 +177,12 @@ class PersistenceOwner implements PersistenceWriteCapability {
 		input: RuntimeTransactionInput,
 	): RuntimeTransactionResult {
 		return this.#runtimeRepository.record(input);
+	}
+
+	materializeRuntimeEvent(
+		input: RuntimeMaterializationInput,
+	): RuntimeMaterializationResult {
+		return this.#runtimeRepository.materialize(input);
 	}
 
 	claimRuntimeOutbox(

@@ -5,6 +5,8 @@ import { sha256 } from "./schema.js";
 import type {
 	ClaimedOutboxRecord,
 	PersistenceClock,
+	RuntimeMaterializationInput,
+	RuntimeMaterializationResult,
 	RuntimeOutboxFailure,
 	RuntimeTransactionInput,
 	RuntimeTransactionResult,
@@ -153,6 +155,133 @@ export class RuntimeRepository {
 		if (result.disposition === "accepted" && input.failpoint === "after_commit")
 			throw new RuntimeFailpointError("after_commit");
 		return result;
+	}
+
+	/**
+	 * The materializer's atomic boundary: source event, producer watermark,
+	 * canonical mutation, explanation, and optional cross-store outbox record.
+	 * A lower-or-equal producer sequence is retained as an auditable stale event
+	 * but cannot mutate canonical rows or enqueue delivery.
+	 */
+	materialize(
+		input: RuntimeMaterializationInput,
+	): RuntimeMaterializationResult {
+		return this.#database.transaction(() => {
+			const receivedAt = this.#clock.now();
+			const materializedAt = this.#clock.now();
+			const currentWatermark = this.#database
+				.prepare<{ readonly watermark: string }>(
+					"SELECT watermark FROM producer_watermarks WHERE producer_id = ?",
+				)
+				.get(input.producer.id);
+			const priorSequence = currentWatermark
+				? Number(/^([0-9]+):/u.exec(currentWatermark.watermark)?.[1])
+				: undefined;
+			const stale =
+				input.producer.sequence !== undefined &&
+				priorSequence !== undefined &&
+				Number.isSafeInteger(priorSequence) &&
+				input.producer.sequence <= priorSequence;
+			const disposition = stale ? "stale" : input.disposition;
+			const inserted = this.#database
+				.prepare(
+					"INSERT OR IGNORE INTO runtime_events(event_id, deduplication_key, event_kind, payload_json, provenance_json, source_observed_at, received_at, materialized_at, activity_at, metadata_version, disposition) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'golem.runtime-signal/v1', ?)",
+				)
+				.run(
+					input.eventId,
+					input.deduplicationKey,
+					input.eventKind,
+					json(input.payload),
+					json(input.provenance),
+					input.occurredAt,
+					receivedAt,
+					materializedAt,
+					disposition === "accepted" ? input.occurredAt : null,
+					disposition,
+				);
+			if (inserted.changes === 0)
+				return Object.freeze({ disposition: "duplicate" as const });
+
+			this.#database
+				.prepare(
+					"INSERT OR REPLACE INTO diagnostics(id, code, details_json, created_at) VALUES (?, ?, ?, ?)",
+				)
+				.run(
+					sha256(`${input.eventId}:${input.explanation.code}`).slice(0, 32),
+					input.explanation.code,
+					json({
+						event_id: input.eventId,
+						disposition,
+						...input.explanation.details,
+					}),
+					materializedAt,
+				);
+
+			if (disposition !== "accepted")
+				return Object.freeze({
+					disposition: disposition as "stale" | "illegal",
+					materializedAt,
+				});
+
+			if (input.producer.sequence !== undefined) {
+				const watermark = `${input.producer.sequence}:${input.eventId}`;
+				this.#database
+					.prepare(
+						"INSERT INTO producer_watermarks(producer_id, watermark, source_observed_at, received_at, materialized_at, provenance_json) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(producer_id) DO UPDATE SET watermark = excluded.watermark, source_observed_at = excluded.source_observed_at, received_at = excluded.received_at, materialized_at = excluded.materialized_at, provenance_json = excluded.provenance_json",
+					)
+					.run(
+						input.producer.id,
+						watermark,
+						input.occurredAt,
+						receivedAt,
+						materializedAt,
+						json(input.provenance),
+					);
+			}
+			if (input.mutation?.project) {
+				const project = input.mutation.project;
+				this.#database
+					.prepare(
+						"INSERT OR IGNORE INTO projects(project_id, name, created_at) VALUES (?, ?, ?)",
+					)
+					.run(project.projectId, project.name, materializedAt);
+				this.#database
+					.prepare(
+						"INSERT OR IGNORE INTO project_locations(location_id, project_id, canonical_path, observed_path, relation, source_observed_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+					)
+					.run(
+						project.locationId,
+						project.projectId,
+						project.canonicalPath,
+						project.observedPath ?? null,
+						project.relation,
+						input.occurredAt,
+						materializedAt,
+					);
+			}
+			let outboxId: string | undefined;
+			if (input.outbox) {
+				outboxId = sha256(`${input.eventId}:${input.outbox.destination}`).slice(
+					0,
+					32,
+				);
+				this.#database
+					.prepare(
+						"INSERT INTO runtime_outbox(id, destination, payload_json, status, created_at, attempts) VALUES (?, ?, ?, 'pending', ?, 0)",
+					)
+					.run(
+						outboxId,
+						input.outbox.destination,
+						json(input.outbox.payload),
+						materializedAt,
+					);
+			}
+			return Object.freeze({
+				disposition: "accepted" as const,
+				...(outboxId ? { outboxId } : {}),
+				materializedAt,
+			});
+		})();
 	}
 
 	#failClaim(

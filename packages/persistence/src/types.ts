@@ -176,6 +176,39 @@ export interface RuntimeTransactionResult {
 	readonly outboxId?: string;
 }
 
+/**
+ * The runtime materializer owns this transaction boundary. Producers never
+ * receive this capability or a database handle.
+ */
+export interface RuntimeMaterializationInput {
+	readonly eventId: string;
+	readonly deduplicationKey: string;
+	readonly eventKind: string;
+	readonly payload: Readonly<Record<string, unknown>>;
+	readonly provenance: Readonly<Record<string, unknown>>;
+	readonly occurredAt: string;
+	readonly producer: {
+		readonly id: string;
+		readonly sequence?: number;
+	};
+	readonly disposition: "accepted" | "illegal";
+	readonly explanation: {
+		readonly code: string;
+		readonly details: Readonly<Record<string, unknown>>;
+	};
+	readonly mutation?: RuntimeCanonicalMutation;
+	readonly outbox?: {
+		readonly destination: "tracker" | "management";
+		readonly payload: Readonly<Record<string, unknown>>;
+	};
+}
+
+export interface RuntimeMaterializationResult {
+	readonly disposition: "accepted" | "duplicate" | "stale" | "illegal";
+	readonly outboxId?: string;
+	readonly materializedAt?: string;
+}
+
 export interface ClaimedOutboxRecord {
 	readonly id: string;
 	readonly destination: "tracker" | "management";
@@ -239,6 +272,9 @@ export interface PersistenceWriteCapability {
 	recordRuntimeTransaction(
 		input: RuntimeTransactionInput,
 	): RuntimeTransactionResult;
+	materializeRuntimeEvent(
+		input: RuntimeMaterializationInput,
+	): RuntimeMaterializationResult;
 	claimRuntimeOutbox(
 		workerId: string,
 		limit: number,
