@@ -426,7 +426,7 @@ export async function runLauncherResolutionReplay() {
 	assert.equal(passthroughFailure.ok, false, "passthrough redaction");
 	if (!passthroughFailure.ok)
 		assert.equal(passthroughFailure.error.code, "launcher.argv.secret_or_unsafe");
-	assertFailure({ harness: "claude", isTTY: false, now }, "launcher.capability.unqualified", "unqualified builtin");
+	assertFailure({ harness: "claude", isTTY: false, now }, "launcher.launch.unavailable", "unavailable Anthropic launch contribution");
 
 	const duplicateNames = parseJsoncConfig(
 		configText({

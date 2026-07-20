@@ -30,6 +30,15 @@ export const builtInPresets: readonly LaunchPreset[] = deepFreeze([
 		env_key_refs: ["OPENAI_API_KEY"],
 	},
 	{
+		name: "direct",
+		harness: "codex",
+		backend: "openai",
+		model_selector: "gpt-*",
+		delivery_mode: "pull",
+		native_args: [],
+		env_key_refs: ["OPENAI_API_KEY"],
+	},
+	{
 		name: "default",
 		harness: "opencode",
 		backend: "openai",
@@ -48,6 +57,15 @@ export const builtInPresets: readonly LaunchPreset[] = deepFreeze([
 		env_key_refs: [],
 	},
 	{
+		name: "cloud",
+		harness: "opencode",
+		backend: "ollama_cloud",
+		model_selector: "*",
+		delivery_mode: "prompt_bridge",
+		native_args: [],
+		env_key_refs: [],
+	},
+	{
 		name: "default",
 		harness: "claude",
 		backend: "anthropic",
@@ -55,6 +73,24 @@ export const builtInPresets: readonly LaunchPreset[] = deepFreeze([
 		delivery_mode: "native_channel",
 		native_args: [],
 		env_key_refs: ["ANTHROPIC_API_KEY"],
+	},
+	{
+		name: "local",
+		harness: "claude",
+		backend: "ollama_local",
+		model_selector: "*",
+		delivery_mode: "native_channel",
+		native_args: [],
+		env_key_refs: [],
+	},
+	{
+		name: "cloud",
+		harness: "claude",
+		backend: "ollama_cloud",
+		model_selector: "*",
+		delivery_mode: "native_channel",
+		native_args: [],
+		env_key_refs: [],
 	},
 ]);
 

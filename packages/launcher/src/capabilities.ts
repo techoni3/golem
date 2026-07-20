@@ -1,9 +1,13 @@
 import type { DeliveryMode } from "@golem/contracts";
+import { redactDeliveryFacts, redactLaunchFacts } from "./public-safety.js";
 import type {
 	CapabilitySnapshot,
 	CapabilityTruth,
+	DeliveryFacts,
+	DeliveryTruthReadiness,
 	DoctorFact,
 	LauncherList,
+	LaunchFacts,
 	LaunchSelection,
 	Qualification,
 } from "./types.js";
@@ -18,10 +22,13 @@ const evidenceSources = new Set([
 ]);
 const evidencePolicies = new Set(["observed", "version_qualified"]);
 
-function deliveryFlow(mode: DeliveryMode): CapabilitySnapshot["deliveryFlow"] {
+function qualifiedDeliveryFlow(
+	mode: DeliveryMode,
+	qualification: Qualification,
+): CapabilitySnapshot["deliveryFlow"] {
 	if (mode === "pull") return "pull";
 	if (mode === "next_turn") return "next_turn";
-	return "push";
+	return qualification === "supported" ? "push" : "pull";
 }
 
 function capability(
@@ -33,7 +40,29 @@ function capability(
 	deliveryMode: DeliveryMode,
 	qualification: Qualification,
 	controlFeatures: readonly string[] = [],
+	options: Readonly<{
+		readonly launch?: LaunchFacts;
+		readonly deliveryReason?: string;
+		readonly deliveryRemediation?: string;
+	}> = {},
 ): CapabilitySnapshot {
+	const launch =
+		options.launch ??
+		({
+			status: "launchable",
+			reason:
+				"The selected harness, backend, and model have a launch contribution.",
+			remediation:
+				"Keep the installed harness and adapter contribution available.",
+		} satisfies LaunchFacts);
+	const readiness =
+		deliveryMode === "next_turn"
+			? "next_turn"
+			: deliveryMode === "pull"
+				? "pull_only"
+				: qualification === "supported"
+					? "ready"
+					: "unsupported";
 	return deepFreeze({
 		capability: {
 			capability_id: id,
@@ -44,23 +73,25 @@ function capability(
 			],
 			qualification,
 			delivery_mode: deliveryMode,
-			readiness:
-				deliveryMode === "next_turn"
-					? "next_turn"
-					: deliveryMode === "pull"
-						? "pull_only"
-						: "ready",
+			readiness,
 			evidence_version: "launcher-builtin-v1",
 		},
 		mode,
 		backend,
 		modelPattern,
-		deliveryFlow: deliveryFlow(deliveryMode),
+		deliveryFlow: qualifiedDeliveryFlow(deliveryMode, qualification),
 		controlFeatures: [...controlFeatures],
 		executable: harness,
 		evidenceSource: "built_in",
 		evidencePolicy: "version_qualified",
 		evidenceObservedAt: "2026-07-20T00:00:00.000Z",
+		launchContribution: launch,
+		...(options.deliveryReason
+			? { deliveryReason: options.deliveryReason }
+			: {}),
+		...(options.deliveryRemediation
+			? { deliveryRemediation: options.deliveryRemediation }
+			: {}),
 	});
 }
 
@@ -77,6 +108,22 @@ export const builtInCapabilities: readonly CapabilitySnapshot[] = deepFreeze([
 		["resume", "interrupt"],
 	),
 	capability(
+		"codex.openai.direct",
+		"codex",
+		"direct",
+		"openai",
+		"gpt-*",
+		"pull",
+		"supported",
+		["pull"],
+		{
+			deliveryReason:
+				"Direct Codex retains Golem pull tools but is not Golem-owned push control.",
+			deliveryRemediation:
+				"Use managed golem codex for App Server push/control.",
+		},
+	),
+	capability(
 		"opencode.openai.direct",
 		"opencode",
 		"direct",
@@ -84,6 +131,13 @@ export const builtInCapabilities: readonly CapabilitySnapshot[] = deepFreeze([
 		"gpt-*",
 		"prompt_bridge",
 		"experimental",
+		[],
+		{
+			deliveryReason:
+				"OpenCode prompt delivery is not yet independently consumption-qualified.",
+			deliveryRemediation:
+				"Run the OpenCode adapter qualification journey before advertising push readiness.",
+		},
 	),
 	capability(
 		"opencode.ollama-local.direct",
@@ -93,6 +147,29 @@ export const builtInCapabilities: readonly CapabilitySnapshot[] = deepFreeze([
 		"*",
 		"prompt_bridge",
 		"experimental",
+		[],
+		{
+			deliveryReason:
+				"Local Ollama launchability is independent from unproven prompt consumption.",
+			deliveryRemediation:
+				"Run the OpenCode local-provider qualification journey before advertising push readiness.",
+		},
+	),
+	capability(
+		"opencode.ollama-cloud.direct",
+		"opencode",
+		"direct",
+		"ollama_cloud",
+		"*",
+		"prompt_bridge",
+		"experimental",
+		[],
+		{
+			deliveryReason:
+				"Ollama Cloud launchability does not prove addressed prompt consumption.",
+			deliveryRemediation:
+				"Run the OpenCode cloud-provider qualification journey before advertising push readiness.",
+		},
 	),
 	capability(
 		"claude.anthropic.direct",
@@ -102,6 +179,52 @@ export const builtInCapabilities: readonly CapabilitySnapshot[] = deepFreeze([
 		"claude-*",
 		"native_channel",
 		"unknown",
+		[],
+		{
+			launch: {
+				status: "unavailable",
+				reason:
+					"Claude Anthropic launch contribution is not installed or qualified in this environment.",
+				remediation:
+					"Verify the Claude plugin/channel launch contribution before spawning.",
+			},
+			deliveryReason:
+				"Claude channel consumption has not been proven for this process/provider combination.",
+			deliveryRemediation:
+				"Run the Claude channel-consumption qualification journey; until then use pull-only operation.",
+		},
+	),
+	capability(
+		"claude.ollama-local.direct",
+		"claude",
+		"direct",
+		"ollama_local",
+		"*",
+		"native_channel",
+		"unknown",
+		[],
+		{
+			deliveryReason:
+				"Claude/Ollama local can launch, but addressed channel consumption is unproven.",
+			deliveryRemediation:
+				"Run the real Claude/Ollama consumption journey; until then use pull-only operation.",
+		},
+	),
+	capability(
+		"claude.ollama-cloud.direct",
+		"claude",
+		"direct",
+		"ollama_cloud",
+		"*",
+		"native_channel",
+		"unknown",
+		[],
+		{
+			deliveryReason:
+				"Claude/Ollama cloud can launch, but addressed channel consumption is unproven.",
+			deliveryRemediation:
+				"Run the real Claude/Ollama consumption journey; until then use pull-only operation.",
+		},
 	),
 ]);
 
@@ -117,23 +240,15 @@ export function capabilityTruth(
 	now: string,
 	maxAge = defaultQualificationMaxAgeMs,
 ): CapabilityTruth {
+	const explicitLaunch = snapshot.launchContribution;
+	let status: CapabilityTruth["status"] = snapshot.capability.qualification;
 	if (
 		!evidenceSources.has(snapshot.evidenceSource) ||
 		!evidencePolicies.has(snapshot.evidencePolicy)
 	)
-		return deepFreeze({
-			status: "invalid_evidence",
-			launchable: false,
-			remediation:
-				"Record evidence with a recognized source and qualification policy before authorizing launch.",
-		});
-	if (snapshot.evidenceSource === "registration")
-		return deepFreeze({
-			status: "registration_only",
-			launchable: false,
-			remediation:
-				"Record a real consumption journey before authorizing launch or delivery.",
-		});
+		status = "invalid_evidence";
+	else if (snapshot.evidenceSource === "registration")
+		status = "registration_only";
 	const observedAt = validTime(snapshot.evidenceObservedAt);
 	const current = validTime(now);
 	if (
@@ -142,42 +257,94 @@ export function capabilityTruth(
 		!Number.isFinite(maxAge) ||
 		maxAge < 0
 	)
-		return deepFreeze({
-			status: "invalid_evidence",
-			launchable: false,
-			remediation:
-				"Record valid evidence time and policy before authorizing launch.",
-		});
+		status = "invalid_evidence";
 	if (
 		snapshot.evidencePolicy === "version_qualified" &&
 		!snapshot.capability.evidence_version
 	)
-		return deepFreeze({
-			status: "invalid_evidence",
-			launchable: false,
-			remediation:
-				"Version-qualified evidence must include its compatibility version.",
-		});
-	if (snapshot.evidencePolicy === "observed") {
+		status = "invalid_evidence";
+	if (
+		snapshot.evidencePolicy === "observed" &&
+		observedAt !== undefined &&
+		current !== undefined
+	) {
 		const age = current - observedAt;
-		if (age < 0 || age > maxAge)
-			return deepFreeze({
-				status: "stale",
-				launchable: false,
-				remediation: "Refresh qualification with a real adapter journey.",
-			});
+		if (age < 0 || age > maxAge) status = "stale";
 	}
-	const qualification = snapshot.capability.qualification;
-	const launchable =
-		qualification === "supported" || qualification === "experimental";
-	return deepFreeze({
-		status: qualification,
-		launchable,
+	const evidenceBlockedLaunch =
+		status === "invalid_evidence"
+			? {
+					status: "unavailable" as const,
+					reason: "Launch evidence is invalid or incomplete.",
+					remediation:
+						snapshot.remediation ??
+						"Record valid launch evidence before authorizing spawn.",
+				}
+			: status === "registration_only"
+				? {
+						status: "unavailable" as const,
+						reason: "Registration is not a launch authorization.",
+						remediation:
+							snapshot.remediation ??
+							"Record a real launch contribution before authorizing spawn.",
+					}
+				: undefined;
+	const rawLaunch: LaunchFacts = evidenceBlockedLaunch ??
+		explicitLaunch ?? {
+			status:
+				status === snapshot.capability.qualification &&
+				(snapshot.capability.qualification === "supported" ||
+					snapshot.capability.qualification === "experimental")
+					? "launchable"
+					: "unavailable",
+			reason:
+				status === snapshot.capability.qualification &&
+				(snapshot.capability.qualification === "supported" ||
+					snapshot.capability.qualification === "experimental")
+					? "The selected capability has a qualified launch contribution."
+					: "The selected capability has no independently qualified launch contribution.",
+			remediation:
+				snapshot.remediation ??
+				(status === snapshot.capability.qualification &&
+				(snapshot.capability.qualification === "supported" ||
+					snapshot.capability.qualification === "experimental")
+					? "Keep the installed harness and capability contribution available."
+					: "Choose a launchable capability or run its adapter preflight."),
+		};
+	const launch = deepFreeze(redactLaunchFacts(rawLaunch));
+	const launchable = launch.status === "launchable";
+	const deliveryReadiness: DeliveryTruthReadiness =
+		status === "registration_only" ||
+		snapshot.capability.qualification === "unsupported"
+			? "ineligible"
+			: status === "invalid_evidence" || status === "stale"
+				? "not_ready"
+				: snapshot.capability.qualification === "supported" &&
+						snapshot.capability.readiness === "ready"
+					? "ready"
+					: "not_ready";
+	const rawDelivery: DeliveryFacts = {
+		mode: snapshot.capability.delivery_mode,
+		qualification: snapshot.capability.qualification,
+		readiness: deliveryReadiness,
+		reason:
+			snapshot.deliveryReason ??
+			(deliveryReadiness === "ready"
+				? "Delivery is qualified by the selected capability evidence."
+				: "Delivery is not independently qualified by the selected capability evidence."),
 		remediation:
-			snapshot.remediation ??
-			(launchable
-				? "Keep evidence policy and compatibility version current."
-				: "Choose a qualified capability or run its real qualification journey."),
+			snapshot.deliveryRemediation ??
+			(deliveryReadiness === "ready"
+				? "Keep the capability evidence current."
+				: "Run the real adapter consumption journey before advertising push readiness."),
+	};
+	const delivery = deepFreeze(redactDeliveryFacts(rawDelivery));
+	return deepFreeze({
+		status,
+		launchable,
+		remediation: launch.remediation,
+		launch,
+		delivery,
 	});
 }
 
@@ -238,6 +405,8 @@ export function doctorFacts(
 						? { observedAt: snapshot.evidenceObservedAt }
 						: {}),
 					remediation: truth.remediation,
+					launch: truth.launch,
+					delivery: truth.delivery,
 				};
 			})
 			.sort((left, right) => left.id.localeCompare(right.id)),
@@ -272,6 +441,8 @@ export function listCapabilities(
 					...(snapshot.evidenceObservedAt
 						? { observedAt: snapshot.evidenceObservedAt }
 						: {}),
+					launch: truth.launch,
+					delivery: truth.delivery,
 				};
 			})
 			.sort((left, right) => left.id.localeCompare(right.id)),

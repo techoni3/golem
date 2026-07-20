@@ -1,3 +1,4 @@
+import { redactDiagnostic, sanitizePublicValue } from "./public-safety.js";
 import type {
 	LaunchExplanation,
 	LauncherIssue,
@@ -21,7 +22,14 @@ export function issue(
 	remediation: readonly string[],
 	severity: LauncherIssue["severity"] = "error",
 ): LauncherIssue {
-	return deepFreeze({ code, severity, message, remediation: [...remediation] });
+	return deepFreeze({
+		code,
+		severity,
+		message: redactDiagnostic(message, "message"),
+		remediation: remediation.map((entry) =>
+			redactDiagnostic(entry, "remediation"),
+		),
+	});
 }
 
 export function failure(
@@ -37,7 +45,7 @@ export function failure(
 }
 
 export function stableLaunchPlanJson(value: unknown): string {
-	return JSON.stringify(sortJson(value));
+	return JSON.stringify(sortJson(sanitizePublicValue(value)));
 }
 
 function sortJson(value: unknown): unknown {

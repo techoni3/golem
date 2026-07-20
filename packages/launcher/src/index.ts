@@ -45,7 +45,12 @@ export {
 	launchRecord,
 	stableLaunchRecordJson,
 } from "./records/launch-record.js";
-export { doctorFacts, listLauncher, resolveLaunch } from "./resolve.js";
+export {
+	doctorFacts,
+	launchPlanBridge,
+	listLauncher,
+	resolveLaunch,
+} from "./resolve.js";
 export type {
 	Backend,
 	CapabilityFact,
@@ -67,6 +72,7 @@ export type {
 	LaunchFailure,
 	LaunchMode,
 	LaunchPlan,
+	LaunchPlanBridge,
 	LaunchPreset,
 	LaunchResolution,
 	LaunchSelection,
