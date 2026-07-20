@@ -1,0 +1,135 @@
+{
+  "$id": "urn:golem:contracts:launcher-config:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "launch": {
+      "additionalProperties": false,
+      "properties": {
+        "harness_defaults": {
+          "additionalProperties": false,
+          "properties": {
+            "claude": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "codex": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "opencode": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "pi": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "presets": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "backend": {
+                "enum": [
+                  "openai",
+                  "anthropic",
+                  "ollama_local",
+                  "ollama_cloud",
+                  "native"
+                ],
+                "type": "string"
+              },
+              "binary_override": {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              "delivery_mode": {
+                "enum": [
+                  "pull",
+                  "native_channel",
+                  "prompt_bridge",
+                  "managed_app_server",
+                  "next_turn"
+                ],
+                "type": "string"
+              },
+              "env_key_refs": {
+                "items": {
+                  "pattern": "^[A-Z][A-Z0-9_]*$",
+                  "type": "string"
+                },
+                "maxItems": 16,
+                "type": "array"
+              },
+              "harness": {
+                "enum": [
+                  "claude",
+                  "codex",
+                  "opencode",
+                  "pi"
+                ],
+                "type": "string"
+              },
+              "model_selector": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "name": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[a-z0-9][a-z0-9-]*$",
+                "type": "string"
+              },
+              "native_args": {
+                "items": {
+                  "maxLength": 1024,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 32,
+                "type": "array"
+              }
+            },
+            "required": [
+              "name",
+              "harness",
+              "backend",
+              "model_selector",
+              "delivery_mode",
+              "native_args",
+              "env_key_refs"
+            ],
+            "type": "object"
+          },
+          "maxItems": 256,
+          "type": "array"
+        }
+      },
+      "required": [
+        "harness_defaults",
+        "presets"
+      ],
+      "type": "object"
+    },
+    "schema_version": {
+      "const": "golem.launcher-config/v1",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "launch"
+  ],
+  "type": "object",
+  "x-golem-contract-semver": "1.0.0",
+  "x-golem-wire-version": "golem.launcher-config/v1"
+}

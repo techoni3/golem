@@ -1,0 +1,48 @@
+{
+  "$id": "urn:golem:contracts:project-location-reference:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "canonical_path": {
+      "maxLength": 4096,
+      "minLength": 1,
+      "type": "string"
+    },
+    "location_id": {
+      "pattern": "^loc_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "type": "string"
+    },
+    "observed_path": {
+      "maxLength": 4096,
+      "minLength": 1,
+      "type": "string"
+    },
+    "project_id": {
+      "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "type": "string"
+    },
+    "relation": {
+      "enum": [
+        "main",
+        "worktree",
+        "registered",
+        "legacy"
+      ],
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "golem.project-location-reference/v1",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "project_id",
+    "location_id",
+    "relation",
+    "canonical_path"
+  ],
+  "type": "object",
+  "x-golem-contract-semver": "1.0.0",
+  "x-golem-wire-version": "golem.project-location-reference/v1"
+}

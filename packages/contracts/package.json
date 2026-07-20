@@ -9,6 +9,11 @@
 			"import": "./dist/index.js"
 		}
 	},
+	"scripts": {
+		"build": "tsc -b",
+		"check": "node ./generate.mjs --check",
+		"generate": "node ./generate.mjs"
+	},
 	"dependencies": {
 		"zod": "4.4.3"
 	}

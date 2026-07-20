@@ -1,0 +1,43 @@
+{
+  "$id": "urn:golem:contracts:provenance:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "confidence": {
+      "enum": [
+        "verified",
+        "observed",
+        "inferred",
+        "legacy"
+      ],
+      "type": "string"
+    },
+    "evidence_id": {
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "golem.provenance/v1",
+      "type": "string"
+    },
+    "source": {
+      "enum": [
+        "adapter",
+        "api",
+        "launcher",
+        "legacy_import",
+        "migration"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "source",
+    "confidence"
+  ],
+  "type": "object",
+  "x-golem-contract-semver": "1.0.0",
+  "x-golem-wire-version": "golem.provenance/v1"
+}

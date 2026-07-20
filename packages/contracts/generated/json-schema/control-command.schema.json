@@ -1,0 +1,790 @@
+{
+  "$defs": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "propertyNames": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$id": "urn:golem:contracts:control-command:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "additionalProperties": false,
+      "properties": {
+        "actor_id": {
+          "pattern": "^act_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "display_name": {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "human",
+            "service",
+            "adapter",
+            "session"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "actor_id",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "audit": {
+      "additionalProperties": false,
+      "properties": {
+        "redacted_metadata": {
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "propertyNames": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "request_source": {
+          "enum": [
+            "cli",
+            "dashboard",
+            "mcp",
+            "service"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_source",
+        "redacted_metadata"
+      ],
+      "type": "object"
+    },
+    "causation_id": {
+      "pattern": "^cmd_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "type": "string"
+    },
+    "command_id": {
+      "pattern": "^cmd_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "type": "string"
+    },
+    "command_kind": {
+      "enum": [
+        "project.register",
+        "project.archive",
+        "project.location_decide",
+        "preset.upsert",
+        "preset.delete",
+        "launch.prepare",
+        "session.control",
+        "dispatch.enqueue",
+        "dispatch.cancel",
+        "dispatch.retry",
+        "migration.plan",
+        "migration.apply",
+        "migration.rollback",
+        "compatibility.cutover"
+      ],
+      "type": "string"
+    },
+    "correlation_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "type": "string"
+    },
+    "endpoint_fence": {
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "expected_revision": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "idempotency_key": {
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "payload": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "project.register",
+              "type": "string"
+            },
+            "location": {
+              "additionalProperties": false,
+              "properties": {
+                "canonical_path": {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "location_id": {
+                  "pattern": "^loc_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                "observed_path": {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "project_id": {
+                  "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                "relation": {
+                  "enum": [
+                    "main",
+                    "worktree",
+                    "registered",
+                    "legacy"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "project_id",
+                "location_id",
+                "relation",
+                "canonical_path"
+              ],
+              "type": "object"
+            },
+            "project": {
+              "additionalProperties": false,
+              "properties": {
+                "project_id": {
+                  "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "project_id"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind",
+            "project",
+            "location"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "project.archive",
+              "type": "string"
+            },
+            "project": {
+              "additionalProperties": false,
+              "properties": {
+                "project_id": {
+                  "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "project_id"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind",
+            "project"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "decision": {
+              "enum": [
+                "attach",
+                "reject"
+              ],
+              "type": "string"
+            },
+            "kind": {
+              "const": "project.location_decide",
+              "type": "string"
+            },
+            "location": {
+              "additionalProperties": false,
+              "properties": {
+                "canonical_path": {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "location_id": {
+                  "pattern": "^loc_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                "observed_path": {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "project_id": {
+                  "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                "relation": {
+                  "enum": [
+                    "main",
+                    "worktree",
+                    "registered",
+                    "legacy"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "project_id",
+                "location_id",
+                "relation",
+                "canonical_path"
+              ],
+              "type": "object"
+            },
+            "project": {
+              "additionalProperties": false,
+              "properties": {
+                "project_id": {
+                  "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "project_id"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind",
+            "project",
+            "location",
+            "decision"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "preset.upsert",
+              "type": "string"
+            },
+            "preset": {
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "propertyNames": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "preset_name": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "preset_name",
+            "preset"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "preset.delete",
+              "type": "string"
+            },
+            "preset_name": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "preset_name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "harness": {
+              "enum": [
+                "claude",
+                "codex",
+                "opencode",
+                "pi"
+              ],
+              "type": "string"
+            },
+            "kind": {
+              "const": "launch.prepare",
+              "type": "string"
+            },
+            "preset_name": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "harness"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "enum": [
+                "interrupt",
+                "halt",
+                "resume",
+                "rename",
+                "set_role"
+              ],
+              "type": "string"
+            },
+            "generation": {
+              "additionalProperties": false,
+              "properties": {
+                "generation_id": {
+                  "pattern": "^gen_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                "project_id": {
+                  "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                "session_id": {
+                  "pattern": "^ses_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "project_id",
+                "session_id",
+                "generation_id"
+              ],
+              "type": "object"
+            },
+            "input": {
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "propertyNames": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "kind": {
+              "const": "session.control",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "generation",
+            "action"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "endpoint": {
+              "additionalProperties": false,
+              "properties": {
+                "endpoint_id": {
+                  "pattern": "^ep_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                "generation": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "generation_id": {
+                      "pattern": "^gen_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                      "type": "string"
+                    },
+                    "project_id": {
+                      "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                      "type": "string"
+                    },
+                    "session_id": {
+                      "pattern": "^ses_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "project_id",
+                    "session_id",
+                    "generation_id"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "endpoint_id",
+                "generation"
+              ],
+              "type": "object"
+            },
+            "kind": {
+              "const": "dispatch.enqueue",
+              "type": "string"
+            },
+            "payload": {
+              "$ref": "#/$defs/__schema0"
+            }
+          },
+          "required": [
+            "kind",
+            "endpoint",
+            "payload"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "delivery_id": {
+              "pattern": "^del_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "kind": {
+              "const": "dispatch.cancel",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "delivery_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "delivery_id": {
+              "pattern": "^del_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "kind": {
+              "const": "dispatch.retry",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "delivery_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "migration.plan",
+              "type": "string"
+            },
+            "scope": {
+              "enum": [
+                "runtime",
+                "tracker",
+                "config"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "scope"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "migration.apply",
+              "type": "string"
+            },
+            "plan_id": {
+              "pattern": "^mig_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "plan_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "migration.rollback",
+              "type": "string"
+            },
+            "plan_id": {
+              "pattern": "^mig_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "plan_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "compatibility.cutover",
+              "type": "string"
+            },
+            "stage": {
+              "enum": [
+                "C1",
+                "C2",
+                "C3",
+                "C4",
+                "C5"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "stage"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "schema_version": {
+      "const": "golem.control-command/v1",
+      "type": "string"
+    },
+    "target": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "project",
+              "type": "string"
+            },
+            "project": {
+              "additionalProperties": false,
+              "properties": {
+                "project_id": {
+                  "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "project_id"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind",
+            "project"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "session",
+              "type": "string"
+            },
+            "session": {
+              "additionalProperties": false,
+              "properties": {
+                "project_id": {
+                  "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                "session_id": {
+                  "pattern": "^ses_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "project_id",
+                "session_id"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "kind",
+            "session"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "generation": {
+              "additionalProperties": false,
+              "properties": {
+                "generation_id": {
+                  "pattern": "^gen_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                "project_id": {
+                  "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                "session_id": {
+                  "pattern": "^ses_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "project_id",
+                "session_id",
+                "generation_id"
+              ],
+              "type": "object"
+            },
+            "kind": {
+              "const": "generation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "generation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "endpoint": {
+              "additionalProperties": false,
+              "properties": {
+                "endpoint_id": {
+                  "pattern": "^ep_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                "generation": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "generation_id": {
+                      "pattern": "^gen_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                      "type": "string"
+                    },
+                    "project_id": {
+                      "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                      "type": "string"
+                    },
+                    "session_id": {
+                      "pattern": "^ses_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "project_id",
+                    "session_id",
+                    "generation_id"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "endpoint_id",
+                "generation"
+              ],
+              "type": "object"
+            },
+            "kind": {
+              "const": "endpoint",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "endpoint"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "command_id",
+    "command_kind",
+    "actor",
+    "correlation_id",
+    "idempotency_key",
+    "audit",
+    "payload"
+  ],
+  "type": "object",
+  "x-golem-contract-semver": "1.0.0",
+  "x-golem-wire-version": "golem.control-command/v1"
+}
