@@ -19,8 +19,8 @@
 
 ### `scripts/check-boundaries.mjs`
 
-- Reads manifests and source imports, then rejects domain→persistence/Fastify/React/adapter, adapter→database, client→repository, canonical→compat, and tool/application edges.
-- Its committed rejection-fixture matrix is the regression proof; do not replace it with mock-heavy unit fan-out.
+- Reads manifest dependency metadata and source imports (including root JS/MJS tool entrypoints), then rejects domain→persistence/Fastify/React/adapter, adapter→database, client→repository, canonical→compat, and tool/application edges.
+- Its nine committed direction fixtures include a metadata-only dependency and a root-level codegen MJS case; they are the regression proof, not mock-heavy unit fan-out.
 
 ## Data flow
 

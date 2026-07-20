@@ -71,17 +71,22 @@ async function sourceFiles(directory) {
 	const files = [];
 	const sourceRoot = join(directory, "src");
 	if (!(await exists(join(directory, "package.json")))) return files;
+	const isSourceFile = (name) => /\.(?:[cm]?[jt]s|[jt]sx)$/u.test(name);
 	async function visit(current) {
 		for (const entry of await readdir(current, { withFileTypes: true })) {
 			const target = join(current, entry.name);
 			if (entry.isDirectory()) await visit(target);
-			else if (/\.(?:ts|tsx|mts|cts)$/.test(entry.name)) files.push(target);
+			else if (isSourceFile(entry.name)) files.push(target);
 		}
 	}
 	try {
 		await visit(sourceRoot);
-	} catch {
-		return files;
+	} catch (error) {
+		if (error?.code !== "ENOENT") throw error;
+	}
+	for (const entry of await readdir(directory, { withFileTypes: true })) {
+		if (entry.isFile() && isSourceFile(entry.name))
+			files.push(join(directory, entry.name));
 	}
 	return files.sort();
 }
@@ -169,6 +174,22 @@ function assertImportBoundary(owner, specifier, source) {
 	if (rule) throw new BoundaryError(rule, owner, specifier, source);
 }
 
+function packageDependencies(manifest) {
+	return {
+		...manifest.dependencies,
+		...manifest.devDependencies,
+		...manifest.optionalDependencies,
+		...manifest.peerDependencies,
+	};
+}
+
+function assertManifestBoundaries(manifest, source) {
+	const dependencies = packageDependencies(manifest);
+	for (const specifier of Object.keys(dependencies))
+		assertImportBoundary(manifest.name, specifier, source);
+	return dependencies;
+}
+
 async function loadWorkspace(directory) {
 	const manifest = JSON.parse(
 		await readFile(join(directory, "package.json"), "utf8"),
@@ -208,10 +229,10 @@ async function validateGraph(root) {
 				`${relative(root, directory)} must be private native ESM`,
 			);
 		}
-		const dependencies = {
-			...manifest.dependencies,
-			...manifest.devDependencies,
-		};
+		const dependencies = assertManifestBoundaries(
+			manifest,
+			`${relative(root, directory)}/package.json`,
+		);
 		for (const source of sources) {
 			for (const specifier of imports(source.contents)) {
 				assertImportBoundary(
@@ -300,11 +321,25 @@ async function validateFixtures(root) {
 		const manifest = JSON.parse(
 			await readFile(join(fixture, "package.json"), "utf8"),
 		);
-		const source = await readFile(join(fixture, "src", "index.ts"), "utf8");
+		const dependencies = packageDependencies(manifest);
+		const sources = await Promise.all(
+			(await sourceFiles(fixture)).map(async (file) => ({
+				file,
+				contents: await readFile(file, "utf8"),
+			})),
+		);
 		let observed;
 		try {
-			for (const specifier of imports(source))
-				assertImportBoundary(manifest.name, specifier, entry.name);
+			for (const specifier of Object.keys(dependencies))
+				assertImportBoundary(
+					manifest.name,
+					specifier,
+					`${entry.name}/package.json`,
+				);
+			for (const source of sources) {
+				for (const specifier of imports(source.contents))
+					assertImportBoundary(manifest.name, specifier, entry.name);
+			}
 		} catch (error) {
 			if (error instanceof BoundaryError) observed = error.rule;
 			else throw error;
