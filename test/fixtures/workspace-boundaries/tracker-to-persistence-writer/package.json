@@ -1,0 +1,4 @@
+{
+  "name": "@golem/tracker",
+  "expectedBoundaryRule": "persistence-writer-constructor"
+}

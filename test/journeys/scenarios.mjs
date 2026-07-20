@@ -32,6 +32,12 @@ export const scenarios = [
 		regression: "a failed assertion leaks child descendants or writes outside a temporary home",
 	}),
 	registerScenario({
+		id: "sqlite-owner-migration-recovery",
+		journey: "J3",
+		tier: "pr",
+		regression: "two SQLite writers, migration drift, or a crash loses a committed runtime event or makes tracker recovery unsafe",
+	}),
+	registerScenario({
 		id: "testkit-browser",
 		journey: "J8",
 		tier: "release",

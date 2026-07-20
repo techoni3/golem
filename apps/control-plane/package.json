@@ -9,9 +9,13 @@
 			"import": "./dist/index.js"
 		}
 	},
+	"scripts": {
+		"build": "tsc -b"
+	},
 	"dependencies": {
 		"@golem/adapter-sdk": "file:../../packages/adapter-sdk",
 		"@golem/contracts": "file:../../packages/contracts",
+		"@golem/persistence": "file:../../packages/persistence",
 		"@golem/runtime": "file:../../packages/runtime",
 		"@golem/tracker": "file:../../packages/tracker",
 		"@fastify/static": "9.1.3",

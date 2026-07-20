@@ -1,0 +1,9 @@
+{
+  "name": "@golem/tracker",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@golem/control-plane": "file:../../../../apps/control-plane"
+  },
+  "expectedBoundaryRule": "control-plane-composition-only"
+}
