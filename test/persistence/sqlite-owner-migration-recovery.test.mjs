@@ -22,6 +22,12 @@ function count(database, table) {
 	return database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count;
 }
 
+function phaseCount(database) {
+	return database
+		.prepare("SELECT COUNT(*) AS count FROM tickets WHERE phase IS NOT NULL AND phase != ''")
+		.get().count;
+}
+
 function childOwner(home, ownerId) {
 	const child = spawn(process.execPath, [ownerChild], {
 		cwd: repositoryRoot,
@@ -80,11 +86,11 @@ function createRepresentativeTracker(target) {
 	const database = new Database(target);
 	try {
 		database.exec(`
-CREATE TABLE tickets (id TEXT PRIMARY KEY, title TEXT NOT NULL);
+CREATE TABLE tickets (id TEXT PRIMARY KEY, title TEXT NOT NULL, phase TEXT NOT NULL);
 CREATE TABLE comments (id TEXT PRIMARY KEY, ticket_id TEXT NOT NULL, body TEXT NOT NULL);
 CREATE TABLE streams (id TEXT PRIMARY KEY, name TEXT NOT NULL);
 CREATE TABLE message_envelopes (id TEXT PRIMARY KEY, ticket_id TEXT);
-INSERT INTO tickets VALUES ('GOL-legacy', 'legacy ticket');
+INSERT INTO tickets VALUES ('GOL-legacy', 'legacy ticket', 'built');
 INSERT INTO comments VALUES ('comment-legacy', 'GOL-legacy', 'preserve me');
 INSERT INTO streams VALUES ('stream-legacy', 'legacy stream');
 INSERT INTO message_envelopes VALUES ('envelope-legacy', 'GOL-legacy');
@@ -135,6 +141,7 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 		const before = new Database(trackerSource, { readonly: true });
 		const beforeCounts = {
 			tickets: count(before, "tickets"),
+			phases: phaseCount(before),
 			comments: count(before, "comments"),
 			streams: count(before, "streams"),
 			envelopes: count(before, "message_envelopes"),
@@ -182,6 +189,7 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 		assert.deepEqual(
 			{
 				tickets: count(after, "tickets"),
+				phases: phaseCount(after),
 				comments: count(after, "comments"),
 				streams: count(after, "streams"),
 				envelopes: count(after, "message_envelopes"),
@@ -297,6 +305,7 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 		assert.deepEqual(
 			{
 				tickets: count(sourceVerify, "tickets"),
+				phases: phaseCount(sourceVerify),
 				comments: count(sourceVerify, "comments"),
 				streams: count(sourceVerify, "streams"),
 				envelopes: count(sourceVerify, "message_envelopes"),
