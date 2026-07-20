@@ -28,6 +28,10 @@ function hasControlCharacter(value: string): boolean {
 	return value.includes("\0") || value.includes("\r") || value.includes("\n");
 }
 
+function hasUnsafeModelCharacter(value: string): boolean {
+	return /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value);
+}
+
 function safePassthrough(
 	arguments_: readonly string[],
 ): LauncherIssue | undefined {
@@ -49,7 +53,7 @@ function safePassthrough(
 function safeModelSelector(value: string): LauncherIssue | undefined {
 	if (
 		!value.trim() ||
-		hasControlCharacter(value) ||
+		hasUnsafeModelCharacter(value) ||
 		secretArgument.test(value) ||
 		secretInlineValue.test(value)
 	)

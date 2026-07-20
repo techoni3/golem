@@ -357,14 +357,34 @@ export async function runLauncherResolutionReplay() {
 	assertFailure({ harness: "opencode", globalPreset: "glm", user, isTTY: false, now }, "launcher.input.conflict", "global conflict");
 	assertFailure({ harness: "unknown", isTTY: false, now }, "launcher.harness.unknown", "unknown harness");
 	assertFailure({ harness: "codex", explicit: { backend: "not-a-backend" }, isTTY: false, now }, "launcher.selection.invalid", "unknown backend");
-	for (const [label, modelSelector] of [
+	const invalidModelSelectors = [
 		["blank model", ""],
 		["whitespace model", "   "],
 		["secret-bearing model", "api_key=sentinel-secret-value"],
-	]) {
+		...Array.from({ length: 0x20 }, (_, codePoint) => [
+			`C0 U+${codePoint.toString(16).padStart(4, "0").toUpperCase()}`,
+			`llama${String.fromCodePoint(codePoint)}model`,
+		]),
+		...Array.from({ length: 0x21 }, (_, offset) => {
+			const codePoint = 0x7f + offset;
+			return [
+				`C1 U+${codePoint.toString(16).padStart(4, "0").toUpperCase()}`,
+				`llama${String.fromCodePoint(codePoint)}model`,
+			];
+		}),
+		...[0x00ad, 0x061c, 0x200b, 0x200d, 0x2060, 0xfeff].map((codePoint) => [
+			`Cf U+${codePoint.toString(16).padStart(4, "0").toUpperCase()}`,
+			`llama${String.fromCodePoint(codePoint)}model`,
+		]),
+		["Zl U+2028", "llama\u2028model"],
+		["Zp U+2029", "llama\u2029model"],
+	];
+	let invalidModelErrorJson;
+	for (const [label, modelSelector] of invalidModelSelectors) {
 		const modelFailure = assertFailure(
 			{
 				harness: "opencode",
+				preset: "local",
 				explicit: { modelSelector },
 				isTTY: false,
 				now,
@@ -373,11 +393,29 @@ export async function runLauncherResolutionReplay() {
 			label,
 		);
 		assert.equal(modelFailure.error.remediation.length, 1, `${label} has one remedy`);
+		const errorJson = JSON.stringify(modelFailure.error);
+		if (invalidModelErrorJson === undefined) invalidModelErrorJson = errorJson;
+		else assert.equal(errorJson, invalidModelErrorJson, `${label} has the stable model-boundary error`);
 		assert.equal(
 			stableLaunchPlanJson(modelFailure).includes("sentinel-secret-value"),
 			false,
 			`${label} is redacted from public failure serialization`,
 		);
+		assert.equal(
+			stableLaunchPlanJson(modelFailure).includes("llama"),
+			false,
+			`${label} does not leak the rejected selector`,
+		);
+	}
+	for (const modelSelector of ["模型-β:1.0", "mødel/δ+v2"]) {
+		const validUnicodeModel = resolveLaunch({
+			harness: "opencode",
+			preset: "local",
+			explicit: { modelSelector },
+			isTTY: false,
+			now,
+		});
+		assert.equal(validUnicodeModel.ok, true, `${modelSelector} remains a valid Unicode selector`);
 	}
 	const passthroughFailure = resolveLaunch({
 		harness: "codex",
