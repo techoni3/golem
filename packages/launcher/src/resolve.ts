@@ -8,6 +8,7 @@ import {
 } from "./capabilities.js";
 import { failure, issue } from "./explain.js";
 import { mergeLauncherConfig, resolvePreset } from "./presets.js";
+import { redactDeliveryFacts, redactLaunchFacts } from "./public-safety.js";
 import type {
 	CapabilitySnapshot,
 	LaunchExplanation,
@@ -244,8 +245,8 @@ export function resolveLaunch(input: ResolveLaunchInput): LaunchResolution {
 				: {}),
 			observedAt: snapshot.evidenceObservedAt ?? "",
 		},
-		launch: truth.launch,
-		delivery: truth.delivery,
+		launch: redactLaunchFacts(truth.launch),
+		delivery: redactDeliveryFacts(truth.delivery),
 		capabilityFacts: {
 			deliveryMode: snapshot.capability.delivery_mode,
 			deliveryFlow: snapshot.deliveryFlow,
@@ -261,7 +262,10 @@ export function resolveLaunch(input: ResolveLaunchInput): LaunchResolution {
 
 /** Project only the two eligibility facts for downstream CLI/API consumers. */
 export function launchPlanBridge(plan: LaunchPlan): LaunchPlanBridge {
-	return deepFreeze({ launch: plan.launch, delivery: plan.delivery });
+	return deepFreeze({
+		launch: redactLaunchFacts(plan.launch),
+		delivery: redactDeliveryFacts(plan.delivery),
+	});
 }
 
 export function listLauncher(input: {

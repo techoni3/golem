@@ -75,13 +75,17 @@ temporary-home `compact-launch-dry-run-matrix` child invokes the built public
 resolver/bridge with an empty credential inventory and verifies stable JSON,
 path/credential non-leakage, and sentinel preservation. Neither journey starts
 a harness or changes a real home.
+The existing `launcher-launchability-delivery-split` J7 journey also injects
+hostile adapter diagnostics and proves the bridge and stable JSON fail closed
+for credential-shaped values without adding a test scenario.
 
 ## Module layout
 
 `config.ts` owns JSONC and the atomic text port; `presets.ts` owns validated
 precedence and duplicate-name policy; `capabilities.ts` owns evidence truth;
 `resolve.ts` composes immutable plans and the narrow `launchPlanBridge`;
-`explain.ts` owns redacted failures and canonical serialization; `types.ts` is
-the shared pure contract; and `index.ts` is a thin public boundary. CLI/API
-consumers may use the bridge for the two facts without acquiring spawn or
-delivery-transport ownership.
+`public-safety.ts` is the authoritative diagnostic-redaction and public-clone
+boundary; `explain.ts` owns redacted failures and canonical serialization;
+`types.ts` is the shared pure contract; and `index.ts` is a thin public
+boundary. CLI/API consumers may use the bridge for the two facts without
+acquiring spawn or delivery-transport ownership.

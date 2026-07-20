@@ -1,4 +1,5 @@
 import type { DeliveryMode } from "@golem/contracts";
+import { redactDeliveryFacts, redactLaunchFacts } from "./public-safety.js";
 import type {
 	CapabilitySnapshot,
 	CapabilityTruth,
@@ -288,30 +289,29 @@ export function capabilityTruth(
 							"Record a real launch contribution before authorizing spawn.",
 					}
 				: undefined;
-	const launch: LaunchFacts = deepFreeze(
-		evidenceBlockedLaunch ??
-			explicitLaunch ?? {
-				status:
-					status === snapshot.capability.qualification &&
-					(snapshot.capability.qualification === "supported" ||
-						snapshot.capability.qualification === "experimental")
-						? "launchable"
-						: "unavailable",
-				reason:
-					status === snapshot.capability.qualification &&
-					(snapshot.capability.qualification === "supported" ||
-						snapshot.capability.qualification === "experimental")
-						? "The selected capability has a qualified launch contribution."
-						: "The selected capability has no independently qualified launch contribution.",
-				remediation:
-					snapshot.remediation ??
-					(status === snapshot.capability.qualification &&
-					(snapshot.capability.qualification === "supported" ||
-						snapshot.capability.qualification === "experimental")
-						? "Keep the installed harness and capability contribution available."
-						: "Choose a launchable capability or run its adapter preflight."),
-			},
-	);
+	const rawLaunch: LaunchFacts = evidenceBlockedLaunch ??
+		explicitLaunch ?? {
+			status:
+				status === snapshot.capability.qualification &&
+				(snapshot.capability.qualification === "supported" ||
+					snapshot.capability.qualification === "experimental")
+					? "launchable"
+					: "unavailable",
+			reason:
+				status === snapshot.capability.qualification &&
+				(snapshot.capability.qualification === "supported" ||
+					snapshot.capability.qualification === "experimental")
+					? "The selected capability has a qualified launch contribution."
+					: "The selected capability has no independently qualified launch contribution.",
+			remediation:
+				snapshot.remediation ??
+				(status === snapshot.capability.qualification &&
+				(snapshot.capability.qualification === "supported" ||
+					snapshot.capability.qualification === "experimental")
+					? "Keep the installed harness and capability contribution available."
+					: "Choose a launchable capability or run its adapter preflight."),
+		};
+	const launch = deepFreeze(redactLaunchFacts(rawLaunch));
 	const launchable = launch.status === "launchable";
 	const deliveryReadiness: DeliveryTruthReadiness =
 		status === "registration_only" ||
@@ -323,7 +323,7 @@ export function capabilityTruth(
 						snapshot.capability.readiness === "ready"
 					? "ready"
 					: "not_ready";
-	const delivery: DeliveryFacts = deepFreeze({
+	const rawDelivery: DeliveryFacts = {
 		mode: snapshot.capability.delivery_mode,
 		qualification: snapshot.capability.qualification,
 		readiness: deliveryReadiness,
@@ -337,7 +337,8 @@ export function capabilityTruth(
 			(deliveryReadiness === "ready"
 				? "Keep the capability evidence current."
 				: "Run the real adapter consumption journey before advertising push readiness."),
-	});
+	};
+	const delivery = deepFreeze(redactDeliveryFacts(rawDelivery));
 	return deepFreeze({
 		status,
 		launchable,

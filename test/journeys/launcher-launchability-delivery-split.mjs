@@ -57,6 +57,70 @@ export async function exerciseLauncherLaunchabilityDeliverySplit() {
 			delivery: claudeLocal.delivery,
 		});
 
+		// Adapter-owned diagnostics are untrusted: delivery text is redacted at
+		// the immutable bridge while launch text fails closed before spawn.
+		const localSnapshot = builtInCapabilities.find(
+			(snapshot) => snapshot.capability.capability_id === "claude.ollama-local.direct",
+		);
+		assert(localSnapshot, "Claude/Ollama local adapter fixture is present");
+		const hostileDelivery = {
+			...localSnapshot,
+			capability: { ...localSnapshot.capability, capability_id: "fixture-hostile-delivery" },
+			launchContribution: {
+				status: "launchable",
+				reason: "fixture launch contribution is available",
+				remediation: "Keep the installed adapter contribution available.",
+			},
+			deliveryReason: "adapter token=marker-token credential=marker-credential",
+			deliveryRemediation: "adapter password=marker-password api_key=marker-api-key",
+		};
+		const hostileDeliveryPlan = assertPlan(
+			resolveLaunch({
+				harness: "claude",
+				preset: "local",
+				isTTY: false,
+				now,
+				capabilities: [hostileDelivery],
+			}),
+			"hostile delivery diagnostics",
+		);
+		const hostileBridge = launchPlanBridge(hostileDeliveryPlan);
+		assert.equal(hostileBridge.delivery.readiness, "not_ready");
+		assert.equal(Object.isFrozen(hostileBridge), true);
+		assert.equal(Object.isFrozen(hostileBridge.launch), true);
+		assert.equal(Object.isFrozen(hostileBridge.delivery), true);
+		const hostilePublicJson = stableLaunchPlanJson({
+			adapterFacts: hostileDelivery,
+			bridge: hostileBridge,
+			plan: hostileDeliveryPlan,
+		});
+		for (const pattern of [/token\s*=/iu, /credential\s*=/iu, /password\s*=/iu, /api_key\s*=/iu])
+			assert.equal(pattern.test(hostilePublicJson), false, `adapter diagnostic leaked ${pattern}`);
+
+		const hostileLaunch = {
+			...hostileDelivery,
+			capability: { ...hostileDelivery.capability, capability_id: "fixture-hostile-launch" },
+			launchContribution: {
+				status: "launchable",
+				reason: "adapter password=marker-password",
+				remediation: "adapter api_key=marker-api-key",
+			},
+		};
+		const hostileLaunchFailure = resolveLaunch({
+			harness: "claude",
+			preset: "local",
+			isTTY: false,
+			now,
+			capabilities: [hostileLaunch],
+		});
+		assert.equal(hostileLaunchFailure.ok, false, "unsafe launch diagnostics fail closed");
+		if (!hostileLaunchFailure.ok) {
+			assert.equal(hostileLaunchFailure.error.code, "launcher.launch.unavailable");
+			const failureJson = stableLaunchPlanJson(hostileLaunchFailure);
+			for (const pattern of [/token\s*=/iu, /credential\s*=/iu, /password\s*=/iu, /api_key\s*=/iu])
+				assert.equal(pattern.test(failureJson), false, `launch failure leaked ${pattern}`);
+		}
+
 		const missingCredential = resolveLaunch({
 			harness: "codex",
 			isTTY: false,
