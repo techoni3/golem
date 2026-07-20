@@ -40,6 +40,7 @@ import {
 	type PersistenceWriteCapability,
 	type RuntimeMaterializationInput,
 	type RuntimeMaterializationResult,
+	type RuntimeProjectStorage,
 	type RuntimeTransactionInput,
 	type RuntimeTransactionResult,
 	type TrackerCoreStorageCapability,
@@ -228,6 +229,10 @@ class PersistenceOwner implements PersistenceWriteCapability {
 
 	runtimeOutboxHealth() {
 		return this.#runtimeRepository.health();
+	}
+
+	runtimeProjectStorage(): RuntimeProjectStorage {
+		return this.#runtimeRepository.runtimeProjectStorage();
 	}
 
 	trackerStorage(): TrackerStorageCapability {

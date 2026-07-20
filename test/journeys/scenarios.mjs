@@ -2,6 +2,18 @@ import { registerScenario } from "@golem/testkit";
 
 export const scenarios = [
 	registerScenario({
+		id: "project-identity-git-worktree-relocation",
+		journey: "J2",
+		tier: "integration",
+		regression: "nested Git paths, linked worktrees, relocation, and broad-root heuristics split or merge project identity",
+	}),
+	registerScenario({
+		id: "project-register-concurrency",
+		journey: "J2",
+		tier: "integration",
+		regression: "duplicate real producer registrations allocate multiple project UUIDs or lose durable location/outbox evidence",
+	}),
+	registerScenario({
 		id: "domain-replay",
 		journey: "J2",
 		tier: "pr",

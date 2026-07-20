@@ -30,6 +30,22 @@ export {
 	RuntimeOutboxDrainer,
 	type RuntimeOutboxDrainResult,
 } from "./outbox.js";
+export type {
+	ProjectDiscoveryEvidence,
+	ProjectRegisterInput,
+	ProjectResolution,
+	ProjectResolutionStatus,
+	ProjectServiceOptions,
+} from "./projects/index.js";
+export {
+	createProjectService,
+	discoverProjectEvidence,
+	eventIdForPath,
+	locationIdForPath,
+	ProjectService,
+	projectIdForPath,
+	rejectBroadRoot,
+} from "./projects/index.js";
 export {
 	type RuntimeEngineHealth,
 	RuntimeEngineScheduler,
