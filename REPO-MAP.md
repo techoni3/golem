@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-07-20 @ 69e30e1 — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-20 @ 575fae8 — maintained via golem:docs-maintenance.
 
 ## Structure
 
@@ -16,12 +16,12 @@
 - One npm 11 lock owns `apps/`, `packages/`, and `tools/`; applications use TS 7 while legacy JS stays unchecked. `typecheck`, `build`, boundaries, lint, clean, and `api:*` are the typed-scaffold contract.
 - `api-client` owns runtime `openapi-fetch@0.17.0`; codegen owns private TS 5.9.3/OpenAPI Typescript 7.13.0. `contracts:*` owns the deterministic v1 registry and one JSON-wire journey.
 - `testkit` owns temp-home containment, child cleanup, stable summaries, and fresh-context browser fixtures; denied loopback is `UNMET`.
-- `persistence` owns the private SQLite/Kysely owner, runtime/tracker connection policy, locks, immutable checked migrations, clone-verified dry-runs, backups, and leased runtime outbox; only its control-plane composition port can write.
+- `persistence` owns the private SQLite/Kysely owner, canonical runtime/tracker schemas, nonce guards, checked migrations, clone-verified dry-runs, backups, injected clock, and bounded runtime outbox; only `control-plane` may import its writer constructor.
 - `packages/ui` owns semantic tokens/React Aria wrappers; `apps/dashboard/src/design-lab` is its isolated consumer.
 
 ### `scripts/check-boundaries.mjs`
 
-- Reads dependency metadata/imports (including root JS/MJS), normalizing `@golem/*` subpaths before direction checks; its nine fixtures are regression proof, not a mock farm.
+- Reads dependency metadata/imports (including root JS/MJS), retaining raw `@golem/*` subpaths for writer checks and normalizing package ownership for direction checks; its ten fixtures are regression proof, not a mock farm.
 
 ## Data flow
 
