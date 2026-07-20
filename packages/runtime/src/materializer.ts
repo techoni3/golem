@@ -8,12 +8,12 @@ import type {
 	RuntimeCanonicalMutation,
 	RuntimeMaterializationResult,
 } from "@golem/persistence";
-
 import {
 	type ClaimedInboxEntry,
 	RuntimeInbox,
 	type RuntimeInboxOptions,
 } from "./inbox.js";
+import type { SessionService } from "./sessions/index.js";
 
 export interface RuntimeMaterializerHandlerResult {
 	readonly disposition: "accepted" | "illegal";
@@ -49,6 +49,16 @@ export type MaterializerFailpoint =
 	| "before_transaction"
 	| "after_commit"
 	| "before_archive";
+
+const sessionKinds = [
+	"session.started",
+	"session.resumed",
+	"session.activity",
+	"session.idle",
+	"session.waiting",
+	"session.metadata_patched",
+	"session.ended",
+] as const;
 
 function defaultHandler(
 	signal: RuntimeSignalV1,
@@ -95,12 +105,52 @@ function defaultHandler(
 
 /** The only handler registry currently required is deliberately pure. */
 export function createDefaultRuntimeHandlers(): readonly RuntimeMaterializerHandler[] {
-	return Object.freeze([
+	return createDefaultRuntimeHandlersWithOptions();
+}
+
+function createDefaultRuntimeHandlersWithOptions(
+	options: { readonly sessions?: SessionService } = {},
+): readonly RuntimeMaterializerHandler[] {
+	const handlers: RuntimeMaterializerHandler[] = [];
+	if (options.sessions) {
+		handlers.push(
+			Object.freeze({
+				kinds: sessionKinds,
+				materialize: (
+					signal: RuntimeSignalV1,
+				): RuntimeMaterializerHandlerResult => {
+					const result = options.sessions?.apply(signal);
+					if (result?.disposition !== "accepted")
+						return Object.freeze({
+							disposition: "illegal",
+							explanation: {
+								code: result?.code ?? "runtime.session.rejected",
+								details: result?.details ?? {},
+							},
+						});
+					return Object.freeze({
+						disposition: "accepted",
+						explanation: {
+							code: result.code,
+							details: {
+								session_id: result.sessionId ?? "",
+								generation_id: result.generationId ?? "",
+								revision: result.revision ?? 0,
+							},
+						},
+					});
+				},
+			}),
+		);
+	}
+	const handled = new Set<string>(options.sessions ? sessionKinds : []);
+	handlers.push(
 		Object.freeze({
-			kinds: RuntimeSignalKinds,
+			kinds: RuntimeSignalKinds.filter((kind) => !handled.has(kind)),
 			materialize: defaultHandler,
 		}),
-	]);
+	);
+	return Object.freeze(handlers);
 }
 
 export class RuntimeMaterializer {
@@ -239,6 +289,7 @@ export function createRuntimeMaterializer(options: {
 	readonly home: string;
 	readonly writer: PersistenceWriteCapability;
 	readonly handlers?: readonly RuntimeMaterializerHandler[];
+	readonly sessions?: SessionService;
 	readonly inboxOptions?: RuntimeInboxOptions;
 }): {
 	readonly inbox: RuntimeInbox;
@@ -250,7 +301,13 @@ export function createRuntimeMaterializer(options: {
 		materializer: new RuntimeMaterializer({
 			inbox,
 			writer: options.writer,
-			...(options.handlers ? { handlers: options.handlers } : {}),
+			...(options.handlers
+				? { handlers: options.handlers }
+				: {
+						handlers: createDefaultRuntimeHandlersWithOptions(
+							options.sessions ? { sessions: options.sessions } : {},
+						),
+					}),
 		}),
 	});
 }

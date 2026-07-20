@@ -303,6 +303,46 @@ CREATE VIEW runtime_diagnostics AS SELECT id, code, details_json, created_at FRO
 CREATE INDEX runtime_events_received_at ON runtime_events(received_at);
 CREATE INDEX runtime_outbox_claimable ON runtime_outbox(status, next_attempt_at, created_at);
 CREATE INDEX capability_observations_endpoint ON capability_observations(endpoint_id, capability, observed_at);
+CREATE TABLE session_projection (
+  project_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 0 CHECK(revision >= 0),
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  field_provenance_json TEXT NOT NULL DEFAULT '{}',
+  role_json TEXT,
+  actor_activity_at TEXT,
+  observed_at TEXT,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(project_id, session_id),
+  FOREIGN KEY(project_id, session_id) REFERENCES logical_sessions(project_id, session_id) ON DELETE CASCADE
+);
+CREATE TABLE generation_projection (
+  project_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  generation_id TEXT NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 0 CHECK(revision >= 0),
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  field_provenance_json TEXT NOT NULL DEFAULT '{}',
+  parent_generation_id TEXT,
+  continuation TEXT,
+  actor_activity_at TEXT,
+  observed_at TEXT,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(project_id, session_id, generation_id),
+  FOREIGN KEY(project_id, session_id, generation_id) REFERENCES session_generations(project_id, session_id, generation_id) ON DELETE CASCADE
+);
+CREATE INDEX session_projection_revision ON session_projection(project_id, revision, session_id);
+CREATE INDEX generation_projection_revision ON generation_projection(project_id, session_id, revision, generation_id);
+CREATE TABLE session_pending_events (
+  event_id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  generation_id TEXT NOT NULL,
+  event_json TEXT NOT NULL,
+  source_observed_at TEXT NOT NULL,
+  received_at TEXT NOT NULL,
+  producer_instance_id TEXT NOT NULL
+);
 `,
 	),
 ];

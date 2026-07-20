@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 import type { SqliteConnection } from "./internals.js";
 import { sha256 } from "./schema.js";
+import { RuntimeSessionRepository } from "./session-repository.js";
 import type {
 	ClaimedOutboxRecord,
 	PersistenceClock,
@@ -16,6 +17,7 @@ import type {
 	RuntimeProjectObservationResult,
 	RuntimeProjectStorage,
 	RuntimeProjectView,
+	RuntimeSessionStorage,
 	RuntimeTransactionInput,
 	RuntimeTransactionResult,
 } from "./types.js";
@@ -637,6 +639,10 @@ export class RuntimeRepository {
 
 	runtimeProjectStorage(): RuntimeProjectStorage {
 		return new RuntimeProjectRepository(this.#database, this.#clock);
+	}
+
+	runtimeSessionStorage(): RuntimeSessionStorage {
+		return new RuntimeSessionRepository(this.#database, this.#clock);
 	}
 
 	record(input: RuntimeTransactionInput): RuntimeTransactionResult {
