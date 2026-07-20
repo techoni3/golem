@@ -6,6 +6,12 @@ export interface ServiceLock {
 	release(): void;
 }
 
+export interface ServiceLockStatus {
+	readonly state: "absent" | "active" | "stale" | "invalid";
+	readonly path: string;
+	readonly ownerPid?: number;
+}
+
 export function acquireServiceLock(stateDirectory: string): ServiceLock {
 	fs.mkdirSync(stateDirectory, { recursive: true, mode: 0o700 });
 	const lockPath = path.join(stateDirectory, "control-plane.lock");
@@ -44,6 +50,34 @@ export function acquireServiceLock(stateDirectory: string): ServiceLock {
 			}
 		},
 	});
+}
+
+export function serviceLockStatus(stateDirectory: string): ServiceLockStatus {
+	const lockPath = path.join(stateDirectory, "control-plane.lock");
+	if (!fs.existsSync(lockPath))
+		return Object.freeze({ state: "absent", path: lockPath });
+	try {
+		const parsed = JSON.parse(fs.readFileSync(lockPath, "utf8")) as {
+			pid?: unknown;
+		};
+		const pid = parsed.pid;
+		if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0)
+			return Object.freeze({ state: "invalid", path: lockPath });
+		try {
+			process.kill(pid, 0);
+			return Object.freeze({ state: "active", path: lockPath, ownerPid: pid });
+		} catch (error) {
+			if (!isCode(error, "ESRCH"))
+				return Object.freeze({
+					state: "active",
+					path: lockPath,
+					ownerPid: pid,
+				});
+			return Object.freeze({ state: "stale", path: lockPath, ownerPid: pid });
+		}
+	} catch {
+		return Object.freeze({ state: "invalid", path: lockPath });
+	}
 }
 
 function removeStaleLock(lockPath: string): boolean {

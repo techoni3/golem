@@ -153,6 +153,16 @@ export async function exerciseControlPlaneShell() {
 		first = await start(home);
 		assert.match(first.origin, /^http:\/\/127\.0\.0\.1:\d+$/u);
 		assert.match(first.instance_id, /^cpi_/u);
+		const controlPlane = await import(
+			"../../apps/control-plane/dist/index.js"
+		);
+		assert.equal(
+			controlPlane.serviceLockStatus(
+				path.join(home.golemHome, "control-plane"),
+			).state,
+			"active",
+			"the foreground owner publishes an actionable active lock status",
+		);
 
 		const liveness = await requestJson(`${first.origin}/api/v1/health/live`);
 		assert.equal(liveness.response.status, 200);
@@ -214,11 +224,17 @@ export async function exerciseControlPlaneShell() {
 		assert.equal(typeof first.group.child.pid, "number", "control plane exposes its process owner for the crash-recovery probe");
 		first.group.child.kill("SIGKILL");
 		await waitFor(() => exited(first.group) ? true : undefined, "forced control-plane owner exit");
+		assert.equal(
+			controlPlane.serviceLockStatus(
+				path.join(home.golemHome, "control-plane"),
+			).state,
+			"stale",
+			"a crashed owner is distinguishable before recovery",
+		);
 		first = undefined;
 		recovered = await start(home);
 		assert.notEqual(recovered.instance_id, snapshot.instance_id, "a restarted owner receives a fresh control-plane instance identity");
 
-		const { installLaunchAgent, rollbackLaunchAgent, updateLaunchAgent } = await import("../../apps/control-plane/dist/index.js");
 		const launchDirectory = path.join(home.root, "LaunchAgents");
 		const definition = {
 			label: "dev.golem.control-plane",
@@ -227,14 +243,52 @@ export async function exerciseControlPlaneShell() {
 			workingDirectory: repositoryRoot,
 			environment: { GOLEM_HOME: home.golemHome },
 		};
-		const initialLaunch = installLaunchAgent(launchDirectory, definition);
+		const initialLaunch = controlPlane.installLaunchAgent(
+			launchDirectory,
+			definition,
+		);
 		assert.match(fs.readFileSync(initialLaunch.path, "utf8"), /<false\/>/u, "LaunchAgent plan never auto-starts the service");
-		const updatedLaunch = updateLaunchAgent(launchDirectory, { ...definition, arguments: [serviceProgram, "--foreground"] });
-		rollbackLaunchAgent(updatedLaunch);
+		const updatedLaunch = controlPlane.updateLaunchAgent(launchDirectory, {
+			...definition,
+			arguments: [serviceProgram, "--foreground"],
+		});
+		controlPlane.rollbackLaunchAgent(updatedLaunch);
 		assert.equal(fs.readFileSync(initialLaunch.path, "utf8").includes("--foreground"), false, "LaunchAgent update can roll back without touching user LaunchAgents");
+		const launchctlCalls = [];
+		const runner = {
+			run: (arguments_) => {
+				launchctlCalls.push(arguments_);
+				return { status: 0, stdout: "fixture", stderr: "" };
+			},
+		};
+		assert.equal(
+			controlPlane.statusLaunchAgent({
+				directory: launchDirectory,
+				label: definition.label,
+				uid: process.getuid(),
+				runner,
+			}).loaded,
+			true,
+			"explicit LaunchAgent status reads an injected launchctl boundary",
+		);
+		controlPlane.startLaunchAgent({
+			label: definition.label,
+			uid: process.getuid(),
+			runner,
+		});
+		controlPlane.stopLaunchAgent({
+			label: definition.label,
+			uid: process.getuid(),
+			runner,
+		});
+		assert.deepEqual(
+			launchctlCalls.map((arguments_) => arguments_[0]),
+			["print", "kickstart", "kill"],
+			"status/start/stop remain explicit commands and never run during installation",
+		);
 
 		await assertBrowserShell(recovered.origin);
-		return "real Fastify process authenticated typed HTTP/OpenAPI client, cookie+CSRF, WS snapshot/delta/resync, static browser shell, exclusive/stale lock recovery, LaunchAgent rollback, and graceful cleanup verified";
+		return "real Fastify process authenticated typed HTTP/OpenAPI client, cookie+CSRF, WS snapshot/delta/resync, static browser shell, exclusive/stale lock recovery/status, explicit LaunchAgent status/start/stop/update/rollback, and graceful cleanup verified";
 	} finally {
 		if (duplicate && !exited(duplicate)) await stopProcessGroup(duplicate);
 		if (recovered) await stopProcessGroup(recovered.group);
