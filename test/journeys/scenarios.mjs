@@ -14,6 +14,12 @@ export const scenarios = [
 		regression: "launch precedence, capability qualification, or JSONC preservation drifts before process spawn",
 	}),
 	registerScenario({
+		id: "migration-dry-run-ambiguity",
+		journey: "J7",
+		tier: "integration",
+		regression: "a legacy audit mutates a supplied home or auto-merges unsafe, corrupt, name/PID, or ambiguous identity evidence",
+	}),
+	registerScenario({
 		id: "testkit-smoke",
 		journey: "J3",
 		tier: "pr",

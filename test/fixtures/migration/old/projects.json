@@ -1,0 +1,11 @@
+{
+  "version": 0,
+  "projects": [
+    {
+      "id": "relocated-project",
+      "name": "Old Acme",
+      "path": "/Volumes/work/acme",
+      "kind": "legacy"
+    }
+  ]
+}

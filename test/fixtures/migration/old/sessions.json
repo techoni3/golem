@@ -1,0 +1,11 @@
+{
+  "version": 0,
+  "sessions": [
+    {
+      "session_id": "legacy-native-1",
+      "project_id": "relocated-project",
+      "harness": "claude",
+      "name": "Same display name"
+    }
+  ]
+}

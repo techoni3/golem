@@ -1,46 +1,34 @@
 # REPO-MAP.md
-> Last verified: 2026-07-20 @ Wave 4 reconciliation — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-20 @ 4058f1b — maintained via golem:docs-maintenance.
 
 ## Structure
 
-- `apps/` are private TypeScript seams; legacy entrypoints remain authoritative until vertical-slice cutover.
-- `packages/` are strictly directed: `contracts` owns schemas, `domain` pure policy, `persistence` the single SQLite writer, `launcher` redacted configuration/capability plans, `compiler` deterministic manifests, `mcp-adapter` schema validation/API delegation, `api-client` generated HTTP types, and `testkit`/journeys serial real-boundary proof.
-- `tools/openapi-codegen/` is isolated TS5 source generation, never runtime or public packaging.
-- `substrate/` is source; `plugin/` and `dashboard/dist/` are generated products. `cli/`, `lib/`, `dashboard/server/`, `mcp/channel/`, and `shims/` are compatibility surfaces.
+- `apps/` are private TypeScript composition; legacy entrypoints stay authoritative until their vertical cutover.
+- `packages/`: `contracts` schemas; `domain` pure policy; `persistence` SQLite writer; `runtime`/`tracker` services; `launcher` redacted plans; `compat` legacy seams; `compiler` renders; `mcp-adapter` schema/API delegation; `api-client` generated types; `testkit` journeys; `ui` tokens/React Aria.
+- `tools/openapi-codegen/` is isolated TS5 generation, never runtime packaging. `substrate/` is source; `plugin/` and `dashboard/dist/` are generated. `cli/`, `lib/`, `dashboard/server/`, `mcp/channel/`, and `shims/` are compatibility surfaces.
 
-## Workspace contract
+## Invariants
 
-- One npm 11 lock owns `apps/`, `packages/`, and `tools/`; applications use TS 7 while untouched JS stays unchecked.
-- Root scripts own typecheck/build/boundaries/lint/clean and deterministic `contracts:*`/`api:*` generation and checks.
-- `api-client` owns runtime `openapi-fetch@0.17.0`; codegen owns exact TS 5.9.3/OpenAPI Typescript 7.13.0 without `npx`.
-- `domain` is the pure layered kernel; its compact J2 replay is `test:domain`/`domain-replay`.
-- `persistence` owns private SQLite/Kysely, canonical node/edge, alias/harness/capability/lifecycle schemas, checked migrations, recovery, backup, injected clock, and bounded outbox; writer construction stays internal to control-plane.
-- `launcher` rejects conflicting preset overrides and owns redacted JSONC plus fail-closed capability plans; backup/temp/commit/rollback is save-only.
-- `apps/control-plane` is the thin foreground Fastify composition façade. Typed `/api/v1/ws` accepts bearer CLI/MCP callers without Origin; bounded HttpOnly browser sessions require exact Origin/Host/protocol/port; headerless legacy `/ws` uses only an injected compatibility source.
-- `testkit` owns temp-home/child cleanup, stable summaries, semantic comparison, and fresh headless fixtures; loopback denial is `UNMET`.
-- `packages/ui` owns semantic tokens/React Aria; `apps/dashboard/src/design-lab` is its isolated consumer.
+- One npm11 lock owns workspace code. Apps use TS7; `api-client` owns `openapi-fetch`; codegen pins TS5.9.3. Root scripts own build/typecheck/boundaries/lint and generation.
+- Direction is contracts → domain/runtime/tracker → control-plane → client → CLI/MCP/dashboard. Canonical code never imports compatibility, storage, UI, harness, or tools; `scripts/check-boundaries.mjs` enforces this.
+- `persistence` alone opens SQLite writers; runtime/tracker DBs remain separate. `launcher` owns fail-closed preset resolution, redacted JSONC backup/temp/commit/rollback, trusted native discovery, and `shell:false` execution.
+- `compat` is never authoritative: GOL-39 uses `lstat`/no-follow reads and proposes redacted actions only. Apply/import is deferred; links, corruption, names/PIDs/recency, conflicts, and unresolved evidence never auto-link.
+- `apps/control-plane` is foreground Fastify composition. Typed `/api/v1/ws` accepts bearer CLI/MCP callers; browser sessions are bounded HttpOnly/Origin/Host/protocol/port; headerless legacy `/ws` has an injected source only.
 
-## Boundary and data flow
+## Data flow and gotchas
 
-Hooks/shims write beneath `GOLEM_HOME`; dashboard REST/WS and tracker phase remain authoritative. The control-plane shell exposes typed `/api/v1` and `/api/v1/ws` while retaining bounded static/headerless legacy compatibility. Direction is contracts → domain/runtime/tracker → control plane → client → CLI/MCP/dashboard; canonical packages never import compatibility, storage, UI, harness, or tools. The rendered MCP validates schemas and calls its injected API client.
+Hooks/shims write below `GOLEM_HOME`; dashboard REST/WS and tracker phase remain authoritative. Contract aliases enter domain, which leaves unresolved evidence for review. `testkit` owns temp homes, child cleanup, stable summaries, semantic comparison, and headless fixtures; sandbox loopback denial is `UNMET`.
 
-Canonical alias kinds and optional session resolution originate in contracts; domain returns unresolved evidence for review and never auto-links it. `scripts/check-boundaries.mjs` retains raw `@golem/*` subpaths, forbids non-control-plane writer construction, and rejects MCP-to-domain imports; fixtures are regression proof.
-
-## Constraints
-
-- The nested `mcp/channel` postinstall/lock remains the current GOL-29 rendered closure; the relocatable artifact is a separately verified deferred-cutover candidate, not `.mcp.json`'s entrypoint.
-- `docs/architecture/render-mcp-closure.md` owns the five-target compiler, packed-channel, and isolated-artifact J1 gate.
-- Never peer-bypass, import `tools/**` from production code, or include workspace symlinks/TS5 in the root tarball.
-- TS 7 uses build-mode `--stopBuildOnErrors`; Claude uses cached render bytes after substrate sync/update/reload.
+- Nested `mcp/channel` postinstall/lock is the live GOL-29 render closure; its relocatable artifact is deferred, not `.mcp.json`'s entrypoint. See `docs/architecture/render-mcp-closure.md` for J1.
+- Never peer-bypass, import `tools/**` from production, ship workspace symlinks/TS5, or hand-edit generated renders. Claude updates cached render bytes only after sync/update/reload.
 
 ## Common tasks
 
-| Task | Files | Verify with |
-|---|---|---|
-| Typed workspace | `apps/`, `packages/`, `tools/` | Node 24 `npm ci`, typecheck/build, boundaries, lint |
-| Render/MCP closure | compiler, mcp adapter, J1 journey | Node 24 `npm run verify:render` |
-| Domain policy | `packages/domain/`, `test/domain/replay.mjs` | Node 24 `test:domain`, J2 `domain-replay` |
-| SQLite persistence | `packages/persistence/`, `test/persistence/`, `docs/architecture/persistence.md` | Node 24 `test:persistence`, selected J3, fixtures, boundaries |
-| Control plane | `apps/control-plane`, `packages/api-client`, J6 | Node 24 `api:generate`, `api:check`, J6, browser shell |
-| Launcher resolution | `packages/launcher/`, `test/launcher/replay.mjs` | Node 24 J7 `launcher-resolution-matrix` |
-| Legacy runtime | `cli/`, `dashboard/`, `mcp/channel/`, `shims/` | temp-home legacy baseline |
+| Task | Verify |
+|---|---|
+| Workspace | Node24 build/typecheck/boundaries/lint |
+| Render/MCP | `npm run verify:render` (J1) |
+| Domain/persistence | `test:domain` (J2), `test:persistence` (J3) |
+| Launcher | `test:launcher-resolution`, J5/J7 |
+| Legacy audit | `migration:plan`, `test:migration-plan` (J7) |
+| Legacy runtime | temp-home legacy baseline |

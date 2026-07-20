@@ -26,6 +26,7 @@ import { exerciseControlPlaneShell } from "../control-plane/control-plane-shell.
 import { exerciseRenderMcpClosure } from "../render-mcp-closure.mjs";
 import { exerciseDomainReplay } from "./domain-replay.mjs";
 import { exerciseLauncherResolution } from "./launcher-resolution.mjs";
+import { runMigrationPlanReplay } from "../migration/replay.mjs";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright-core");
@@ -379,6 +380,10 @@ export async function exerciseLegacyParityBaseline() {
 	}
 }
 
+export async function exerciseMigrationDryRunAmbiguity() {
+	return runMigrationPlanReplay();
+}
+
 export function diagnosticFor(error, context) {
 	const description = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 	const temporaryRoot = context?.temporaryRoot || context?.root || (error instanceof JourneyDiagnosticError ? error.temporaryRoot : undefined);
@@ -389,6 +394,7 @@ export function diagnosticFor(error, context) {
 export const exercises = Object.freeze({
 	"domain-replay": exerciseDomainReplay,
 	"launcher-resolution-matrix": exerciseLauncherResolution,
+	"migration-dry-run-ambiguity": exerciseMigrationDryRunAmbiguity,
 	"testkit-smoke": exerciseSmoke,
 	"testkit-fake-harness": exerciseFakeHarness,
 	"testkit-semantic-parity": exerciseSemanticParity,

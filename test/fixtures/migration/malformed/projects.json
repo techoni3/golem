@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "projects": [
+    {
+      "id": "valid-beside-bad",
+      "path": "/workspace/valid"
+    },
+    {
+      "id": "broad-root",
+      "path": "/"
+    },
+    {
+      "id": "conflicting-project-one",
+      "path": "/workspace/conflict"
+    },
+    {
+      "id": "conflicting-project-two",
+      "path": "/workspace/conflict"
+    }
+  ]
+}
