@@ -41,6 +41,11 @@ export {
 	type TrackerClock,
 	type TrackerStoragePort,
 } from "./types.js";
+export {
+	type TrackerValidationCode,
+	TrackerValidationError,
+	trackerValidationLimits,
+} from "./validation.js";
 
 export interface TrackerBoundary {
 	readonly domain: DomainBoundary;

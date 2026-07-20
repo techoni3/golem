@@ -4,6 +4,11 @@ import type {
 	TrackerClock,
 	TrackerStoragePort,
 } from "./types.js";
+import {
+	requireIdentifier,
+	requireJsonObject,
+	requireLease,
+} from "./validation.js";
 
 export interface PassiveSlotService {
 	append(input: {
@@ -25,22 +30,20 @@ export function createPassiveSlotService(options: {
 }): PassiveSlotService {
 	const service: PassiveSlotService = {
 		append(input) {
-			if (
-				!input.recipientId.trim() ||
-				!input.ticketId.trim() ||
-				!input.category.trim()
-			)
-				throw new Error(
-					"passive delta requires recipient, ticket, and category",
-				);
+			requireIdentifier(input.recipientId, "passive recipient");
+			requireIdentifier(input.ticketId, "passive ticket");
+			requireIdentifier(input.category, "passive category");
+			requireIdentifier(input.eventId, "passive event id");
+			requireJsonObject(input.baseline, "passive baseline");
+			requireJsonObject(input.value, "passive value");
 			options.storage.upsertPassiveDelta({
 				...input,
 				now: options.clock.now(),
 			});
 		},
 		claim(recipientId, leaseMs = 30_000) {
-			if (!recipientId.trim() || !Number.isInteger(leaseMs) || leaseMs < 1)
-				throw new Error("passive claim requires recipient and positive lease");
+			requireIdentifier(recipientId, "passive recipient");
+			requireLease(leaseMs);
 			return options.storage.claimPassiveBatch({
 				recipientId,
 				leaseId: globalThis.crypto.randomUUID(),
@@ -49,6 +52,8 @@ export function createPassiveSlotService(options: {
 			});
 		},
 		commit(recipientId, leaseId) {
+			requireIdentifier(recipientId, "passive recipient");
+			requireIdentifier(leaseId, "passive lease id");
 			return options.storage.commitPassiveBatch({
 				recipientId,
 				leaseId,
@@ -56,6 +61,8 @@ export function createPassiveSlotService(options: {
 			});
 		},
 		release(recipientId, leaseId) {
+			requireIdentifier(recipientId, "passive recipient");
+			requireIdentifier(leaseId, "passive lease id");
 			return options.storage.releasePassiveBatch({
 				recipientId,
 				leaseId,

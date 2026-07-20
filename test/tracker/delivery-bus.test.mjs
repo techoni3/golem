@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { fork, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -8,7 +8,12 @@ import { fileURLToPath } from "node:url";
 
 import { composeControlPlaneTrackerServices } from "../../apps/control-plane/dist/tracker.js";
 import { openControlPlanePersistence } from "../../apps/control-plane/dist/persistence.js";
-import { BusEventConflictError, EnvelopeConflictError } from "@golem/tracker";
+import {
+	BusEventConflictError,
+	EnvelopeConflictError,
+	TrackerValidationError,
+	trackerValidationLimits,
+} from "@golem/tracker";
 import { createTemporaryHome } from "@golem/testkit";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -87,15 +92,50 @@ function envelope(id, recipientId, extra = {}) {
 	};
 }
 
-function claimChild(home, now, workerId, barrier) {
-	return new Promise((resolve, reject) => {
-		const child = spawn(process.execPath, [worker], { cwd: repositoryRoot, env: { ...home.env, GOLEM_TRACKER_FIXTURE_NOW: now, GOLEM_TRACKER_FIXTURE_WORKER: workerId, GOLEM_TRACKER_FIXTURE_ROOT: home.root, GOLEM_TRACKER_FIXTURE_BARRIER: barrier }, stdio: ["ignore", "pipe", "pipe"] });
-		let stdout = ""; let stderr = "";
-		child.stdout.on("data", (chunk) => { stdout += chunk; });
-		child.stderr.on("data", (chunk) => { stderr += chunk; });
-		child.once("error", reject);
-		child.once("close", (code) => code === 0 ? resolve(JSON.parse(stdout)) : reject(new Error(`claim child ${workerId} exited ${code}: ${stderr}`)));
+function claimChild(home, now, workerId) {
+	const child = fork(worker, [], { cwd: repositoryRoot, env: { ...home.env, GOLEM_TRACKER_FIXTURE_NOW: now, GOLEM_TRACKER_FIXTURE_WORKER: workerId, GOLEM_TRACKER_FIXTURE_ROOT: home.root }, silent: true });
+	const stop = () => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); };
+	const bounded = (label, register) => new Promise((resolve, reject) => {
+		const timer = setTimeout(() => { stop(); reject(new Error(`${workerId} timed out waiting for ${label}`)); }, 5_000);
+		register((value) => { clearTimeout(timer); resolve(value); });
 	});
+	const ready = bounded("READY", (resolve) => child.on("message", (message) => { if (message?.type === "READY") resolve(message); }));
+	const claim = bounded("CLAIM", (resolve) => child.on("message", (message) => { if (message?.type === "CLAIM") resolve(message); }));
+	const close = bounded("CLOSE", (resolve) => child.once("close", (code, signal) => resolve({ code, signal })));
+	child.once("error", stop);
+	return { child, ready, claim, close, stop };
+}
+
+function durableTrackerCounts(home) {
+	const database = new Database(home.trackerDb, { readonly: true, fileMustExist: true });
+	try {
+		return Object.freeze(
+			Object.fromEntries(
+				[
+					"tracker_envelopes",
+					"tracker_bus_events",
+					"tracker_subscriptions",
+					"tracker_passive_slots",
+					"tracker_delivery_audit",
+				].map((table) => [
+					table,
+					database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count,
+				]),
+			),
+		);
+	} finally {
+		database.close();
+	}
+}
+
+function persistedEnvelopeError(home, id) {
+	const database = new Database(home.trackerDb, { readonly: true, fileMustExist: true });
+	try {
+		return database.prepare("SELECT last_error FROM tracker_envelopes WHERE id = ?").get(id)
+			.last_error;
+	} finally {
+		database.close();
+	}
 }
 
 test("delivery queue crash matrix", async () => {
@@ -106,10 +146,179 @@ test("delivery queue crash matrix", async () => {
 	let services;
 	try {
 		({ writer, services } = openServices(home, clock, eligibility, "delivery-parent"));
-
-		const first = services.delivery.enqueue(envelope("env-1", "recipient-a"));
+		const deepPayload = {};
+		let nested = deepPayload;
+		for (let depth = 0; depth < 100; depth += 1) {
+			nested.next = {};
+			nested = nested.next;
+		}
+		const validationEnvelope = services.delivery.enqueue(
+			envelope("env-validation", "recipient-a", {
+				maxAttempts: trackerValidationLimits.maxAttempts,
+				deadlineAt: clock.after(trackerValidationLimits.maxDeadlineHorizonMs),
+			}),
+		);
 		assert.equal(
-			services.delivery.enqueue(envelope("env-1", "recipient-a")).id,
+			validationEnvelope.maxAttempts,
+			trackerValidationLimits.maxAttempts,
+			"max-attempt and deadline horizon boundaries are accepted",
+		);
+		const [retryValidationClaim] = services.delivery.claim(
+			"worker-validation",
+			1,
+			1,
+		);
+		assert(retryValidationClaim);
+		assert.equal(retryValidationClaim.prepare().kind, "deliver");
+		const durableBeforeInvalidInput = durableTrackerCounts(home);
+		const invalidInputCases = [
+			{
+				name: "non-ISO delivery deadline",
+				code: "invalid_deadline",
+				run: () =>
+					services.delivery.enqueue(
+						envelope("env-invalid-date", "recipient-a", {
+							deadlineAt: "not-a-date",
+						}),
+					),
+			},
+			{
+				name: "nonpositive delivery attempts",
+				code: "invalid_max_attempts",
+				run: () =>
+					services.delivery.enqueue(
+						envelope("env-invalid-attempts", "recipient-a", { maxAttempts: 0 }),
+					),
+			},
+			{
+				name: "negative retry delay",
+				code: "invalid_retry_delay",
+				run: () => retryValidationClaim.fail("retry", -1),
+			},
+			{
+				name: "blank bus identifier",
+				code: "invalid_identifier",
+				run: () =>
+					services.bus.append({
+						id: " ",
+						deduplicationKey: "dedupe-invalid-id",
+						topic: "validation/topic",
+						class: "custom",
+						payload: {},
+					}),
+			},
+			{
+				name: "duplicate subscription class",
+				code: "invalid_subscription_class",
+				run: () =>
+					services.subscriptions.subscribe({
+						name: "invalid-class",
+						recipientId: "recipient-validation",
+						topic: "validation/topic",
+						classes: ["tracker", "tracker"],
+					}),
+			},
+			{
+				name: "negative subscription cursor",
+				code: "invalid_cursor",
+				run: () =>
+					services.subscriptions.subscribe({
+						name: "invalid-cursor",
+						recipientId: "recipient-validation",
+						topic: "validation/topic",
+						cursor: -1,
+					}),
+			},
+			{
+				name: "unsafe subscription cursor range",
+				code: "invalid_range",
+				run: () => services.subscriptions.commit("sub-validation", 2, 1),
+			},
+			{
+				name: "overdeep JSON payload",
+				code: "invalid_json",
+				run: () =>
+					services.bus.append({
+						id: "bus-invalid-depth",
+						deduplicationKey: "dedupe-invalid-depth",
+						topic: "validation/topic",
+						class: "custom",
+						payload: deepPayload,
+					}),
+			},
+			{
+				name: "oversize passive delta",
+				code: "invalid_json",
+				run: () =>
+					services.passive.append({
+						recipientId: "recipient-validation",
+						ticketId: "GOL-36",
+						category: "validation",
+						baseline: { large: "x".repeat(trackerValidationLimits.maxJsonBytes) },
+						value: {},
+						eventId: "passive-invalid-size",
+					}),
+			},
+			{
+				name: "negative claim limit",
+				code: "invalid_claim_limit",
+				run: () => services.delivery.claim("worker-validation", -1, 1),
+			},
+			{
+				name: "negative passive lease",
+				code: "invalid_lease",
+				run: () => services.passive.claim("recipient-validation", -1),
+			},
+		];
+		for (const invalidCase of invalidInputCases) {
+			assert.throws(
+				invalidCase.run,
+				(error) =>
+					error instanceof TrackerValidationError && error.code === invalidCase.code,
+				`${invalidCase.name} reports a stable service validation error`,
+			);
+		}
+		assert.deepEqual(
+			durableTrackerCounts(home),
+			durableBeforeInvalidInput,
+			"every invalid input is rejected before changing durable queue, bus, subscription, passive, or audit state",
+		);
+		const boundedIdentifier = "v".repeat(
+			trackerValidationLimits.maxIdentifierLength,
+		);
+		const boundedSubscription = services.subscriptions.subscribe({
+			id: boundedIdentifier,
+			name: boundedIdentifier,
+			recipientId: boundedIdentifier,
+			topic: boundedIdentifier,
+			classes: ["tracker", "lifecycle", "custom"],
+			cursor: trackerValidationLimits.maxCursor,
+		});
+		assert.equal(
+			boundedSubscription.cursor,
+			trackerValidationLimits.maxCursor,
+			"unique allowed classes and the maximum safe cursor are accepted",
+		);
+		assert.equal(
+			boundedSubscription.id,
+			boundedIdentifier,
+			"maximum nonblank subscription id, name, recipient, and topic boundaries are accepted",
+		);
+		assert.deepEqual(
+			services.delivery.claim(
+				"worker-validation-boundary",
+				trackerValidationLimits.maxClaimLimit,
+				trackerValidationLimits.maxLeaseMs,
+			),
+			[],
+			"maximum claim and lease boundaries are accepted without a competing pending envelope",
+		);
+		retryValidationClaim.delivered();
+		retryValidationClaim.acknowledge("ack-validation");
+
+		const first = services.delivery.enqueue(envelope("env-1", "recipient-a", { payload: { message: "env-1", nested: { b: [2, { c: 3 }], a: 1 } } }));
+		assert.equal(
+			services.delivery.enqueue(envelope("env-1", "recipient-a", { payload: { nested: { a: 1, b: [2, { c: 3 }] }, message: "env-1" } })).id,
 			first.id,
 			"identical idempotency is a stable duplicate, not a second envelope",
 		);
@@ -119,7 +328,7 @@ test("delivery queue crash matrix", async () => {
 			"a reused idempotency key with different payload is rejected",
 		);
 		assert.throws(() => services.delivery.enqueue(envelope("env-semantic", "recipient-a", { idempotencyKey: "key-env-1", deadlineAt: clock.after(1) })), EnvelopeConflictError, "deadline is semantic idempotency input");
-		assert.equal(services.delivery.enqueue(envelope("env-1", "recipient-a", { payload: { message: "env-1" } })).id, first.id, "canonical payload order/shape preserves duplicate identity");
+		assert.equal(services.delivery.enqueue(envelope("env-1", "recipient-a", { payload: { nested: { a: 1, b: [2, { c: 3 }] }, message: "env-1" } })).id, first.id, "canonical nested payload order preserves duplicate identity");
 
 		const [firstClaim] = services.delivery.claim("worker-a", 1, 5_000);
 		assert(firstClaim, "one worker claims the only pending envelope");
@@ -150,18 +359,29 @@ test("delivery queue crash matrix", async () => {
 		const [failureClaim] = services.delivery.claim("worker-fail", 1, 5_000);
 		assert(failureClaim);
 		assert.equal(failureClaim.prepare().kind, "deliver");
-		const failed = failureClaim.fail("Bearer ghp-abcdef123456", 1_000);
+		const failed = failureClaim.fail(
+			"Bearer ghp-abcdef123456 failed at /Users/example/.golem/token",
+			1_000,
+		);
 		assert.equal(failed.status, "dead_letter", "second bounded failure is observable permanent failure");
 		assert.equal(services.audit().some((row) => JSON.stringify(row.details).includes("ghp-abcdef123456")), false, "audit redacts transport credentials");
+		assert.doesNotMatch(
+			persistedEnvelopeError(home, "env-fail"),
+			/ghp-abcdef123456|\/Users\/example/u,
+			"storage receives only the service-sanitized transport diagnostic",
+		);
 
 		services.delivery.enqueue(envelope("env-lease", "recipient-lease"));
 		const [oldClaim] = services.delivery.claim("worker-old", 1, 100);
 		assert(oldClaim, "old worker owns the initial lease");
+		assert.equal(oldClaim.prepare().kind, "deliver", "old worker prepared while its fence and lease were current");
 		clock.advance(101);
 		const [newClaim] = services.delivery.claim("worker-new", 1, 5_000);
 		assert(newClaim, "a new worker reclaims only the expired lease");
-		assert.throws(() => oldClaim.acknowledge("stale-ack"), /successful current prepare/, "expired claim cannot acknowledge after recovery");
-		assert.throws(() => oldClaim.reply({ id: "stale-reply", idempotencyKey: "stale-reply", payload: {} }), /claim|reply/i, "expired claim cannot create a reply");
+		assert.equal(oldClaim.acknowledge("stale-ack"), false, "reclaimed claim token cannot acknowledge");
+		assert.throws(() => oldClaim.reply({ id: "stale-reply", idempotencyKey: "stale-reply", payload: {} }), /claim|reply/i, "reclaimed claim token cannot create a reply");
+		assert.throws(() => oldClaim.delivered(), /no longer current/, "reclaimed claim token cannot settle delivered");
+		assert.throws(() => oldClaim.fail("late"), /no longer current/, "reclaimed claim token cannot settle failure");
 		assert.equal(newClaim.prepare().kind, "deliver");
 		newClaim.delivered();
 		newClaim.acknowledge("fresh-ack");
@@ -171,8 +391,8 @@ test("delivery queue crash matrix", async () => {
 		assert.equal(services.delivery.recover().some((row) => row.id === "env-deadline" && row.status === "expired"), true, "deadline recovery expires an unclaimed envelope");
 
 		const manual = services.subscriptions.subscribe({ id: "sub-manual", name: "ticket-audit", recipientId: "recipient-a", topic: "ticket/GOL-36", cursor: 0, manual: true });
-		const event = services.bus.append({ id: "bus-1", deduplicationKey: "dedupe-bus-1", topic: "ticket/GOL-36", class: "tracker", payload: { action: "created" } });
-		assert.equal(services.bus.append({ id: "bus-1", deduplicationKey: "dedupe-bus-1", topic: "ticket/GOL-36", class: "tracker", payload: { action: "created" } }).sequence, event.sequence, "duplicate bus delivery preserves its original sequence");
+		const event = services.bus.append({ id: "bus-1", deduplicationKey: "dedupe-bus-1", topic: "ticket/GOL-36", class: "tracker", payload: { action: "created", nested: { b: [2, { c: 3 }], a: 1 } } });
+		assert.equal(services.bus.append({ id: "bus-1", deduplicationKey: "dedupe-bus-1", topic: "ticket/GOL-36", class: "tracker", payload: { nested: { a: 1, b: [2, { c: 3 }] }, action: "created" } }).sequence, event.sequence, "nested reordered bus payload preserves its original sequence");
 		assert.throws(
 			() => services.bus.append({ id: "bus-2", deduplicationKey: "dedupe-bus-1", topic: "ticket/GOL-36", class: "tracker", payload: { action: "changed" } }),
 			BusEventConflictError,
@@ -210,12 +430,19 @@ test("delivery queue crash matrix", async () => {
 		services.delivery.enqueue(envelope("env-crash", "recipient-crash"));
 		await writer.close();
 		writer = undefined;
-		const barrier = path.join(home.root, "claim.barrier");
-		const childAPromise = claimChild(home, clock.now(), "process-a", barrier);
-		const childBPromise = claimChild(home, clock.now(), "process-b", barrier);
-		fs.writeFileSync(barrier, "go");
-		const [childA, childB] = await Promise.all([childAPromise, childBPromise]);
-		assert.equal([childA, childB].filter((result) => result.claimed).length, 1, "simultaneous independent SQLite claimers elect exactly one owner without raw SQLITE_BUSY");
+		const childA = claimChild(home, clock.now(), "process-a");
+		const childB = claimChild(home, clock.now(), "process-b");
+		await Promise.all([childA.ready, childB.ready]);
+		childA.child.send({ type: "RELEASE" }); childB.child.send({ type: "RELEASE" });
+		const [resultA, resultB] = await Promise.all([childA.claim, childB.claim]);
+		assert.equal([resultA, resultB].filter((result) => result.claimed).length, 1, "one real service child owns the durable claim");
+		const winner = resultA.claimed ? childA.child : childB.child;
+		const winnerHandle = resultA.claimed ? childA : childB;
+		const loserHandle = resultA.claimed ? childB : childA;
+		const winnerClose = winnerHandle.close; const loserClose = loserHandle.close;
+		winner.kill("SIGKILL");
+		assert.deepEqual(await winnerClose, { code: null, signal: "SIGKILL" }, "winner is killed before owner.close");
+		assert.deepEqual(await loserClose, { code: 0, signal: null }, "loser closes normally");
 		clock.advance(5_001);
 		({ writer, services } = openServices(home, clock, eligibility, "delivery-recovery"));
 		assert.equal(services.delivery.recover().some((row) => row.id === "env-crash" && row.status === "retrying"), true, "restart replays the dead child lease without double settlement");

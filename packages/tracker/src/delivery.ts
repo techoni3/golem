@@ -10,6 +10,16 @@ import {
 	type TrackerClock,
 	type TrackerStoragePort,
 } from "./types.js";
+import {
+	requireClaimLimit,
+	requireDeadline,
+	requireIdentifier,
+	requireJsonObject,
+	requireLease,
+	requireMaxAttempts,
+	requireRetryDelay,
+	sanitizeDiagnostic,
+} from "./validation.js";
 
 const defaultLeaseMs = 30_000;
 const defaultMaxAttempts = 5;
@@ -58,12 +68,6 @@ function endpointMatches(
 	);
 }
 
-function boundedLimit(limit: number): number {
-	if (!Number.isInteger(limit) || limit < 1 || limit > 100)
-		throw new Error("delivery claim limit must be an integer from 1 to 100");
-	return limit;
-}
-
 function retryAfter(attempts: number): number {
 	return Math.min(60_000, 1_000 * 2 ** Math.max(0, attempts - 1));
 }
@@ -84,14 +88,21 @@ export function createDurableDeliveryService(options: {
 	readonly clock: TrackerClock;
 }): DurableDeliveryService {
 	function enqueue(input: CreateEnvelopeInput): DeliveryEnvelope {
-		if (!input.id.trim() || !input.idempotencyKey.trim())
-			throw new Error("delivery envelope requires an id and idempotency key");
+		requireIdentifier(input.id, "delivery id");
+		requireIdentifier(input.idempotencyKey, "delivery idempotency key");
+		requireIdentifier(input.senderId, "delivery sender");
+		requireIdentifier(input.recipientId, "delivery recipient");
+		requireIdentifier(input.kind, "delivery kind");
+		if (input.replyToRecipientId !== undefined)
+			requireIdentifier(input.replyToRecipientId, "delivery reply recipient");
+		requireJsonObject(input.payload, "delivery payload");
 		const endpoint = options.eligibility.resolve(input.recipientId);
 		if (!eligible(endpoint))
 			throw new Error("delivery endpoint is not eligible for a new envelope");
 		const maxAttempts = input.maxAttempts ?? defaultMaxAttempts;
-		if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 20)
-			throw new Error("delivery max attempts must be an integer from 1 to 20");
+		requireMaxAttempts(maxAttempts);
+		if (input.deadlineAt !== undefined)
+			requireDeadline(input.deadlineAt, options.clock);
 		const now = options.clock.now();
 		const envelope: DeliveryEnvelope = Object.freeze({
 			id: input.id,
@@ -108,7 +119,9 @@ export function createDurableDeliveryService(options: {
 			status: "pending",
 			attempts: 0,
 			maxAttempts,
-			...(input.deadlineAt ? { deadlineAt: input.deadlineAt } : {}),
+			...(input.deadlineAt !== undefined
+				? { deadlineAt: input.deadlineAt }
+				: {}),
 			createdAt: now,
 		});
 		const result = options.storage.createEnvelope({
@@ -174,6 +187,8 @@ export function createDurableDeliveryService(options: {
 			},
 			acknowledge(acknowledgementId: string, payload: JsonObject = {}) {
 				requirePrepared();
+				requireIdentifier(acknowledgementId, "acknowledgement id");
+				requireJsonObject(payload, "acknowledgement payload");
 				return options.storage.acknowledgeEnvelope({
 					id: envelope.id,
 					claimToken: envelope.claimToken,
@@ -189,6 +204,9 @@ export function createDurableDeliveryService(options: {
 				readonly payload: JsonObject;
 			}) {
 				requirePrepared();
+				requireIdentifier(input.id, "reply id");
+				requireIdentifier(input.idempotencyKey, "reply idempotency key");
+				requireJsonObject(input.payload, "reply payload");
 				if (!envelope.replyToRecipientId)
 					throw new Error("delivery envelope has no reply route");
 				const endpoint = options.eligibility.resolve(
@@ -228,12 +246,12 @@ export function createDurableDeliveryService(options: {
 			},
 			fail(error: string, retryAfterMs = retryAfter(envelope.attempts)) {
 				requirePrepared();
-				if (!error.trim())
-					throw new Error("delivery failure requires an error");
+				requireRetryDelay(retryAfterMs);
+				const diagnostic = sanitizeDiagnostic(error);
 				const exhausted = envelope.attempts >= envelope.maxAttempts;
 				return settle(
 					exhausted ? "dead_letter" : "retrying",
-					error,
+					diagnostic,
 					exhausted ? undefined : options.clock.after(retryAfterMs),
 				);
 			},
@@ -247,16 +265,14 @@ export function createDurableDeliveryService(options: {
 	const service: DurableDeliveryService = {
 		enqueue,
 		claim(workerId, limit = 1, leaseMs = defaultLeaseMs) {
-			if (!workerId.trim() || !Number.isInteger(leaseMs) || leaseMs < 1)
-				throw new Error(
-					"delivery claim requires a worker id and positive lease",
-				);
+			requireIdentifier(workerId, "delivery worker");
+			requireLease(leaseMs);
 			const now = options.clock.now();
 			const rows = options.storage.claimEnvelopes({
 				workerId,
 				now,
 				claimUntil: options.clock.after(leaseMs),
-				limit: boundedLimit(limit),
+				limit: requireClaimLimit(limit),
 			});
 			return Object.freeze(rows.map(wrapClaim));
 		},

@@ -16,6 +16,7 @@ import type {
 	TrackerClock,
 	TrackerStoragePort,
 } from "./types.js";
+import { requireTimestamp } from "./validation.js";
 
 export interface TrackerServices {
 	readonly delivery: DurableDeliveryService;
@@ -41,6 +42,7 @@ export function createTrackerServices(options: {
 		subscriptions: createDurableSubscriptionService(options),
 		passive: createPassiveSlotService(options),
 		prune(before) {
+			requireTimestamp(before, "prune before");
 			return options.storage.prune({ now: options.clock.now(), before });
 		},
 		audit() {

@@ -105,7 +105,6 @@ class PersistenceOwner implements PersistenceWriteCapability {
 			ensureParent(paths.trackerPath);
 			runtime = new Database(paths.runtimePath);
 			tracker = new Database(paths.trackerPath);
-			tracker.pragma("busy_timeout = 1000");
 			this.#runtime = runtime;
 			this.#tracker = tracker;
 			this.#runtimeSql = new Kysely<RuntimeTables>({
@@ -119,15 +118,17 @@ class PersistenceOwner implements PersistenceWriteCapability {
 				}),
 			});
 			const runtimePlan = planFor(runtime, "runtime", "apply");
-			this.#trackerBaseline =
-				hasTrackerTables(tracker) && !hasManagedTrackerSchema(tracker)
-					? "unmanaged"
-					: "managed";
+			const trackerIsLegacy =
+				hasTrackerTables(tracker) && !hasManagedTrackerSchema(tracker);
+			const trackerPlan = trackerIsLegacy
+				? undefined
+				: planFor(tracker, "tracker", "apply");
+			this.#trackerBaseline = trackerIsLegacy ? "unmanaged" : "managed";
 			configure(runtime);
 			applyPlan(runtime, paths.runtimePath, runtimePlan, this.#clock);
-			if (this.#trackerBaseline === "managed") {
+			if (this.#trackerBaseline === "managed" && trackerPlan) {
+				tracker.pragma("busy_timeout = 1000");
 				configure(tracker);
-				const trackerPlan = planFor(tracker, "tracker", "apply");
 				applyPlan(tracker, paths.trackerPath, trackerPlan, this.#clock);
 			}
 			this.#runtimeRepository = new RuntimeRepository(runtime, this.#clock);

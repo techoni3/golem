@@ -5,6 +5,14 @@ import type {
 	TrackerClock,
 	TrackerStoragePort,
 } from "./types.js";
+import {
+	requireCursor,
+	requireCursorRange,
+	requireIdentifier,
+	requireSubscriptionClasses,
+	requireSubscriptionPendingLimit,
+	requireSubscriptionStatus,
+} from "./validation.js";
 
 export interface DurableSubscriptionService {
 	subscribe(input: {
@@ -27,37 +35,38 @@ export function createDurableSubscriptionService(options: {
 }): DurableSubscriptionService {
 	const service: DurableSubscriptionService = {
 		subscribe(input) {
-			if (
-				!input.name.trim() ||
-				!input.recipientId.trim() ||
-				!input.topic.trim()
-			)
-				throw new Error("subscription requires name, recipient, and topic");
-			const classes = input.classes ?? ["tracker", "lifecycle", "custom"];
-			if (classes.length === 0)
-				throw new Error("subscription requires at least one event class");
+			if (input.id !== undefined)
+				requireIdentifier(input.id, "subscription id");
+			requireIdentifier(input.name, "subscription name");
+			requireIdentifier(input.recipientId, "subscription recipient");
+			requireIdentifier(input.topic, "subscription topic");
+			const classes = requireSubscriptionClasses(
+				input.classes ?? ["tracker", "lifecycle", "custom"],
+			);
+			const cursor = requireCursor(input.cursor ?? 0);
+			requireSubscriptionStatus(input.status ?? "active");
 			return options.storage.upsertSubscription({
 				id: input.id ?? globalThis.crypto.randomUUID(),
 				name: input.name,
 				recipientId: input.recipientId,
 				topic: input.topic,
 				classes: Object.freeze([...classes]),
-				cursor: input.cursor ?? 0,
+				cursor,
 				manual: input.manual ?? true,
 				status: input.status ?? "active",
 				createdAt: options.clock.now(),
 			});
 		},
 		pending(id, limit = 100) {
-			if (!Number.isInteger(limit) || limit < 1 || limit > 1_000)
-				throw new Error(
-					"subscription pending limit must be an integer from 1 to 1000",
-				);
-			return options.storage.pendingSubscriptionEvents({ id, limit });
+			requireIdentifier(id, "subscription id");
+			return options.storage.pendingSubscriptionEvents({
+				id,
+				limit: requireSubscriptionPendingLimit(limit),
+			});
 		},
 		commit(id, fromSequence, toSequence) {
-			if (!Number.isInteger(fromSequence) || !Number.isInteger(toSequence))
-				throw new Error("subscription cursor values must be integers");
+			requireIdentifier(id, "subscription id");
+			requireCursorRange(fromSequence, toSequence);
 			return options.storage.advanceSubscriptionCursor({
 				id,
 				fromSequence,

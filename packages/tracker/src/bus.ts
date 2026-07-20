@@ -6,6 +6,11 @@ import {
 	type TrackerClock,
 	type TrackerStoragePort,
 } from "./types.js";
+import {
+	requireBusClass,
+	requireIdentifier,
+	requireJsonObject,
+} from "./validation.js";
 
 function fingerprint(value: unknown): string {
 	if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -33,12 +38,11 @@ export function createDurableBusService(options: {
 }): DurableBusService {
 	const service: DurableBusService = {
 		append(input) {
-			if (
-				!input.id.trim() ||
-				!input.deduplicationKey.trim() ||
-				!input.topic.trim()
-			)
-				throw new Error("bus event requires id, deduplication key, and topic");
+			requireIdentifier(input.id, "bus event id");
+			requireIdentifier(input.deduplicationKey, "bus deduplication key");
+			requireIdentifier(input.topic, "bus topic");
+			requireBusClass(input.class);
+			requireJsonObject(input.payload, "bus payload");
 			const event = Object.freeze({
 				id: input.id,
 				deduplicationKey: input.deduplicationKey,
