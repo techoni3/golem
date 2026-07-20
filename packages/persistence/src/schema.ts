@@ -44,12 +44,12 @@ CREATE TABLE projects (
 CREATE TABLE project_locations (
   location_id TEXT PRIMARY KEY CHECK(length(location_id) > 0),
   project_id TEXT NOT NULL REFERENCES projects(project_id),
-  location TEXT NOT NULL,
-  observed_path TEXT NOT NULL,
-  location_kind TEXT NOT NULL CHECK(location_kind IN ('canonical', 'worktree', 'relocated', 'legacy')),
+  canonical_path TEXT NOT NULL,
+  observed_path TEXT,
+  relation TEXT NOT NULL CHECK(relation IN ('main', 'worktree', 'registered', 'legacy')),
   source_observed_at TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  UNIQUE(project_id, location),
+  UNIQUE(project_id, canonical_path),
   UNIQUE(project_id, location_id)
 );
 CREATE TABLE location_aliases (
@@ -66,7 +66,7 @@ CREATE TABLE location_relations (
   project_id TEXT NOT NULL,
   location_id TEXT NOT NULL,
   related_location_id TEXT NOT NULL,
-  relation_kind TEXT NOT NULL CHECK(relation_kind IN ('same_project', 'worktree_of', 'relocated_from', 'legacy_source')),
+  relation_kind TEXT NOT NULL CHECK(relation_kind IN ('main', 'worktree', 'registered', 'legacy')),
   observed_at TEXT NOT NULL,
   provenance_json TEXT NOT NULL,
   PRIMARY KEY(project_id, location_id, related_location_id, relation_kind),
@@ -86,7 +86,7 @@ CREATE TABLE session_generations (
   session_id TEXT NOT NULL,
   project_id TEXT NOT NULL,
   ordinal INTEGER NOT NULL CHECK(ordinal > 0),
-  harness TEXT NOT NULL CHECK(length(harness) > 0),
+  harness TEXT NOT NULL CHECK(harness IN ('claude', 'codex', 'opencode', 'pi')),
   lifecycle_state TEXT NOT NULL CHECK(lifecycle_state IN ('starting', 'idle', 'active', 'waiting', 'ending', 'ended', 'errored', 'superseded')),
   lifecycle_schema_version TEXT NOT NULL CHECK(lifecycle_schema_version = 'golem.lifecycle/v1'),
   lifecycle_provenance_json TEXT NOT NULL,
@@ -99,24 +99,25 @@ CREATE TABLE session_generations (
   ended_at TEXT,
   UNIQUE(session_id, ordinal),
   UNIQUE(project_id, generation_id),
+  UNIQUE(project_id, session_id, generation_id),
   FOREIGN KEY(project_id, session_id) REFERENCES logical_sessions(project_id, session_id),
   CHECK((lifecycle_state IN ('ended', 'errored', 'superseded') AND ended_at IS NOT NULL) OR (lifecycle_state NOT IN ('ended', 'errored', 'superseded') AND ended_at IS NULL))
 );
 CREATE TABLE session_aliases (
   project_id TEXT NOT NULL,
-  harness TEXT NOT NULL CHECK(length(harness) > 0),
-  alias_kind TEXT NOT NULL CHECK(alias_kind IN ('native', 'thread', 'run', 'legacy', 'path')),
-  producer_id TEXT NOT NULL CHECK(length(producer_id) > 0),
+  harness TEXT NOT NULL CHECK(harness IN ('claude', 'codex', 'opencode', 'pi')),
+  alias_kind TEXT NOT NULL CHECK(alias_kind IN ('native_conversation', 'native_run', 'legacy_canonical_id', 'supervisor_thread', 'bridge_session', 'migration_relation')),
+  producer_id TEXT CHECK(producer_id IS NULL OR length(producer_id) > 0),
   alias TEXT NOT NULL CHECK(length(alias) > 0),
   session_id TEXT NOT NULL,
   generation_id TEXT,
   source TEXT NOT NULL,
   provenance_json TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  PRIMARY KEY(project_id, harness, alias_kind, producer_id, alias),
   FOREIGN KEY(project_id, session_id) REFERENCES logical_sessions(project_id, session_id),
-  FOREIGN KEY(project_id, generation_id) REFERENCES session_generations(project_id, generation_id)
+  FOREIGN KEY(project_id, session_id, generation_id) REFERENCES session_generations(project_id, session_id, generation_id)
 );
+CREATE UNIQUE INDEX session_aliases_scoped_identity ON session_aliases(project_id, harness, alias_kind, COALESCE(producer_id, ''), alias);
 CREATE TABLE producer_watermarks (
   producer_id TEXT PRIMARY KEY,
   watermark TEXT NOT NULL,
@@ -148,6 +149,7 @@ CREATE TABLE endpoint_claims (
   heartbeat_at TEXT,
   expires_at TEXT,
   superseded_at TEXT,
+  UNIQUE(endpoint_id, readiness_state),
   CHECK((state = 'superseded' AND superseded_at IS NOT NULL) OR (state <> 'superseded'))
 );
 CREATE UNIQUE INDEX endpoint_claims_one_live_route ON endpoint_claims(generation_id, route_kind) WHERE state IN ('claiming', 'healthy', 'degraded');
@@ -166,12 +168,14 @@ CREATE TABLE capability_observations (
   capability TEXT NOT NULL,
   adapter_id TEXT NOT NULL,
   adapter_version TEXT NOT NULL,
-  qualification_state TEXT NOT NULL CHECK(qualification_state IN ('qualified', 'unqualified', 'expired', 'unknown')),
+  qualification_state TEXT NOT NULL CHECK(qualification_state IN ('supported', 'experimental', 'unsupported', 'unknown')),
   delivery_mode TEXT NOT NULL CHECK(delivery_mode IN ('pull', 'native_channel', 'prompt_bridge', 'managed_app_server', 'next_turn')),
+  readiness_state TEXT NOT NULL CHECK(readiness_state IN ('ready', 'held_busy', 'held_waiting', 'pull_only', 'next_turn', 'unsupported', 'unhealthy', 'uninitialized')),
   evidence_kind TEXT NOT NULL CHECK(evidence_kind IN ('probe', 'configured', 'observed', 'operator')),
   evidence_json TEXT NOT NULL,
   observed_at TEXT NOT NULL,
   expires_at TEXT,
+  FOREIGN KEY(endpoint_id, readiness_state) REFERENCES endpoint_claims(endpoint_id, readiness_state),
   UNIQUE(endpoint_id, capability, evidence_kind, observed_at)
 );
 CREATE TABLE commands (

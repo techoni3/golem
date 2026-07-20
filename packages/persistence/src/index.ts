@@ -4,6 +4,7 @@
  */
 export { runtimeMigrations, trackerMigrations } from "./schema.js";
 export type {
+	CapabilityQualification,
 	ClaimedOutboxRecord,
 	CommandStatus,
 	DatabaseHealth,
@@ -14,6 +15,7 @@ export type {
 	EndpointLifecycleState,
 	EndpointReadinessState,
 	GenerationLifecycleState,
+	Harness,
 	MigrationDecision,
 	MigrationDefinition,
 	MigrationMode,
@@ -26,11 +28,13 @@ export type {
 	PersistencePaths,
 	PersistenceStatus,
 	PersistenceWriteCapability,
+	ProjectLocationRelation,
 	RuntimeCanonicalMutation,
 	RuntimeFailpoint,
 	RuntimeTransactionInput,
 	RuntimeTransactionResult,
 	SchemaVersionedProvenance,
+	SessionAliasKind,
 } from "./types.js";
 export {
 	PersistenceMigrationError,

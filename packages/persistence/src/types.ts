@@ -40,6 +40,32 @@ export type DeliveryMode =
 	| "managed_app_server"
 	| "next_turn";
 
+/** GOL-26 project-location facts, never inferred from a mutable observed path. */
+export type ProjectLocationRelation =
+	| "main"
+	| "worktree"
+	| "registered"
+	| "legacy";
+
+/** Exact GOL-26 harness closure for generations and scoped aliases. */
+export type Harness = "claude" | "codex" | "opencode" | "pi";
+
+/** Stable, project-scoped native identity evidence from GOL-15/GOL-26. */
+export type SessionAliasKind =
+	| "native_conversation"
+	| "native_run"
+	| "legacy_canonical_id"
+	| "supervisor_thread"
+	| "bridge_session"
+	| "migration_relation";
+
+/** Capability support truth is distinct from delivery readiness. */
+export type CapabilityQualification =
+	| "supported"
+	| "experimental"
+	| "unsupported"
+	| "unknown";
+
 /** Closed runtime-v1 recovery/control vocabularies mirrored by SQL CHECKs. */
 export type CommandStatus =
 	| "accepted"
@@ -156,15 +182,16 @@ export interface RuntimeCanonicalMutation {
 		readonly projectId: string;
 		readonly name: string;
 		readonly locationId: string;
-		readonly location: string;
-		readonly observedPath: string;
+		readonly canonicalPath: string;
+		readonly observedPath?: string;
+		readonly relation: ProjectLocationRelation;
 	};
 	readonly generation?: {
 		readonly generationId: string;
 		readonly sessionId: string;
 		readonly projectId: string;
 		readonly ordinal: number;
-		readonly harness: string;
+		readonly harness: Harness;
 		readonly state: GenerationLifecycleState;
 		readonly lifecycleProvenance: SchemaVersionedProvenance<"golem.lifecycle/v1">;
 		readonly fieldProvenance: SchemaVersionedProvenance<"golem.fields/v1">;
@@ -248,7 +275,8 @@ export class RuntimeFailpointError extends Error {
  */
 export interface PersistenceWriteCapability {
 	plan(scope: DatabaseScope, mode?: MigrationMode): MigrationPlan;
-	apply(scope: DatabaseScope, expectedPlanHash?: string): MigrationResult;
+	/** Apply is permitted only with the exact approved dry-run plan hash. */
+	apply(scope: DatabaseScope, expectedPlanHash: string): MigrationResult;
 	checkpointAndBackup(scope: DatabaseScope): string;
 	recordRuntimeTransaction(
 		input: RuntimeTransactionInput,

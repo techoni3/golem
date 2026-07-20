@@ -86,13 +86,14 @@ export class RuntimeRepository {
 					.run(project.projectId, project.name, materializedAt);
 				this.#database
 					.prepare(
-						"INSERT OR IGNORE INTO project_locations(location_id, project_id, location, observed_path, location_kind, source_observed_at, created_at) VALUES (?, ?, ?, ?, 'canonical', ?, ?)",
+						"INSERT OR IGNORE INTO project_locations(location_id, project_id, canonical_path, observed_path, relation, source_observed_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
 					)
 					.run(
 						project.locationId,
 						project.projectId,
-						project.location,
-						project.observedPath,
+						project.canonicalPath,
+						project.observedPath ?? null,
+						project.relation,
 						input.occurredAt,
 						materializedAt,
 					);

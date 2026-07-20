@@ -136,12 +136,16 @@ class PersistenceOwner implements PersistenceWriteCapability {
 			: planFor(database, scope, "apply");
 	}
 
-	apply(scope: DatabaseScope, expectedPlanHash?: string): MigrationResult {
+	apply(scope: DatabaseScope, expectedPlanHash: string): MigrationResult {
 		const database = scope === "runtime" ? this.#runtime : this.#tracker;
 		const databasePath =
 			scope === "runtime" ? this.#paths.runtimePath : this.#paths.trackerPath;
 		const approvedPlan = planFor(database, scope, "apply");
-		if (expectedPlanHash && expectedPlanHash !== approvedPlan.planHash)
+		if (
+			typeof expectedPlanHash !== "string" ||
+			!expectedPlanHash.trim() ||
+			expectedPlanHash !== approvedPlan.planHash
+		)
 			throw new PersistenceMigrationError(
 				"plan_mismatch",
 				`${scope} migration plan no longer matches the approved dry-run`,
@@ -149,7 +153,7 @@ class PersistenceOwner implements PersistenceWriteCapability {
 		if (scope === "tracker" && this.#trackerBaseline === "unmanaged")
 			configure(this.#tracker);
 		const plan = planFor(database, scope, "apply");
-		if (expectedPlanHash && expectedPlanHash !== plan.planHash)
+		if (expectedPlanHash !== plan.planHash)
 			throw new PersistenceMigrationError(
 				"plan_mismatch",
 				`${scope} migration plan changed while preparing the source database`,

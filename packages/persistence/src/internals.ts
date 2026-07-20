@@ -1,4 +1,5 @@
 import type {
+	CapabilityQualification,
 	CommandStatus,
 	DatabaseScope,
 	DeliveryEnvelopeStatus,
@@ -6,8 +7,11 @@ import type {
 	EndpointLifecycleState,
 	EndpointReadinessState,
 	GenerationLifecycleState,
+	Harness,
 	MigrationDecision,
 	MigrationRunStatus,
+	ProjectLocationRelation,
+	SessionAliasKind,
 } from "./types.js";
 
 export interface SqliteStatement<Row = Record<string, unknown>> {
@@ -52,9 +56,9 @@ export interface RuntimeTables {
 	readonly project_locations: {
 		readonly location_id: string;
 		readonly project_id: string;
-		readonly location: string;
-		readonly observed_path: string;
-		readonly location_kind: string;
+		readonly canonical_path: string;
+		readonly observed_path: string | null;
+		readonly relation: ProjectLocationRelation;
 		readonly source_observed_at: string;
 		readonly created_at: string;
 	};
@@ -70,7 +74,7 @@ export interface RuntimeTables {
 		readonly project_id: string;
 		readonly location_id: string;
 		readonly related_location_id: string;
-		readonly relation_kind: string;
+		readonly relation_kind: ProjectLocationRelation;
 		readonly observed_at: string;
 		readonly provenance_json: string;
 	};
@@ -85,7 +89,7 @@ export interface RuntimeTables {
 		readonly session_id: string;
 		readonly project_id: string;
 		readonly ordinal: number;
-		readonly harness: string;
+		readonly harness: Harness;
 		readonly lifecycle_state: GenerationLifecycleState;
 		readonly lifecycle_schema_version: "golem.lifecycle/v1";
 		readonly lifecycle_provenance_json: string;
@@ -99,9 +103,9 @@ export interface RuntimeTables {
 	};
 	readonly session_aliases: {
 		readonly project_id: string;
-		readonly harness: string;
-		readonly alias_kind: string;
-		readonly producer_id: string;
+		readonly harness: Harness;
+		readonly alias_kind: SessionAliasKind;
+		readonly producer_id: string | null;
 		readonly alias: string;
 		readonly session_id: string;
 		readonly generation_id: string | null;
@@ -154,8 +158,9 @@ export interface RuntimeTables {
 		readonly capability: string;
 		readonly adapter_id: string;
 		readonly adapter_version: string;
-		readonly qualification_state: string;
+		readonly qualification_state: CapabilityQualification;
 		readonly delivery_mode: DeliveryMode;
+		readonly readiness_state: EndpointReadinessState;
 		readonly evidence_kind: string;
 		readonly evidence_json: string;
 		readonly observed_at: string;

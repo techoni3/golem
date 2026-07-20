@@ -113,15 +113,16 @@ function eventInput(id, failpoint) {
 				projectId: "prj_fixture",
 				name: "Fixture",
 				locationId: "loc_fixture",
-				location: "/temporary/fixture",
+				canonicalPath: "/temporary/fixture",
 				observedPath: "/observed/fixture",
+				relation: "registered",
 			},
 			generation: {
 				generationId: `gen_${id}`,
 				sessionId: "ses_fixture",
 				projectId: "prj_fixture",
 				ordinal: id === "after" ? 1 : 2,
-				harness: "fixture",
+				harness: "claude",
 				state: "active",
 				lifecycleProvenance: {
 					schemaVersion: "golem.lifecycle/v1",
@@ -352,16 +353,24 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 		const contractDatabase = new Database(home.runtimeDb);
 		try {
 			contractDatabase.pragma("foreign_keys = ON");
-			const insertGeneration = ({ id, sessionId, projectId, ordinal, state }) =>
+			const insertGeneration = ({
+				id,
+				sessionId,
+				projectId,
+				ordinal,
+				state,
+				harness = "claude",
+			}) =>
 				contractDatabase
 					.prepare(
-						"INSERT INTO session_generations(generation_id, session_id, project_id, ordinal, harness, lifecycle_state, lifecycle_schema_version, lifecycle_provenance_json, field_schema_version, field_provenance_json, source_observed_at, received_at, activity_at, materialized_at, ended_at) VALUES (?, ?, ?, ?, 'fixture', ?, 'golem.lifecycle/v1', '{}', 'golem.fields/v1', '{}', ?, ?, ?, ?, ?)",
+						"INSERT INTO session_generations(generation_id, session_id, project_id, ordinal, harness, lifecycle_state, lifecycle_schema_version, lifecycle_provenance_json, field_schema_version, field_provenance_json, source_observed_at, received_at, activity_at, materialized_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, 'golem.lifecycle/v1', '{}', 'golem.fields/v1', '{}', ?, ?, ?, ?, ?)",
 					)
 					.run(
 						id,
 						sessionId,
 						projectId,
 						ordinal,
+						harness,
 						state,
 						clock.now(),
 						clock.now(),
@@ -385,6 +394,29 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 						readiness,
 						clock.now(),
 						state === "superseded" ? clock.now() : null,
+					);
+			const insertAlias = ({
+				projectId,
+				harness = "claude",
+				aliasKind = "native_conversation",
+				producerId = null,
+				alias,
+				sessionId,
+				generationId = null,
+			}) =>
+				contractDatabase
+					.prepare(
+						"INSERT INTO session_aliases(project_id, harness, alias_kind, producer_id, alias, session_id, generation_id, source, provenance_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'fixture', '{}', ?)",
+					)
+					.run(
+						projectId,
+						harness,
+						aliasKind,
+						producerId,
+						alias,
+						sessionId,
+						generationId,
+						clock.now(),
 					);
 
 			assert.equal(
@@ -419,30 +451,87 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 				],
 				"generations retain independent clocks and schema-versioned lifecycle/field provenance",
 			);
-			for (const [projectId, name, locationId] of [
-				["prj_contract", "Contract", "loc_text_identity"],
-				["prj_other", "Other", "loc_other"],
-			]) {
-				contractDatabase
-					.prepare("INSERT INTO projects VALUES (?, ?, ?)")
-					.run(projectId, name, clock.now());
+			const insertLocation = ({
+				locationId,
+				projectId,
+				canonicalPath,
+				observedPath = null,
+				relation,
+			}) =>
 				contractDatabase
 					.prepare(
-						"INSERT INTO project_locations VALUES (?, ?, ?, ?, ?, ?, ?)",
+						"INSERT INTO project_locations(location_id, project_id, canonical_path, observed_path, relation, source_observed_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
 					)
 					.run(
 						locationId,
 						projectId,
-						`/${projectId}/canonical`,
-						`/${projectId}/observed`,
-						"canonical",
+						canonicalPath,
+						observedPath,
+						relation,
 						clock.now(),
 						clock.now(),
 					);
+			const projectLocationColumns = contractDatabase
+				.prepare("PRAGMA table_info(project_locations)")
+				.all();
+			assert.deepEqual(
+				projectLocationColumns.map((column) => column.name),
+				[
+					"location_id",
+					"project_id",
+					"canonical_path",
+					"observed_path",
+					"relation",
+					"source_observed_at",
+					"created_at",
+				],
+				"project locations retain the exact GOL-26 canonical/observed/relation fields",
+			);
+			assert.equal(
+				projectLocationColumns.find((column) => column.name === "observed_path")
+					.notnull,
+				0,
+				"a project location may omit an untrusted raw observed path",
+			);
+			for (const [projectId, name, locationId, relation] of [
+				["prj_contract", "Contract", "loc_text_identity", "main"],
+				["prj_other", "Other", "loc_other", "registered"],
+			]) {
+				contractDatabase
+					.prepare("INSERT INTO projects VALUES (?, ?, ?)")
+					.run(projectId, name, clock.now());
+				insertLocation({
+					locationId,
+					projectId,
+					canonicalPath: `/${projectId}/canonical`,
+					observedPath: `/${projectId}/observed`,
+					relation,
+				});
 				contractDatabase
 					.prepare("INSERT INTO logical_sessions VALUES (?, ?, '{}', ?)")
 					.run(`ses_${projectId}`, projectId, clock.now());
 			}
+			for (const [locationId, relation] of [
+				["loc_worktree", "worktree"],
+				["loc_legacy", "legacy"],
+			])
+				insertLocation({
+					locationId,
+					projectId: "prj_contract",
+					canonicalPath: `/prj_contract/${relation}`,
+					relation,
+				});
+			assert.throws(
+				() =>
+					insertLocation({
+						locationId: "loc_competing_relation",
+						projectId: "prj_contract",
+						canonicalPath: "/prj_contract/competing",
+						relation: "canonical",
+					}),
+				/constraint/i,
+				"project locations reject competing persistence-only relation values",
+			);
 			const lifecycle = [
 				"starting",
 				"idle",
@@ -468,6 +557,43 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 				ordinal: 1,
 				state: "starting",
 			});
+			contractDatabase
+				.prepare("INSERT INTO logical_sessions VALUES (?, ?, '{}', ?)")
+				.run("ses_prj_contract_second", "prj_contract", clock.now());
+			insertGeneration({
+				id: "gen_contract_second",
+				sessionId: "ses_prj_contract_second",
+				projectId: "prj_contract",
+				ordinal: 1,
+				state: "starting",
+			});
+			for (const [index, harness] of [
+				"claude",
+				"codex",
+				"opencode",
+				"pi",
+			].entries())
+				insertGeneration({
+					id: `gen_harness_${harness}`,
+					sessionId: "ses_prj_contract",
+					projectId: "prj_contract",
+					ordinal: 20 + index,
+					state: "starting",
+					harness,
+				});
+			assert.throws(
+				() =>
+					insertGeneration({
+						id: "gen_unknown_harness",
+						sessionId: "ses_prj_contract",
+						projectId: "prj_contract",
+						ordinal: 30,
+						state: "starting",
+						harness: "cursor",
+					}),
+				/constraint/i,
+				"generation harnesses close over the exact GOL-26 set",
+			);
 			assert.equal(
 				contractDatabase
 					.prepare("SELECT COUNT(*) AS count FROM live_sessions WHERE lifecycle_state IN ('ended', 'errored', 'superseded')")
@@ -514,7 +640,7 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 				assert.throws(
 					() =>
 						contractDatabase
-							.prepare("INSERT INTO location_relations VALUES (?, ?, ?, 'worktree_of', ?, '{}')")
+							.prepare("INSERT INTO location_relations VALUES (?, ?, ?, 'worktree', ?, '{}')")
 							.run("prj_contract", locationId, relatedLocationId, clock.now()),
 					/FOREIGN KEY/i,
 					"both relation endpoints stay within the owning project",
@@ -522,26 +648,95 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 			for (const [sessionId, generationId] of [
 				["ses_prj_other", "gen_lifecycle_0"],
 				["ses_prj_contract", "gen_other"],
+				["ses_prj_contract", "gen_contract_second"],
 			])
 				assert.throws(
 					() =>
-						contractDatabase
-							.prepare("INSERT INTO session_aliases VALUES (?, 'fixture', 'native', ?, ?, ?, ?, 'fixture', '{}', ?)")
-							.run("prj_contract", `producer-${sessionId}`, `alias-${generationId}`, sessionId, generationId, clock.now()),
+						insertAlias({
+							projectId: "prj_contract",
+							producerId: `producer-${sessionId}`,
+							alias: `alias-${generationId}`,
+							sessionId,
+							generationId,
+						}),
 					/FOREIGN KEY/i,
-					"session aliases cannot cross-link project-owned sessions or generations",
+					"session aliases cannot cross-link project-owned sessions or generations, including a different same-project session",
 				);
-			contractDatabase
-				.prepare("INSERT INTO session_aliases VALUES (?, 'fixture', 'native', ?, ?, ?, ?, 'fixture', '{}', ?)")
-				.run("prj_contract", "producer-a", "same-alias", "ses_prj_contract", "gen_lifecycle_0", clock.now());
+			for (const aliasKind of [
+				"native_conversation",
+				"native_run",
+				"legacy_canonical_id",
+				"supervisor_thread",
+				"bridge_session",
+				"migration_relation",
+			])
+				insertAlias({
+					projectId: "prj_contract",
+					aliasKind,
+					producerId: `producer-${aliasKind}`,
+					alias: `alias-${aliasKind}`,
+					sessionId: "ses_prj_contract",
+					generationId: "gen_lifecycle_0",
+				});
+			for (const harness of ["claude", "codex", "opencode", "pi"])
+				insertAlias({
+					projectId: "prj_contract",
+					harness,
+					producerId: `producer-${harness}`,
+					alias: `harness-${harness}`,
+					sessionId: "ses_prj_contract",
+					generationId: "gen_lifecycle_0",
+				});
 			assert.throws(
 				() =>
-					contractDatabase
-						.prepare("INSERT INTO session_aliases VALUES (?, 'fixture', 'native', ?, ?, ?, ?, 'fixture', '{}', ?)")
-						.run("prj_contract", "producer-a", "same-alias", "ses_prj_contract", "gen_lifecycle_0", clock.now()),
+					insertAlias({
+						projectId: "prj_contract",
+						harness: "cursor",
+						alias: "invalid-harness",
+						sessionId: "ses_prj_contract",
+						generationId: "gen_lifecycle_0",
+					}),
 				/constraint/i,
-				"strong aliases remain unique inside their full project/harness/kind/producer scope",
+				"session aliases reject harnesses outside the exact GOL-26 set",
 			);
+			assert.throws(
+				() =>
+					insertAlias({
+						projectId: "prj_contract",
+						aliasKind: "native",
+						alias: "invalid-kind",
+						sessionId: "ses_prj_contract",
+						generationId: "gen_lifecycle_0",
+					}),
+				/constraint/i,
+				"session aliases reject competing persistence-only alias kinds",
+			);
+			insertAlias({
+				projectId: "prj_contract",
+				producerId: null,
+				alias: "same-alias",
+				sessionId: "ses_prj_contract",
+				generationId: "gen_lifecycle_0",
+			});
+			assert.throws(
+				() =>
+					insertAlias({
+						projectId: "prj_contract",
+						producerId: null,
+						alias: "same-alias",
+						sessionId: "ses_prj_contract",
+						generationId: "gen_lifecycle_0",
+					}),
+				/constraint/i,
+				"unscoped aliases remain deterministically unique when producer scope is absent",
+			);
+			insertAlias({
+				projectId: "prj_contract",
+				producerId: "producer-a",
+				alias: "same-alias",
+				sessionId: "ses_prj_contract",
+				generationId: "gen_lifecycle_0",
+			});
 			const endpointStates = ["claiming", "healthy", "degraded", "released", "expired", "superseded"];
 			const readinessStates = [
 				"ready",
@@ -597,13 +792,73 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 				/constraint/i,
 				"one live endpoint route per generation is enforced by a partial unique index",
 			);
+			const insertCapability = ({
+				id,
+				endpointId,
+				capability,
+				qualification,
+				readiness,
+			}) =>
+				contractDatabase
+					.prepare(
+						"INSERT INTO capability_observations(id, endpoint_id, capability, adapter_id, adapter_version, qualification_state, delivery_mode, readiness_state, evidence_kind, evidence_json, observed_at, expires_at) VALUES (?, ?, ?, 'fixture', '1', ?, 'native_channel', ?, 'probe', '{}', ?, NULL)",
+					)
+					.run(
+						id,
+						endpointId,
+						capability,
+						qualification,
+						readiness,
+						clock.now(),
+					);
 			assert.throws(
 				() =>
-					contractDatabase
-						.prepare("INSERT INTO capability_observations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-						.run("cap_missing_endpoint", "missing", "dispatch", "fixture", "1", "qualified", "native_channel", "probe", "{}", clock.now(), null),
+					insertCapability({
+						id: "cap_missing_endpoint",
+						endpointId: "missing",
+						capability: "dispatch",
+						qualification: "supported",
+						readiness: "ready",
+					}),
 				/FOREIGN KEY/i,
 				"capability evidence retains a foreign-keyed endpoint owner",
+			);
+			for (const qualification of [
+				"supported",
+				"experimental",
+				"unsupported",
+				"unknown",
+			])
+				insertCapability({
+					id: `cap_${qualification}`,
+					endpointId: "endpoint_0",
+					capability: `dispatch_${qualification}`,
+					qualification,
+					readiness: "ready",
+				});
+			assert.throws(
+				() =>
+					insertCapability({
+						id: "cap_competing_qualification",
+						endpointId: "endpoint_0",
+						capability: "competing_qualification",
+						qualification: "qualified",
+						readiness: "ready",
+					}),
+				/constraint/i,
+				"capability qualification rejects competing persistence-only values",
+			);
+			assert.throws(
+				() =>
+					insertCapability({
+						id: "cap_mismatched_readiness",
+						endpointId: "endpoint_0",
+						capability: "mismatched_readiness",
+						qualification: "supported",
+						readiness: "held_busy",
+					}),
+				/FOREIGN KEY/i,
+				"capability readiness is relationally bound to the endpoint readiness fact",
 			);
 			contractDatabase
 				.prepare("INSERT INTO commands VALUES (?, ?, '{}', 'accepted', ?)")
@@ -650,6 +905,18 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 			fs.readFileSync(home.trackerDb),
 			trackerBeforeDryRun,
 			"dry-run leaves the source tracker bytes unchanged",
+		);
+		assert.throws(
+			() => owner.apply("tracker", undefined),
+			(error) =>
+				error instanceof PersistenceMigrationError &&
+				error.code === "plan_mismatch",
+			"apply requires an explicit dry-run plan hash",
+		);
+		assert.deepEqual(
+			fs.readFileSync(home.trackerDb),
+			trackerBeforeDryRun,
+			"an omitted approval hash cannot configure, back up, ledger, or mutate tracker bytes",
 		);
 		assert.throws(
 			() => owner.apply("tracker", "not-the-approved-plan"),
