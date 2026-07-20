@@ -1,12 +1,11 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawn } from 'node:child_process';
-import Fastify from 'fastify';
 import swagger from '@fastify/swagger';
 import websocket from '@fastify/websocket';
+import Fastify from 'fastify';
 import { serializerCompiler, validatorCompiler, jsonSchemaTransform } from 'fastify-type-provider-zod';
 import createClient from 'openapi-fetch';
 import WebSocket from 'ws';
@@ -76,7 +75,8 @@ export async function certifyContractBoundary({ fixtureRoot, generatedRoot, env 
     ], fixtureRoot, env);
     const spec = JSON.parse(await readFile(specPath, 'utf8'));
     assert(spec.paths['/echo']?.post, 'OpenAPI document omitted POST /echo');
-    assert((await readFile(typesPath, 'utf8')).includes("'/echo'"), 'generated client types omitted /echo');
+    const generatedTypes = await readFile(typesPath, 'utf8');
+    assert.match(generatedTypes, /["']\/echo["']\s*:/, 'generated client types omitted /echo');
     const generatedClientPath = join(artifactRoot, 'generated-client.ts');
     await writeFile(generatedClientPath, `import createClient from 'openapi-fetch';\nimport type { paths } from './openapi.js';\nexport const client = createClient<paths>({ baseUrl: 'http://127.0.0.1' });\n`);
     await run(process.execPath, [

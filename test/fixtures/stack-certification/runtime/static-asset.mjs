@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
+import Fastify from 'fastify';
 
 export async function certifyStaticAsset(distRoot) {
   const app = Fastify({ logger: false });
@@ -15,7 +15,7 @@ export async function certifyStaticAsset(distRoot) {
     const index = await fetch(`${baseUrl}/`);
     assert.equal(index.status, 200);
     const indexHtml = await index.text();
-    const assetMatch = indexHtml.match(/src="([^\"]+\.js)"/);
+    const assetMatch = indexHtml.match(/src="([^"]+\.js)"/);
     assert(assetMatch, 'Vite index did not reference a JavaScript asset');
     const asset = await fetch(`${baseUrl}${assetMatch[1]}`);
     assert.equal(asset.status, 200);
