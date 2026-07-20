@@ -9,9 +9,13 @@
 			"import": "./dist/index.js"
 		}
 	},
+	"scripts": {
+		"build": "npm run build -w @golem/contracts && tsc -b"
+	},
 	"dependencies": {
 		"@golem/contracts": "file:../contracts",
 		"@clack/prompts": "1.7.0",
-		"commander": "15.0.0"
+		"commander": "15.0.0",
+		"jsonc-parser": "3.3.1"
 	}
 }

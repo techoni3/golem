@@ -2,6 +2,12 @@ import { registerScenario } from "@golem/testkit";
 
 export const scenarios = [
 	registerScenario({
+		id: "launcher-resolution-matrix",
+		journey: "J7",
+		tier: "pr",
+		regression: "launch precedence, capability qualification, or JSONC preservation drifts before process spawn",
+	}),
+	registerScenario({
 		id: "testkit-smoke",
 		journey: "J3",
 		tier: "pr",
