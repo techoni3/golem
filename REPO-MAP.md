@@ -1,46 +1,39 @@
 # REPO-MAP.md
-> Last verified: 2026-07-20 @ 558ca83 — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-20 @ ae007f4 — maintained via golem:docs-maintenance.
 
 ## Structure
 
-- `apps/` — private TypeScript seams; legacy entrypoints remain authoritative until vertical-slice cutover.
-- `packages/` — strict boundaries: `contracts` owns Zod v1 schemas; `testkit` and `test/journeys/` own serial real-process proof.
-- `tools/openapi-codegen/` — isolated TS5/OpenAPI source generator, never runtime or public packaging.
-- `substrate/` is source; `plugin/` and `dashboard/dist/` are generated products.
-- `cli/`, `lib/`, `dashboard/server/`, `mcp/channel/`, and `shims/` are public/compatibility surfaces; `test/` has journey fixtures.
+- `apps/` — private TypeScript seams; legacy entrypoints are authoritative until cutover.
+- `packages/` — `contracts` owns Zod v1 schemas, `api-client` generated `openapi-fetch`, `ui` primitives, and `testkit`/`test/journeys/` real-process proof.
+- `tools/openapi-codegen/` — private TS5/OpenAPI generator, never runtime/public packaging.
+- `substrate/` is source; `plugin/` and `dashboard/dist/` are generated products. `cli/`, `lib/`, `dashboard/server/`, `mcp/channel/`, and `shims/` are compatibility surfaces.
 
-## Workspace and entrypoints
+## Workspace
 
 ### Root `package.json`, `tsconfig*.json`, and `biome.json`
 
 - One npm 11 lock owns `apps/`, `packages/`, and `tools/`; applications use TS 7 while untouched JS stays unchecked.
-- `typecheck`, `build`, boundaries, lint, clean, and `api:*` are the typed-scaffold contract; clean removes named outputs only.
-- `api-client` owns runtime `openapi-fetch@0.17.0`; codegen owns exact TS 5.9.3/OpenAPI Typescript 7.13.0 without `npx`.
-- `contracts:*` regenerates/checks the deterministic v1 registry; `test:contracts` is its single table-driven JSON-wire journey.
-- `testkit` owns temp-home containment, child termination, stable summaries, semantic comparison, and fresh-context headless fixtures; loopback denial is `UNMET` (see `docs/architecture/testing.md`).
-- `packages/ui` owns ordered semantic token layers/React Aria wrappers; `apps/dashboard/src/design-lab` is its isolated consumer (`test:ui-primitives`).
-- `apps/control-plane` owns the foreground-only Fastify 5 typed shell: loopback auth, typed error/response handling, `/api/v1` OpenAPI artifact, revisioned WS resync, static legacy dashboard shell, and explicit service/LaunchAgent lifecycle (see `docs/architecture/control-plane.md`).
-- `packages/api-client/src/generated/openapi.ts` is generated only from `apps/control-plane/generated/openapi.json`; `api:generate` writes it and `api:check` rejects drift using the isolated codegen toolchain.
+- Root scripts own typecheck/build/boundaries/lint/clean and deterministic `contracts:*`/`api:*` generation/check.
+- `api-client` uses runtime `openapi-fetch@0.17.0`; codegen alone has exact TS 5.9.3/OpenAPI Typescript 7.13.0. No application/runtime source imports the tools workspace.
+- `testkit` contains temp-home containment, child cleanup, stable summaries, and fresh headless contexts; denied loopback is `UNMET`.
+- `apps/control-plane` is the thin foreground Fastify composition façade. `auth`, `routes`, `ws-replay`, `compatibility`, and `lifecycle` keep bearer/browser policy, validated routes/errors, bounded injected replay, concrete legacy `/api/health`/`/api/meta` + static shell, and nonce-safe service/LaunchAgent lifecycle separate (`docs/architecture/control-plane.md`).
 
 ### `scripts/check-boundaries.mjs`
 
-- Reads dependency metadata/imports (including root JS/MJS), normalizing `@golem/*` subpaths to declared roots before direction checks.
-- Its nine committed direction fixtures include metadata-only, compat-subpath, and root-level codegen MJS cases; they are the regression proof, not mock-heavy unit fan-out.
+- Reads dependency metadata/imports including root JS/MJS, normalizing `@golem/*` subpaths before direction checks.
+- Its nine fixtures cover metadata-only, compat-subpath, and root-level codegen MJS cases.
 
-## Data flow
+## Data flow and constraints
 
-Hooks/shims write beneath `GOLEM_HOME`; dashboard REST/WS and tracker phase remain authoritative. The control-plane shell owns only `/api/v1` and `/ws` typed transport; legacy dashboard REST/WS routes are not migrated by its composition seam. Typed direction is contracts → domain/runtime/tracker → control plane → client → CLI/MCP/dashboard; canonical packages never import compat, storage, UI, harness, or tools.
+Hooks/shims write below `GOLEM_HOME`; dashboard REST/WS and tracker phase remain authoritative. The control-plane shell exposes typed `/api/v1`, versioned `/ws`, and static compatibility only; it neither imports legacy dashboard state nor migrates runtime/tracker routes. Direction is contracts → domain/runtime/tracker → control plane → client → CLI/MCP/dashboard; canonical packages never import compat, storage, UI, harness, or tools.
 
-## Constraints
-
-- The nested `mcp/channel` postinstall/lock is a declared temporary legacy closure for GOL-29, not a second canonical workspace lock.
-- Never peer-bypass, import `tools/**` from production code, or include workspace symlinks/TS5 in the root tarball.
-- TS 7 accepts build-mode `--stopBuildOnErrors`, not `--stopOnBuildErrors`.
-- Claude uses cached render bytes; after substrate edits sync, update, and `/reload-plugins`.
+- Nested `mcp/channel` postinstall/lock is the declared temporary GOL-29 legacy closure, not a second canonical lock.
+- Never peer-bypass, import `tools/**` from production, or include workspace symlinks/TS5 in the root tarball. TS 7 uses `--stopBuildOnErrors`.
 
 ## Common tasks
 
 | Task | Files | Verify with |
-|------|-------|-------------|
-| Typed workspace | `apps/`, `packages/`, `tools/`, root configs | Node 24 `npm ci`, `typecheck`, `build`, boundaries, lint |
+|---|---|---|
+| Typed workspace | `apps/`, `packages/`, `tools/`, root configs | Node 24 `npm ci`, typecheck/build, boundaries, lint |
+| Control plane | `apps/control-plane`, `packages/api-client`, J6 | Node 24 `api:generate`, `api:check`, J6, browser shell |
 | Legacy runtime | `cli/`, `dashboard/`, `mcp/channel/`, `shims/` | temp-home legacy baseline |
