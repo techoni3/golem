@@ -8,7 +8,7 @@ import Fastify from 'fastify';
 import swagger from '@fastify/swagger';
 import websocket from '@fastify/websocket';
 import { serializerCompiler, validatorCompiler, jsonSchemaTransform } from 'fastify-type-provider-zod';
-import { createClient } from 'openapi-fetch';
+import createClient from 'openapi-fetch';
 import WebSocket from 'ws';
 import { EchoInput, EchoOutput } from './schema.mjs';
 
@@ -96,7 +96,7 @@ export async function certifyContractBoundary({ fixtureRoot, generatedRoot, env 
     const broken = await fetch(`${baseUrl}/broken-response`);
     assert.equal(broken.status, 500);
 
-    const socket = new WebSocket(baseUrl.replace(/^http/, 'ws') + '/events');
+    const socket = new WebSocket(`${baseUrl.replace(/^http/, 'ws')}/events`);
     await once(socket, 'open');
     const snapshot = await receiveJson(socket);
     assert.deepEqual(snapshot, { event: 'snapshot', cursor: 'c1' });

@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const [input, output] = process.argv.slice(2);
 if (!input || !output) throw new Error('usage: generate.mjs <openapi.json> <output.ts>');

@@ -26,6 +26,7 @@ export const INSTALL_KILL_GRACE_MS = 5_000;
 const outputLimit = 12_000;
 let activeTemporaryRoot = null;
 const activeChildren = new Set();
+const esmRequireBridge = "import { createRequire as __golemCreateRequire } from 'node:module'; const require = __golemCreateRequire(import.meta.url);";
 
 function appendTail(current, chunk) {
   const next = current + chunk;
@@ -300,7 +301,7 @@ async function certifyMcpRender(fixtureRoot, temporaryRoot, env) {
   const esbuild = join(fixtureRoot, 'node_modules', 'esbuild', 'bin', 'esbuild');
   for (const [source, output] of [['mcp-server.mjs', 'server.mjs'], ['mcp-client.mjs', 'client.mjs']]) {
     requireSuccess(await command(esbuild, [
-      join(fixtureRoot, 'runtime', source), '--bundle', '--format=esm', '--platform=node', '--target=node24', `--outfile=${join(renderRoot, output)}`
+      join(fixtureRoot, 'runtime', source), '--bundle', '--format=esm', '--platform=node', '--target=node24', `--banner:js=${esmRequireBridge}`, `--outfile=${join(renderRoot, output)}`
     ], { cwd: fixtureRoot, env }));
   }
   assert(!(await exists(join(renderRoot, 'node_modules'))), 'render unexpectedly contains node_modules');
@@ -308,6 +309,7 @@ async function certifyMcpRender(fixtureRoot, temporaryRoot, env) {
   const clientBundle = await readFile(join(renderRoot, 'client.mjs'), 'utf8');
   const serverBundle = await readFile(join(renderRoot, 'server.mjs'), 'utf8');
   assert(!clientBundle.includes(fixtureRoot) && !serverBundle.includes(fixtureRoot), 'render bundle leaked fixture source path');
+  assert(clientBundle.includes('__golemCreateRequire') && serverBundle.includes('__golemCreateRequire'), 'render bundle omitted its ESM require bridge');
   const childEnv = { ...env, NODE_PATH: '' };
   const result = requireSuccess(await command(process.execPath, ['client.mjs', 'server.mjs'], { cwd: renderRoot, env: childEnv }));
   return JSON.parse(result.stdout);

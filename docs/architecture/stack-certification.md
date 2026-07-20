@@ -54,8 +54,10 @@ The fixture has no dependency on the repository root `node_modules`:
 4. a loopback WebSocket sends a snapshot and verifies a resume exchange;
 5. Vite builds a React asset which is served and fetched through Fastify static;
 6. esbuild produces MCP server/client bundles in a sibling directory with no
-   parent or render `node_modules`; a rendered client launches its rendered
-   server with `NODE_PATH` cleared and performs initialize/list-tools/call-tool;
+   parent or render `node_modules`; each ESM bundle receives a
+   `createRequire(import.meta.url)` bridge for bundled CommonJS-only SDK
+   transitive code. A rendered client launches its rendered server with
+   `NODE_PATH` cleared and performs initialize/list-tools/call-tool;
 7. Biome checks the fixture and compiled `node:test` imports the generated ESM
    workspace package.
 
