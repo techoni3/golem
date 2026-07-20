@@ -1,6 +1,10 @@
 {
 	"extends": "../../tsconfig.package.json",
-	"compilerOptions": { "outDir": "./dist", "rootDir": "./src" },
+	"compilerOptions": {
+		"outDir": "./dist",
+		"rootDir": "./src",
+		"types": ["node"]
+	},
 	"references": [{ "path": "../runtime" }, { "path": "../tracker" }],
 	"include": ["src/**/*.ts"]
 }

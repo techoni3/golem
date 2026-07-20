@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "projects": [
+    {
+      "id": "acme-current",
+      "name": "Acme",
+      "path": "/workspace/acme",
+      "kind": "manual"
+    },
+    {
+      "id": "acme-current",
+      "name": "Acme feature",
+      "path": "/workspace/acme/.worktrees/feature",
+      "kind": "auto"
+    }
+  ]
+}

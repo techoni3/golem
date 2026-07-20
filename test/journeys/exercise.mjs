@@ -24,6 +24,7 @@ import {
 } from "@golem/testkit";
 import { normalizeLegacyObservation } from "../parity/normalization.mjs";
 import { exerciseControlPlaneShell } from "../control-plane/control-plane-shell.mjs";
+import { runMigrationPlanReplay } from "../migration/replay.mjs";
 import { exerciseRenderMcpClosure } from "../render-mcp-closure.mjs";
 import { exerciseDomainReplay } from "./domain-replay.mjs";
 import { exerciseLauncherResolution } from "./launcher-resolution.mjs";
@@ -459,6 +460,10 @@ export async function exerciseLegacyParityBaseline() {
 	}
 }
 
+export async function exerciseMigrationDryRunAmbiguity() {
+	return runMigrationPlanReplay();
+}
+
 export function diagnosticFor(error, context) {
 	const description = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 	const temporaryRoot = context?.temporaryRoot || context?.root || (error instanceof JourneyDiagnosticError ? error.temporaryRoot : undefined);
@@ -471,6 +476,7 @@ export const exercises = Object.freeze({
 	"launcher-resolution-matrix": exerciseLauncherResolution,
 	"native-spawn-safety": exerciseNativeSpawnSafety,
 	"launcher-signal-cleanup": exerciseLauncherSignalCleanup,
+	"migration-dry-run-ambiguity": exerciseMigrationDryRunAmbiguity,
 	"testkit-smoke": exerciseSmoke,
 	"testkit-fake-harness": exerciseFakeHarness,
 	"testkit-semantic-parity": exerciseSemanticParity,

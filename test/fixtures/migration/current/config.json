@@ -1,0 +1,8 @@
+{
+  "schema_version": "legacy/v1",
+  "launch": { "presets": [] },
+  "user_owned": {
+    "keep": true,
+    "api_key": "fixture-secret-must-not-appear"
+  }
+}
