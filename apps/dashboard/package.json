@@ -10,13 +10,17 @@
 		}
 	},
 	"scripts": {
-		"build": "npm run build -w @golem/ui && vite build"
+		"build": "npm run build -w @golem/ui && vite build",
+		"typecheck": "tsc -b --pretty false"
 	},
 	"dependencies": {
 		"@golem/api-client": "file:../../packages/api-client",
 		"@golem/ui": "file:../../packages/ui",
+		"@tanstack/react-query": "^5.101.2",
 		"react": "19.2.7",
-		"react-dom": "19.2.7"
+		"react-dom": "19.2.7",
+		"react-router": "^7.18.1",
+		"react-router-dom": "^7.18.1"
 	},
 	"devDependencies": {
 		"@types/react": "19.2.17",

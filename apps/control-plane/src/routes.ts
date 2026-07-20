@@ -2,7 +2,11 @@ import { RuntimeSignalV1Schema } from "@golem/contracts";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
-import { type BrowserSessionAuthority, bearerIsValid } from "./auth.js";
+import {
+	type BrowserSessionAuthority,
+	bearerIsValid,
+	isExpectedOrigin,
+} from "./auth.js";
 import type { LegacyCompatibilityPublisher } from "./compatibility.js";
 import { fail, sendValidated } from "./errors.js";
 import { controlPlaneOpenApiDocument } from "./openapi.js";
@@ -44,6 +48,26 @@ function requireBearer(
 ): boolean {
 	if (bearerIsValid(request, token)) return true;
 	fail(request, reply, 401, "auth.invalid", "a valid bearer token is required");
+	return false;
+}
+
+/** Browser reads carry the bootstrap CSRF proof so a local page cannot borrow
+ * a session cookie to observe typed projections without a same-origin origin. */
+function requireBrowserRead(
+	request: FastifyRequest,
+	reply: FastifyReply,
+	token: string,
+	sessions: BrowserSessionAuthority,
+): boolean {
+	if (bearerIsValid(request, token) || sessions.validMutation(request))
+		return true;
+	fail(
+		request,
+		reply,
+		401,
+		"auth.invalid",
+		"a valid bearer token or same-origin browser session is required",
+	);
 	return false;
 }
 
@@ -124,7 +148,8 @@ export function registerValidatedRoutes(options: {
 			},
 		},
 		async (request, reply) => {
-			if (!requireBearer(request, reply, options.token)) return;
+			if (!requireBrowserRead(request, reply, options.token, options.sessions))
+				return;
 			return sendValidated(request, reply, MetaResponseSchema, {
 				schema_version: "golem.control-plane-meta/v1",
 				instance_id: options.instanceId,
@@ -167,7 +192,8 @@ export function registerValidatedRoutes(options: {
 			},
 		},
 		async (request, reply) => {
-			if (!requireBearer(request, reply, options.token)) return;
+			if (!requireBrowserRead(request, reply, options.token, options.sessions))
+				return;
 			const parsed = ProjectionParamsSchema.safeParse(request.params);
 			if (!parsed.success)
 				return fail(
@@ -242,7 +268,20 @@ export function registerValidatedRoutes(options: {
 			},
 		},
 		async (request, reply) => {
-			if (!requireBearer(request, reply, options.token)) return;
+			// The static SPA cannot receive the service bearer. A same-origin POST
+			// is the explicit bootstrap boundary that mints its HttpOnly session;
+			// subsequent browser mutations still require that session plus CSRF.
+			if (
+				!bearerIsValid(request, options.token) &&
+				!isExpectedOrigin(request.headers.origin, request)
+			)
+				return fail(
+					request,
+					reply,
+					403,
+					"origin.invalid",
+					"a same-origin browser bootstrap or bearer token is required",
+				);
 			const session = options.sessions.create();
 			reply.header("set-cookie", session.setCookie);
 			return sendValidated(request, reply, BrowserSessionResponseSchema, {

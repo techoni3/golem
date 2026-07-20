@@ -1,0 +1,1 @@
+import{F as s,g as c,p as e}from"./src-SharrJEw.js";var a=c(t=>{const{securityLevel:n}=s();let o=e("body");return n==="sandbox"&&(o=e((e(`#i${t}`).node()?.contentDocument??document).body)),o.select(`#${t}`)},"selectSvgElement");export{a as t};

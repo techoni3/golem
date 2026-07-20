@@ -1,6 +1,22 @@
+import {
+	type WebSocketFrameV1,
+	WebSocketFrameV1Schema,
+} from "@golem/contracts";
 import createClient from "openapi-fetch";
 
 import type { paths } from "./generated/openapi.js";
+
+export {
+	applyProjectionDelta,
+	type ProjectionStateLike,
+	replaceProjectionSnapshot,
+} from "./projection-state.js";
+export {
+	createProjectionSynchronizer,
+	type ProjectionConnectionState,
+	type ProjectionSocket,
+	type ProjectionSynchronizer,
+} from "./projection-sync.js";
 
 export type ApiClientMethod = "GET" | "POST" | "PATCH" | "DELETE";
 
@@ -79,3 +95,111 @@ export function createControlPlaneClient(options: ControlPlaneClientOptions) {
 		headers: { authorization: `Bearer ${options.token}` },
 	});
 }
+
+export type ControlPlaneStream = WebSocketFrameV1["stream"];
+export type ControlPlaneProjection = Extract<
+	WebSocketFrameV1["payload"],
+	{ readonly kind: "snapshot" }
+>["payload"];
+
+export class ControlPlaneClientError extends Error {
+	readonly status: number;
+
+	constructor(status: number, operation: string) {
+		super(`control-plane ${operation} failed with HTTP ${status}`);
+		this.name = "ControlPlaneClientError";
+		this.status = status;
+	}
+}
+
+function requireData<T>(
+	data: T | undefined,
+	response: Response,
+	operation: string,
+): T {
+	if (data !== undefined) return data;
+	throw new ControlPlaneClientError(response.status, operation);
+}
+
+/**
+ * Browser-only typed client. It relies on an HttpOnly same-origin session and
+ * is the sole owner of REST paths, CSRF state, and WebSocket frame validation.
+ */
+export interface BrowserControlPlaneClientOptions {
+	/** Process-composed test/CLI credentials; browser callers leave this empty. */
+	readonly headers?: HeadersInit;
+}
+
+export function createBrowserControlPlaneClient(
+	baseUrl: string,
+	options: BrowserControlPlaneClientOptions = {},
+) {
+	const client = createClient<paths>({
+		baseUrl,
+		credentials: "same-origin",
+		...(options.headers === undefined ? {} : { headers: options.headers }),
+	});
+	let csrfToken: string | undefined;
+	const browserHeaders = () =>
+		csrfToken === undefined ? {} : { "x-golem-csrf": csrfToken };
+
+	return Object.freeze({
+		async bootstrap() {
+			const result = await client.POST("/api/v1/browser/session");
+			const data = requireData(
+				result.data,
+				result.response,
+				"browser bootstrap",
+			);
+			csrfToken = data.csrf_token;
+			return data;
+		},
+		async meta() {
+			const result = await client.GET("/api/v1/meta", {
+				headers: browserHeaders(),
+			});
+			return requireData(result.data, result.response, "metadata fetch");
+		},
+		async projection(stream: ControlPlaneStream) {
+			const result = await client.GET("/api/v1/projections/{stream}", {
+				headers: browserHeaders(),
+				params: { path: { stream } },
+			});
+			return requireData(result.data, result.response, "projection fetch");
+		},
+		async echo(value: string) {
+			if (!csrfToken)
+				throw new Error(
+					"control-plane browser session has not been bootstrapped",
+				);
+			const result = await client.POST("/api/v1/browser/echo", {
+				body: { value },
+				headers: { "x-golem-csrf": csrfToken },
+			});
+			return requireData(result.data, result.response, "browser mutation");
+		},
+		webSocketUrl(
+			stream: ControlPlaneStream,
+			cursor?: {
+				readonly instanceId: string;
+				readonly sequence: number;
+			},
+		) {
+			const url = new URL("/api/v1/ws", baseUrl);
+			url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+			url.searchParams.set("stream", stream);
+			if (cursor) {
+				url.searchParams.set("instance_id", cursor.instanceId);
+				url.searchParams.set("cursor", String(cursor.sequence));
+			}
+			return url.toString();
+		},
+		parseWebSocketFrame(raw: string): WebSocketFrameV1 {
+			return WebSocketFrameV1Schema.parse(JSON.parse(raw) as unknown);
+		},
+	});
+}
+
+export type BrowserControlPlaneClient = ReturnType<
+	typeof createBrowserControlPlaneClient
+>;

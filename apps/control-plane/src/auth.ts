@@ -60,6 +60,32 @@ export function isExpectedOrigin(
 	return constantTimeEqual(origin, `${protocol}://${host}`);
 }
 
+/**
+ * Fetch omits Origin for some same-origin reads and body-less POSTs. In that
+ * browser-only case, require the browser provenance pair as well as the exact
+ * loopback Referer; arbitrary headerless clients still fail closed.
+ */
+export function isExpectedBrowserRequest(request: FastifyRequest): boolean {
+	if (isExpectedOrigin(request.headers.origin, request)) return true;
+	const host = request.headers.host;
+	const referer = request.headers.referer;
+	const fetchSite = request.headers["sec-fetch-site"];
+	if (
+		typeof fetchSite !== "string" ||
+		fetchSite !== "same-origin" ||
+		typeof referer !== "string" ||
+		!host ||
+		!isExpectedHost(host)
+	)
+		return false;
+	try {
+		const expected = `${request.protocol}://${host}`;
+		return constantTimeEqual(new URL(referer).origin, expected);
+	} catch {
+		return false;
+	}
+}
+
 /** Bearer clients are non-browser callers: they never require Origin or CSRF. */
 export function bearerIsValid(request: FastifyRequest, token: string): boolean {
 	const authorization = request.headers.authorization;
@@ -91,7 +117,7 @@ export function createBrowserSessionAuthority(options?: {
 	}
 
 	function validSession(request: FastifyRequest): BrowserSession | undefined {
-		if (!isExpectedOrigin(request.headers.origin, request)) return undefined;
+		if (!isExpectedBrowserRequest(request)) return undefined;
 		const identifier = cookieValue(request, sessionCookieName);
 		if (!identifier) return undefined;
 		expire(clock.now());

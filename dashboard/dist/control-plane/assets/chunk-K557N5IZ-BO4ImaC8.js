@@ -1,0 +1,1 @@
+import{g as i}from"./src-SharrJEw.js";var n=i(({flowchart:t})=>{const r=t?.subGraphTitleMargin?.top??0,a=t?.subGraphTitleMargin?.bottom??0;return{subGraphTitleTopMargin:r,subGraphTitleBottomMargin:a,subGraphTitleTotalMargin:r+a}},"getSubGraphTitleMargins");export{n as t};

@@ -13,6 +13,7 @@
 		"build": "tsc -b"
 	},
 	"dependencies": {
+		"@golem/contracts": "file:../contracts",
 		"openapi-fetch": "0.17.0"
 	}
 }
