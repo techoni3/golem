@@ -5,13 +5,18 @@
 	"type": "module",
 	"exports": {
 		".": {
-			"types": "./dist/index.d.ts",
-			"import": "./dist/index.js"
+			"types": "../../dist/apps/cli/index.d.ts",
+			"import": "../../dist/apps/cli/index.js"
 		}
+	},
+	"scripts": {
+		"build": "npm run build -w @golem/contracts && npm run build -w @golem/launcher && npm run build -w @golem/api-client && tsc -b"
 	},
 	"dependencies": {
 		"@golem/api-client": "file:../../packages/api-client",
 		"@golem/compiler": "file:../../packages/compiler",
-		"@golem/launcher": "file:../../packages/launcher"
+		"@golem/contracts": "file:../../packages/contracts",
+		"@golem/launcher": "file:../../packages/launcher",
+		"commander": "15.0.0"
 	}
 }

@@ -14,6 +14,12 @@ export const scenarios = [
 		regression: "duplicate real producer registrations allocate multiple project UUIDs or lose durable location/outbox evidence",
 	}),
 	registerScenario({
+		id: "cli-command-parity",
+		journey: "J5",
+		tier: "pr",
+		regression: "typed command registry or legacy-compatible CLI grammar drifts, exposes launch, or writes state during help/schema generation",
+	}),
+	registerScenario({
 		id: "domain-replay",
 		journey: "J2",
 		tier: "pr",
