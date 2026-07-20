@@ -37,4 +37,10 @@ export const scenarios = [
 		tier: "integration",
 		regression: "legacy dashboard/SQLite/REST/WebSocket/MCP dispatch parity disappears before cutover",
 	}),
+	registerScenario({
+		id: "render-mcp-closure",
+		journey: "J1",
+		tier: "integration",
+		regression: "a render drifts, clobbers a tampered target, rolls back poorly, or ships an MCP that needs the checkout dependency tree",
+	}),
 ];

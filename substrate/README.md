@@ -31,6 +31,9 @@ sub-agents, and the golem channel MCP.
 - **Channel MCP** (`golem`) → `ack` / `respond` tools + an SSE `/events` stream
   the dashboard subscribes to, **plus the tracker tools** and the
   **session-to-session consult tools** (see below).
+- **Relocatable MCP artifact** → generated and pack-verified beside the channel
+  as a future cutover candidate; `.mcp.json` still selects the legacy channel
+  until lifecycle registration and delivery parity have an adapter owner.
 - **Consult tools** (on the same `golem` MCP) → `consult_request`, `consult_reply`,
   `consult_status`. One live session asks ANOTHER for a fresh pair of eyes on a
   hard problem (a second opinion, not delegation) over the channel transport —

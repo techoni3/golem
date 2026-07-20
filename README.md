@@ -127,6 +127,11 @@ production dependencies. `npm link` exposes this checkout's `cli/golem.js` as
 the global `golem` command. Without linking, run commands from the checkout as
 `node cli/golem.js <command>`.
 
+The relocatable MCP artifact is built and pack-verified alongside this current
+channel closure. It is a future cutover candidate; rendered `.mcp.json` keeps
+starting `mcp/channel/index.js` until the later lifecycle-adapter journey proves
+registration, addressed delivery, and uncorrelated reply parity.
+
 ## Quick start
 
 1. Install the CLI by one of the paths above.

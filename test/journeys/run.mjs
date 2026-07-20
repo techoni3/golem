@@ -32,7 +32,7 @@ for (const scenario of selected) {
 			...scenario,
 			status: loopbackGate ? "UNMET" : "FAIL",
 			evidence: loopbackGate
-				? "sandbox rejected the real 127.0.0.1 listener (EPERM); no product assertion was evaluated"
+				? "sandbox rejected the real 127.0.0.1 listener (EPERM); real-boundary lifecycle is UNMET and no PASS is implied"
 				: diagnosticFor(error),
 		});
 	}

@@ -1,5 +1,4 @@
-import type { ApiClientBoundary } from "@golem/api-client";
-
-export interface McpAdapterBoundary {
-	readonly client: ApiClientBoundary;
-}
+export * from "./adapter.js";
+export * from "./catalog.js";
+export * from "./server.js";
+export * from "./types.js";
