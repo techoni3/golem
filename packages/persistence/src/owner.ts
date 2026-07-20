@@ -18,7 +18,13 @@ import {
 } from "./lock.js";
 import { applyPlan, dryRunPlan, planFor } from "./migrations.js";
 import { RuntimeRepository } from "./repositories.js";
-import { configure, hasTrackerTables, sha256 } from "./schema.js";
+import {
+	configure,
+	hasManagedTrackerSchema,
+	hasTrackerTables,
+	sha256,
+} from "./schema.js";
+import { TrackerRepository } from "./tracker-repository.js";
 import {
 	type ClaimedOutboxRecord,
 	type DatabaseScope,
@@ -35,6 +41,7 @@ import {
 	type RuntimeMaterializationResult,
 	type RuntimeTransactionInput,
 	type RuntimeTransactionResult,
+	type TrackerStorageCapability,
 } from "./types.js";
 
 type SqliteDatabase = ConstructorParameters<
@@ -67,6 +74,7 @@ class PersistenceOwner implements PersistenceWriteCapability {
 	readonly #runtimeSql: Kysely<RuntimeTables>;
 	readonly #trackerSql: Kysely<TrackerTables>;
 	readonly #runtimeRepository: RuntimeRepository;
+	readonly #trackerRepository: TrackerRepository;
 	readonly #paths: Readonly<PersistencePaths>;
 	readonly #ownerId: string;
 	readonly #clock: PersistenceClock;
@@ -110,17 +118,21 @@ class PersistenceOwner implements PersistenceWriteCapability {
 				}),
 			});
 			const runtimePlan = planFor(runtime, "runtime", "apply");
-			this.#trackerBaseline = hasTrackerTables(tracker)
-				? "unmanaged"
-				: "managed";
+			const trackerIsLegacy =
+				hasTrackerTables(tracker) && !hasManagedTrackerSchema(tracker);
+			const trackerPlan = trackerIsLegacy
+				? undefined
+				: planFor(tracker, "tracker", "apply");
+			this.#trackerBaseline = trackerIsLegacy ? "unmanaged" : "managed";
 			configure(runtime);
 			applyPlan(runtime, paths.runtimePath, runtimePlan, this.#clock);
-			if (this.#trackerBaseline === "managed") {
+			if (this.#trackerBaseline === "managed" && trackerPlan) {
+				tracker.pragma("busy_timeout = 1000");
 				configure(tracker);
-				const trackerPlan = planFor(tracker, "tracker", "apply");
 				applyPlan(tracker, paths.trackerPath, trackerPlan, this.#clock);
 			}
 			this.#runtimeRepository = new RuntimeRepository(runtime, this.#clock);
+			this.#trackerRepository = new TrackerRepository(tracker);
 		} catch (error) {
 			safeClose(runtime);
 			safeClose(tracker);
@@ -207,6 +219,10 @@ class PersistenceOwner implements PersistenceWriteCapability {
 
 	runtimeOutboxHealth() {
 		return this.#runtimeRepository.health();
+	}
+
+	trackerStorage(): TrackerStorageCapability {
+		return this.#trackerRepository;
 	}
 
 	status(): PersistenceStatus {

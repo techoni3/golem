@@ -1,9 +1,9 @@
 # REPO-MAP.md
-> Last verified: 2026-07-20 @ e69f622 — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-20 @ 12c4669 — maintained via golem:docs-maintenance.
 
 ## Structure
 
-- `apps/` compose private TypeScript seams; legacy entrypoints stay authoritative until a vertical-slice cutover.
+- `apps/` compose private TypeScript seams; legacy entrypoints remain authoritative until vertical-slice cutover.
 - `packages/` flow strictly: `contracts` schemas → `domain` pure policy → `persistence` single SQLite writer → `runtime`/`tracker` services → control plane/client/CLI/MCP/dashboard. `testkit` and journeys prove real boundaries.
 - `tools/openapi-codegen/` is isolated TS5 codegen, never production; `substrate/` is source while `plugin/` and `dashboard/dist/` are generated products.
 
@@ -12,8 +12,8 @@
 - Root npm 11 lock owns all workspaces. Applications use TS7; codegen alone pins TS5.9.3 and OpenAPI Typescript 7.13.0. Never peer-bypass or import `tools/**` from production.
 - `persistence` owns private SQLite/Kysely, checked migrations, backup/recovery, injected clock, typed schema, and bounded outboxes. Writer construction is control-plane-only.
 - `runtime` gives producers only a filesystem spool. The service owns lease/attempt recovery, no-clobber archive or redacted quarantine, atomic facts/watermarks/outbox, and bounded materializer+outbox health; producer processes never open SQLite.
+- `tracker` owns durable envelope claim/settlement authority, semantic idempotency, bus event/cursor replay, passive slot leases, and dependency-aware retention through typed storage/eligibility ports only; it never treats a JSON registry as endpoint authority.
 - The control plane owns typed `/api/v1`, browser/bearer authority, `/api/v1/ws`, static legacy dashboard, and headerless legacy `/ws`. Legacy dashboard/server code is compatibility, not a canonical package dependency.
-- `tracker` receives typed storage/eligibility ports only; it never treats a JSON registry as endpoint authority.
 
 ## Constraints
 
@@ -28,5 +28,6 @@
 | Workspace/boundaries | Node 24 `typecheck`, `check:boundaries`, `lint` |
 | Persistence J3 | `test:persistence`, `sqlite-owner-migration-recovery` |
 | Runtime J3/J1 | `test:runtime-engine`, distinct `materializer-crash-matrix` and `dashboard-down-inbox-replay` |
+| Tracker J4 | `test:delivery-bus`, distinct `delivery-queue-crash-matrix` and `bus-offline-replay` |
 | Control plane J6 | `api:check`, `control-plane-auth-ws-lifecycle` |
 | Render/MCP J1 | `verify:render` |

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import os from "node:os";
@@ -36,6 +37,7 @@ const legacyBaseline = path.join(repositoryRoot, "test/parity/legacy-baseline.mj
 const persistenceJourney = path.join(repositoryRoot, "test/persistence/sqlite-owner-migration-recovery.test.mjs");
 const runtimeEngineJourney = path.join(repositoryRoot, "test/runtime/materializer-crash-matrix.test.mjs");
 const dashboardDownJourney = path.join(repositoryRoot, "test/runtime/dashboard-down-inbox-replay.test.mjs");
+const deliveryBusJourney = path.join(repositoryRoot, "test/tracker/delivery-bus.test.mjs");
 const chromeExecutable = process.env.GOLEM_CHROME_EXECUTABLE || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
 class JourneyDiagnosticError extends Error {
@@ -366,6 +368,31 @@ export async function exerciseMaterializerCrashMatrix() {
 	}
 }
 
+function runDeliveryBusJourney(testNamePattern) {
+	const home = createTemporaryHome("golem-j4-delivery-runner-");
+	try {
+		const result = spawnSync(
+			process.execPath,
+		[
+				"--test",
+				"--test-concurrency=1",
+				"--test-name-pattern",
+				testNamePattern,
+				deliveryBusJourney,
+			],
+			{ cwd: repositoryRoot, encoding: "utf8", env: home.env },
+		);
+		if (result.status !== 0)
+			throw new JourneyDiagnosticError(
+				`durable delivery/bus journey exited ${result.status}; stdout=${result.stdout}; stderr=${result.stderr}`,
+				home.root,
+				[home.token],
+			);
+	} finally {
+		cleanupHome(home);
+	}
+}
+
 export async function exerciseDashboardDownInboxReplay() {
 	const home = createTemporaryHome("golem-j1-dashboard-down-runner-");
 	const group = spawnGrouped(process.execPath, ["--test", "--test-concurrency=1", dashboardDownJourney], {
@@ -382,6 +409,16 @@ export async function exerciseDashboardDownInboxReplay() {
 		if (!exited(group)) await stopProcessGroup(group);
 		cleanupHome(home);
 	}
+}
+
+export async function exerciseDeliveryQueueCrashMatrix() {
+	runDeliveryBusJourney("delivery queue crash matrix");
+	return "real SQLite CAS claim, stale-fence recheck, bounded retry/deadline, and child-crash lease replay verified";
+}
+
+export async function exerciseBusOfflineReplay() {
+	runDeliveryBusJourney("bus offline replay");
+	return "real SQLite bus dedupe, named cursor replay, passive lease commit/release, manual-interest prune, and audit verified";
 }
 
 export async function exerciseBrowser() {
@@ -435,6 +472,8 @@ export const exercises = Object.freeze({
 	"sqlite-owner-migration-recovery": exerciseSqliteOwnerMigrationRecovery,
 	"materializer-crash-matrix": exerciseMaterializerCrashMatrix,
 	"dashboard-down-inbox-replay": exerciseDashboardDownInboxReplay,
+	"delivery-queue-crash-matrix": exerciseDeliveryQueueCrashMatrix,
+	"bus-offline-replay": exerciseBusOfflineReplay,
 	"testkit-browser": exerciseBrowser,
 	"legacy-parity-baseline": exerciseLegacyParityBaseline,
 	"render-mcp-closure": exerciseRenderMcpClosure,

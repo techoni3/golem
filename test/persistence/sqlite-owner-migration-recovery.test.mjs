@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -71,6 +72,36 @@ function integrity(target) {
 	return inspectDatabase(target, (database) =>
 		database.pragma("integrity_check", { simple: true }),
 	);
+}
+
+function immutableTrackerSnapshot(target) {
+	const bytes = fs.readFileSync(target);
+	return Object.freeze({
+		sha256: crypto.createHash("sha256").update(bytes).digest("hex"),
+		journalMode: inspectDatabase(target, (database) =>
+			database.pragma("journal_mode", { simple: true }),
+		),
+	});
+}
+
+function createNameMatchedTrackerWithLedger(target, id, checksum) {
+	const database = new Database(target);
+	try {
+		database.exec(`
+CREATE TABLE tracker_envelopes (id TEXT PRIMARY KEY);
+CREATE TABLE tracker_bus_events (id TEXT PRIMARY KEY);
+CREATE TABLE golem_migrations (
+  id TEXT PRIMARY KEY,
+  checksum TEXT NOT NULL,
+  applied_at TEXT NOT NULL
+);
+`);
+		database
+			.prepare("INSERT INTO golem_migrations(id, checksum, applied_at) VALUES (?, ?, ?)")
+			.run(id, checksum, "2026-07-20T00:00:00.000Z");
+	} finally {
+		database.close();
+	}
 }
 
 function childOwner(home, ownerId) {
@@ -232,7 +263,7 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 				},
 				{
 					runtimeVersion: 1,
-					trackerVersion: 1,
+					trackerVersion: 2,
 					foreignKeys: true,
 					journal: "wal",
 					busy: 2500,
@@ -256,7 +287,7 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 			envelopes: count(before, "message_envelopes"),
 		};
 		before.close();
-		const trackerBeforeOpen = fs.readFileSync(home.trackerDb);
+		const trackerBeforeOpen = immutableTrackerSnapshot(home.trackerDb);
 
 		owner = openPersistenceForControlPlane(
 			{
@@ -306,9 +337,9 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 			"source, receipt, materialization, activity, metadata, and disposition are separate runtime event facts",
 		);
 		assert.deepEqual(
-			fs.readFileSync(home.trackerDb),
+			immutableTrackerSnapshot(home.trackerDb),
 			trackerBeforeOpen,
-			"opening an unmanaged legacy tracker is inspection-only before the explicit baseline",
+			"opening an unmanaged nonledger tracker keeps both bytes and journal mode unchanged before the explicit baseline",
 		);
 		const initial = owner.status();
 		assert.deepEqual(
@@ -951,13 +982,16 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 		const trackerDryRun = owner.plan("tracker");
 		assert.equal(trackerDryRun.mode, "dry-run");
 		assert.equal(trackerDryRun.requiresBackup, true);
-		assert.equal(trackerDryRun.pending[0].id, "tracker/001-baseline");
+		assert.deepEqual(
+			trackerDryRun.pending.map((migration) => migration.id),
+			["tracker/001-baseline", "tracker/002-durable-delivery-bus"],
+		);
 		assert.deepEqual(
 			trackerDryRun.dryRun,
 			{
 				integrity: "ok",
 				foreignKeyViolations: 0,
-				applied: ["tracker/001-baseline"],
+				applied: ["tracker/001-baseline", "tracker/002-durable-delivery-bus"],
 			},
 			"dry-run clones, applies, and verifies the tracker migration before source apply",
 		);
@@ -986,7 +1020,7 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 			"apply refuses a plan that was not the approved dry-run",
 		);
 		const trackerApply = owner.apply("tracker", trackerDryRun.planHash);
-		assert.equal(trackerApply.applied[0], "tracker/001-baseline");
+		assert.deepEqual(trackerApply.applied, ["tracker/001-baseline", "tracker/002-durable-delivery-bus"]);
 		assert.equal(fs.existsSync(trackerApply.backupPath), true, "apply verifies a pre-migration backup");
 		assert.deepEqual(
 			inspectDatabase(home.trackerDb, (after) => ({
@@ -999,6 +1033,40 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 			beforeCounts,
 			"tracker baseline records migration ownership without rewriting legacy rows",
 		);
+
+		for (const fixture of [
+			{
+				name: "unknown managed ledger",
+				id: "tracker/999-unknown",
+				checksum: "unknown-checksum",
+				code: "schema_too_new",
+			},
+			{
+				name: "mismatched managed ledger",
+				id: "tracker/002-durable-delivery-bus",
+				checksum: "mismatched-checksum",
+				code: "checksum_drift",
+			},
+		]) {
+			const trackerPath = path.join(home.root, `${fixture.name.replaceAll(" ", "-")}.db`);
+			createNameMatchedTrackerWithLedger(trackerPath, fixture.id, fixture.checksum);
+			const beforeOpen = immutableTrackerSnapshot(trackerPath);
+			assert.throws(
+				() =>
+					openPersistenceForControlPlane({
+						runtimePath: path.join(home.root, `${fixture.name.replaceAll(" ", "-")}-runtime.db`),
+						trackerPath,
+					}),
+				(error) =>
+					error instanceof PersistenceMigrationError && error.code === fixture.code,
+				`${fixture.name} is refused by real control-plane open before tracker configuration`,
+			);
+			assert.deepEqual(
+				immutableTrackerSnapshot(trackerPath),
+				beforeOpen,
+				`${fixture.name} refusal preserves exact tracker bytes and journal mode`,
+			);
+		}
 
 		assert.throws(
 			() => owner.recordRuntimeTransaction(eventInput("before", "before_commit")),
