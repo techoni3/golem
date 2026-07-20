@@ -48,7 +48,7 @@
   "engines": {
     "node": ">=24.18.0 <25"
   },
-  "scripts": {
+	"scripts": {
     "api:check": "npm run check -w @golem/openapi-codegen",
     "api:generate": "npm run generate -w @golem/openapi-codegen",
     "build": "npm run typecheck && npm run build -w @golem/dashboard",
@@ -63,6 +63,7 @@
     "test": "node test/session-facts.test.mjs && node test/codex-journey.test.mjs && node test/pi-journey.test.mjs && node test/pi-tracker-integration.test.mjs && node test/sync-enforcement.test.mjs && node shims/opencode/resume-dispatchable.test.mjs && node shims/opencode/passive-delta.test.mjs && node mcp/channel/tracker-client.test.mjs",
     "verify:stack": "node test/stack-certification/run.mjs",
     "test:stack-certification": "node --test test/stack-certification/version-gate.test.mjs",
+    "test:ui-primitives": "npm run build -w @golem/ui && npm run build -w @golem/dashboard && node test/ui-primitives.mjs",
     "test:legacy-baseline": "node test/parity/legacy-baseline.mjs",
     "test:contracts": "npm run contracts:check && node --test test/contracts/contracts-v1.test.mjs",
     "test:testkit": "npm run build -w @golem/testkit && node --test --test-concurrency=1 test/journeys/testkit.test.mjs",

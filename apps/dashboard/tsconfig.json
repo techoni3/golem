@@ -2,11 +2,12 @@
 	"extends": "../../tsconfig.browser.json",
 	"compilerOptions": {
 		"outDir": "./dist/types",
-		"rootDir": "./src"
+		"rootDir": "./src",
+		"skipLibCheck": true
 	},
 	"references": [
 		{ "path": "../../packages/api-client" },
 		{ "path": "../../packages/ui" }
 	],
-	"include": ["src/**/*.ts"]
+	"include": ["src/**/*.ts", "src/**/*.tsx"]
 }

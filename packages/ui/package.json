@@ -7,10 +7,20 @@
 		".": {
 			"types": "./dist/index.d.ts",
 			"import": "./dist/index.js"
-		}
+		},
+		"./tokens.css": "./dist/tokens.css"
+	},
+	"scripts": {
+		"build": "tsc -b && cp src/tokens.css dist/tokens.css && cp src/primitives.module.css dist/primitives.module.css"
 	},
 	"dependencies": {
-		"@golem/api-client": "file:../api-client",
+		"react-aria-components": "1.19.0"
+	},
+	"peerDependencies": {
+		"react": "19.2.7"
+	},
+	"devDependencies": {
+		"@types/react": "19.2.17",
 		"react": "19.2.7"
 	}
 }
