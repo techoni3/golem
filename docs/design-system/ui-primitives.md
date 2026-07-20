@@ -9,14 +9,15 @@ share one rendered runtime without changing the legacy React 18 dashboard.
 
 ## Tokens and themes
 
-Import `@golem/ui/tokens.css` once at an application entry point. Components
-use only semantic `--g-*` variables for canvas, surfaces, text, borders,
-focus, state colors, spacing, radii, motion, layering, and the fixed
+Import `@golem/ui/tokens.css` once at an application entry point. The ordered
+`golem.tokens`, `golem.primitives`, and `golem.design-lab` layers use only
+semantic `--g-*` variables for canvas, raised/sunken surfaces, text, borders,
+focus, state colors, spacing, radii, elevation, motion, and the fixed
 `--g-passport-max: 520px` bound. `ThemeProvider` stores only an explicit
 `system`, `light`, or `dark` preference under `golem.ui.theme`; it reflects
-the resolved theme on `<html>`. The dashboard entry repeats the small
-bootstrap before its module script so the first paint uses that resolved
-theme.
+the resolved theme on `<html>`. The dashboard's inline bootstrap validates
+that same closed preference set before its module script, so an invalid value
+falls back to the system theme and the first paint cannot use it.
 
 ## Primitive contract
 
@@ -25,7 +26,9 @@ combobox fields, checkbox/switch, tabs, menus, modal dialog/drawer, tooltip,
 toast/alert, list/table, status, skeleton/state panel, and PassportCard.
 Focus-visible, contrast, and reduced-motion behavior are token-level rules.
 Dialog and drawer accept `returnFocusRef`; callers provide the trigger target
-when a controlled overlay must return keyboard focus after Escape.
+when a controlled overlay must return keyboard focus after Escape. The
+primitive owns that restoration after teardown; callers must not rescue it by
+looking up a DOM id.
 
 `PassportCard` is always at most 520px wide. Its role select stops pointer,
 keyboard, and click propagation before it can activate the card surface; that
@@ -40,7 +43,10 @@ remain programmatically associated with their inputs.
 ## Design lab and verification
 
 `apps/dashboard` mounts this isolated composition at `/design-lab`; it is not
-a production-page migration. `npm run test:ui-primitives` builds both private
-workspaces, serves only the generated Vite output from an ephemeral loopback
-server, and drives a temporary headless Chrome profile through theme, keyboard
-overlay, focus, tab, PassportCard, narrow viewport, and reduced-motion flows.
+a production-page migration. The lab renders loading, empty, error, and
+disconnected examples. `npm run test:ui-primitives` is the single real browser
+journey: it serves only generated Vite output from an ephemeral loopback server
+and drives a temporary headless Chrome profile through valid/invalid/system
+theme bootstrap, keyboard overlay/listbox focus, computed token styles,
+representative light/dark AA contrast, high contrast, reduced motion, and
+PassportCard containment.

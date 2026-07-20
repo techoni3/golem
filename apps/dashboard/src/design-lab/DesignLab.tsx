@@ -55,22 +55,6 @@ export function DesignLab() {
 	const [switchEnabled, setSwitchEnabled] = React.useState(false);
 	const dialogTrigger = React.useRef<HTMLElement | null>(null);
 	const drawerTrigger = React.useRef<HTMLElement | null>(null);
-	const setDialog = React.useCallback((next: boolean) => {
-		setDialogOpen(next);
-		if (!next)
-			window.setTimeout(
-				() => document.getElementById("dialog-trigger")?.focus(),
-				0,
-			);
-	}, []);
-	const setDrawer = React.useCallback((next: boolean) => {
-		setDrawerOpen(next);
-		if (!next)
-			window.setTimeout(
-				() => document.getElementById("drawer-trigger")?.focus(),
-				0,
-			);
-	}, []);
 
 	return (
 		<main className={styles.lab} data-testid="design-lab">
@@ -107,8 +91,8 @@ export function DesignLab() {
 								dialogTrigger={dialogTrigger}
 								drawerTrigger={drawerTrigger}
 								notify={notify}
-								onDialogOpen={() => setDialog(true)}
-								onDrawerOpen={() => setDrawer(true)}
+								onDialogOpen={() => setDialogOpen(true)}
+								onDrawerOpen={() => setDrawerOpen(true)}
 								onNotifyChange={setNotify}
 								onRoleChange={setRole}
 								onSwitchChange={setSwitchEnabled}
@@ -145,23 +129,23 @@ export function DesignLab() {
 			{notify ? <Toast tone="success">Preference saved locally.</Toast> : null}
 			<DialogSurface
 				isOpen={dialogOpen}
-				onOpenChange={setDialog}
+				onOpenChange={setDialogOpen}
 				returnFocusRef={dialogTrigger}
 				title="Keyboard dialog"
 			>
 				<p>Escape returns focus to the dialog trigger.</p>
-				<Button onPress={() => setDialog(false)} variant="primary">
+				<Button onPress={() => setDialogOpen(false)} variant="primary">
 					Close dialog
 				</Button>
 			</DialogSurface>
 			<Drawer
 				isOpen={drawerOpen}
-				onOpenChange={setDrawer}
+				onOpenChange={setDrawerOpen}
 				returnFocusRef={drawerTrigger}
 				title="Operator drawer"
 			>
 				<p>A bounded overlay with a labeled close action.</p>
-				<Button onPress={() => setDrawer(false)}>Close drawer</Button>
+				<Button onPress={() => setDrawerOpen(false)}>Close drawer</Button>
 			</Drawer>
 		</main>
 	);
@@ -283,6 +267,16 @@ function States({
 					Doctor reports a local-only compatibility check.
 				</InlineAlert>
 				<Skeleton width="100%" />
+				<StatePanel
+					description="No operator task matches the current view."
+					kind="empty"
+					title="No queued work"
+				/>
+				<StatePanel
+					description="The last status refresh could not be completed."
+					kind="error"
+					title="Queue unavailable"
+				/>
 				<StatePanel
 					description="No live transport is started by this design lab."
 					kind="disconnected"

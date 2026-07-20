@@ -1,1 +1,1 @@
-import "@golem/compat";
+import "@golem/compat/legacy-entrypoint";

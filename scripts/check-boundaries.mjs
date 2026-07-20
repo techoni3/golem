@@ -99,6 +99,12 @@ function imports(source) {
 	return matches;
 }
 
+function workspacePackageSpecifier(specifier) {
+	if (!specifier.startsWith("@golem/")) return specifier;
+	const [scope, name] = specifier.split("/");
+	return name ? `${scope}/${name}` : specifier;
+}
+
 function isAdapter(name) {
 	return name.startsWith("@golem/adapter-") && name !== "@golem/adapter-sdk";
 }
@@ -235,12 +241,16 @@ async function validateGraph(root) {
 		);
 		for (const source of sources) {
 			for (const specifier of imports(source.contents)) {
+				const workspaceSpecifier = workspacePackageSpecifier(specifier);
 				assertImportBoundary(
 					manifest.name,
-					specifier,
+					workspaceSpecifier,
 					relative(root, source.file),
 				);
-				if (specifier.startsWith("@golem/") && !dependencies[specifier]) {
+				if (
+					workspaceSpecifier.startsWith("@golem/") &&
+					!dependencies[workspaceSpecifier]
+				) {
 					throw new Error(
 						`${manifest.name} imports ${specifier} without declaring it in package metadata`,
 					);
@@ -338,7 +348,11 @@ async function validateFixtures(root) {
 				);
 			for (const source of sources) {
 				for (const specifier of imports(source.contents))
-					assertImportBoundary(manifest.name, specifier, entry.name);
+					assertImportBoundary(
+						manifest.name,
+						workspacePackageSpecifier(specifier),
+						entry.name,
+					);
 			}
 		} catch (error) {
 			if (error instanceof BoundaryError) observed = error.rule;

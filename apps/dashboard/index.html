@@ -7,7 +7,10 @@
     <script>
       (() => {
         const key = "golem.ui.theme";
-        const preference = localStorage.getItem(key) || "system";
+        const stored = localStorage.getItem(key);
+        const preference = stored === "system" || stored === "light" || stored === "dark"
+          ? stored
+          : "system";
         const resolved = preference === "system"
           ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
           : preference;

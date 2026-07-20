@@ -18,11 +18,12 @@
 - `api-client` owns runtime `openapi-fetch@0.17.0`; codegen owns exact TS 5.9.3/OpenAPI Typescript 7.13.0 without `npx`.
 - `contracts:*` regenerates/checks the deterministic v1 registry; `test:contracts` is its single table-driven JSON-wire journey.
 - `testkit` owns temp-home containment, child termination, stable summaries, semantic comparison, and fresh-context headless fixtures; loopback denial is `UNMET` (see `docs/architecture/testing.md`).
-- `packages/ui` owns tokens/React Aria wrappers; `apps/dashboard/src/design-lab` is its isolated consumer (`test:ui-primitives`).
+- `packages/ui` owns ordered semantic token layers/React Aria wrappers; `apps/dashboard/src/design-lab` is its isolated consumer (`test:ui-primitives`).
 
 ### `scripts/check-boundaries.mjs`
 
-- Rejects manifest and source-import direction violations. Nine committed fixtures cover metadata-only dependencies and root codegen MJS, instead of mock fan-out.
+- Reads dependency metadata/imports (including root JS/MJS), normalizing `@golem/*` subpaths to declared roots before direction checks.
+- Its nine committed direction fixtures include metadata-only, compat-subpath, and root-level codegen MJS cases; they are the regression proof, not mock-heavy unit fan-out.
 
 ## Data flow
 

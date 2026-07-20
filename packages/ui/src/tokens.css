@@ -1,4 +1,4 @@
-@layer golem.tokens;
+@layer golem.tokens, golem.primitives, golem.design-lab;
 
 @layer golem.tokens {
 	:root {
@@ -6,6 +6,8 @@
 		--g-canvas: #f7f8fb;
 		--g-surface: #ffffff;
 		--g-surface-elevated: #ffffff;
+		--g-surface-raised: #ffffff;
+		--g-surface-sunken: #edf1f6;
 		--g-surface-overlay: #111827;
 		--g-text: #172033;
 		--g-text-secondary: #3e4b63;
@@ -22,13 +24,16 @@
 		--g-info: #2457d6;
 		--g-role: #6d3bc8;
 		--g-shadow: 0 12px 32px rgb(19 32 52 / 18%);
+		--g-shadow-1: 0 4px 14px rgb(19 32 52 / 14%);
 		--g-radius-sm: 0.375rem;
 		--g-radius-md: 0.625rem;
 		--g-radius-lg: 0.875rem;
+		--g-radius-pill: 999rem;
 		--g-space-1: 0.25rem;
 		--g-space-2: 0.5rem;
 		--g-space-3: 0.75rem;
 		--g-space-4: 1rem;
+		--g-space-5: 1.25rem;
 		--g-space-6: 1.5rem;
 		--g-space-8: 2rem;
 		--g-font-sans: Inter, ui-sans-serif, system-ui, sans-serif;
@@ -46,6 +51,8 @@
 		--g-canvas: #0f1420;
 		--g-surface: #171f2e;
 		--g-surface-elevated: #202a3b;
+		--g-surface-raised: #202a3b;
+		--g-surface-sunken: #111827;
 		--g-surface-overlay: #e8edf8;
 		--g-text: #f2f5fb;
 		--g-text-secondary: #c2cbdb;
@@ -62,6 +69,7 @@
 		--g-info: #9cb8ff;
 		--g-role: #cdb7ff;
 		--g-shadow: 0 16px 40px rgb(0 0 0 / 42%);
+		--g-shadow-1: 0 4px 16px rgb(0 0 0 / 32%);
 	}
 
 	* {

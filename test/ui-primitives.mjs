@@ -16,6 +16,48 @@ const mimeTypes = {
 	".map": "application/json",
 };
 
+function relativeLuminance(color) {
+	const channels = color.match(/\d+(?:\.\d+)?/gu)?.slice(0, 3).map(Number);
+	assert.equal(channels?.length, 3, `expected an RGB computed color, received ${color}`);
+	return channels
+		.map((channel, index) => {
+			const value = channel / 255;
+			const linear = value <= 0.04045
+				? value / 12.92
+				: ((value + 0.055) / 1.055) ** 2.4;
+			return linear * [0.2126, 0.7152, 0.0722][index];
+		})
+		.reduce((sum, channel) => sum + channel, 0);
+}
+
+function contrastRatio(foreground, background) {
+	const [lighter, darker] = [
+		relativeLuminance(foreground),
+		relativeLuminance(background),
+	].sort((left, right) => right - left);
+	return (lighter + 0.05) / (darker + 0.05);
+}
+
+function assertWcagAa(colors, theme) {
+	for (const [name, [foreground, background]] of Object.entries(colors)) {
+		const ratio = contrastRatio(foreground, background);
+		assert.ok(ratio >= 4.5, `${theme} ${name} contrast must meet WCAG AA; observed ${ratio.toFixed(2)}:1`);
+	}
+}
+
+async function representativeColors(page) {
+	return page.evaluate(() => {
+		const button = document.querySelector("#dialog-trigger");
+		if (!button) throw new Error("primary design-lab button is unavailable");
+		const body = getComputedStyle(document.body);
+		const primary = getComputedStyle(button);
+		return {
+			body: [body.color, body.backgroundColor],
+			primary: [primary.color, primary.backgroundColor],
+		};
+	});
+}
+
 function startStaticOutput() {
 	const sockets = new Set();
 	const server = createServer(async (request, response) => {
@@ -83,13 +125,52 @@ test("design lab preserves keyboard, theme, and passport-card containment contra
 	page.setDefaultTimeout(5_000);
 
 	try {
+		await page.emulateMedia({
+			colorScheme: "light",
+			contrast: "no-preference",
+			reducedMotion: "no-preference",
+		});
+		await page.addInitScript(() => {
+			const snapshots = [];
+			window.__golemThemeSnapshots = snapshots;
+			new MutationObserver(() => {
+				const theme = document.documentElement?.dataset.theme;
+				if (theme) snapshots.push(theme);
+			}).observe(document, {
+				attributes: true,
+				attributeFilter: ["data-theme"],
+				childList: true,
+				subtree: true,
+			});
+		});
 		await page.goto(`${server.url}/design-lab`, { waitUntil: "domcontentloaded" });
+		await page.evaluate(() => localStorage.removeItem("golem.ui.theme"));
+		await page.reload({ waitUntil: "domcontentloaded" });
 		try {
 			await page.getByTestId("design-lab").waitFor();
 		} catch (error) {
 			throw new Error(`design lab did not mount: ${browserErrors.join(" | ") || error.message}`);
 		}
-		assert.match(await page.locator("html").getAttribute("data-theme"), /^(dark|light)$/);
+		assert.equal(await page.locator("html").getAttribute("data-theme"), "light");
+		assert.equal(await page.locator("html").getAttribute("data-theme-preference"), "system");
+		assert.equal(
+			await page.evaluate(() => window.__golemThemeSnapshots.filter(Boolean)[0]),
+			"light",
+			"system preference resolves before the design lab mounts",
+		);
+		assertWcagAa(await representativeColors(page), "light");
+
+		await page.emulateMedia({ colorScheme: "dark" });
+		await page.evaluate(() => localStorage.setItem("golem.ui.theme", "invalid-theme"));
+		await page.reload({ waitUntil: "domcontentloaded" });
+		await page.getByTestId("design-lab").waitFor();
+		assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
+		assert.equal(await page.locator("html").getAttribute("data-theme-preference"), "system");
+		assert.equal(
+			await page.evaluate(() => window.__golemThemeSnapshots.filter(Boolean)[0]),
+			"dark",
+			"invalid stored values fall back to the system theme before the app mounts",
+		);
 
 		await page.getByTestId("theme-select").getByRole("button").focus();
 		await page.keyboard.press("ArrowDown");
@@ -98,26 +179,38 @@ test("design lab preserves keyboard, theme, and passport-card containment contra
 		await page.keyboard.press("Enter");
 		assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
 		assert.equal(await page.evaluate(() => localStorage.getItem("golem.ui.theme")), "dark");
-		await page.addInitScript(() => {
-			const snapshots = [];
-			const observer = new MutationObserver(() => {
-				if (document.documentElement.dataset.theme) snapshots.push(document.documentElement.dataset.theme);
-			});
-			observer.observe(document, {
-				attributes: true,
-				attributeFilter: ["data-theme"],
-				childList: true,
-				subtree: true,
-			});
-			window.__golemThemeSnapshots = snapshots;
-		});
 		await page.reload({ waitUntil: "domcontentloaded" });
 		await page.getByTestId("design-lab").waitFor();
 		assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
+		assert.equal(await page.locator("html").getAttribute("data-theme-preference"), "dark");
 		assert.equal(
 			await page.evaluate(() => window.__golemThemeSnapshots.filter(Boolean)[0]),
 			"dark",
 			"the pre-module bootstrap sets the persisted theme before the app mounts",
+		);
+		assertWcagAa(await representativeColors(page), "dark");
+		const computedSurface = await page.evaluate(() => {
+			const root = getComputedStyle(document.documentElement);
+			const group = document.querySelector("[class*='group']");
+			return {
+				radius: root.getPropertyValue("--g-radius-pill").trim(),
+				shadow: getComputedStyle(group).boxShadow,
+				space: root.getPropertyValue("--g-space-5").trim(),
+				surface: getComputedStyle(group).backgroundColor,
+				surfaceToken: root.getPropertyValue("--g-surface-raised").trim(),
+			};
+		});
+		assert.equal(computedSurface.radius, "999rem");
+		assert.equal(computedSurface.space, "1.25rem");
+		assert.notEqual(computedSurface.shadow, "none");
+		assert.notEqual(computedSurface.surfaceToken, "", "semantic raised-surface token must be defined");
+		assert.match(computedSurface.surface, /^rgba?\(/u);
+		assert.notEqual(computedSurface.surface, "transparent");
+		const surfaceChannels = computedSurface.surface.match(/\d+(?:\.\d+)?/gu)?.map(Number);
+		assert.ok(surfaceChannels && (surfaceChannels.length === 3 || surfaceChannels.length === 4));
+		assert.ok(
+			(surfaceChannels.length === 4 ? surfaceChannels[3] : 1) > 0,
+			"computed raised surface must not have a transparent alpha channel",
 		);
 
 		const descriptionIds = await page.getByRole("textbox", { name: "Queue name" }).evaluate((input) => input.getAttribute("aria-describedby")?.split(" ") ?? []);
@@ -161,6 +254,10 @@ test("design lab preserves keyboard, theme, and passport-card containment contra
 		await page.getByRole("tab", { name: "Foundation" }).focus();
 		await page.keyboard.press("ArrowRight");
 		assert.equal(await page.getByRole("tab", { name: "States" }).getAttribute("aria-selected"), "true");
+		await page.getByText("No queued work").waitFor();
+		await page.getByText("Queue unavailable").waitFor();
+		await page.getByText("Connection paused").waitFor();
+		await page.getByRole("status", { name: "Loading" }).waitFor();
 		await page.getByRole("option", { name: "Ready queue" }).focus();
 		await page.keyboard.press("ArrowDown");
 		await page.keyboard.press("Space");
@@ -188,8 +285,15 @@ test("design lab preserves keyboard, theme, and passport-card containment contra
 			"passport role layout collapses to one column at the narrow width",
 		);
 
-		await page.emulateMedia({ reducedMotion: "reduce" });
+		await page.emulateMedia({ contrast: "more", reducedMotion: "reduce" });
 		await page.reload({ waitUntil: "domcontentloaded" });
+		await page.getByTestId("design-lab").waitFor();
+		await page.locator("#dialog-trigger").focus();
+		assert.equal(
+			await page.locator("#dialog-trigger").evaluate((element) => getComputedStyle(element).outlineWidth),
+			"4px",
+			"high-contrast media preference enlarges the visible semantic focus ring",
+		);
 		assert.equal(
 			Number.parseFloat(await page.locator("html").evaluate((element) => getComputedStyle(element).getPropertyValue("--g-motion-fast").trim())),
 			0,
