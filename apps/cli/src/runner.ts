@@ -3,7 +3,9 @@ import { join } from "node:path";
 import type { Harness } from "@golem/contracts";
 import {
 	LauncherResolutionError,
+	type LaunchPlanBridge,
 	type LaunchResolution,
+	launchPlanBridge,
 	parseJsoncConfig,
 	resolveLaunch,
 } from "@golem/launcher";
@@ -172,11 +174,24 @@ function renderSuccess(
 	input: ParsedCliInput,
 	io: CliIo,
 ): number {
+	// The immutable bridge is the sole public source for launchability and
+	// delivery truth. Keep JSON, explain, and human output on that projection
+	// instead of deriving eligibility or advertising push from adapter details.
+	const bridge: LaunchPlanBridge = launchPlanBridge(result);
+	const publicPlan = {
+		...result,
+		launch: bridge.launch,
+		delivery: bridge.delivery,
+	};
 	if (input.json) {
-		output(io, stableCliJson(result));
+		output(io, stableCliJson(publicPlan));
 		return CLI_EXIT_CODES.ok;
 	}
 	output(io, `selected ${conciseSelection(result)}`);
+	output(
+		io,
+		`launch ${bridge.launch.status}; delivery ${bridge.delivery.mode}/${bridge.delivery.qualification}/${bridge.delivery.readiness}`,
+	);
 	if (input.explain) {
 		for (const trace of result.trace)
 			output(io, `${trace.code}: ${trace.detail}`);
@@ -304,7 +319,15 @@ export async function runCli(
 	try {
 		const result = resolveForInput(input, io);
 		if (!result.ok) return renderFailure(result, input, io);
-		if (!input.dryRun && input.command !== "codex") {
+		const bridge = launchPlanBridge(result);
+		// A canonical launchable plan is a valid foundation result even when its
+		// delivery fact is pull-only/not-ready. Only an actually unavailable
+		// contribution uses the legacy pre-spawn qualification failure.
+		if (
+			!input.dryRun &&
+			input.command !== "codex" &&
+			bridge.launch.status !== "launchable"
+		) {
 			return renderFailure(
 				{
 					schemaVersion: "golem.launch-plan/v1",

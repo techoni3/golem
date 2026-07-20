@@ -42,8 +42,8 @@ test("typed registry preserves compact grammar, redaction, and pre-spawn qualifi
 		assert.deepEqual(plan.effectiveArgvIntent, ["codex", "--profile", "safe"]);
 		assert.equal(JSON.stringify(plan).includes("secret-value"), false);
 		const unavailable = invoke(["claude", "--dry-run", "--json"], home);
-		assert.equal(unavailable.status, 4);
-		assert.equal(JSON.parse(unavailable.stdout).error.code, "launcher.capability.unqualified");
+		assert.equal(unavailable.status, 3);
+		assert.equal(JSON.parse(unavailable.stdout).error.code, "launcher.launch.unavailable");
 		const invalid = invoke(["opencode", "local", "--dry-run", "--json", "--model", "api_key=secret-value"], home);
 		assert.equal(invalid.status, 3);
 		assert.equal(JSON.parse(invalid.stdout).error.code, "launcher.model.invalid");

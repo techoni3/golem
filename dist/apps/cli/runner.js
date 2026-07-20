@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { LauncherResolutionError, parseJsoncConfig, resolveLaunch, } from "@golem/launcher";
+import { LauncherResolutionError, launchPlanBridge, parseJsoncConfig, resolveLaunch, } from "@golem/launcher";
 import { CLI_EXIT_CODES, CliResolutionError, CliUsageError } from "./errors.js";
 import { conciseSelection, stableCliJson } from "./format.js";
 import { commandDefinition, commandMetadata, createProgram, } from "./registry.js";
@@ -112,11 +112,21 @@ function renderFailure(result, input, io) {
         : CLI_EXIT_CODES.resolution;
 }
 function renderSuccess(result, input, io) {
+    // The immutable bridge is the sole public source for launchability and
+    // delivery truth. Keep JSON, explain, and human output on that projection
+    // instead of deriving eligibility or advertising push from adapter details.
+    const bridge = launchPlanBridge(result);
+    const publicPlan = {
+        ...result,
+        launch: bridge.launch,
+        delivery: bridge.delivery,
+    };
     if (input.json) {
-        output(io, stableCliJson(result));
+        output(io, stableCliJson(publicPlan));
         return CLI_EXIT_CODES.ok;
     }
     output(io, `selected ${conciseSelection(result)}`);
+    output(io, `launch ${bridge.launch.status}; delivery ${bridge.delivery.mode}/${bridge.delivery.qualification}/${bridge.delivery.readiness}`);
     if (input.explain) {
         for (const trace of result.trace)
             output(io, `${trace.code}: ${trace.detail}`);
@@ -220,7 +230,13 @@ export async function runCli(argv = process.argv.slice(2), io = {}) {
         const result = resolveForInput(input, io);
         if (!result.ok)
             return renderFailure(result, input, io);
-        if (!input.dryRun && input.command !== "codex") {
+        const bridge = launchPlanBridge(result);
+        // A canonical launchable plan is a valid foundation result even when its
+        // delivery fact is pull-only/not-ready. Only an actually unavailable
+        // contribution uses the legacy pre-spawn qualification failure.
+        if (!input.dryRun &&
+            input.command !== "codex" &&
+            bridge.launch.status !== "launchable") {
             return renderFailure({
                 schemaVersion: "golem.launch-plan/v1",
                 ok: false,

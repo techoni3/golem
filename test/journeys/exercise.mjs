@@ -764,6 +764,17 @@ export async function exerciseCliCommandParity() {
 		const metadata = JSON.parse(schema.stdout);
 		assert.equal(metadata.schemaVersion, "golem.cli-registry/v1");
 		assert.equal(metadata.commands.some((command) => command.name === "launch"), false);
+		const local = runTypedCliFixture(home, ["claude", "local", "--dry-run", "--json"]);
+		assert.equal(local.status, 0, local.stderr);
+		const localPlan = JSON.parse(local.stdout);
+		assert.equal(localPlan.ok, true);
+		assert.equal(localPlan.launch.status, "launchable");
+		assert.equal(localPlan.delivery.mode, "native_channel");
+		assert.equal(localPlan.delivery.readiness, "not_ready");
+		assert.notEqual(localPlan.capabilityFacts.deliveryFlow, "push");
+		const explained = runTypedCliFixture(home, ["claude", "local", "--explain"]);
+		assert.equal(explained.status, 0, explained.stderr);
+		assert.match(explained.stdout, /launch launchable; delivery native_channel\/unknown\/not_ready/u);
 		assert.deepEqual(fs.readdirSync(home), before, "help and schema generation perform no writes");
 		return "one Commander registry generated help/metadata with canonical harness verbs, compatibility names, no launch command, and zero home writes";
 	} finally {
