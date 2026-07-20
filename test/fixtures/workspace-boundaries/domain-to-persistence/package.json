@@ -1,0 +1,4 @@
+{
+  "name": "@golem/domain",
+  "expectedBoundaryRule": "domain-to-persistence"
+}

@@ -15,6 +15,13 @@
     "access": "public"
   },
   "type": "module",
+  "packageManager": "npm@11.16.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "packages/adapters/*",
+    "tools/*"
+  ],
   "bin": {
     "golem": "./cli/golem.js"
   },
@@ -39,10 +46,18 @@
     "SECURITY.md"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=24.18.0 <25"
   },
   "scripts": {
-    "check": "node --check cli/golem.js && node cli/golem.js sync --check --all",
+    "api:check": "npm run check -w @golem/openapi-codegen",
+    "api:generate": "npm run generate -w @golem/openapi-codegen",
+    "build": "npm run typecheck && npm run build -w @golem/dashboard",
+    "check": "npm run typecheck && npm run check:boundaries && npm run check:strictness && npm run lint && npm run check:legacy",
+    "check:boundaries": "node scripts/check-boundaries.mjs",
+    "check:legacy": "node --check cli/golem.js && node cli/golem.js sync --check --all",
+    "check:strictness": "node scripts/check-strictness.mjs",
+    "clean": "node scripts/clean-workspace.mjs",
+    "lint": "biome check apps packages tools scripts --no-errors-on-unmatched",
     "test": "node test/session-facts.test.mjs && node test/codex-journey.test.mjs && node test/pi-journey.test.mjs && node test/pi-tracker-integration.test.mjs && node test/sync-enforcement.test.mjs && node shims/opencode/resume-dispatchable.test.mjs && node shims/opencode/passive-delta.test.mjs && node mcp/channel/tracker-client.test.mjs",
     "verify:stack": "node test/stack-certification/run.mjs",
     "test:stack-certification": "node --test test/stack-certification/version-gate.test.mjs",
@@ -54,7 +69,8 @@
     "dashboard:dev": "vite --config dashboard/vite.config.js",
     "dashboard:serve": "npm run dashboard:build && node dashboard/server/index.js",
     "test:dashboard:browser": "node dashboard/scripts/gol-461-browser.mjs && node dashboard/scripts/gol-495-browser.mjs",
-    "check:dashboard": "dashboard/scripts/check.sh"
+    "check:dashboard": "dashboard/scripts/check.sh",
+    "typecheck": "tsc -b --stopBuildOnErrors"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -78,8 +94,10 @@
     "ws": "^8.21.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.4",
     "@babel/parser": "^7.29.7",
     "playwright-core": "^1.61.0",
+    "typescript": "7.0.2",
     "vite": "^6.3.5"
   }
 }

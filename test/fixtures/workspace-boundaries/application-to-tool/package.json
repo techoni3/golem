@@ -1,0 +1,4 @@
+{
+  "name": "@golem/runtime",
+  "expectedBoundaryRule": "application-to-tool"
+}

@@ -1,0 +1,1 @@
+export const dashboardTheme = "golem";

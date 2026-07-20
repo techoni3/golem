@@ -1,0 +1,1 @@
+import "@golem/contracts";

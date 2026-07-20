@@ -1,0 +1,17 @@
+{
+	"name": "@golem/cli",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"dependencies": {
+		"@golem/api-client": "file:../../packages/api-client",
+		"@golem/compiler": "file:../../packages/compiler",
+		"@golem/launcher": "file:../../packages/launcher"
+	}
+}
