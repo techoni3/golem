@@ -104,7 +104,7 @@ test('certification timeout and interrupt guards terminate process groups and cl
     const result = spawnSync(process.execPath, [runner, '--json'], {
       encoding: 'utf8',
       env: runnerEnv(rowTimeout, {
-        STACK_CERTIFICATION_TEST_COMMAND_TIMEOUT_MS: '500',
+        STACK_CERTIFICATION_TEST_TYPECHECK_TIMEOUT_MS: '500',
         STACK_CERTIFICATION_TEST_KILL_GRACE_MS: '25',
         STACK_CERTIFICATION_TEST_ROW_CHILD_PID_FILE: rowTimeout.rowChildPidFile,
       }),
@@ -126,7 +126,7 @@ test('certification timeout and interrupt guards terminate process groups and cl
   try {
     const child = spawn(process.execPath, [runner, '--json'], {
       env: runnerEnv(interrupted, {
-        STACK_CERTIFICATION_TEST_COMMAND_TIMEOUT_MS: '10000',
+        STACK_CERTIFICATION_TEST_TYPECHECK_TIMEOUT_MS: '10000',
         STACK_CERTIFICATION_TEST_KILL_GRACE_MS: '25',
         STACK_CERTIFICATION_TEST_ROW_CHILD_PID_FILE: interrupted.rowChildPidFile,
       }),

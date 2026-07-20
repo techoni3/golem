@@ -257,7 +257,11 @@ async function certifyDependencyTopology(fixtureRoot, env) {
 async function certifyTypeScript(fixtureRoot, env, binary, force = false) {
   const args = [join(fixtureRoot, 'node_modules', binary, 'bin', 'tsc'), '-b'];
   if (force) args.push('--force');
-  requireSuccess(await command(process.execPath, args, { cwd: fixtureRoot, env }));
+  requireSuccess(await command(process.execPath, args, {
+    cwd: fixtureRoot,
+    env,
+    timeoutMs: configuredTimeout('STACK_CERTIFICATION_TEST_TYPECHECK_TIMEOUT_MS', CERTIFICATION_TIMEOUT_MS),
+  }));
   for (const filePath of [
     join(fixtureRoot, 'packages', 'contracts', 'dist', 'index.js'),
     join(fixtureRoot, 'packages', 'contracts', 'dist', 'index.d.ts'),
