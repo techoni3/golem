@@ -1,26 +1,24 @@
 # REPO-MAP.md
-> Last verified: 2026-07-21 @ 2833e4d — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-21 @ 99f1682 — maintained via golem:docs-maintenance.
 
 ## Structure
 
-- `apps/`: private TypeScript composition; typed CLI registry, Fastify control-plane and typed dashboard shell. `dashboard/web` remains a narrow body/drawer island.
-- `packages/`: contracts, domain, persistence, runtime/tracker, launcher, compat, compiler, MCP, generated client, testkit, and UI. Apps use TS7; only `tools/openapi-codegen/` uses TS5.9.3. Runtime session materialization is split between `packages/runtime/src/sessions/` and the typed SQLite projection in `packages/persistence/src/session-repository.ts`.
-- `substrate/` is render source; `plugin/` and `dashboard/dist/` are generated. Legacy `dashboard/dist/` remains the `golem dashboard` root; typed control-plane is parallel.
+- `apps/` contains private TypeScript composition: CLI registry, Fastify control plane, and typed dashboard shell. `dashboard/web` remains the legacy body/drawer island.
+- `packages/` contains contracts, pure domain, SQLite persistence, runtime/tracker services, launcher, compat, compiler, MCP, generated API client, testkit, and UI. Runtime session materialization is split between `packages/runtime/src/sessions/` and `packages/persistence/src/session-repository.ts`.
+- `substrate/` is render source; `plugin/` and `dashboard/dist/` are generated. Legacy `dashboard/dist/` remains the `golem dashboard` root; the typed control-plane root is parallel.
 
 ## Invariants and flow
 
-- Flow is contracts → domain/runtime/tracker → control-plane → api-client → clients. Canonical code does not import compatibility, storage, UI, harnesses, or tools; boundaries enforce this.
-- One npm11 lock. `packages/persistence` alone opens SQLite writers; runtime/tracker DBs are separate. Producers spool; the owner handles recovery/quarantine.
-- `packages/tracker` owns durable delivery/claim/replay/retention and typed work-item, phase, comment, link, and stream services. Its legacy façade owns no DB or runtime-readiness authority.
-- Exceptional close is server-composed `{id, expectedRevision, reason}`; request text, comments, and generic MCP input never authorize it. Launcher owns fail-closed writes, shell-free process groups, and the immutable LaunchPlan launchability/delivery split; compat is non-authoritative.
-- Control plane owns REST/WS; bearer is CLI/MCP-only. Browser mutation bootstrap is same-origin/CSRF-protected; dashboard code receives no bearer. `api-client` owns generated validation/resync; typed dashboard owns UI lifecycle.
-- Tracker core uses `tracker/003-live-tracker-core` over canonical rows/events. CAS/outbox/audit derive from `events.id`; legacy tracker remains byte-preserved until explicit migration.
-- Project identity uses canonical real paths plus Git common-dir/worktree evidence. Git roots auto-register; non-Git paths require `.golem-project` or explicit registration. Runtime observations are one-owner transactional and deduplicated; relocation history retains the UUID.
-- Logical sessions are project-first; immutable generations, scoped aliases, source-time provenance, terminal monotonic lifecycle, actor activity, observation timestamps, and deterministic outbox explanations are materialized by `SessionService`.
-- `apps/cli/src/registry.ts` is the one Commander vocabulary for parser/help/metadata; `cli/golem.js` delegates harness dry-runs through `dist/apps/cli/`.
+- Flow is contracts → domain/runtime/tracker → control plane → generated API client → clients. Canonical layers do not import compatibility, storage, UI, harnesses, or tools; boundaries enforce this.
+- One npm11 lock. `packages/persistence` alone opens SQLite writers. Producers spool; the owner handles recovery, quarantine, and durable outbox replay.
+- Tracker owns durable delivery, claim/replay/retention, and typed work-item/phase/comment/link/stream services. Exceptional close is server-composed `{id, expectedRevision, reason}`; request text and generic MCP input never authorize it.
+- Launcher owns fail-closed writes, shell-free process groups, and immutable LaunchPlan launchability/delivery facts; compat is non-authoritative. The CLI registry is the one parser/help/metadata vocabulary.
+- Control plane owns REST/WS; bearer is CLI/MCP-only. Browser bootstrap is same-origin/CSRF-protected and typed dashboard code receives no bearer. `api-client` owns generated validation and resync.
+- Project identity uses canonical real paths plus Git common-dir/worktree evidence; relocation history retains UUIDs. Runtime observations are one-owner transactional and deduplicated.
+- Logical sessions are project-first: immutable generations, scoped aliases, source-time/tie provenance, terminal monotonic lifecycle, monotonic actor activity, observation timestamps, and deterministic ordered outbox effects are materialized by `SessionService`.
 
 ## Checks and gotchas
 
-- Tests use disposable homes; never mutate user state, shared ports, Docker, or renders. Sandbox loopback denial is `UNMET`, never PASS.
+- Tests use disposable homes; never mutate user state, shared ports, Docker, or renders. Loopback denial is `UNMET`, never PASS.
 - `mcp/channel` remains the GOL-29 render entrypoint. Do not hand-edit generated renders, peer-bypass workspace symlinks, or TS5 topology.
-- Node24 checks cover typecheck, boundaries, lint, render, and J2–J7 journeys. Focused project checks are `npm run test:launcher-resolution`, the named launcher `test:journey` scenarios, `npm run check:boundaries`, and `git diff --check`.
+- Node24 checks cover build/typecheck, boundaries, lint, render, and named J2–J7 journeys. Session evidence is `npm run test:sessions`, `npm run test:journey -- --scenario cross-harness-session-lifecycle`, and `npm run test:journey -- --scenario session-reorder-restart-replay`, plus `git diff --check`.

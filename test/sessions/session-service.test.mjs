@@ -62,6 +62,10 @@ test("GOL-41 cross-harness lifecycle keeps actor activity separate from observat
 		assert.equal(service.apply(signal("session.resumed", 15, 5, generationTwo, { resumed_from_generation_id: generationOne })).disposition, "accepted");
 		const observed = service.observe({ projectId, sessionId, generationId: generationTwo, observedAt: "2026-01-01T00:02:00.000Z" });
 		assert.equal(observed.disposition, "accepted");
+		const staleObservation = service.observe({ projectId, sessionId, generationId: generationTwo, observedAt: "2026-01-01T00:01:59.000Z" });
+		assert.equal(staleObservation.disposition, "ignored");
+		assert.equal(staleObservation.revision, observed.revision);
+		assert.equal(service.observe({ projectId, sessionId, generationId: uuid("gen", 99), observedAt: "2026-01-01T00:03:00.000Z" }).disposition, "rejected");
 		const view = service.get(projectId, sessionId);
 		assert(view);
 		assert.deepEqual(view.metadata, { model: "sonnet", name: "alpha", role: "worker" });
@@ -74,7 +78,7 @@ test("GOL-41 cross-harness lifecycle keeps actor activity separate from observat
 		const alias = { projectId, harness: "claude", aliasKind: "native_conversation", producerId: uuid("prod", 10), alias: "native-1", sessionId, generationId: generationTwo, source: "adapter", provenance: { event: "alias" } };
 		assert.equal(owner.runtimeSessionStorage().attachAlias(alias).disposition, "accepted");
 		assert.equal(owner.runtimeSessionStorage().findAlias(alias)?.sessionId, sessionId);
-		assert.equal(owner.runtimeOutboxHealth().pending, 6, "accepted lifecycle changes each emit one durable explanation");
+		assert.equal(owner.runtimeOutboxHealth().pending, 8, "accepted lifecycle, observation, and alias changes each emit one durable explanation");
 	} finally {
 		await owner.close();
 		home.cleanup();
@@ -110,15 +114,63 @@ test("GOL-41 reorder/restart/replay converges and aliases remain scoped", async 
 	first.home.cleanup();
 	second.home.cleanup();
 
+	const terminalOutcome = async (order) => {
+		const home = createTemporaryHome("golem-gol41-terminal-");
+		const owner = openControlPlanePersistence({ runtimePath: home.runtimeDb, trackerPath: home.trackerDb }, { clock: clock(), ownerId: `gol41-terminal-${order.join("-")}` });
+		try {
+			seedProject(owner);
+			const service = createSessionService({ projects: owner.runtimeProjectStorage(), sessions: owner.runtimeSessionStorage() });
+			const started = signal("session.started", 41, 1);
+			const ended = signal("session.ended", 42, 2, generationOne, { disposition: "ended" });
+			const errored = signal("session.ended", 43, 3, generationOne, { disposition: "errored" });
+			for (const event of [started, ...order.map((index) => index === 0 ? ended : errored)]) service.apply(event);
+			return service.get(projectId, sessionId);
+		} finally {
+			await owner.close();
+			home.cleanup();
+		}
+	};
+	const terminalFirst = await terminalOutcome([0, 1]);
+	const terminalSecond = await terminalOutcome([1, 0]);
+	assert.deepEqual(terminalFirst, terminalSecond, "terminal same-stage provenance must converge across receipt order");
+	assert.equal(terminalFirst?.generations[0].state, "errored");
+
+	const activityOutcome = async (order) => {
+		const home = createTemporaryHome("golem-gol41-activity-");
+		const owner = openControlPlanePersistence({ runtimePath: home.runtimeDb, trackerPath: home.trackerDb }, { clock: clock(), ownerId: `gol41-activity-${order.join("-")}` });
+		try {
+			seedProject(owner);
+			const service = createSessionService({ projects: owner.runtimeProjectStorage(), sessions: owner.runtimeSessionStorage() });
+			const events = [signal("session.started", 51, 1), signal("session.activity", 52, 5), signal("session.ended", 53, 6, generationOne, { disposition: "ended" }), signal("session.activity", 54, 2)];
+			for (const index of order) service.apply(events[index]);
+			return service.get(projectId, sessionId);
+		} finally {
+			await owner.close();
+			home.cleanup();
+		}
+	};
+	const activityFirst = await activityOutcome([0, 1, 2, 3]);
+	const activitySecond = await activityOutcome([0, 3, 1, 2]);
+	assert.deepEqual(activityFirst, activitySecond, "actor activity must use a monotonic source clock after terminal");
+	assert.equal(activityFirst?.activityAt, "2026-01-01T00:00:05.000Z");
+
 	const home = createTemporaryHome("golem-gol41-alias-scope-");
 	const owner = openControlPlanePersistence({ runtimePath: home.runtimeDb, trackerPath: home.trackerDb }, { clock: clock(), ownerId: "gol41-alias" });
 	try {
 		seedProject(owner);
 		const service = createSessionService({ projects: owner.runtimeProjectStorage(), sessions: owner.runtimeSessionStorage() });
-		const unresolved = service.apply(signal("session.started", 31, 1), { projectId, harness: "claude", aliasKind: "native_run", alias: "missing", source: "adapter", provenance: {} });
-		assert.equal(unresolved.disposition, "review");
-		const started = service.apply(signal("session.started", 32, 2, generationTwo));
+		const resume = signal("session.resumed", 31, 2, generationTwo, { resumed_from_generation_id: generationOne });
+		assert.equal(service.apply(resume).code, "runtime.session.generation_parent_pending");
+		const started = service.apply(signal("session.started", 32, 1, generationOne));
 		assert.equal(started.disposition, "accepted");
+		const resumed = service.get(projectId, sessionId);
+		assert(resumed);
+		assert.equal(resumed.generations.filter((generation) => !["ended", "errored", "superseded"].includes(generation.state)).length, 1, "reverse resume must leave one live generation");
+		assert.equal(resumed.generations.length, 2);
+		const replayedOutbox = owner.claimRuntimeOutbox("gol41-replay-order", 20);
+		const replayRevisions = replayedOutbox.filter((entry) => entry.destination === "tracker").map((entry) => entry.payload.revision).filter((value) => typeof value === "number");
+		assert.deepEqual(replayRevisions, [1, 2], "pending replay effects follow transaction revision order");
+		for (const entry of replayedOutbox) owner.ackRuntimeOutbox(entry.id, entry.claimToken);
 		const alias = { projectId, harness: "claude", aliasKind: "native_run", alias: "missing", sessionId, source: "adapter", provenance: {} };
 		assert.equal(owner.runtimeSessionStorage().attachAlias(alias).disposition, "accepted");
 		const different = signal("session.started", 33, 3, uuid("gen", 7));
