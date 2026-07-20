@@ -9,7 +9,8 @@ export type AuditSourceStatus =
 	| "missing"
 	| "unsafe"
 	| "unreadable"
-	| "malformed";
+	| "malformed"
+	| "changed";
 
 export interface AuditSource {
 	readonly id: string;

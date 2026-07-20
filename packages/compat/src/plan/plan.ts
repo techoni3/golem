@@ -111,10 +111,13 @@ function sourceActions(
 			case "unsafe":
 			case "unreadable":
 			case "malformed":
+			case "changed":
 				result.push(
 					action(
 						"quarantine",
-						`audit.source.${source.status}`,
+						source.status === "changed"
+							? "audit.source.changed_during_audit"
+							: `audit.source.${source.status}`,
 						[source.id],
 						[],
 						[],
@@ -200,7 +203,15 @@ function projectActions(document: JsonRecord | undefined): AuditAction[] {
 			(root) => (pathOwners.get(root)?.size ?? 0) > 1,
 		);
 		const uniqueRoots = [...new Set(roots)].sort();
-		if (malformed || conflictingOwner || uniqueRoots.length > 1) {
+		const strongCanonicalId =
+			/^prj_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+				id,
+			);
+		if (
+			malformed ||
+			conflictingOwner ||
+			(uniqueRoots.length > 1 && !strongCanonicalId)
+		) {
 			result.push(
 				action(
 					"review",

@@ -12,7 +12,7 @@
 - One npm11 lock owns workspace code. Apps use TS7; `api-client` owns `openapi-fetch`; codegen pins TS5.9.3. Root scripts own build/typecheck/boundaries/lint and generation.
 - Direction is contracts → domain/runtime/tracker → control-plane → client → CLI/MCP/dashboard. Canonical code never imports compatibility, storage, UI, harness, or tools; `scripts/check-boundaries.mjs` enforces this.
 - `persistence` alone opens SQLite writers; runtime/tracker DBs remain separate. `launcher` owns fail-closed preset resolution, redacted JSONC backup/temp/commit/rollback, trusted native discovery, and `shell:false` execution.
-- `compat` is never authoritative: GOL-39 uses `lstat`/no-follow reads and proposes redacted actions only. Apply/import is deferred; links, corruption, names/PIDs/recency, conflicts, and unresolved evidence never auto-link.
+- `compat` is never authoritative: GOL-39 uses stable no-follow descriptor snapshots, per-component containment, one global 5k inventory, and redacted/hashed paths. Apply/import is deferred; unsafe or unresolved evidence never auto-links.
 - `apps/control-plane` is foreground Fastify composition. Typed `/api/v1/ws` accepts bearer CLI/MCP callers; browser sessions are bounded HttpOnly/Origin/Host/protocol/port; headerless legacy `/ws` has an injected source only.
 
 ## Data flow and gotchas
