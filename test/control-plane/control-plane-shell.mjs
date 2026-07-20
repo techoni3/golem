@@ -76,13 +76,14 @@ async function requestJson(url, options) {
 	return { response, body: await response.json() };
 }
 
-function requestWithHost(origin, host) {
-	const url = new URL(`${origin}/api/v1/health/live`);
+function requestWithHost(origin, host, route = "/api/v1/health/live", method = "GET") {
+	const url = new URL(`${origin}${route}`);
 	return new Promise((resolve, reject) => {
 		const request = http.request({
 			host: url.hostname,
 			port: url.port,
 			path: url.pathname,
+			method,
 			headers: { host },
 		}, (response) => {
 			let body = "";
@@ -179,13 +180,13 @@ function setCookie(response) {
 	return value.split(";", 1)[0];
 }
 
-async function assertBrowserShell(origin, publishLegacyDelta) {
+async function assertBrowserShell(origin) {
 	const chrome = await acquireChrome();
 	try {
 		const context = await chrome.browser.newContext();
 		try {
 			const page = await context.newPage();
-			await page.goto(origin, { waitUntil: "domcontentloaded" });
+			await page.goto(`${origin}/?ticket=control-plane-ticket`, { waitUntil: "domcontentloaded" });
 			const shippedScripts = await page.evaluate(async () =>
 				Promise.all(
 					[...document.scripts].map(async (script) =>
@@ -200,22 +201,43 @@ async function assertBrowserShell(origin, publishLegacyDelta) {
 				false,
 				"the shipped dashboard JavaScript never receives the bearer token",
 			);
-			assert.equal(await page.locator("#root").count(), 1, "legacy dashboard static shell is served by the control plane");
-			await page.waitForFunction(
-				() =>
-					window.Store?.getState?.().connection === "connected" &&
-					window.Store.getState().ready === true,
-				undefined,
-				{ timeout: 4_000 },
+			assert.equal(await page.locator("#root").count(), 1, "typed dashboard static shell is served by the control plane");
+			await page.getByTestId("dashboard-shell").waitFor({ state: "visible", timeout: 4_000 });
+			await page.getByRole("dialog", { name: "Ticket details" }).waitFor({ state: "visible", timeout: 4_000 });
+			assert.equal(await page.locator("[data-compatibility-island='legacy-current-pages'] .app").count(), 1, "typed shell mounts the current legacy page implementation through one explicit island");
+			await page.keyboard.press("Escape");
+			await page.waitForFunction(() => !window.location.search.includes("ticket="), undefined, { timeout: 4_000 });
+			await page.getByRole("link", { name: "Tracker" }).click();
+			await page.locator(".tracker-board").waitFor({ state: "visible", timeout: 4_000 });
+			assert.match(page.url(), /\/tracker$/u, "typed Router keeps the legacy navigation URL deep-linkable");
+			const create = page.getByRole("button", { name: "+ New ticket" });
+			await create.focus();
+			await page.keyboard.press("Enter");
+			await page.locator(".drawer-compose.open").waitFor({ state: "visible", timeout: 4_000 });
+			await page.keyboard.press("Escape");
+			await page.waitForFunction(() => !window.location.search.includes("compose="), undefined, { timeout: 4_000 });
+			const tracker = page.getByRole("link", { name: "Tracker" });
+			await tracker.focus();
+			await page.evaluate(() => window.Router.openTicket("control-plane-ticket"));
+			await page.getByRole("dialog", { name: "Ticket details" }).waitFor({ state: "visible", timeout: 4_000 });
+			await page.keyboard.press("Escape");
+			assert.equal(
+				await tracker.evaluate((element) => document.activeElement === element),
+				true,
+				"the current ticket drawer restores focus to its real invoking legacy trigger",
 			);
-			await publishLegacyDelta();
-			await page.waitForFunction(
-				() =>
-					window.Store
-						?.getState?.()
-						.projects.some((project) => project.id === "control-plane-browser-echo"),
-				undefined,
-				{ timeout: 4_000 },
+			for (const [width, height] of [[360, 800], [768, 900], [1280, 900]]) {
+				await page.setViewportSize({ width, height });
+				assert.equal(await page.getByTestId("dashboard-shell").isVisible(), true, `shell remains reachable at ${width}px`);
+			}
+			await page.emulateMedia({ colorScheme: "dark" });
+			await page.evaluate(() => window.localStorage.setItem("golem.ui.theme", "system"));
+			await page.reload({ waitUntil: "domcontentloaded" });
+			await page.getByTestId("dashboard-shell").waitFor({ state: "visible", timeout: 4_000 });
+			assert.equal(
+				await page.evaluate(() => document.documentElement.dataset.theme),
+				"dark",
+				"system preference is applied by the inline first-paint bootstrap before the shell hydrates",
 			);
 		} finally {
 			await context.close();
@@ -284,6 +306,13 @@ export async function exerciseControlPlaneShell() {
 
 		const unsafeHost = await requestWithHost(first.origin, "example.invalid");
 		assert.equal(unsafeHost.status, 400, "non-loopback Host is rejected before routing");
+		const unsafeBrowserBootstrap = await requestWithHost(
+			first.origin,
+			"example.invalid",
+			"/api/v1/browser/session",
+			"POST",
+		);
+		assert.equal(unsafeBrowserBootstrap.status, 400, "a non-loopback Host cannot reach browser bootstrap");
 
 		const { createControlPlaneClient } = await import("../../packages/api-client/dist/index.js");
 		const client = createControlPlaneClient({ baseUrl: first.origin, token: controlPlaneToken });
@@ -295,6 +324,17 @@ export async function exerciseControlPlaneShell() {
 		});
 		assert.equal(openapi.response.status, 200);
 		assert.equal(openapi.body.openapi, "3.1.1", "the authenticated process serves its deterministic OpenAPI document");
+		const missingBrowserProof = await requestJson(`${first.origin}/api/v1/browser/session`, {
+			method: "POST",
+		});
+		assert.equal(missingBrowserProof.response.status, 403, "a headerless client cannot mint a browser session");
+		assert.equal(missingBrowserProof.body.code, "origin.invalid");
+		const wrongBrowserOrigin = await requestJson(`${first.origin}/api/v1/browser/session`, {
+			method: "POST",
+			headers: { origin: "https://example.invalid" },
+		});
+		assert.equal(wrongBrowserOrigin.response.status, 403, "a wrong browser Origin cannot mint a session");
+		assert.equal(wrongBrowserOrigin.body.code, "origin.invalid");
 
 		const bootstrap = await requestJson(`${first.origin}/api/v1/browser/session`, {
 			method: "POST",
@@ -413,18 +453,17 @@ export async function exerciseControlPlaneShell() {
 			},
 			"cross-port browser session Origin",
 		);
-		await assertBrowserShell(first.origin, async () => {
-			const echoed = await requestJson(`${first.origin}/api/v1/browser/echo`, {
-				method: "POST",
-				headers: {
-					authorization: `Bearer ${controlPlaneToken}`,
-					"content-type": "application/json",
-				},
-				body: JSON.stringify({ value: "browser-shell" }),
-			});
-			assert.equal(echoed.response.status, 200, "bearer mutation succeeds without Origin");
-			assert.equal(echoed.body.value, "browser-shell");
+		await assertBrowserShell(first.origin);
+		const echoed = await requestJson(`${first.origin}/api/v1/browser/echo`, {
+			method: "POST",
+			headers: {
+				authorization: `Bearer ${controlPlaneToken}`,
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({ value: "browser-shell" }),
 		});
+		assert.equal(echoed.response.status, 200, "bearer mutation succeeds without Origin");
+		assert.equal(echoed.body.value, "browser-shell");
 		const liveDelta = await waitForFrame(
 			typed,
 			(frame) => frame.payload?.kind === "delta",
@@ -564,7 +603,11 @@ export async function exerciseControlPlaneShell() {
 		});
 		await waitFor(() => exited(duplicate) ? true : undefined, "exclusive service-lock rejection");
 		assert.notEqual(duplicate.child.exitCode, 0, "second owner cannot take the service lock");
-		assert.match(`${duplicate.stdout()}${duplicate.stderr()}`, /service lock active/u);
+		assert.match(
+			`${duplicate.stdout()}${duplicate.stderr()}`,
+			/persistence owner already holds the runtime lock/u,
+			"the reconciled persistence owner rejects a second control-plane process before it can bind",
+		);
 		assert.equal(first.group.stdout().includes(controlPlaneToken), false, "readiness and logs never expose the bearer token");
 
 		assert.equal(typeof first.group.child.pid, "number", "control plane exposes its process owner for the crash-recovery probe");

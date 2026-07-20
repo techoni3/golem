@@ -3,8 +3,8 @@
 
 ## Structure
 
-- `apps/` are private TypeScript composition; legacy entrypoints stay authoritative until their vertical cutover.
-- `packages/`: `contracts` schemas; `domain` pure policy; `persistence` SQLite writer; `runtime`/`tracker` services; `launcher` redacted plans and owned child processes; `compat` legacy seams; `compiler` renders; `mcp-adapter` schema/API delegation; `api-client` generated types; `testkit` journeys; `ui` tokens/React Aria.
+- `apps/` are private TypeScript composition; legacy entrypoints stay authoritative until their vertical cutover. Dashboard is a React 19/Vite 8 shell: Router 7 URL/overlay state and Query 5 use only the generated client; current `dashboard/web` mounts through a projection-fed island.
+- `packages/`: `contracts` schemas; `domain` pure policy; `persistence` SQLite writer; `runtime`/`tracker` services; `launcher` redacted plans and owned child processes; `compat` legacy seams; `compiler` renders; `mcp-adapter` schema/API delegation; `api-client` generated HTTP/WS types; `testkit` journeys; `ui` tokens/React Aria.
 - `tools/openapi-codegen/` is isolated TS5 generation, never runtime packaging. `substrate/` is source; `plugin/` and `dashboard/dist/` are generated. `cli/`, `lib/`, `dashboard/server/`, `mcp/channel/`, and `shims/` are compatibility surfaces.
 
 ## Invariants
@@ -16,7 +16,8 @@
 - `tracker` owns durable envelope claim/settlement authority, semantic idempotency, bus event/cursor replay, passive slot leases, and dependency-aware retention through typed storage/eligibility ports only; a JSON registry is never endpoint authority.
 - `launcher` owns fail-closed preset resolution, redacted JSONC backup/temp/commit/rollback, trusted native discovery, shell-free argv/environment, readiness-gated automatic timeout, and owned child groups. See `docs/architecture/launcher-execution.md` (J5).
 - `compat` is never authoritative: GOL-39 uses stable no-follow descriptor snapshots, per-component containment, one global 5k inventory, and redacted/hashed paths. Apply/import is deferred; unsafe or unresolved evidence never auto-links.
-- `apps/control-plane` is foreground Fastify composition. Typed `/api/v1/ws` accepts bearer CLI/MCP callers; browser sessions are bounded HttpOnly/Origin/Host/protocol/port; headerless legacy `/ws` has an injected source only.
+- `apps/control-plane` is foreground Fastify composition. Typed `/api/v1/ws` accepts bearer CLI/MCP callers; browser sessions are bounded HttpOnly/Origin/Host/protocol/port. Exact same-origin Origin or Fetch/Referer + CSRF authorizes projections; the static browser receives no bearer; headerless legacy `/ws` has an injected source only.
+- `api-client` owns generated HTTP, WS-frame validation, revision snapshots, ordered deltas, and gap/instance resync; dashboard code does not spell API paths or DTOs.
 
 ## Data flow and gotchas
 
@@ -26,6 +27,7 @@ Hooks and shims write below `GOLEM_HOME`; dashboard REST/WS and tracker phase re
 - Nested `mcp/channel` postinstall/lock is the live GOL-29 render closure; its relocatable artifact is deferred, not `.mcp.json`'s entrypoint. See `docs/architecture/render-mcp-closure.md` for J1.
 - Never peer-bypass, import `tools/**` from production, ship workspace symlinks/TS5, or hand-edit generated renders. Claude updates cached render bytes only after sync/update/reload.
 - TS7 builds use `--stopBuildOnErrors`; generated OpenAPI is deterministic and must match the pinned CLI.
+- New dashboard code uses the typed projection/cache seam; isolated `dashboard/web` pages cannot mutate Query cache.
 
 ## Common tasks
 
@@ -39,4 +41,5 @@ Hooks and shims write below `GOLEM_HOME`; dashboard REST/WS and tracker phase re
 | Launcher resolution/process | `test:launcher-resolution`, `test:launcher-process`, J5/J7 |
 | Legacy audit/migration | `migration:plan`, `test:migration-plan`, `migration-dry-run-ambiguity` (J7) |
 | Control plane | `api:check`, `control-plane-auth-ws-lifecycle` (J6) |
+| Dashboard shell | `test:browser -- --grep dashboard-shell`, `test:journey -- --scenario ws-gap-resync` (J6) |
 | Legacy runtime | temp-home legacy baseline |

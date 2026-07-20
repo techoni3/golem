@@ -43,6 +43,7 @@ const persistenceJourney = path.join(repositoryRoot, "test/persistence/sqlite-ow
 const runtimeEngineJourney = path.join(repositoryRoot, "test/runtime/materializer-crash-matrix.test.mjs");
 const dashboardDownJourney = path.join(repositoryRoot, "test/runtime/dashboard-down-inbox-replay.test.mjs");
 const deliveryBusJourney = path.join(repositoryRoot, "test/tracker/delivery-bus.test.mjs");
+const controlPlaneProgram = path.join(repositoryRoot, "apps/control-plane/dist/main.js");
 const chromeExecutable = process.env.GOLEM_CHROME_EXECUTABLE || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
 class JourneyDiagnosticError extends Error {
@@ -426,6 +427,109 @@ export async function exerciseBusOfflineReplay() {
 	return "real SQLite bus dedupe, named cursor replay, passive lease commit/release, manual-interest prune, and audit verified";
 }
 
+function createNodeSocket(url, token, sockets) {
+	const socket = new WebSocket(url, { headers: { authorization: `Bearer ${token}` } });
+	const adapter = {
+		close: () => socket.close(),
+		onclose: null,
+		onerror: null,
+		onmessage: null,
+		onopen: null,
+	};
+	socket.on("open", () => adapter.onopen?.());
+	socket.on("message", (raw) => adapter.onmessage?.({ data: String(raw) }));
+	socket.on("error", () => adapter.onerror?.());
+	socket.on("close", () => adapter.onclose?.());
+	sockets.push(adapter);
+	return adapter;
+}
+
+export async function exerciseWsGapResync() {
+	const home = createTemporaryHome("golem-j6-ws-gap-");
+	const token = "golem-ws-gap-test-token-000000000000";
+	const staticRoot = path.join(home.root, "static");
+	let service;
+	let synchronizer;
+	try {
+		fs.mkdirSync(staticRoot, { recursive: true });
+		fs.writeFileSync(path.join(staticRoot, "index.html"), "<!doctype html><title>temporary dashboard</title>\n");
+		service = spawnGrouped(process.execPath, [controlPlaneProgram], {
+			cwd: repositoryRoot,
+			env: {
+				...home.env,
+				GOLEM_CONTROL_PLANE_TOKEN: token,
+				GOLEM_CONTROL_PLANE_PORT: "0",
+				GOLEM_CONTROL_PLANE_REPLAY_WINDOW: "2",
+				GOLEM_CONTROL_PLANE_STATIC_ROOT: staticRoot,
+			},
+		});
+		const ready = await waitFor(() => {
+			const message = parseReady(service.stdout());
+			if (message) return message;
+			if (exited(service)) return { failure: processFailure("ws gap control plane exited before ready", service) };
+			return undefined;
+		}, "ws gap control plane readiness");
+		if ("failure" in ready) throw ready.failure;
+
+		const { createBrowserControlPlaneClient, createProjectionSynchronizer } = await import("../../packages/api-client/dist/index.js");
+		const client = createBrowserControlPlaneClient(ready.origin, {
+			headers: { authorization: `Bearer ${token}` },
+		});
+		const states = [];
+		const snapshots = [];
+		const deltas = [];
+		const sockets = [];
+		await client.bootstrap();
+		synchronizer = createProjectionSynchronizer({
+			client,
+			stream: "runtime.live",
+			socketFactory: (url) => createNodeSocket(url, token, sockets),
+			onState: (state) => states.push(state),
+			onSnapshot: (snapshot, source) => snapshots.push({ source, revision: snapshot.resource_revision }),
+			onDelta: (frame) => deltas.push(frame.sequence),
+			retryDelayMs: 250,
+		});
+		synchronizer.start();
+		await waitFor(
+			() => (snapshots.length === 1 && states.includes("connected") ? true : undefined),
+			"initial typed WebSocket snapshot",
+		);
+		await client.echo("ordered-one");
+		await waitFor(() => (deltas.length === 1 ? true : undefined), "ordered delta");
+		assert.deepEqual(deltas, [1], "the first ordered delta applies exactly once");
+		const activeSocket = sockets.at(-1);
+		assert.ok(activeSocket, "journey owns a real authenticated WebSocket");
+		activeSocket.close();
+		await waitFor(
+			() => (states.includes("disconnected") ? true : undefined),
+			"WebSocket disconnect",
+		);
+		for (const value of ["gap-two", "gap-three", "gap-four"])
+			await client.echo(value);
+		await waitFor(
+				() =>
+					snapshots.some((snapshot) => snapshot.source === "http") &&
+					snapshots.length >= 2 &&
+					states.at(-1) === "connected"
+						? true
+						: undefined,
+			"compacted-cursor HTTP resync and fresh WebSocket snapshot",
+			4_000,
+		);
+		assert.deepEqual(deltas, [1], "gap frames never partially mutate the cache before a full resync");
+		assert.equal(
+			sockets.length,
+			3,
+			`the resync epoch closes its stale socket without scheduling a competing reconnect; states=${JSON.stringify(states)} snapshots=${JSON.stringify(snapshots)}`,
+		);
+		return "typed WebSocket applies one ordered delta, detects a real compacted replay cursor, refetches the projection, and reconnects from one fresh snapshot";
+	} finally {
+		if (synchronizer) synchronizer.stop();
+		if (service && !exited(service)) await stopProcessGroup(service);
+		cleanupHome(home);
+	}
+}
+
 export async function exerciseBrowser() {
 	const home = createTemporaryHome("golem-j8-browser-");
 	const artifactRoot = path.join(home.root, "browser-artifacts");
@@ -486,6 +590,7 @@ export const exercises = Object.freeze({
 	"dashboard-down-inbox-replay": exerciseDashboardDownInboxReplay,
 	"delivery-queue-crash-matrix": exerciseDeliveryQueueCrashMatrix,
 	"bus-offline-replay": exerciseBusOfflineReplay,
+	"ws-gap-resync": exerciseWsGapResync,
 	"testkit-browser": exerciseBrowser,
 	"legacy-parity-baseline": exerciseLegacyParityBaseline,
 	"render-mcp-closure": exerciseRenderMcpClosure,

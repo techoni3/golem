@@ -367,7 +367,9 @@ function Overlay({
 	drawer = false,
 }: OverlayProps & { drawer?: boolean }) {
 	const returnFocus = React.useRef<HTMLElement | null>(null);
-	const wasOpen = React.useRef(isOpen);
+	// Overlays can mount from a resumable URL already open. Start closed so
+	// that first render captures the invoking element as well as later opens.
+	const wasOpen = React.useRef(false);
 	if (isOpen && !wasOpen.current) {
 		returnFocus.current =
 			returnFocusRef?.current ??

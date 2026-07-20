@@ -453,8 +453,13 @@
     // v4: count of all alive native Golem sessions on the machine.
     getAliveSessionCount: () => state.nativeSessions.filter((s) => s.alive).length,
     getWorkingSessionCount: () => state.nativeSessions.filter((s) => s.alive && s.status === 'busy').length,
+    // The typed-shell compatibility adapter supplies normalized snapshots to
+    // the existing display modules. It never reaches back into the new cache.
+    applyTypedProjection: applySnapshot,
   };
 
-  // Kick off as soon as DOM is ready (script in <body>, so it already is).
-  bootstrap();
+  // Standalone legacy boot retains its REST/WS bootstrap. When mounted by the
+  // typed shell, the adapter is the only bootstrap owner and this Store is
+  // projection-fed so it cannot race or mutate the Query cache.
+  if (!window.__GOLEM_TYPED_SHELL__) bootstrap();
 })();

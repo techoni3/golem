@@ -1,6 +1,6 @@
 // Root App — routing + global shell.
 
-function App() {
+export function LegacyDashboardApp() {
   useStore();
   // Route state is driven by window.Router (path-based). The router pushes
   // history on navigation (so Back traverses pages) and dispatches `route-change`
@@ -114,6 +114,9 @@ function mount() {
     return setTimeout(mount, 30);
   }
   const root = window.ReactDOMClient.createRoot(document.getElementById('root'));
-  root.render(window.React.createElement(App));
+  root.render(window.React.createElement(LegacyDashboardApp));
 }
-mount();
+// GOL-38 imports the current application as a compatibility island. Its typed
+// host owns the root and feeds the legacy Store a normalized projection, while
+// direct legacy boot keeps its existing standalone behavior until cutover.
+if (!window.__GOLEM_TYPED_SHELL__) mount();

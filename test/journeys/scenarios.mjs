@@ -98,6 +98,12 @@ export const scenarios = [
 		regression: "the typed control plane accepts an unsafe caller, loses revision resync, serves no dashboard shell, or leaks its service lock",
 	}),
 	registerScenario({
+		id: "ws-gap-resync",
+		journey: "J6",
+		tier: "pr",
+		regression: "a resumed dashboard stream applies a partial gap instead of refetching one authoritative projection",
+	}),
+	registerScenario({
 		id: "legacy-parity-baseline",
 		journey: "J4",
 		tier: "integration",
