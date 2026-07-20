@@ -15,7 +15,7 @@
 - One npm 11 lock owns `apps/`, `packages/`, and `tools/`; applications use TS 7 while untouched JS stays unchecked.
 - Root scripts own typecheck/build/boundaries/lint/clean and deterministic `contracts:*`/`api:*` generation/check.
 - `api-client` uses runtime `openapi-fetch@0.17.0`; codegen alone has exact TS 5.9.3/OpenAPI Typescript 7.13.0. No application/runtime source imports the tools workspace.
-- `testkit` contains temp-home containment, child cleanup, stable summaries, and fresh headless contexts; denied loopback is `UNMET`.
+- `testkit` contains temp-home containment, child cleanup, stable summaries, and headless contexts; denied loopback is `UNMET`.
 - `apps/control-plane` is the thin foreground Fastify composition façade. `auth`, `routes`, `ws-replay`, `compatibility`, and `lifecycle` keep bearer/browser policy, validated routes/errors, bounded injected replay, concrete legacy `/api/health`/`/api/meta` + static shell, and nonce-safe service/LaunchAgent lifecycle separate (`docs/architecture/control-plane.md`).
 
 ### `scripts/check-boundaries.mjs`
