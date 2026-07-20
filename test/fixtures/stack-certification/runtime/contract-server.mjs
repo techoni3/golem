@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import swagger from '@fastify/swagger';
 import websocket from '@fastify/websocket';
 import Fastify from 'fastify';
-import { serializerCompiler, validatorCompiler, jsonSchemaTransform } from 'fastify-type-provider-zod';
+import { jsonSchemaTransform, serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import createClient from 'openapi-fetch';
 import WebSocket from 'ws';
 import { EchoInput, EchoOutput } from './schema.mjs';
@@ -80,7 +80,7 @@ export async function certifyContractBoundary({ fixtureRoot, generatedRoot, env 
     const generatedClientPath = join(artifactRoot, 'generated-client.ts');
     await writeFile(generatedClientPath, `import createClient from 'openapi-fetch';\nimport type { paths } from './openapi.js';\nexport const client = createClient<paths>({ baseUrl: 'http://127.0.0.1' });\n`);
     await run(process.execPath, [
-      join(fixtureRoot, 'node_modules', 'typescript', 'bin', 'tsc'), '--noEmit', '--strict', '--module', 'NodeNext', '--moduleResolution', 'NodeNext', '--target', 'ES2024', generatedClientPath
+      join(fixtureRoot, 'node_modules', 'typescript', 'bin', 'tsc'), '--noEmit', '--ignoreConfig', '--strict', '--module', 'NodeNext', '--moduleResolution', 'NodeNext', '--target', 'ES2024', generatedClientPath
     ], fixtureRoot, env);
 
     const client = createClient({ baseUrl });
