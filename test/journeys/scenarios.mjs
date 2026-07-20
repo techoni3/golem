@@ -26,6 +26,18 @@ export const scenarios = [
 		regression: "native harness argv, stdin, crash, duplicate output, or signal handling drifts",
 	}),
 	registerScenario({
+		id: "native-spawn-safety",
+		journey: "J5",
+		tier: "integration",
+		regression: "recursive or unsafe binary discovery, shell expansion, secret leakage, signal loss, or a leaked native child group",
+	}),
+	registerScenario({
+		id: "launcher-signal-cleanup",
+		journey: "J5",
+		tier: "integration",
+		regression: "signal, resize, timeout, or native descendant cleanup leaves an orphaned or misreported harness process",
+	}),
+	registerScenario({
 		id: "testkit-semantic-parity",
 		journey: "J6",
 		tier: "pr",
