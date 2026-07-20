@@ -24,7 +24,8 @@ one native child process.
 Interactive TTY launches inherit stdio; noninteractive launches use bounded
 capture. Unix launches own a detached process group, forward SIGINT/SIGTERM and
 SIGWINCH, and terminate with SIGTERM followed by bounded SIGKILL. A timeout
-uses the same owned-group cleanup. Managed plans call the injected GOL-32
+uses the same owned-group cleanup; an adapter that owns a concrete readiness
+signal may gate when that automatic deadline begins. Managed plans call the injected GOL-32
 control-plane ensure port before spawning; direct plans never claim or start
 management. Dry-run performs the same discovery/environment validation and
 returns the redacted record without ensuring or spawning.

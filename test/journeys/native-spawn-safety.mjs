@@ -421,8 +421,12 @@ export async function exerciseLauncherSignalCleanup() {
 		await childIsGone(ready.worker_pid);
 
 		const timeoutLog = path.join(home.root, "timeout.ndjson");
+		const timeoutGate = Promise.withResolvers();
 		const timed = await executeLaunch(
-			executionInput(home, directPlan, timeoutLog, "stubborn-tree"),
+			executionInput(home, directPlan, timeoutLog, "stubborn-tree", {
+				timeoutMs: 50,
+				timeoutGate: timeoutGate.promise,
+			}),
 		);
 		assert.equal(timed.kind, "running");
 		if (timed.kind !== "running") throw new Error("timeout launch did not start");
@@ -431,16 +435,20 @@ export async function exerciseLauncherSignalCleanup() {
 			timeoutLog,
 			(row) =>
 				row.event === "ready" &&
-				row.root_sigterm_resistance_ready === true,
-			"SIGTERM-resistance readiness before TERM-to-KILL timeout",
+				row.root_sigterm_resistance_ready === true &&
+				row.descendant_sigterm_resistance_ready === true,
+			"root and descendant SIGTERM-resistance readiness before automatic timeout",
 		);
-		const timeoutExit = await timed.running.stop(50);
+		timeoutGate.resolve();
+		const timeoutExit = await timed.running.wait();
+		assert.equal(timeoutExit.timedOut, true, "armed automatic timeout terminates the owned process group");
 		assert.equal(timeoutExit.signal, "SIGKILL", "observably SIGTERM-resistant root receives bounded SIGKILL");
 		await waitForRow(timeoutLog, (row) => row.event === "signal" && row.signal === "SIGTERM", "timeout termination");
-		assert.equal(timeoutReady.root_sigterm_resistance_ready, true, "TERM-to-KILL grace starts only after the fixture confirms resistance");
+		assert.equal(timeoutReady.root_sigterm_resistance_ready, true, "automatic timeout arms only after the root confirms resistance");
+		assert.equal(timeoutReady.descendant_sigterm_resistance_ready, true, "automatic timeout arms only after the descendant confirms resistance");
 		assert.equal(typeof timeoutReady.worker_pid, "number");
 		await childIsGone(timeoutReady.worker_pid);
-		return "SIGINT/SIGWINCH forwarding, listener restoration, readiness-gated TERM-to-KILL timeout, and descendant cleanup verified";
+		return "SIGINT/SIGWINCH forwarding, listener restoration, readiness-gated automatic TERM-to-KILL timeout, and descendant cleanup verified";
 	} finally {
 		await Promise.all(
 			[...ownedLaunches].map(async (running) => {

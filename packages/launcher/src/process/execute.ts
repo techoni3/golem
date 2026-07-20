@@ -43,6 +43,12 @@ export interface LaunchExecutionInput {
 	readonly isTTY: boolean;
 	readonly dryRun?: boolean;
 	readonly timeoutMs?: number;
+	/**
+	 * An adapter-owned readiness fence. When supplied, the automatic timeout is
+	 * armed only after it resolves; a rejected fence fails safe by stopping the
+	 * owned process group immediately.
+	 */
+	readonly timeoutGate?: Promise<void>;
 	readonly controlPlane?: ControlPlaneEnsurePort;
 }
 
@@ -181,6 +187,7 @@ function runningLaunch(input: {
 	readonly child: ChildProcess;
 	readonly record: LaunchRecord;
 	readonly timeoutMs?: number;
+	readonly timeoutGate?: Promise<void>;
 	readonly sensitiveValues: readonly string[];
 }): RunningLaunch {
 	const { child, record } = input;
@@ -235,17 +242,30 @@ function runningLaunch(input: {
 		forwardSignal("SIGKILL");
 		return completed;
 	};
-	if (input.timeoutMs !== undefined) {
-		if (!Number.isSafeInteger(input.timeoutMs) || input.timeoutMs <= 0)
+	const armTimeout = (timeoutMs: number): void => {
+		if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0)
 			throw executionFailure(
 				"launcher.process.timeout_invalid",
 				"The launch timeout must be a positive whole number of milliseconds.",
 				["Use a bounded positive timeout for non-interactive launch."],
 			);
+		if (timeout || child.exitCode !== null || child.signalCode !== null) return;
 		timeout = setTimeout(() => {
 			timedOut = true;
 			void stop();
-		}, input.timeoutMs);
+		}, timeoutMs);
+	};
+	if (input.timeoutMs !== undefined) {
+		const timeoutMs = input.timeoutMs;
+		if (input.timeoutGate)
+			void input.timeoutGate.then(
+				() => armTimeout(timeoutMs),
+				() => {
+					timedOut = true;
+					void stop();
+				},
+			);
+		else armTimeout(timeoutMs);
 	}
 	return Object.freeze({
 		record,
@@ -353,6 +373,7 @@ export async function executeLaunch(
 			record,
 			sensitiveValues: Object.values(environment.values),
 			...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+			...(input.timeoutGate ? { timeoutGate: input.timeoutGate } : {}),
 		}),
 	});
 }

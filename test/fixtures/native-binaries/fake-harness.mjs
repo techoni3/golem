@@ -62,21 +62,25 @@ if (mode === "delayed") {
 		process.execPath,
 		[
 			"--eval",
-			mode === "stubborn-tree"
-				? "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"
-				: "setInterval(() => {}, 1000)",
+			sigtermResistant
+				? "process.on('SIGTERM', () => {}); process.send?.('sigterm-resistant-ready'); setInterval(() => {}, 1000)"
+				: "process.send?.('ready'); setInterval(() => {}, 1000)",
 		],
-		{ stdio: "ignore" },
+		{ stdio: ["ignore", "ignore", "ignore", "ipc"] },
 	);
-	// This record is emitted only after the root's SIGTERM handler above has
-	// been installed and the descendant process exists. The J5 timeout arm is
-	// intentionally gated on this fact, not on an elapsed startup delay.
-	record("ready", {
-		worker_pid: worker.pid,
-		root_sigterm_resistance_ready: sigtermResistant,
+	worker.once("message", (message) => {
+		// The root handler is installed above; the descendant only sends this
+		// acknowledgement after installing its own handler. J5 arms the deadline
+		// from this observable boundary, never a startup delay.
+		record("ready", {
+			worker_pid: worker.pid,
+			root_sigterm_resistance_ready: sigtermResistant,
+			descendant_sigterm_resistance_ready:
+				message === "sigterm-resistant-ready",
+		});
+		process.stdout.write("ready\n");
+		process.stderr.write("fixture-stderr\n");
 	});
-	process.stdout.write("ready\n");
-	process.stderr.write("fixture-stderr\n");
 	setInterval(() => {}, 1_000);
 } else {
 	record("ready");
