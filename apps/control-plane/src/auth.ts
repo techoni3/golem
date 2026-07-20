@@ -12,6 +12,12 @@ interface BrowserSession {
 export interface BrowserSessionAuthority {
 	create(): { readonly csrf: string; readonly setCookie: string };
 	validMutation(request: FastifyRequest): boolean;
+	/** A browser WebSocket proves same-origin session possession, never CSRF. */
+	validSocket(request: FastifyRequest): boolean;
+}
+
+export interface BrowserSessionClock {
+	now(): number;
 }
 
 function constantTimeEqual(left: string, right: string): boolean {
@@ -26,11 +32,17 @@ function cookieValue(
 ): string | undefined {
 	const cookies = request.headers.cookie;
 	if (!cookies) return undefined;
+	let result: string | undefined;
 	for (const part of cookies.split(";")) {
-		const [key, value] = part.trim().split("=", 2);
-		if (key === name && value) return value;
+		const separator = part.indexOf("=");
+		if (separator < 1) continue;
+		const key = part.slice(0, separator).trim();
+		const value = part.slice(separator + 1).trim();
+		if (key !== name) continue;
+		if (!value || value.includes("=") || result) return undefined;
+		result = value;
 	}
-	return undefined;
+	return result;
 }
 
 export function isExpectedHost(host: string | undefined): boolean {
@@ -41,16 +53,11 @@ export function isExpectedOrigin(
 	origin: string | undefined,
 	request: FastifyRequest,
 ): boolean {
-	if (!origin) return false;
-	try {
-		const value = new URL(origin);
-		return (
-			(value.hostname === "127.0.0.1" || value.hostname === "localhost") &&
-			value.port === String(request.socket.localPort ?? "")
-		);
-	} catch {
-		return false;
-	}
+	const host = request.headers.host;
+	if (!origin || !host || !isExpectedHost(host)) return false;
+	const protocol = request.protocol;
+	if (protocol !== "http" && protocol !== "https") return false;
+	return constantTimeEqual(origin, `${protocol}://${host}`);
 }
 
 /** Bearer clients are non-browser callers: they never require Origin or CSRF. */
@@ -63,9 +70,11 @@ export function bearerIsValid(request: FastifyRequest, token: string): boolean {
 }
 
 export function createBrowserSessionAuthority(options?: {
+	readonly clock?: BrowserSessionClock;
 	readonly maxSessions?: number;
 	readonly ttlMs?: number;
 }): BrowserSessionAuthority {
+	const clock = options?.clock ?? Date;
 	const maxSessions = options?.maxSessions ?? 64;
 	const ttlMs = options?.ttlMs ?? 10 * 60_000;
 	if (!Number.isInteger(maxSessions) || maxSessions < 1 || maxSessions > 256)
@@ -81,9 +90,17 @@ export function createBrowserSessionAuthority(options?: {
 			if (session.expiresAt <= now) sessions.delete(identifier);
 	}
 
+	function validSession(request: FastifyRequest): BrowserSession | undefined {
+		if (!isExpectedOrigin(request.headers.origin, request)) return undefined;
+		const identifier = cookieValue(request, sessionCookieName);
+		if (!identifier) return undefined;
+		expire(clock.now());
+		return sessions.get(identifier);
+	}
+
 	return Object.freeze({
 		create: () => {
-			const now = Date.now();
+			const now = clock.now();
 			expire(now);
 			while (sessions.size >= maxSessions) {
 				const oldest = sessions.keys().next().value;
@@ -99,14 +116,11 @@ export function createBrowserSessionAuthority(options?: {
 			});
 		},
 		validMutation: (request: FastifyRequest) => {
-			if (!isExpectedOrigin(request.headers.origin, request)) return false;
-			const identifier = cookieValue(request, sessionCookieName);
 			const csrf = request.headers["x-golem-csrf"];
-			if (!identifier || typeof csrf !== "string") return false;
-			const now = Date.now();
-			expire(now);
-			const session = sessions.get(identifier);
+			if (typeof csrf !== "string") return false;
+			const session = validSession(request);
 			return Boolean(session && constantTimeEqual(session.csrf, csrf));
 		},
+		validSocket: (request: FastifyRequest) => Boolean(validSession(request)),
 	});
 }

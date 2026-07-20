@@ -5,7 +5,11 @@ import path from "node:path";
 import websocket from "@fastify/websocket";
 import Fastify from "fastify";
 
-import { createBrowserSessionAuthority, isExpectedHost } from "./auth.js";
+import {
+	type BrowserSessionAuthority,
+	createBrowserSessionAuthority,
+	isExpectedHost,
+} from "./auth.js";
 import {
 	createLegacyCompatibilitySource,
 	type LegacyCompatibilityPort,
@@ -35,6 +39,8 @@ export interface ControlPlaneLifecycleOptions {
 	readonly projection?: ControlPlaneProjectionPort;
 	readonly replay?: ControlPlaneReplayPort;
 	readonly legacyCompatibility?: LegacyCompatibilityPort;
+	/** Injectable only for bounded composition and deterministic journey clocks. */
+	readonly browserSessions?: BrowserSessionAuthority;
 	readonly replayWindowSize?: number;
 	readonly invalidResponseForTest?: boolean;
 }
@@ -74,7 +80,7 @@ export async function startControlPlane(
 		options.replay ?? new BoundedReplayWindow(options.replayWindowSize ?? 32);
 	const legacyCompatibility =
 		options.legacyCompatibility ?? createLegacyCompatibilitySource();
-	const sessions = createBrowserSessionAuthority();
+	const sessions = options.browserSessions ?? createBrowserSessionAuthority();
 	const sockets = new Set<ControlPlaneSocket>();
 	const app = Fastify({
 		logger: {
@@ -123,6 +129,7 @@ export async function startControlPlane(
 			replay,
 			read: (stream: ControlPlaneStream) => projection.read(stream),
 			revision: (stream: ControlPlaneStream) => projection.revision(stream),
+			sessions,
 			sockets,
 		});
 		closeLegacyWebSocket = registerLegacyWebSocket({

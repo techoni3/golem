@@ -99,6 +99,10 @@ function connectSocket(url, headers = undefined) {
 	return new Promise((resolve, reject) => {
 		const socket = new WebSocket(url, headers ? { headers } : undefined);
 		const frames = [];
+		let resolveClosed;
+		const closed = new Promise((resolveClose) => {
+			resolveClosed = resolveClose;
+		});
 		const timeout = setTimeout(() => {
 			socket.terminate();
 			reject(new Error("control-plane WebSocket timed out before connect"));
@@ -112,13 +116,35 @@ function connectSocket(url, headers = undefined) {
 		});
 		socket.once("open", () => {
 			clearTimeout(timeout);
-			resolve({ socket, frames });
+			resolve({ socket, frames, closed });
+		});
+		socket.once("close", (code, reason) => {
+			resolveClosed({ code, reason: String(reason) });
 		});
 		socket.once("error", (error) => {
 			clearTimeout(timeout);
 			reject(error);
 		});
 	});
+}
+
+async function assertSocketRejected(url, headers, label) {
+	const connection = await connectSocket(url, headers);
+	const closed = await Promise.race([
+		connection.closed,
+		new Promise((_, reject) => {
+			setTimeout(
+				() => reject(new Error(`${label}: WebSocket did not close`)),
+				4_000,
+			);
+		}),
+	]);
+	assert.equal(closed.code, 1008, `${label}: socket uses the policy close code`);
+	assert.equal(
+		connection.frames.length,
+		0,
+		`${label}: rejected socket receives no typed frames`,
+	);
 }
 
 async function waitForFrame(connection, predicate, label) {
@@ -129,10 +155,11 @@ async function waitForFrame(connection, predicate, label) {
 	);
 }
 
-async function receiveTypedFrame(url) {
-	const connection = await connectSocket(url, {
-		authorization: `Bearer ${controlPlaneToken}`,
-	});
+async function receiveTypedFrame(
+	url,
+	headers = { authorization: `Bearer ${controlPlaneToken}` },
+) {
+	const connection = await connectSocket(url, headers);
 	try {
 		return await waitForFrame(connection, () => true, "typed WebSocket frame");
 	} finally {
@@ -159,6 +186,20 @@ async function assertBrowserShell(origin, publishLegacyDelta) {
 		try {
 			const page = await context.newPage();
 			await page.goto(origin, { waitUntil: "domcontentloaded" });
+			const shippedScripts = await page.evaluate(async () =>
+				Promise.all(
+					[...document.scripts].map(async (script) =>
+						script.src
+							? (await fetch(script.src)).text()
+							: script.textContent ?? "",
+					),
+				),
+			);
+			assert.equal(
+				shippedScripts.join("\n").includes(controlPlaneToken),
+				false,
+				"the shipped dashboard JavaScript never receives the bearer token",
+			);
 			assert.equal(await page.locator("#root").count(), 1, "legacy dashboard static shell is served by the control plane");
 			await page.waitForFunction(
 				() =>
@@ -191,6 +232,7 @@ export async function exerciseControlPlaneShell() {
 	let duplicate;
 	let recovered;
 	let invalidResponse;
+	let expiringService;
 	try {
 		first = await start(home);
 		assert.match(first.origin, /^http:\/\/127\.0\.0\.1:\d+$/u);
@@ -326,6 +368,51 @@ export async function exerciseControlPlaneShell() {
 		);
 		assert.equal(snapshot.schema_version, "golem.websocket-frame/v1");
 		assert.equal(snapshot.payload.kind, "snapshot");
+		const browserTyped = await connectSocket(
+			`${wsOrigin}/api/v1/ws?stream=runtime.live`,
+			{ cookie, origin: first.origin },
+		);
+		const browserSnapshot = await waitForFrame(
+			browserTyped,
+			(frame) => frame.payload?.kind === "snapshot",
+			"same-origin browser session typed WebSocket snapshot",
+		);
+		assert.equal(
+			browserSnapshot.schema_version,
+			"golem.websocket-frame/v1",
+			"a valid HttpOnly cookie authorizes typed WebSocket without bearer or CSRF",
+		);
+		await assertSocketRejected(
+			`${wsOrigin}/api/v1/ws?stream=runtime.live`,
+			{ origin: first.origin },
+			"missing browser session cookie",
+		);
+		await assertSocketRejected(
+			`${wsOrigin}/api/v1/ws?stream=runtime.live`,
+			{
+				cookie: "golem_control_plane_session=malformed=duplicate",
+				origin: first.origin,
+			},
+			"malformed browser session cookie",
+		);
+		await assertSocketRejected(
+			`${wsOrigin}/api/v1/ws?stream=runtime.live`,
+			{ cookie, origin: first.origin.replace("127.0.0.1", "localhost") },
+			"cross-host browser session Origin",
+		);
+		await assertSocketRejected(
+			`${wsOrigin}/api/v1/ws?stream=runtime.live`,
+			{ cookie, origin: first.origin.replace("http:", "https:") },
+			"cross-scheme browser session Origin",
+		);
+		await assertSocketRejected(
+			`${wsOrigin}/api/v1/ws?stream=runtime.live`,
+			{
+				cookie,
+				origin: first.origin.replace(/:\d+$/u, ":1"),
+			},
+			"cross-port browser session Origin",
+		);
 		await assertBrowserShell(first.origin, async () => {
 			const echoed = await requestJson(`${first.origin}/api/v1/browser/echo`, {
 				method: "POST",
@@ -349,6 +436,17 @@ export async function exerciseControlPlaneShell() {
 			"transport sequence advances without inventing a canonical resource revision",
 		);
 		assert.equal(
+			(
+				await waitForFrame(
+					browserTyped,
+					(frame) => frame.payload?.kind === "delta",
+					"same-origin browser session live typed broadcast",
+				)
+			).payload.kind,
+			"delta",
+			"the cookie-authorized typed socket receives live broadcasts",
+		);
+		assert.equal(
 			(await waitForFrame(
 				legacy,
 				(frame) => frame.type === "projects-list",
@@ -358,9 +456,14 @@ export async function exerciseControlPlaneShell() {
 			"the injected compatibility source broadcasts legacy deltas",
 		);
 		typed.socket.close();
+		browserTyped.socket.close();
 		legacy.socket.close();
 
-		const delta = await receiveTypedFrame(`${wsOrigin}/api/v1/ws?stream=runtime.live&instance_id=${snapshot.instance_id}&cursor=${snapshot.payload.cursor}`);
+		const browserSocketHeaders = { cookie, origin: first.origin };
+		const delta = await receiveTypedFrame(
+			`${wsOrigin}/api/v1/ws?stream=runtime.live&instance_id=${snapshot.instance_id}&cursor=${snapshot.payload.cursor}`,
+			browserSocketHeaders,
+		);
 		assert.equal(delta.payload.kind, "delta");
 		assert.ok(delta.sequence > snapshot.sequence, "a valid WebSocket resume advances a monotonic transport sequence");
 		assert.equal(delta.resource_revision, snapshot.resource_revision, "replay keeps the supplied canonical revision exactly");
@@ -372,9 +475,88 @@ export async function exerciseControlPlaneShell() {
 			});
 			assert.equal(published.response.status, 200);
 		}
-		const compacted = await receiveTypedFrame(`${wsOrigin}/api/v1/ws?stream=runtime.live&instance_id=${snapshot.instance_id}&cursor=${snapshot.payload.cursor}`);
+		const compacted = await receiveTypedFrame(
+			`${wsOrigin}/api/v1/ws?stream=runtime.live&instance_id=${snapshot.instance_id}&cursor=${snapshot.payload.cursor}`,
+			browserSocketHeaders,
+		);
 		assert.equal(compacted.payload.kind, "resync_required");
 		assert.equal(compacted.payload.reason, "cursor_compacted", "bounded replay identifies a compacted cursor gap");
+
+		let clockNow = 1_700_000_000_000;
+		let canonicalRevision = 2;
+		const expiringReplay = new controlPlane.BoundedReplayWindow(2);
+		expiringService = await controlPlane.startControlPlane({
+			token: controlPlaneToken,
+			stateDirectory: path.join(home.root, "clocked-control-plane"),
+			staticDirectory: dashboardStaticRoot,
+			browserSessions: controlPlane.createBrowserSessionAuthority({
+				clock: { now: () => clockNow },
+				ttlMs: 1_000,
+			}),
+			projection: {
+				read: () => ({}),
+				revision: () => canonicalRevision,
+			},
+			replay: expiringReplay,
+		});
+		const expiringBootstrap = await requestJson(
+			`${expiringService.origin}/api/v1/browser/session`,
+			{
+				method: "POST",
+				headers: { authorization: `Bearer ${controlPlaneToken}` },
+			},
+		);
+		assert.equal(expiringBootstrap.response.status, 200);
+		const expiringCookie = expiringBootstrap.response.headers
+			.get("set-cookie")
+			?.split(";", 1)[0];
+		assert.ok(expiringCookie, "clocked browser session returns an HttpOnly cookie");
+		const expiringWsOrigin = expiringService.origin.replace("http", "ws");
+		const expiringConnection = await connectSocket(
+			`${expiringWsOrigin}/api/v1/ws?stream=runtime.live`,
+			{ cookie: expiringCookie, origin: expiringService.origin },
+		);
+		await waitForFrame(
+			expiringConnection,
+			(frame) => frame.payload?.kind === "snapshot",
+			"clocked browser session typed WebSocket snapshot",
+		);
+		expiringConnection.socket.close();
+		clockNow += 1_000;
+		await assertSocketRejected(
+			`${expiringWsOrigin}/api/v1/ws?stream=runtime.live`,
+			{ cookie: expiringCookie, origin: expiringService.origin },
+			"expired browser session cookie",
+		);
+		const acceptedRevision = await requestJson(
+			`${expiringService.origin}/api/v1/browser/echo`,
+			{
+				method: "POST",
+				headers: {
+					authorization: `Bearer ${controlPlaneToken}`,
+					"content-type": "application/json",
+				},
+				body: JSON.stringify({ value: "revision-two" }),
+			},
+		);
+		assert.equal(acceptedRevision.response.status, 200);
+		canonicalRevision = 1;
+		const regressedRevision = await requestJson(
+			`${expiringService.origin}/api/v1/browser/echo`,
+			{
+				method: "POST",
+				headers: {
+					authorization: `Bearer ${controlPlaneToken}`,
+					"content-type": "application/json",
+				},
+				body: JSON.stringify({ value: "revision-one" }),
+			},
+		);
+		assert.equal(regressedRevision.response.status, 409);
+		assert.equal(regressedRevision.body.schema_version, "golem.api-error/v1");
+		assert.equal(regressedRevision.body.code, "revision.regressed");
+		await expiringService.close();
+		expiringService = undefined;
 
 		duplicate = spawnGrouped(process.execPath, [serviceProgram], {
 			cwd: repositoryRoot,
@@ -528,6 +710,7 @@ export async function exerciseControlPlaneShell() {
 
 		return "real Fastify process validates generated-client auth, cookie+CSRF and typed errors; proves headerless legacy shell ingestion plus live typed/replay/restart WebSockets, nonce-safe crash lock recovery, durable LaunchAgent swap rollback, and graceful cleanup";
 	} finally {
+		if (expiringService) await expiringService.close();
 		if (invalidResponse) await stopProcessGroup(invalidResponse.group);
 		if (duplicate && !exited(duplicate)) await stopProcessGroup(duplicate);
 		if (recovered) await stopProcessGroup(recovered.group);

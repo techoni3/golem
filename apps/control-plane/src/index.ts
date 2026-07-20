@@ -2,6 +2,11 @@ import type { RuntimeBoundary } from "@golem/runtime";
 import type { TrackerBoundary } from "@golem/tracker";
 
 export {
+	type BrowserSessionAuthority,
+	type BrowserSessionClock,
+	createBrowserSessionAuthority,
+} from "./auth.js";
+export {
 	createLegacyCompatibilitySource,
 	type LegacyCompatibilityFrame,
 	type LegacyCompatibilityPort,

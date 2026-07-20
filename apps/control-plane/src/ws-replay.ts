@@ -3,7 +3,11 @@ import crypto from "node:crypto";
 import { WebSocketFrameV1Schema } from "@golem/contracts";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 
-import { bearerIsValid, isExpectedHost } from "./auth.js";
+import {
+	type BrowserSessionAuthority,
+	bearerIsValid,
+	isExpectedHost,
+} from "./auth.js";
 import type {
 	ControlPlaneReplayEntry,
 	ControlPlaneReplayListener,
@@ -120,6 +124,7 @@ export function registerWsReplay(options: {
 	readonly replay: ControlPlaneReplayPort;
 	readonly read: (stream: ControlPlaneStream) => Record<string, unknown>;
 	readonly revision: (stream: ControlPlaneStream) => number;
+	readonly sessions: BrowserSessionAuthority;
 	readonly sockets: Set<ControlPlaneSocket>;
 }): () => void {
 	const streams = new Map<ControlPlaneSocket, ControlPlaneStream>();
@@ -154,7 +159,8 @@ export function registerWsReplay(options: {
 		(socket: ControlPlaneSocket, request) => {
 			if (
 				!isExpectedHost(request.headers.host) ||
-				!bearerIsValid(request, options.token)
+				(!bearerIsValid(request, options.token) &&
+					!options.sessions.validSocket(request))
 			) {
 				socket.close(1008, "authentication required");
 				return;

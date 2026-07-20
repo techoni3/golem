@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-07-20 @ 986ac41 — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-20 @ 2f152bc — maintained via golem:docs-maintenance.
 
 ## Structure
 
@@ -16,7 +16,7 @@
 - Root scripts own typecheck/build/boundaries/lint/clean and deterministic `contracts:*`/`api:*` generation/check.
 - `api-client` uses runtime `openapi-fetch@0.17.0`; codegen alone has exact TS 5.9.3/OpenAPI Typescript 7.13.0. No application/runtime source imports the tools workspace.
 - `testkit` contains temp homes, child cleanup, summaries, and headless contexts; denied loopback is `UNMET`.
-- `apps/control-plane` is the thin foreground Fastify composition façade. Its authenticated typed replay is `/api/v1/ws`; headerless legacy `/ws` is fed only by an injected compatibility source, while separate modules keep bearer/browser policy, strict errors, durable LaunchAgent swap, and static shell isolated (`docs/architecture/control-plane.md`).
+- `apps/control-plane` is the thin foreground Fastify composition façade. Its authenticated typed replay is `/api/v1/ws`: bearer CLI/MCP callers need no Origin, while bounded HttpOnly browser sessions require an exact request Origin/Host/protocol/port match; headerless legacy `/ws` is fed only by an injected compatibility source. Separate modules keep that policy, strict errors, durable LaunchAgent swap, and static shell isolated (`docs/architecture/control-plane.md`).
 
 ### `scripts/check-boundaries.mjs`
 
