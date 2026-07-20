@@ -5,22 +5,29 @@ import Database from "better-sqlite3";
 import { Kysely, SqliteDialect } from "kysely";
 
 import { backupDatabase, health } from "./backup-health.js";
+import { systemPersistenceClock } from "./clock.js";
 import type {
 	RuntimeTables,
 	SqliteConnection,
 	TrackerTables,
 } from "./internals.js";
-import { acquireOwnerLock, releaseOwnerLock } from "./lock.js";
+import {
+	type AcquiredOwnerLock,
+	acquireOwnerLock,
+	releaseOwnerLock,
+} from "./lock.js";
 import { applyPlan, dryRunPlan, planFor } from "./migrations.js";
 import { RuntimeRepository } from "./repositories.js";
-import { configure, hasTrackerTables, now, sha256 } from "./schema.js";
+import { configure, hasTrackerTables, sha256 } from "./schema.js";
 import {
 	type ClaimedOutboxRecord,
 	type DatabaseScope,
 	type MigrationMode,
 	type MigrationPlan,
 	type MigrationResult,
+	type PersistenceClock,
 	PersistenceMigrationError,
+	type PersistenceOpenOptions,
 	type PersistencePaths,
 	type PersistenceStatus,
 	type PersistenceWriteCapability,
@@ -60,15 +67,27 @@ class PersistenceOwner implements PersistenceWriteCapability {
 	readonly #runtimeRepository: RuntimeRepository;
 	readonly #paths: Readonly<PersistencePaths>;
 	readonly #ownerId: string;
+	readonly #clock: PersistenceClock;
 	readonly #lockPath: string;
+	readonly #ownerLock: AcquiredOwnerLock;
 	#closed = false;
 	#trackerBaseline: "managed" | "unmanaged";
 
-	constructor(paths: PersistencePaths, ownerId: string) {
+	constructor(paths: PersistencePaths, options: PersistenceOpenOptions) {
 		this.#paths = Object.freeze({ ...paths });
-		this.#ownerId = ownerId;
+		this.#clock = options.clock ?? systemPersistenceClock;
+		this.#ownerId =
+			options.ownerId ??
+			sha256(`${paths.runtimePath}:${process.pid}:${this.#clock.now()}`).slice(
+				0,
+				24,
+			);
 		this.#lockPath = paths.lockPath ?? `${paths.runtimePath}.owner.lock`;
-		acquireOwnerLock(this.#lockPath, ownerId);
+		this.#ownerLock = acquireOwnerLock(
+			this.#lockPath,
+			this.#ownerId,
+			this.#clock,
+		);
 		let runtime: SqliteConnection | undefined;
 		let tracker: SqliteConnection | undefined;
 		try {
@@ -93,17 +112,17 @@ class PersistenceOwner implements PersistenceWriteCapability {
 				? "unmanaged"
 				: "managed";
 			configure(runtime);
-			applyPlan(runtime, paths.runtimePath, runtimePlan);
+			applyPlan(runtime, paths.runtimePath, runtimePlan, this.#clock);
 			if (this.#trackerBaseline === "managed") {
 				configure(tracker);
 				const trackerPlan = planFor(tracker, "tracker", "apply");
-				applyPlan(tracker, paths.trackerPath, trackerPlan);
+				applyPlan(tracker, paths.trackerPath, trackerPlan, this.#clock);
 			}
-			this.#runtimeRepository = new RuntimeRepository(runtime);
+			this.#runtimeRepository = new RuntimeRepository(runtime, this.#clock);
 		} catch (error) {
 			safeClose(runtime);
 			safeClose(tracker);
-			releaseOwnerLock(this.#lockPath);
+			releaseOwnerLock(this.#ownerLock);
 			throw error;
 		}
 	}
@@ -113,7 +132,7 @@ class PersistenceOwner implements PersistenceWriteCapability {
 		const databasePath =
 			scope === "runtime" ? this.#paths.runtimePath : this.#paths.trackerPath;
 		return mode === "dry-run"
-			? dryRunPlan(database, databasePath, scope)
+			? dryRunPlan(database, databasePath, scope, this.#clock)
 			: planFor(database, scope, "apply");
 	}
 
@@ -135,7 +154,7 @@ class PersistenceOwner implements PersistenceWriteCapability {
 				"plan_mismatch",
 				`${scope} migration plan changed while preparing the source database`,
 			);
-		const result = applyPlan(database, databasePath, plan);
+		const result = applyPlan(database, databasePath, plan, this.#clock);
 		if (scope === "tracker") this.#trackerBaseline = "managed";
 		return result;
 	}
@@ -144,6 +163,7 @@ class PersistenceOwner implements PersistenceWriteCapability {
 		return backupDatabase(
 			scope === "runtime" ? this.#runtime : this.#tracker,
 			scope === "runtime" ? this.#paths.runtimePath : this.#paths.trackerPath,
+			this.#clock,
 		);
 	}
 
@@ -169,11 +189,16 @@ class PersistenceOwner implements PersistenceWriteCapability {
 		return this.#runtimeRepository.ack(id, claimToken);
 	}
 
+	failRuntimeOutbox(id: string, claimToken: string, error: string) {
+		return this.#runtimeRepository.fail(id, claimToken, error);
+	}
+
 	status(): PersistenceStatus {
 		return Object.freeze({
 			owner: {
 				lockPath: this.#lockPath,
 				ownerId: this.#ownerId,
+				nonce: this.#ownerLock.nonce,
 				pid: process.pid,
 			},
 			runtime: health(this.#runtime),
@@ -198,7 +223,7 @@ class PersistenceOwner implements PersistenceWriteCapability {
 		} finally {
 			safeClose(this.#runtime);
 			safeClose(this.#tracker);
-			releaseOwnerLock(this.#lockPath);
+			releaseOwnerLock(this.#ownerLock);
 		}
 	}
 }
@@ -206,7 +231,7 @@ class PersistenceOwner implements PersistenceWriteCapability {
 /** Private owner construction; external callers receive only this narrow capability. */
 export function openPersistenceForControlPlane(
 	paths: PersistencePaths,
-	ownerId = sha256(`${paths.runtimePath}:${process.pid}:${now()}`).slice(0, 24),
+	options: PersistenceOpenOptions = {},
 ): PersistenceWriteCapability {
-	return new PersistenceOwner(paths, ownerId);
+	return new PersistenceOwner(paths, options);
 }

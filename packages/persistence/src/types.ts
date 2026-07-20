@@ -4,6 +4,12 @@ export type DatabaseScope = "runtime" | "tracker";
 export type MigrationMode = "apply" | "dry-run";
 export type RuntimeFailpoint = "before_commit" | "after_commit";
 
+/** Injected once by the owning process so persistence never invents test time. */
+export interface PersistenceClock {
+	now(): string;
+	after(milliseconds: number): string;
+}
+
 export interface PersistenceBoundary {
 	readonly contract: ContractBoundary;
 }
@@ -12,6 +18,11 @@ export interface PersistencePaths {
 	readonly runtimePath: string;
 	readonly trackerPath: string;
 	readonly lockPath?: string;
+}
+
+export interface PersistenceOpenOptions {
+	readonly ownerId?: string;
+	readonly clock?: PersistenceClock;
 }
 
 export interface MigrationDefinition {
@@ -58,6 +69,7 @@ export interface PersistenceStatus {
 	readonly owner: {
 		readonly lockPath: string;
 		readonly ownerId: string;
+		readonly nonce: string;
 		readonly pid: number;
 	};
 	readonly runtime: DatabaseHealth;
@@ -70,14 +82,24 @@ export interface RuntimeCanonicalMutation {
 	readonly project?: {
 		readonly projectId: string;
 		readonly name: string;
+		readonly locationId: string;
 		readonly location: string;
+		readonly observedPath: string;
 	};
 	readonly generation?: {
 		readonly generationId: string;
 		readonly sessionId: string;
 		readonly projectId: string;
+		readonly ordinal: number;
 		readonly harness: string;
-		readonly state: string;
+		readonly state:
+			| "starting"
+			| "working"
+			| "idle"
+			| "waiting"
+			| "ended"
+			| "errored"
+			| "superseded";
 	};
 }
 
@@ -107,6 +129,13 @@ export interface ClaimedOutboxRecord {
 	readonly payload: Readonly<Record<string, unknown>>;
 	readonly claimToken: string;
 	readonly attempts: number;
+}
+
+export interface RuntimeOutboxFailure {
+	readonly status: "pending" | "permanent_failure";
+	readonly attempts: number;
+	readonly nextAttemptAt?: string;
+	readonly permanentFailureAt?: string;
 }
 
 export class PersistenceMigrationError extends Error {
@@ -163,6 +192,11 @@ export interface PersistenceWriteCapability {
 	): readonly ClaimedOutboxRecord[];
 	replayRuntimeOutbox(): number;
 	ackRuntimeOutbox(id: string, claimToken: string): boolean;
+	failRuntimeOutbox(
+		id: string,
+		claimToken: string,
+		error: string,
+	): RuntimeOutboxFailure | undefined;
 	status(): PersistenceStatus;
 	close(): Promise<void>;
 }

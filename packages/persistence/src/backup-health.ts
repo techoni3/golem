@@ -4,7 +4,8 @@ import Database from "better-sqlite3";
 
 import type { SqliteConnection } from "./internals.js";
 import { currentVersion, numericPragma, textPragma } from "./schema.js";
-import { type DatabaseHealth, PersistenceMigrationError } from "./types.js";
+import type { DatabaseHealth, PersistenceClock } from "./types.js";
+import { PersistenceMigrationError } from "./types.js";
 
 const fileSystem = fs as {
 	rmSync(target: string, options: { force: true }): void;
@@ -49,8 +50,9 @@ export function verifyDatabase(target: string): DatabaseHealth {
 export function backupDatabase(
 	database: SqliteConnection,
 	databasePath: string,
+	clock: PersistenceClock,
 ): string {
-	const backupPath = `${databasePath}.golem-backup-${Date.now()}.db`;
+	const backupPath = `${databasePath}.golem-backup-${clock.now().replaceAll(/[:.]/gu, "-")}.db`;
 	try {
 		database.pragma("wal_checkpoint(PASSIVE)");
 		database.exec(`VACUUM INTO ${sqlString(backupPath)}`);
@@ -69,8 +71,9 @@ export function backupDatabase(
 export function cloneDatabase(
 	database: SqliteConnection,
 	databasePath: string,
+	clock: PersistenceClock,
 ): string {
-	const clonePath = `${databasePath}.golem-dry-run-${process.pid}-${Date.now()}.db`;
+	const clonePath = `${databasePath}.golem-dry-run-${process.pid}-${clock.now().replaceAll(/[:.]/gu, "-")}.db`;
 	database.exec(`VACUUM INTO ${sqlString(clonePath)}`);
 	return clonePath;
 }
@@ -78,9 +81,6 @@ export function cloneDatabase(
 export function removeClone(target: string): void {
 	try {
 		fileSystem.rmSync(target, { force: true });
-		fileSystem.rmSync(`${target}.golem-backup-${Date.now()}.db`, {
-			force: true,
-		});
 	} catch {
 		// Dry-run cleanup must not hide an immutable-source result.
 	}

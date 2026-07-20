@@ -9,8 +9,8 @@ import { fileURLToPath } from "node:url";
 import {
 	PersistenceMigrationError,
 	RuntimeFailpointError,
-	persistenceCompositionPort,
 } from "@golem/persistence";
+import { openControlPlanePersistence } from "@golem/control-plane";
 import { createTemporaryHome, waitFor } from "@golem/testkit";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -21,7 +21,19 @@ const boundaryFixture = path.join(
 );
 const require = createRequire(new URL("../../packages/persistence/package.json", import.meta.url));
 const Database = require("better-sqlite3");
-const openPersistenceForControlPlane = persistenceCompositionPort.open;
+const openPersistenceForControlPlane = openControlPlanePersistence;
+
+function createFixtureClock() {
+	let value = "2026-07-20T00:00:00.000Z";
+	return {
+		now: () => value,
+		after: (milliseconds) =>
+			new Date(Date.parse(value) + milliseconds).toISOString(),
+		set: (next) => {
+			value = next;
+		},
+	};
+}
 
 function count(database, table) {
 	return database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count;
@@ -96,12 +108,15 @@ function eventInput(id, failpoint) {
 			project: {
 				projectId: "prj_fixture",
 				name: "Fixture",
+				locationId: "loc_fixture",
 				location: "/temporary/fixture",
+				observedPath: "/observed/fixture",
 			},
 			generation: {
 				generationId: `gen_${id}`,
 				sessionId: "ses_fixture",
 				projectId: "prj_fixture",
+				ordinal: id === "after" ? 1 : 2,
 				harness: "fixture",
 				state: "working",
 			},
@@ -132,6 +147,7 @@ INSERT INTO message_envelopes VALUES ('envelope-legacy', 'GOL-legacy');
 test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery", async () => {
 	const home = createTemporaryHome("golem-j3-persistence-");
 	const fresh = createTemporaryHome("golem-j3-persistence-fresh-");
+	const clock = createFixtureClock();
 	let owner;
 	let firstChild;
 	try {
@@ -139,14 +155,14 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 			path.join(repositoryRoot, "packages/persistence/dist/index.d.ts"),
 			"utf8",
 		);
-		assert.match(
+		assert.doesNotMatch(
 			publicDeclarations,
-			/persistenceCompositionPort/,
-			"the control-plane receives the narrow write composition port",
+			/persistenceCompositionPort|openPersistenceForControlPlane/,
+			"the public persistence contract cannot open a writable owner",
 		);
 		assert.doesNotMatch(
 			publicDeclarations,
-			/\b(?:PersistenceOwner|SqliteConnection|Kysely|runtimeSql|trackerSql|openPersistenceForControlPlane)\b/,
+			/\b(?:PersistenceOwner|SqliteConnection|Kysely|runtimeSql|trackerSql)\b/,
 			"public declarations do not leak owner construction or raw database handles",
 		);
 		const forbiddenImport = spawnSync(process.execPath, [boundaryFixture], {
@@ -162,10 +178,13 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 			forbiddenImport.stderr,
 			/ERR_PACKAGE_PATH_NOT_EXPORTED/,
 		);
-		const freshOwner = openPersistenceForControlPlane({
-			runtimePath: fresh.runtimeDb,
-			trackerPath: fresh.trackerDb,
-		});
+		const freshOwner = openPersistenceForControlPlane(
+			{
+				runtimePath: fresh.runtimeDb,
+				trackerPath: fresh.trackerDb,
+			},
+			{ clock },
+		);
 		try {
 			const freshStatus = freshOwner.status();
 			assert.deepEqual(
@@ -178,7 +197,7 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 					integrity: freshStatus.tracker.integrity,
 				},
 				{
-					runtimeVersion: 2,
+					runtimeVersion: 1,
 					trackerVersion: 1,
 					foreignKeys: true,
 					journal: "wal",
@@ -205,10 +224,13 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 		before.close();
 		const trackerBeforeOpen = fs.readFileSync(home.trackerDb);
 
-		owner = openPersistenceForControlPlane({
-			runtimePath: home.runtimeDb,
-			trackerPath: home.trackerDb,
-		});
+		owner = openPersistenceForControlPlane(
+			{
+				runtimePath: home.runtimeDb,
+				trackerPath: home.trackerDb,
+			},
+			{ clock },
+		);
 		assert.deepEqual(
 			tableNames(home.runtimeDb).filter((name) =>
 				[
@@ -228,7 +250,7 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 				"migration_runs",
 				"producer_watermarks",
 			],
-			"runtime-v1 metadata, watermark, disposition, and migration decision tables are owned by the v2 migration",
+			"runtime-v1 metadata, watermark, disposition, and migration decision tables are owned by the canonical initial migration",
 		);
 		assert.deepEqual(
 			inspectDatabase(home.runtimeDb, (database) =>
@@ -240,12 +262,14 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 				"event_kind",
 				"payload_json",
 				"provenance_json",
-				"occurred_at",
+				"source_observed_at",
 				"received_at",
+				"materialized_at",
+				"activity_at",
 				"metadata_version",
 				"disposition",
 			],
-			"runtime event metadata and disposition columns are explicit",
+			"source, receipt, materialization, activity, metadata, and disposition are separate runtime event facts",
 		);
 		assert.deepEqual(
 			fs.readFileSync(home.trackerDb),
@@ -264,7 +288,7 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 				trackerBaseline: initial.tracker.baseline,
 			},
 			{
-				runtime: 2,
+				runtime: 1,
 				tracker: 0,
 				foreignKeys: true,
 				journal: "wal",
@@ -274,9 +298,175 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 			},
 			"separate real SQLite files apply the runtime-v1 metadata contract while opening tracker data unchanged",
 		);
-		assert.equal(fs.existsSync(`${home.trackerDb}.owner.lock`), false, "runtime lock is not attached to tracker data");
+		assert.equal(
+			fs.existsSync(`${home.trackerDb}.owner.lock`),
+			false,
+			"runtime lock is not attached to tracker data",
+		);
+		assert.equal(
+			fs.existsSync(`${home.runtimeDb}.owner.lock.guard`),
+			true,
+			"a nonce-bearing guard directory, rather than a replaceable diagnostic file, owns writes",
+		);
+		assert.match(
+			fs.readFileSync(`${home.runtimeDb}.owner.lock`, "utf8"),
+			/"nonce":"owner_/,
+			"the diagnostic pointer reports the acquired owner nonce",
+		);
 		assert.equal(fs.existsSync(home.runtimeDb), true);
 		assert.equal(fs.existsSync(home.trackerDb), true);
+
+		const contractDatabase = new Database(home.runtimeDb);
+		try {
+			contractDatabase.pragma("foreign_keys = ON");
+			assert.equal(
+				contractDatabase
+					.prepare("PRAGMA table_info(project_locations)")
+					.all()
+					.find((column) => column.name === "location_id").type,
+				"TEXT",
+				"stable project locations use caller-provided TEXT identities",
+			);
+			contractDatabase
+				.prepare("INSERT INTO projects VALUES (?, ?, ?)")
+				.run("prj_contract", "Contract", clock.now());
+			contractDatabase
+				.prepare(
+					"INSERT INTO project_locations VALUES (?, ?, ?, ?, ?, ?, ?)",
+				)
+				.run(
+					"loc_text_identity",
+					"prj_contract",
+					"/canonical",
+					"/observed",
+					"canonical",
+					clock.now(),
+					clock.now(),
+				);
+			contractDatabase
+				.prepare("INSERT INTO logical_sessions VALUES (?, ?, ?, ?)")
+				.run("ses_contract", "prj_contract", "{}", clock.now());
+			contractDatabase
+				.prepare(
+					"INSERT INTO session_generations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+				)
+				.run(
+					"gen_terminal",
+					"ses_contract",
+					"prj_contract",
+					1,
+					"fixture",
+					"ended",
+					"{}",
+					clock.now(),
+					clock.now(),
+					clock.now(),
+					clock.now(),
+				);
+			assert.equal(
+				contractDatabase
+					.prepare("SELECT COUNT(*) AS count FROM live_sessions WHERE generation_id = ?")
+					.get("gen_terminal").count,
+				0,
+				"canonical terminal generations are history-only, never live",
+			);
+			assert.throws(
+				() =>
+					contractDatabase
+						.prepare(
+							"INSERT INTO session_generations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+						)
+						.run(
+							"gen_illegal",
+							"ses_contract",
+							"prj_contract",
+							2,
+							"fixture",
+							"anything-goes",
+							"{}",
+							clock.now(),
+							null,
+							clock.now(),
+							null,
+						),
+				/constraint/i,
+				"the lifecycle is a canonical CHECK rather than an arbitrary string",
+			);
+			for (const [harness, producer] of [
+				["fixture", "producer-a"],
+				["fixture", "producer-b"],
+				["other", "producer-a"],
+			]) {
+				contractDatabase
+					.prepare(
+						"INSERT INTO session_aliases VALUES (?, ?, 'native', ?, 'same-alias', ?, ?, 'fixture', '{}', ?)",
+					)
+					.run(
+						"prj_contract",
+						harness,
+						producer,
+						"ses_contract",
+						"gen_terminal",
+						clock.now(),
+					);
+			}
+			assert.throws(
+				() =>
+					contractDatabase
+						.prepare(
+							"INSERT INTO session_aliases VALUES (?, ?, 'native', ?, 'same-alias', ?, ?, 'fixture', '{}', ?)",
+						)
+						.run(
+							"prj_contract",
+							"fixture",
+							"producer-a",
+							"ses_contract",
+							"gen_terminal",
+							clock.now(),
+						),
+				/constraint/i,
+				"aliases are unique only inside their project, harness, kind, and producer scope",
+			);
+			contractDatabase
+				.prepare(
+					"INSERT INTO endpoint_claims VALUES (?, ?, 'control', 1, 'active', 1, 'owner-a', 'push', 'ready', 'enabled', ?, NULL, NULL, NULL)",
+				)
+				.run("endpoint_active", "gen_terminal", clock.now());
+			assert.throws(
+				() =>
+					contractDatabase
+						.prepare(
+							"INSERT INTO endpoint_claims VALUES (?, ?, 'control', 2, 'active', 2, 'owner-b', 'push', 'ready', 'enabled', ?, NULL, NULL, NULL)",
+						)
+						.run("endpoint_duplicate", "gen_terminal", clock.now()),
+				/constraint/i,
+				"one active route per generation is enforced by a partial unique index",
+			);
+			assert.throws(
+				() =>
+					contractDatabase
+						.prepare(
+							"INSERT INTO capability_observations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+						)
+						.run(
+							"cap_missing_endpoint",
+							"missing",
+							"dispatch",
+							"fixture",
+							"1",
+							"qualified",
+							"push",
+							"probe",
+							"{}",
+							clock.now(),
+							null,
+						),
+				/FOREIGN KEY/i,
+				"capability evidence retains a foreign-keyed endpoint owner",
+			);
+		} finally {
+			contractDatabase.close();
+		}
 
 		const trackerBeforeDryRun = fs.readFileSync(home.trackerDb);
 		const trackerDryRun = owner.plan("tracker");
@@ -344,7 +534,7 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 		);
 		assert.equal(
 			inspectDatabase(home.runtimeDb, (database) => count(database, "projects")),
-			1,
+			2,
 			"post-commit crash retains canonical mutation",
 		);
 		assert.equal(
@@ -365,8 +555,14 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 			/limit must be an integer from 1 to 100/,
 			"outbox claims reject unbounded work",
 		);
-		await new Promise((resolve) => setTimeout(resolve, 5));
+		clock.set("2026-07-20T00:00:01.000Z");
 		assert.equal(owner.replayRuntimeOutbox(), 1, "expired outbox claims replay deterministically");
+		assert.equal(
+			owner.claimRuntimeOutbox("journey-worker", 1).length,
+			0,
+			"replayed work observes its durable next-at backoff before it is eligible again",
+		);
+		clock.set("2026-07-20T00:00:02.000Z");
 		const replayedClaim = owner.claimRuntimeOutbox("journey-worker", 1);
 		assert.equal(replayedClaim.length, 1);
 		assert.equal(
@@ -382,6 +578,52 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 			),
 			"published",
 		);
+		owner.recordRuntimeTransaction(eventInput("retry"));
+		let retryClaim = owner.claimRuntimeOutbox("journey-worker", 1);
+		assert.equal(retryClaim.length, 1);
+		for (let attempt = 1; attempt <= 5; attempt += 1) {
+			const failure = owner.failRuntimeOutbox(
+				retryClaim[0].id,
+				retryClaim[0].claimToken,
+				`attempt-${attempt}`,
+			);
+			assert.equal(failure?.attempts, attempt);
+			if (attempt === 5) {
+				assert.equal(failure?.status, "permanent_failure");
+				assert.ok(
+					failure?.permanentFailureAt,
+					"the bounded final failure remains observable",
+				);
+				break;
+			}
+			assert.equal(failure?.status, "pending");
+			assert.ok(failure?.nextAttemptAt, "retry schedules a durable next-at value");
+			clock.set(failure.nextAttemptAt);
+			retryClaim = owner.claimRuntimeOutbox("journey-worker", 1);
+			assert.equal(retryClaim.length, 1);
+		}
+		assert.equal(
+			owner.claimRuntimeOutbox("journey-worker", 1).length,
+			0,
+			"a permanent failure cannot be replayed or reclaimed",
+		);
+		assert.deepEqual(
+			inspectDatabase(home.runtimeDb, (database) =>
+				database
+					.prepare(
+						"SELECT status, attempts, next_attempt_at, permanent_failure_at, last_error FROM runtime_outbox WHERE id = ?",
+					)
+					.get(retryClaim[0].id),
+			),
+			{
+				status: "permanent_failure",
+				attempts: 5,
+				next_attempt_at: null,
+				permanent_failure_at: clock.now(),
+				last_error: "attempt-5",
+			},
+			"attempt cap, permanent disposition, and terminal diagnostic are durable",
+		);
 		assert.equal(
 			inspectDatabase(home.trackerDb, (database) =>
 				database
@@ -395,7 +637,7 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 		const runtimeBackup = owner.checkpointAndBackup("runtime");
 		assert.equal(fs.existsSync(runtimeBackup), true);
 		const backup = new Database(runtimeBackup, { readonly: true });
-		assert.equal(count(backup, "runtime_events"), 1, "verified backup retains committed rows");
+		assert.equal(count(backup, "runtime_events"), 2, "verified backup retains committed rows");
 		assert.equal(backup.pragma("integrity_check", { simple: true }), "ok");
 		assert.equal(backup.prepare("PRAGMA foreign_key_check").all().length, 0);
 		backup.close();
@@ -408,15 +650,27 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 		try {
 			assert.equal(
 				inspectDatabase(restoredRuntime, (database) => count(database, "runtime_events")),
-				1,
+				2,
 				"restored backup opens with committed rows",
 			);
 			assert.equal(restored.status().runtime.integrity, "ok");
 		} finally {
 			await restored.close();
 		}
+		const replacementPointer = `${JSON.stringify({
+			owner_id: "replacement-owner",
+			pid: 999_999,
+			nonce: "owner_00000000-0000-0000-0000-000000000000",
+			acquired_at: clock.now(),
+		})}\n`;
+		fs.writeFileSync(`${home.runtimeDb}.owner.lock`, replacementPointer);
 		await owner.close();
 		owner = undefined;
+		assert.equal(
+			fs.readFileSync(`${home.runtimeDb}.owner.lock`, "utf8"),
+			replacementPointer,
+			"release carries the acquired nonce and cannot delete a replacement diagnostic pointer",
+		);
 
 		firstChild = childOwner(home, "winner");
 		await waitFor(() => firstChild.stdout().includes('"ready"') ? true : undefined, "first SQLite owner readiness");
@@ -441,7 +695,7 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 		try {
 			assert.equal(
 				inspectDatabase(home.runtimeDb, (database) => count(database, "runtime_events")),
-				1,
+				2,
 				"restart after a child crash reclaims the stale owner lock and preserves the committed event",
 			);
 			assert.equal(restarted.status().runtime.integrity, "ok");
@@ -545,9 +799,9 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 		);
 		brokenVerify.close();
 		assert.equal(
-			fs.existsSync(`${brokenPath}.owner.lock`),
+			fs.existsSync(`${brokenPath}.owner.lock.guard`),
 			false,
-			"constructor failures release the process-owner lock",
+			"constructor failures release their nonce-bearing process-owner guard",
 		);
 		const sourceVerify = new Database(trackerSource, { readonly: true });
 		assert.deepEqual(

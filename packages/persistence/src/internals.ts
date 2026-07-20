@@ -17,6 +17,7 @@ export interface SqliteConnection {
 	close(): void;
 }
 
+/** Private Kysely map: every load-bearing runtime-v1 column remains typed. */
 export interface RuntimeTables {
 	readonly runtime_events: {
 		readonly event_id: string;
@@ -24,23 +25,12 @@ export interface RuntimeTables {
 		readonly event_kind: string;
 		readonly payload_json: string;
 		readonly provenance_json: string;
-		readonly occurred_at: string;
+		readonly source_observed_at: string;
 		readonly received_at: string;
+		readonly materialized_at: string;
+		readonly activity_at: string | null;
 		readonly metadata_version: string;
 		readonly disposition: string;
-	};
-	readonly runtime_outbox: {
-		readonly id: string;
-		readonly destination: string;
-		readonly payload_json: string;
-		readonly status: string;
-		readonly created_at: string;
-		readonly published_at: string | null;
-		readonly attempts: number;
-		readonly claim_owner: string | null;
-		readonly claim_token: string | null;
-		readonly claim_until: string | null;
-		readonly last_error: string | null;
 	};
 	readonly projects: {
 		readonly project_id: string;
@@ -48,46 +38,112 @@ export interface RuntimeTables {
 		readonly created_at: string;
 	};
 	readonly project_locations: {
-		readonly location_id: number;
+		readonly location_id: string;
 		readonly project_id: string;
 		readonly location: string;
+		readonly observed_path: string;
+		readonly location_kind: string;
+		readonly source_observed_at: string;
+		readonly created_at: string;
+	};
+	readonly location_aliases: {
+		readonly project_id: string;
+		readonly location_id: string;
+		readonly alias_path: string;
+		readonly alias_kind: string;
 		readonly observed_at: string;
+		readonly provenance_json: string;
+	};
+	readonly location_relations: {
+		readonly project_id: string;
+		readonly location_id: string;
+		readonly related_location_id: string;
+		readonly relation_kind: string;
+		readonly observed_at: string;
+		readonly provenance_json: string;
 	};
 	readonly logical_sessions: {
 		readonly session_id: string;
 		readonly project_id: string;
+		readonly provenance_json: string;
 		readonly created_at: string;
 	};
 	readonly session_generations: {
 		readonly generation_id: string;
 		readonly session_id: string;
 		readonly project_id: string;
+		readonly ordinal: number;
 		readonly harness: string;
 		readonly lifecycle_state: string;
 		readonly provenance_json: string;
-		readonly created_at: string;
+		readonly source_observed_at: string;
+		readonly activity_at: string | null;
+		readonly materialized_at: string;
+		readonly ended_at: string | null;
 	};
 	readonly session_aliases: {
+		readonly project_id: string;
+		readonly harness: string;
+		readonly alias_kind: string;
+		readonly producer_id: string;
 		readonly alias: string;
 		readonly session_id: string;
 		readonly generation_id: string | null;
 		readonly source: string;
+		readonly provenance_json: string;
 		readonly created_at: string;
+	};
+	readonly producer_watermarks: {
+		readonly producer_id: string;
+		readonly watermark: string;
+		readonly source_observed_at: string;
+		readonly received_at: string;
+		readonly materialized_at: string;
+		readonly provenance_json: string;
+	};
+	readonly metadata_versions: {
+		readonly metadata_key: string;
+		readonly version: string;
+		readonly disposition: string;
+		readonly source_observed_at: string;
+		readonly materialized_at: string;
+		readonly provenance_json: string;
 	};
 	readonly endpoint_claims: {
 		readonly endpoint_id: string;
 		readonly generation_id: string;
-		readonly owner_fence: string;
+		readonly route_kind: string;
+		readonly revision: number;
+		readonly state: string;
+		readonly owner_fence: number;
 		readonly owner_instance_id: string;
-		readonly readiness: string;
+		readonly delivery_mode: string;
+		readonly readiness_state: string;
+		readonly control_state: string;
 		readonly claimed_at: string;
+		readonly heartbeat_at: string | null;
 		readonly expires_at: string | null;
+		readonly superseded_at: string | null;
 	};
-	readonly endpoint_capabilities: {
+	readonly endpoint_fences: {
+		readonly generation_id: string;
+		readonly route_kind: string;
+		readonly fence: number;
+		readonly allocated_at: string;
+		readonly owner_instance_id: string;
+	};
+	readonly capability_observations: {
+		readonly id: string;
 		readonly endpoint_id: string;
 		readonly capability: string;
-		readonly qualified: number;
+		readonly adapter_id: string;
+		readonly adapter_version: string;
+		readonly qualification_state: string;
+		readonly delivery_mode: string;
+		readonly evidence_kind: string;
+		readonly evidence_json: string;
 		readonly observed_at: string;
+		readonly expires_at: string | null;
 	};
 	readonly commands: {
 		readonly command_id: string;
@@ -115,6 +171,21 @@ export interface RuntimeTables {
 		readonly sequence: number;
 		readonly updated_at: string;
 	};
+	readonly runtime_outbox: {
+		readonly id: string;
+		readonly destination: string;
+		readonly payload_json: string;
+		readonly status: string;
+		readonly created_at: string;
+		readonly published_at: string | null;
+		readonly attempts: number;
+		readonly claim_owner: string | null;
+		readonly claim_token: string | null;
+		readonly claim_until: string | null;
+		readonly next_attempt_at: string | null;
+		readonly last_error: string | null;
+		readonly permanent_failure_at: string | null;
+	};
 	readonly diagnostics: {
 		readonly id: string;
 		readonly code: string;
@@ -127,32 +198,6 @@ export interface RuntimeTables {
 		readonly plan_hash: string;
 		readonly backup_path: string | null;
 		readonly applied_at: string;
-	};
-	readonly producer_watermarks: {
-		readonly producer_id: string;
-		readonly watermark: string;
-		readonly metadata_version: string;
-		readonly updated_at: string;
-	};
-	readonly metadata_versions: {
-		readonly metadata_key: string;
-		readonly version: string;
-		readonly disposition: string;
-		readonly recorded_at: string;
-	};
-	readonly endpoint_fences: {
-		readonly generation_id: string;
-		readonly route_kind: string;
-		readonly fence: number;
-		readonly allocated_at: string;
-	};
-	readonly capability_observations: {
-		readonly id: string;
-		readonly endpoint_id: string;
-		readonly capability: string;
-		readonly qualified: number;
-		readonly details_json: string;
-		readonly observed_at: string;
 	};
 	readonly migration_runs: {
 		readonly id: string;
@@ -195,6 +240,8 @@ export interface RuntimeTables {
 		readonly project_id: string;
 		readonly harness: string;
 		readonly lifecycle_state: string;
+		readonly ordinal: number;
+		readonly activity_at: string | null;
 	};
 	readonly session_history: {
 		readonly generation_id: string;
@@ -202,7 +249,11 @@ export interface RuntimeTables {
 		readonly project_id: string;
 		readonly harness: string;
 		readonly lifecycle_state: string;
-		readonly created_at: string;
+		readonly ordinal: number;
+		readonly source_observed_at: string;
+		readonly activity_at: string | null;
+		readonly materialized_at: string;
+		readonly ended_at: string | null;
 	};
 	readonly runtime_diagnostics: {
 		readonly id: string;

@@ -121,6 +121,13 @@ function isClient(name) {
 
 function forbiddenRule(owner, specifier) {
 	if (
+		specifier === "@golem/persistence/control-plane" &&
+		owner !== "@golem/control-plane"
+	) {
+		return "persistence-writer-constructor";
+	}
+	const packageSpecifier = workspacePackageSpecifier(specifier);
+	if (
 		owner !== "@golem/openapi-codegen" &&
 		/(?:^|\/)tools(?:\/|$)/u.test(specifier)
 	) {
@@ -134,7 +141,7 @@ function forbiddenRule(owner, specifier) {
 	}
 	if (owner === "@golem/domain") {
 		if (
-			specifier === "@golem/persistence" ||
+			packageSpecifier === "@golem/persistence" ||
 			specifier === "better-sqlite3" ||
 			specifier === "kysely"
 		) {
@@ -144,12 +151,15 @@ function forbiddenRule(owner, specifier) {
 			return "domain-to-fastify";
 		if (specifier === "react" || specifier.startsWith("react/"))
 			return "domain-to-react";
-		if (specifier === "@golem/adapter-sdk" || isAdapter(specifier))
+		if (
+			packageSpecifier === "@golem/adapter-sdk" ||
+			isAdapter(packageSpecifier)
+		)
 			return "domain-to-adapter";
 	}
 	if (
 		isAdapter(owner) &&
-		(specifier === "@golem/persistence" ||
+		(packageSpecifier === "@golem/persistence" ||
 			specifier === "better-sqlite3" ||
 			specifier === "kysely")
 	) {
@@ -157,20 +167,23 @@ function forbiddenRule(owner, specifier) {
 	}
 	if (
 		isClient(owner) &&
-		(specifier === "@golem/persistence" ||
+		(packageSpecifier === "@golem/persistence" ||
 			specifier === "better-sqlite3" ||
 			specifier === "kysely")
 	) {
 		return "client-to-repository";
 	}
-	if (owner !== "@golem/compat" && specifier === "@golem/compat")
+	if (owner !== "@golem/compat" && packageSpecifier === "@golem/compat")
 		return "canonical-to-compat";
 	if (
 		owner !== "@golem/openapi-codegen" &&
-		specifier === "@golem/openapi-codegen"
+		packageSpecifier === "@golem/openapi-codegen"
 	)
 		return "application-to-tool";
-	if (owner === "@golem/openapi-codegen" && specifier.startsWith("@golem/"))
+	if (
+		owner === "@golem/openapi-codegen" &&
+		packageSpecifier.startsWith("@golem/")
+	)
 		return "tool-to-application";
 	return null;
 }
@@ -241,12 +254,12 @@ async function validateGraph(root) {
 		);
 		for (const source of sources) {
 			for (const specifier of imports(source.contents)) {
-				const workspaceSpecifier = workspacePackageSpecifier(specifier);
 				assertImportBoundary(
 					manifest.name,
-					workspaceSpecifier,
+					specifier,
 					relative(root, source.file),
 				);
+				const workspaceSpecifier = workspacePackageSpecifier(specifier);
 				if (
 					workspaceSpecifier.startsWith("@golem/") &&
 					!dependencies[workspaceSpecifier]
@@ -348,11 +361,7 @@ async function validateFixtures(root) {
 				);
 			for (const source of sources) {
 				for (const specifier of imports(source.contents))
-					assertImportBoundary(
-						manifest.name,
-						workspacePackageSpecifier(specifier),
-						entry.name,
-					);
+					assertImportBoundary(manifest.name, specifier, entry.name);
 			}
 		} catch (error) {
 			if (error instanceof BoundaryError) observed = error.rule;

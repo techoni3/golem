@@ -15,7 +15,6 @@ import {
 	currentVersion,
 	latestVersion,
 	migrationSet,
-	now,
 	numericPragma,
 	sha256,
 	tableExists,
@@ -25,6 +24,7 @@ import {
 	type MigrationMode,
 	type MigrationPlan,
 	type MigrationResult,
+	type PersistenceClock,
 	PersistenceMigrationError,
 } from "./types.js";
 
@@ -170,9 +170,10 @@ export function applyPlan(
 	database: SqliteConnection,
 	databasePath: string,
 	plan: MigrationPlan,
+	clock: PersistenceClock,
 ): MigrationResult {
 	if (plan.pending.length === 0) return Object.freeze({ ...plan, applied: [] });
-	const backupPath = backupDatabase(database, databasePath);
+	const backupPath = backupDatabase(database, databasePath, clock);
 	const definitions = migrationSet(plan.scope).filter((entry) =>
 		plan.pending.some((pending) => pending.id === entry.id),
 	);
@@ -188,19 +189,19 @@ export function applyPlan(
 					.prepare(
 						"INSERT INTO golem_migrations(id, checksum, applied_at) VALUES (?, ?, ?)",
 					)
-					.run(definition.id, definition.checksum, now());
+					.run(definition.id, definition.checksum, clock.now());
 			}
 			database.pragma(`user_version = ${plan.targetVersion}`);
-			const auditId = sha256(`${plan.scope}:${plan.planHash}:${now()}`).slice(
-				0,
-				32,
-			);
+			const appliedAt = clock.now();
+			const auditId = sha256(
+				`${plan.scope}:${plan.planHash}:${appliedAt}`,
+			).slice(0, 32);
 			if (tableExists(database, "migration_audit"))
 				database
 					.prepare(
 						"INSERT INTO migration_audit(id, scope, plan_hash, backup_path, applied_at) VALUES (?, ?, ?, ?, ?)",
 					)
-					.run(auditId, plan.scope, plan.planHash, backupPath, now());
+					.run(auditId, plan.scope, plan.planHash, backupPath, appliedAt);
 		})();
 	} catch (error) {
 		throw new PersistenceMigrationError(
@@ -220,15 +221,16 @@ export function dryRunPlan(
 	database: SqliteConnection,
 	databasePath: string,
 	scope: DatabaseScope,
+	clock: PersistenceClock,
 ): MigrationPlan {
 	const plan = planFor(database, scope, "dry-run");
-	const clonePath = cloneDatabase(database, databasePath);
+	const clonePath = cloneDatabase(database, databasePath, clock);
 	let clone: SqliteConnection | undefined;
 	try {
 		clone = new Database(clonePath);
 		configure(clone);
 		const clonedPlan = planFor(clone, scope, "apply");
-		const result = applyPlan(clone, clonePath, clonedPlan);
+		const result = applyPlan(clone, clonePath, clonedPlan, clock);
 		const checked = health(clone);
 		if (checked.integrity !== "ok" || checked.foreignKeyViolations !== 0)
 			throw new PersistenceMigrationError(

@@ -334,7 +334,7 @@ export async function exerciseSqliteOwnerMigrationRecovery() {
 		await waitFor(() => exited(group) ? true : undefined, "SQLite owner/migration journey exit", 30_000);
 		if (group.child.exitCode !== 0)
 			throw processFailure(`SQLite owner/migration journey exited ${group.child.exitCode}`, group);
-		return "real SQLite owner race, immutable migration checksums, crash failpoints, tracker baseline, backup, and restart recovery verified";
+		return "real SQLite final-schema constraints, writer boundary, nonce-safe crash recovery, bounded outbox failure, tracker baseline, backup, and restart recovery verified";
 	} finally {
 		if (!exited(group)) await stopProcessGroup(group);
 		cleanupHome(home);

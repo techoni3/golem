@@ -4,6 +4,7 @@
 	"references": [
 		{ "path": "../../packages/adapter-sdk" },
 		{ "path": "../../packages/contracts" },
+		{ "path": "../../packages/persistence" },
 		{ "path": "../../packages/runtime" },
 		{ "path": "../../packages/tracker" }
 	],
