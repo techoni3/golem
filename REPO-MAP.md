@@ -1,12 +1,12 @@
 # REPO-MAP.md
-> Last verified: 2026-07-20 @ 8a947fd — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-20 @ fd9d288 — maintained via golem:docs-maintenance.
 
 ## Structure
 
-- `apps/` — private TypeScript composition seams for future control-plane, CLI, and Vite dashboard; legacy entrypoints remain authoritative until their vertical slices land.
-- `packages/` — strict private contracts, domain, persistence, runtime, tracker, adapters, launcher, client, MCP, UI, compat, compiler, and testkit boundaries.
-- `tools/openapi-codegen/` — isolated TS 5.9.3/OpenAPI generation tool. It emits source only and never enters runtime or public packaging.
-- `substrate/` is plugin source; `plugin/` is generated and never hand-edited. `dashboard/web/` produces generated `dashboard/dist/`.
+- `apps/` — private TypeScript seams; legacy entrypoints remain authoritative until vertical-slice cutover.
+- `packages/` — strict private boundaries; `contracts` owns Zod v1 wire schemas and generated JSON Schema snapshots.
+- `tools/openapi-codegen/` — isolated TS5/OpenAPI source generator, never runtime or public packaging.
+- `substrate/` is source; `plugin/` and `dashboard/dist/` are generated products.
 - `cli/`, `lib/`, `dashboard/server/`, `mcp/channel/`, and `shims/` are current public/compatibility surfaces; `test/` contains journey fixtures.
 
 ## Workspace and entrypoints
@@ -16,6 +16,7 @@
 - One npm 11 root lock owns `apps/`, `packages/`, and `tools/`. Application references use pinned TS 7; untouched JS stays `allowJs` with `checkJs:false`.
 - `typecheck`, `build`, `check:boundaries`, `lint`, `clean`, and `api:*` are the typed-scaffold contract. `clean` removes only named workspace outputs.
 - `packages/api-client` owns runtime `openapi-fetch@0.17.0`. The codegen workspace owns exact `typescript@5.9.3` and `openapi-typescript@7.13.0`; root commands delegate without `npx`.
+- `contracts:*` regenerates/checks the deterministic v1 registry; `test:contracts` is its single table-driven JSON-wire journey.
 
 ### `scripts/check-boundaries.mjs`
 
@@ -39,4 +40,3 @@ Current hooks/shims write registries beneath `GOLEM_HOME`; `dashboard/server/ind
 |------|-------|-------------|
 | Typed workspace | `apps/`, `packages/`, `tools/`, root configs | Node 24 `npm ci`, `typecheck`, `build`, boundaries, lint |
 | Legacy runtime | `cli/`, `dashboard/`, `mcp/channel/`, `shims/` | temp-home legacy baseline |
-| Plugin source | `substrate/`, `plugin/` | sync check |
