@@ -12,9 +12,9 @@ import { createClient } from 'openapi-fetch';
 import WebSocket from 'ws';
 import { EchoInput, EchoOutput } from './schema.mjs';
 
-function run(command, args, cwd) {
+function run(command, args, cwd, env = process.env) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(command, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk) => { stdout += chunk; });
@@ -34,7 +34,7 @@ function receiveJson(socket) {
   });
 }
 
-export async function certifyContractBoundary({ fixtureRoot, generatedRoot }) {
+export async function certifyContractBoundary({ fixtureRoot, generatedRoot, env }) {
   const app = Fastify({ logger: false });
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
@@ -72,11 +72,16 @@ export async function certifyContractBoundary({ fixtureRoot, generatedRoot }) {
     await writeFile(specPath, `${JSON.stringify(app.swagger(), null, 2)}\n`);
     const typesPath = join(artifactRoot, 'openapi.d.ts');
     await run(process.execPath, [
-      join(fixtureRoot, 'node_modules', 'openapi-typescript', 'bin', 'cli.js'), specPath, '-o', typesPath
-    ], fixtureRoot);
+      join(fixtureRoot, 'tools', 'openapi-codegen', 'generate.mjs'), specPath, typesPath
+    ], fixtureRoot, env);
     const spec = JSON.parse(await readFile(specPath, 'utf8'));
     assert(spec.paths['/echo']?.post, 'OpenAPI document omitted POST /echo');
     assert((await readFile(typesPath, 'utf8')).includes("'/echo'"), 'generated client types omitted /echo');
+    const generatedClientPath = join(artifactRoot, 'generated-client.ts');
+    await writeFile(generatedClientPath, `import createClient from 'openapi-fetch';\nimport type { paths } from './openapi.js';\nexport const client = createClient<paths>({ baseUrl: 'http://127.0.0.1' });\n`);
+    await run(process.execPath, [
+      join(fixtureRoot, 'node_modules', 'typescript', 'bin', 'tsc'), '--noEmit', '--strict', '--module', 'NodeNext', '--moduleResolution', 'NodeNext', '--target', 'ES2024', generatedClientPath
+    ], fixtureRoot, env);
 
     const client = createClient({ baseUrl });
     const good = await client.POST('/echo', { body: { message: 'contract' } });
@@ -99,7 +104,7 @@ export async function certifyContractBoundary({ fixtureRoot, generatedRoot }) {
     const resumed = await receiveJson(socket);
     assert.deepEqual(resumed, { event: 'resumed', cursor: 'c1' });
     socket.close();
-    return { baseUrl, openapiPaths: Object.keys(spec.paths), websocket: resumed.event };
+    return { baseUrl, openapiPaths: Object.keys(spec.paths), generatedClient: 'root-typescript-7', websocket: resumed.event };
   } finally {
     await app.close();
     await rm(artifactRoot, { force: true, recursive: true });

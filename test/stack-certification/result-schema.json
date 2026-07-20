@@ -32,7 +32,19 @@
           "id": { "type": "string" },
           "status": { "enum": ["PASS", "FAIL"] },
           "evidence": { "type": "string" },
-          "details": { "type": "object" }
+          "details": {
+            "type": "object",
+            "properties": {
+              "command": { "type": "string" },
+              "code": { "type": ["integer", "null"] },
+              "signal": { "type": ["string", "null"] },
+              "timed_out": { "type": "boolean" },
+              "timeout_ms": { "type": ["integer", "null"] },
+              "kill_grace_ms": { "type": ["integer", "null"] },
+              "elapsed_ms": { "type": "integer", "minimum": 0 },
+              "output_tail": { "type": "string" }
+            }
+          }
         }
       }
     },

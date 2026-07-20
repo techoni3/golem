@@ -12,12 +12,24 @@ target pair:
 - Node `>=24.18.0 <25`
 - npm `11.16.0`
 
-The fixture pins the proposed Wave 1 dependencies: TypeScript 7.0.2 plus the
-6.0.3 fallback alias, better-sqlite3 12.11.1, Fastify 5 / Zod 4 / OpenAPI,
-Fastify WebSocket, React 19 / Vite 8, MCP SDK v1, esbuild, and Biome 2.5.4.
-They are installed only after the version gate into a fresh temporary directory.
-The probe supplies a temporary `HOME`, `GOLEM_HOME`, `XDG_CONFIG_HOME`, and npm
-cache; it neither reads nor mutates the user runtime state.
+The fixture pins the proposed Wave 1 dependencies: application TypeScript 7.0.2
+plus the 6.0.3 fallback alias, better-sqlite3 12.11.1, Fastify 5 / Zod 4 /
+OpenAPI, Fastify WebSocket, React 19 / Vite 8, MCP SDK v1, esbuild, and Biome
+2.5.4. Its private `tools/openapi-codegen` workspace owns the generator-only
+toolchain: exact TypeScript 5.9.3 and exact openapi-typescript 7.13.0. The
+application root deliberately does not own openapi-typescript; it consumes the
+codegen output through the root TypeScript 7 compiler.
+
+Dependencies are installed only after the version gate into a fresh temporary
+directory with ordinary lifecycle scripts enabled (no `--ignore-scripts`, peer
+bypass, or committed fixture lockfile). npm 11 uses its nested install strategy
+so the private tool's exact compiler and generator remain workspace-local. The
+probe supplies a temporary `HOME`, `GOLEM_HOME`, XDG config/cache, npm user
+config, and npm cache; it neither reads nor mutates user runtime state. Install
+resolution has a 180,000 ms total
+deadline. On expiry it sends the detached process group `SIGTERM`, waits 5,000
+ms, then sends `SIGKILL`; the resulting row details retain timing, signal, and
+captured command output. SIGINT/SIGTERM follows the same cleanup discipline.
 
 `test/stack-certification/result-schema.json` is the durable result shape. It
 contains the host OS/architecture and tool versions, a PASS/FAIL row for every
@@ -28,14 +40,17 @@ architecture is `UNMET`, never implied PASS.
 
 The fixture has no dependency on the repository root `node_modules`:
 
-1. a strict TypeScript project-reference build runs with TypeScript 7; the
-   installed TypeScript 6 alias is separately recorded as the fallback result;
+1. topology assertions prove root TypeScript 7.0.2, workspace-local TypeScript
+   5.9.3 and openapi-typescript 7.13.0, and a clean npm peer tree; a strict
+   project-reference build then runs with TypeScript 7 while the installed
+   TypeScript 6 alias is separately recorded as the fallback result;
 2. a real file-backed SQLite database enables WAL and foreign keys, commits and
    rolls back transactions, closes/reopens, then checks foreign keys and
    integrity;
-3. one Zod source schema drives a Fastify endpoint, OpenAPI document and
-   generated client type, a real client request, 400 invalid-input handling, and
-   500 response validation handling;
+3. one Zod source schema drives a Fastify endpoint and OpenAPI document; the
+   private codegen workspace generates its client types and root TypeScript 7
+   compiles a real `openapi-fetch` consumer before the real client request,
+   400 invalid-input handling, and 500 response validation handling;
 4. a loopback WebSocket sends a snapshot and verifies a resume exchange;
 5. Vite builds a React asset which is served and fetched through Fastify static;
 6. esbuild produces MCP server/client bundles in a sibling directory with no
