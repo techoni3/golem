@@ -261,9 +261,15 @@ try {
     kind: 'work-item',
   });
   assert.ok(created.id, 'MCP ticket_create returned an id');
-  await ticketCreated;
+  const createdEvent = await ticketCreated;
+  assert.equal(createdEvent.ticket?.display_id, created.id,
+    'raw ticket-created display_id matches the MCP public ticket id');
+  assert.ok(createdEvent.ticket?.id, 'raw ticket-created event retains the internal ticket id');
+  const internalTicketId = createdEvent.ticket.id;
 
-  const ticketUpdated = nextWsEvent(ws, (message) => message.type === 'ticket-updated' && message.ticket?.id === created.id,
+  const ticketUpdated = nextWsEvent(ws, (message) => message.type === 'ticket-updated'
+    && message.ticket?.id === internalTicketId
+    && message.ticket?.display_id === created.id,
     () => `dashboard stderr:\n${dashboardStderr || '(no output)'}`);
   const dispatched = await toolJson(mcpClient, 'ticket_dispatch', {
     id: created.id,
@@ -273,7 +279,11 @@ try {
   assert.equal(dispatched.delivered, true, JSON.stringify(dispatched));
   const notification = await deliveredBrief;
   assert.equal(notification.params.meta.envelope_id, dispatched.envelope_id);
-  await ticketUpdated;
+  const updatedEvent = await ticketUpdated;
+  assert.equal(updatedEvent.ticket?.id, internalTicketId,
+    'raw ticket-updated event retains the created internal ticket id');
+  assert.equal(updatedEvent.ticket?.display_id, created.id,
+    'raw ticket-updated display_id remains the MCP public ticket id');
 
   const persisted = await (await fetch(`${base}/api/tickets/${encodeURIComponent(created.id)}`)).json();
   assert.equal(persisted.assignee, sessionId, 'SQLite-backed ticket retains dispatched assignee');
