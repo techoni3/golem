@@ -1,4 +1,8 @@
-import type { RuntimeSignalV1 } from "@golem/contracts";
+import {
+	type AliasReference,
+	AliasReferenceBodySchema,
+	type RuntimeSignalV1,
+} from "@golem/contracts";
 
 import { result } from "./explain.js";
 import { compareFieldVersion, fieldVersion, sourceTime } from "./ordering.js";
@@ -8,6 +12,7 @@ import type {
 	ProjectLocation,
 	ReducerClock,
 	ReducerResult,
+	ResolvedScopedAlias,
 	ScopedAlias,
 	SessionRecord,
 } from "./types.js";
@@ -336,25 +341,82 @@ function aliasKey(
 	].join("|");
 }
 
+function aliasReferenceInput(alias: ScopedAlias): AliasReference {
+	return {
+		project_id: alias.projectId,
+		harness: alias.harness,
+		alias_kind: alias.kind,
+		alias: alias.value,
+		...(alias.producerId === undefined
+			? {}
+			: { producer_id: alias.producerId }),
+		...(alias.sessionId === undefined
+			? {}
+			: {
+					session: {
+						project_id: alias.projectId,
+						session_id: alias.sessionId,
+					},
+				}),
+	};
+}
+
+function scopedAlias(reference: AliasReference): ScopedAlias {
+	return {
+		projectId: reference.project_id,
+		harness: reference.harness,
+		kind: reference.alias_kind,
+		value: reference.alias,
+		...(reference.producer_id === undefined
+			? {}
+			: { producerId: reference.producer_id }),
+		...(reference.session === undefined
+			? {}
+			: { sessionId: reference.session.session_id }),
+	};
+}
+
 export function attachAlias(
 	state: DomainState,
 	alias: ScopedAlias,
 ): ReducerResult {
-	const key = aliasKey(alias);
+	const parsed = AliasReferenceBodySchema.safeParse(aliasReferenceInput(alias));
+	if (!parsed.success)
+		return result(state, "rejected", "domain.alias.invalid", {
+			contract: "alias-reference",
+		});
+	const candidate = scopedAlias(parsed.data);
+	if (candidate.sessionId === undefined)
+		return result(state, "review", "domain.alias.unresolved", {
+			projectId: candidate.projectId,
+			harness: candidate.harness,
+			kind: candidate.kind,
+			alias: candidate.value,
+		});
+	const resolvedCandidate: ResolvedScopedAlias = {
+		...candidate,
+		sessionId: candidate.sessionId,
+	};
+	const key = aliasKey(resolvedCandidate);
 	const existing = state.aliases[key];
 	if (!existing)
 		return result(
-			{ ...state, aliases: orderedRecord({ ...state.aliases, [key]: alias }) },
+			{
+				...state,
+				aliases: orderedRecord({ ...state.aliases, [key]: resolvedCandidate }),
+			},
 			"applied",
 			"domain.alias.attached",
-			{ sessionId: alias.sessionId },
+			{ sessionId: resolvedCandidate.sessionId },
 		);
-	if (existing.sessionId === alias.sessionId)
+	if (existing.sessionId === resolvedCandidate.sessionId)
 		return result(state, "ignored", "domain.alias.duplicate", {
-			sessionId: alias.sessionId,
+			sessionId: resolvedCandidate.sessionId,
 		});
 	const canonical =
-		existing.sessionId.localeCompare(alias.sessionId) <= 0 ? existing : alias;
+		existing.sessionId.localeCompare(resolvedCandidate.sessionId) <= 0
+			? existing
+			: resolvedCandidate;
 	return result(
 		canonical === existing
 			? state
@@ -368,7 +430,7 @@ export function attachAlias(
 			existingSessionId: canonical.sessionId,
 			candidateSessionId:
 				canonical.sessionId === existing.sessionId
-					? alias.sessionId
+					? resolvedCandidate.sessionId
 					: existing.sessionId,
 			...(canonical === existing ? {} : { aliases: "canonicalized" }),
 		},

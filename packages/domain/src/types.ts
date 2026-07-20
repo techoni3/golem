@@ -1,8 +1,8 @@
 import type {
+	AliasReference,
 	DeliveryMode,
 	DeliveryReadiness,
 	EndpointRouteState,
-	Harness,
 	LifecycleState,
 	RuntimeSignalV1,
 } from "@golem/contracts";
@@ -20,6 +20,8 @@ export type ExplanationCode =
 	| "domain.alias.ambiguous"
 	| "domain.alias.attached"
 	| "domain.alias.duplicate"
+	| "domain.alias.invalid"
+	| "domain.alias.unresolved"
 	| "domain.capability.qualified"
 	| "domain.endpoint.fence_stale"
 	| "domain.endpoint.unknown"
@@ -109,14 +111,25 @@ export interface SessionRecord {
 	readonly activeGenerationId?: string;
 }
 
-export interface ScopedAlias {
-	readonly projectId: string;
-	readonly harness: Harness;
-	readonly kind: string;
-	readonly value: string;
-	readonly producerId?: string;
-	readonly sessionId: string;
-}
+/**
+ * Camel-cased domain view of the canonical GOL-26 alias reference.  Keep this
+ * derived rather than locally widening the public alias vocabulary.
+ */
+export type ScopedAlias = Readonly<{
+	readonly projectId: AliasReference["project_id"];
+	readonly harness: AliasReference["harness"];
+	readonly kind: AliasReference["alias_kind"];
+	readonly value: AliasReference["alias"];
+	readonly producerId?: NonNullable<AliasReference["producer_id"]>;
+	/** Omitted session evidence is review-only; it can never create a link. */
+	readonly sessionId?: NonNullable<AliasReference["session"]>["session_id"];
+}>;
+
+/** Unresolved evidence is never a state alias; stored aliases are attached only. */
+export type ResolvedScopedAlias = ScopedAlias &
+	Readonly<{
+		readonly sessionId: NonNullable<AliasReference["session"]>["session_id"];
+	}>;
 
 export interface EndpointClaim {
 	readonly endpointId: string;
@@ -147,7 +160,7 @@ export interface DomainState {
 	readonly projects: Readonly<Record<string, ProjectRecord>>;
 	readonly sessions: Readonly<Record<string, SessionRecord>>;
 	readonly generations: Readonly<Record<string, GenerationRecord>>;
-	readonly aliases: Readonly<Record<string, ScopedAlias>>;
+	readonly aliases: Readonly<Record<string, ResolvedScopedAlias>>;
 	readonly endpoints: Readonly<Record<string, EndpointClaim>>;
 	readonly capabilities: Readonly<Record<string, CapabilityRecord>>;
 	readonly seenEventIds: Readonly<Record<string, true>>;

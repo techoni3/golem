@@ -27,10 +27,13 @@ database, or harness.
   tie break. Revision/fence remains the stronger endpoint authority.
   Receipt/materialization time never wins, so delayed producers cannot roll
   back a value, recreate a cleared field, or overwrite a newer fact.
-- Native aliases are scoped by project, harness, kind, optional producer, and
-  value. A conflicting session produces `domain.alias.ambiguous` for review,
-  never an automatic merge; the retained candidate is a stable session-ID tie
-  only so replay order cannot choose the apparent owner.
+- Native aliases derive their closed six-kind vocabulary and optional session
+  resolution from `@golem/contracts`. They are scoped by project, harness,
+  kind, optional producer, and value. Unresolved evidence returns
+  `domain.alias.unresolved` for review without creating a link; a conflicting
+  resolved session returns `domain.alias.ambiguous`, never an automatic merge.
+  The retained candidate is a stable session-ID tie only so replay order cannot
+  choose the apparent owner.
 - Endpoint revisions and owner fences protect endpoint heartbeat/release. They
   do not update the actor's activity clock.
 - Capability qualification, delivery mode, and readiness stay separate;
@@ -43,7 +46,8 @@ database, or harness.
 
 `test/domain/replay.mjs` is one compact J2 replay table shared by
 `npm run test:domain` and the root journey scenario `domain-replay`. It covers
-all four harness origins, project locations, alias ambiguity, lifecycle ranks,
+all four harness origins, six canonical alias kinds, removed shorthand
+rejection, unresolved alias review, project locations, alias ambiguity, lifecycle ranks,
 and byte-equivalent final state/projections for cross-producer metadata/clears,
 project locations, lifecycle activity, terminal/idle joins, terminal conflicts,
 duplicate-generation creation, capabilities, same-sequence ties,

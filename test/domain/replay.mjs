@@ -697,6 +697,51 @@ export function runDomainReplay() {
 		value: "thread-1",
 		sessionId: metadataGeneration.session_id,
 	};
+	const canonicalAliasKinds = [
+		"native_conversation",
+		"native_run",
+		"legacy_canonical_id",
+		"supervisor_thread",
+		"bridge_session",
+		"migration_relation",
+	];
+	for (const [index, kind] of canonicalAliasKinds.entries()) {
+		const outcome = attachAlias(aliases, {
+			...alias,
+			kind,
+			value: `canonical-${kind}`,
+			sessionId: sessionId(290 + index),
+		});
+		assert.equal(outcome.effect.disposition, "applied", `${kind} is canonical`);
+		aliases = outcome.state;
+	}
+	assert.deepEqual(
+		Object.values(aliases.aliases)
+			.filter((entry) => entry.value.startsWith("canonical-"))
+			.map((entry) => entry.kind)
+			.sort(),
+		[...canonicalAliasKinds].sort(),
+		"the alias boundary represents exactly the six GOL-26 canonical kinds",
+	);
+	const removedShorthand = attachAlias(aliases, {
+		...alias,
+		kind: "path",
+		value: "/tmp",
+		sessionId: sessionId(299),
+	});
+	assert.equal(removedShorthand.effect.disposition, "rejected");
+	assert.equal(removedShorthand.effect.explanation.code, "domain.alias.invalid");
+	assert.equal(removedShorthand.state, aliases, "removed shorthand cannot attach");
+	const { sessionId: _resolvedSessionId, ...unresolvedEvidence } = alias;
+	const unresolvedAlias = attachAlias(aliases, {
+		...unresolvedEvidence,
+		harness: "codex",
+		kind: "native_run",
+		value: "unresolved-run-evidence",
+	});
+	assert.equal(unresolvedAlias.effect.disposition, "review");
+	assert.equal(unresolvedAlias.effect.explanation.code, "domain.alias.unresolved");
+	assert.equal(unresolvedAlias.state, aliases, "unresolved evidence never auto-links");
 	for (const [index, harness] of ["claude", "codex", "opencode", "pi"].entries()) {
 		const outcome = attachAlias(aliases, { ...alias, harness, sessionId: sessionId(300 + index) });
 		assert.equal(outcome.effect.disposition, "applied", `${harness} aliases are origin-scoped`);
@@ -779,5 +824,5 @@ export function runDomainReplay() {
 	assert.equal(projections.history.some((entry) => entry.sessionId === terminalGeneration.session_id), true);
 	assert.ok(projections.diagnostics.some((entry) => entry.code === "domain.projection.history_terminal"));
 
-	return "four harness origins; stage-dominant lifecycle and terminal/idle convergence; provenance-selected duplicate creation; source-versioned metadata, project, activity, capability, and endpoint convergence; aliases, terminal/resume/supersede, readiness, and projections verified";
+	return "four harness origins; stage-dominant lifecycle and terminal/idle convergence; provenance-selected duplicate creation; source-versioned metadata, project, activity, capability, and endpoint convergence; six canonical aliases, removed shorthand rejection, unresolved review, terminal/resume/supersede, readiness, and projections verified";
 }
