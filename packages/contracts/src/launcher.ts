@@ -4,15 +4,39 @@ import { DeliveryModeSchema, HarnessSchema } from "./common.js";
 import { JsonValueSchema } from "./json.js";
 import { wireVersion } from "./version.js";
 
-const SecretValuePattern =
+const SecretInlineValuePattern =
 	/(?:api[_-]?key|token|secret|password|credential)\s*=/iu;
+const SecretArgumentNamePattern =
+	/^--?(?:api[_-]?key|token|secret|password|credential)(?:=|$)/iu;
 
 function rejectSecretArguments(
 	value: { native_args: string[] },
 	context: z.RefinementCtx,
 ) {
 	for (const [index, argument] of value.native_args.entries()) {
-		if (SecretValuePattern.test(argument)) {
+		if (SecretArgumentNamePattern.test(argument)) {
+			context.addIssue({
+				code: "custom",
+				message: argument.includes("=")
+					? "config.secret_value.forbidden"
+					: "config.secret_argument.forbidden",
+				path: ["native_args", index],
+			});
+			const splitValue = value.native_args[index + 1];
+			if (
+				!argument.includes("=") &&
+				splitValue &&
+				!splitValue.startsWith("-")
+			) {
+				context.addIssue({
+					code: "custom",
+					message: "config.secret_value.forbidden",
+					path: ["native_args", index + 1],
+				});
+			}
+			continue;
+		}
+		if (SecretInlineValuePattern.test(argument)) {
 			context.addIssue({
 				code: "custom",
 				message: "config.secret_value.forbidden",

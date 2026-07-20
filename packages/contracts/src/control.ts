@@ -14,6 +14,7 @@ import {
 	MigrationPlanIdSchema,
 } from "./ids.js";
 import { JsonObjectSchema, JsonValueSchema } from "./json.js";
+import { LauncherPresetBodySchema } from "./launcher.js";
 import { wireVersion } from "./version.js";
 
 export const ControlCommandKinds = [
@@ -34,6 +35,92 @@ export const ControlCommandKinds = [
 ] as const;
 
 export const ControlCommandKindSchema = z.enum(ControlCommandKinds);
+
+const SessionMetadataKeySchema = z
+	.string()
+	.min(1)
+	.max(128)
+	.regex(/^[a-z][a-z0-9_.-]*$/u, "wire.session_metadata.key_invalid");
+
+export const SessionMetadataPatchSchema = z
+	.object({
+		patch: z.record(SessionMetadataKeySchema, JsonValueSchema),
+		clear_fields: z.array(SessionMetadataKeySchema).max(64),
+	})
+	.strict()
+	.superRefine((value, context) => {
+		const patchKeys = Object.keys(value.patch);
+		if (patchKeys.length === 0 && value.clear_fields.length === 0) {
+			context.addIssue({
+				code: "custom",
+				message: "wire.session_metadata.empty_mutation",
+				path: ["patch"],
+			});
+		}
+		for (const [index, field] of value.clear_fields.entries()) {
+			if (field in value.patch) {
+				context.addIssue({
+					code: "custom",
+					message: "wire.session_metadata.patch_clear_conflict",
+					path: ["clear_fields", index],
+				});
+			}
+		}
+	});
+
+export const SessionRoleSchema = z
+	.string()
+	.min(1)
+	.max(64)
+	.regex(/^[a-z][a-z0-9-]*$/u, "wire.session_role.invalid");
+
+const SessionControlPayloadSchema = z.discriminatedUnion("action", [
+	z
+		.object({
+			kind: z.literal("session.control"),
+			generation: GenerationReferenceBodySchema,
+			action: z.literal("interrupt"),
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("session.control"),
+			generation: GenerationReferenceBodySchema,
+			action: z.literal("halt"),
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("session.control"),
+			generation: GenerationReferenceBodySchema,
+			action: z.literal("resume"),
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("session.control"),
+			generation: GenerationReferenceBodySchema,
+			action: z.literal("rename"),
+			name: z.string().min(1).max(160),
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("session.control"),
+			generation: GenerationReferenceBodySchema,
+			action: z.literal("set_role"),
+			role: SessionRoleSchema,
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("session.control"),
+			generation: GenerationReferenceBodySchema,
+			action: z.literal("patch_metadata"),
+			metadata: SessionMetadataPatchSchema,
+		})
+		.strict(),
+]);
 
 const ControlTargetSchema = z.discriminatedUnion("kind", [
 	z
@@ -82,7 +169,7 @@ const ControlCommandPayloadSchema = z.discriminatedUnion("kind", [
 		.object({
 			kind: z.literal("preset.upsert"),
 			preset_name: z.string().min(1).max(128),
-			preset: JsonObjectSchema,
+			preset: LauncherPresetBodySchema,
 		})
 		.strict(),
 	z
@@ -98,14 +185,7 @@ const ControlCommandPayloadSchema = z.discriminatedUnion("kind", [
 			preset_name: z.string().min(1).max(128).optional(),
 		})
 		.strict(),
-	z
-		.object({
-			kind: z.literal("session.control"),
-			generation: GenerationReferenceBodySchema,
-			action: z.enum(["interrupt", "halt", "resume", "rename", "set_role"]),
-			input: JsonObjectSchema.optional(),
-		})
-		.strict(),
+	SessionControlPayloadSchema,
 	z
 		.object({
 			kind: z.literal("dispatch.enqueue"),
@@ -180,7 +260,19 @@ export const ControlCommandV1Schema = z
 				path: ["payload", "kind"],
 			});
 		}
+		if (
+			value.payload.kind === "preset.upsert" &&
+			value.payload.preset_name !== value.payload.preset.name
+		) {
+			context.addIssue({
+				code: "custom",
+				message: "wire.preset.name_mismatch",
+				path: ["payload", "preset", "name"],
+			});
+		}
 	});
 
 export type ControlCommandV1 = z.infer<typeof ControlCommandV1Schema>;
 export type ControlCommandKind = z.infer<typeof ControlCommandKindSchema>;
+export type SessionMetadataPatch = z.infer<typeof SessionMetadataPatchSchema>;
+export type SessionRole = z.infer<typeof SessionRoleSchema>;

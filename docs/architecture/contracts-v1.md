@@ -26,6 +26,11 @@ redeclaring DTOs.
   provenance, explicit clears, and matching event/payload discriminators.
   Commands carry command/idempotency keys, actor, audit metadata, target/fence
   expectations where applicable, and matching command/payload discriminators.
+- Session-control commands are discriminated: interrupt, halt, and resume have
+  no untyped input; rename requires a name; role changes require a normalized
+  role value; and metadata mutations carry separate JSON `patch` and explicit
+  `clear_fields` sets that cannot overlap or both be empty. Preset upserts use
+  the canonical launcher-preset body and its name must match the command key.
 - Clock facts distinguish source event, observation, receipt, and materialized
   time. Invalid ordering has stable `wire.clock.*` diagnostics. Alias sessions
   cannot cross project scope.
@@ -33,9 +38,10 @@ redeclaring DTOs.
   qualification separate. WebSocket frames require instance id, sequence,
   resource revision, and snapshot/delta/resync variants.
 - Launcher config and presets are strict and carry only safe arguments and
-  environment-key references. Secret-valued arguments and unknown managed
-  fields fail with paths; no schema uses transforms, `Date`, `Map`, `Set`,
-  functions, bigint, or another non-JSON value.
+  environment-key references. Sensitive option names fail in both inline and
+  split argv forms with field paths; unknown managed fields fail too. No schema
+  uses transforms, `Date`, `Map`, `Set`, functions, bigint, or another non-JSON
+  value.
 
 ## Generated artifacts
 

@@ -95,7 +95,19 @@ test("contract journey prevents incompatible v1 wire data from crossing process 
 		"project.register": { kind: "project.register", project, location },
 		"project.archive": { kind: "project.archive", project },
 		"project.location_decide": { kind: "project.location_decide", project, location, decision: "attach" },
-		"preset.upsert": { kind: "preset.upsert", preset_name: "review", preset: {} },
+		"preset.upsert": {
+			kind: "preset.upsert",
+			preset_name: "review",
+			preset: {
+				name: "review",
+				harness: "claude",
+				backend: "anthropic",
+				model_selector: "claude-sonnet",
+				delivery_mode: "pull",
+				native_args: ["--verbose"],
+				env_key_refs: ["ANTHROPIC_API_KEY"],
+			},
+		},
 		"preset.delete": { kind: "preset.delete", preset_name: "review" },
 		"launch.prepare": { kind: "launch.prepare", harness: "claude" },
 		"session.control": { kind: "session.control", generation, action: "interrupt" },
@@ -119,11 +131,54 @@ test("contract journey prevents incompatible v1 wire data from crossing process 
 		);
 	}
 
+	const sessionControlPayloads = [
+		{ kind: "session.control", generation, action: "interrupt" },
+		{ kind: "session.control", generation, action: "halt" },
+		{ kind: "session.control", generation, action: "resume" },
+		{ kind: "session.control", generation, action: "rename", name: "Queue steward" },
+		{ kind: "session.control", generation, action: "set_role", role: "manager" },
+		{
+			kind: "session.control",
+			generation,
+			action: "patch_metadata",
+			metadata: { patch: { model: "gpt" }, clear_fields: ["legacy_model"] },
+		},
+	];
+	for (const payload of sessionControlPayloads) {
+		assert.equal(
+			ControlCommandV1Schema.safeParse({
+				...controlBase,
+				command_kind: "session.control",
+				payload,
+			}).success,
+			true,
+			`session control ${payload.action} must require an explicit shape`,
+		);
+	}
+
 	const incompatibleSignal = RuntimeSignalV1Schema.safeParse({
 		...runtimeBase,
 		payload: { kind: "session.metadata_patched", generation, metadata: { fn: () => {} } },
 	});
 	assert.equal(incompatibleSignal.success, false, "non-JSON payload must reject");
+
+	const invalidResumedGeneration = RuntimeSignalV1Schema.safeParse({
+		...runtimeBase,
+		event_kind: "session.resumed",
+		payload: {
+			kind: "session.resumed",
+			generation,
+			resumed_from_generation_id: "legacy-generation-name",
+		},
+	});
+	assert.equal(invalidResumedGeneration.success, false, "resumed generations must use opaque generation ids");
+	assert.equal(
+		invalidResumedGeneration.error.issues.some(
+			(issue) => issue.path.join(".") === "payload.resumed_from_generation_id",
+		),
+		true,
+		"resumed generation diagnostics must identify the opaque id field",
+	);
 
 	const crossScopeAlias = ContractFixtures["alias-reference"].negative;
 	const aliasResult = ContractSchemaRegistry.find((entry) => entry.name === "alias-reference").schema.safeParse(crossScopeAlias);
@@ -164,6 +219,66 @@ test("contract journey prevents incompatible v1 wire data from crossing process 
 		),
 		true,
 		"secret diagnostics must identify the managed field path",
+	);
+
+	const splitSecretArgument = LauncherPresetSchema.safeParse({
+		...ContractFixtures["launcher-preset"].positive,
+		native_args: ["--api-key", "plain-secret"],
+	});
+	assert.equal(splitSecretArgument.success, false, "split secret arguments must reject");
+	assert.equal(
+		splitSecretArgument.error.issues.some(
+			(issue) => issue.message === "config.secret_argument.forbidden" && issue.path.join(".") === "native_args.0",
+		),
+		true,
+		"split secret diagnostics must identify the sensitive argument name",
+	);
+	assert.equal(
+		splitSecretArgument.error.issues.some(
+			(issue) => issue.message === "config.secret_value.forbidden" && issue.path.join(".") === "native_args.1",
+		),
+		true,
+		"split secret diagnostics must identify the secret value",
+	);
+
+	const emptyUntypedPreset = ControlCommandV1Schema.safeParse({
+		...controlBase,
+		command_kind: "preset.upsert",
+		payload: { kind: "preset.upsert", preset_name: "review", preset: {} },
+	});
+	assert.equal(emptyUntypedPreset.success, false, "preset mutation must require a typed launcher preset");
+
+	const renameWithoutName = ControlCommandV1Schema.safeParse({
+		...controlBase,
+		command_kind: "session.control",
+		payload: { kind: "session.control", generation, action: "rename" },
+	});
+	assert.equal(renameWithoutName.success, false, "rename commands must require a name");
+
+	const roleWithoutValue = ControlCommandV1Schema.safeParse({
+		...controlBase,
+		command_kind: "session.control",
+		payload: { kind: "session.control", generation, action: "set_role" },
+	});
+	assert.equal(roleWithoutValue.success, false, "role commands must require a typed role value");
+
+	const invalidMetadataMutation = ControlCommandV1Schema.safeParse({
+		...controlBase,
+		command_kind: "session.control",
+		payload: {
+			kind: "session.control",
+			generation,
+			action: "patch_metadata",
+			metadata: { patch: { model: "gpt" }, clear_fields: ["model"] },
+		},
+	});
+	assert.equal(invalidMetadataMutation.success, false, "metadata mutations cannot patch and clear one field");
+	assert.equal(
+		invalidMetadataMutation.error.issues.some(
+			(issue) => issue.message === "wire.session_metadata.patch_clear_conflict",
+		),
+		true,
+		"metadata patch/clear conflicts need a stable machine-readable issue",
 	);
 
 	const compatibility = CompatibilityIngressV1Schema.safeParse(

@@ -13,7 +13,7 @@ import {
 	CapabilityRecordBodySchema,
 	EndpointRecordBodySchema,
 } from "./facts.js";
-import { EventIdSchema } from "./ids.js";
+import { EventIdSchema, GenerationIdSchema } from "./ids.js";
 import { JsonObjectSchema } from "./json.js";
 import { wireVersion } from "./version.js";
 
@@ -54,7 +54,7 @@ const RuntimeSignalPayloadSchema = z.discriminatedUnion("kind", [
 		.object({
 			kind: z.literal("session.resumed"),
 			generation: GenerationReferenceBodySchema,
-			resumed_from_generation_id: z.string().min(1).max(128).optional(),
+			resumed_from_generation_id: GenerationIdSchema.optional(),
 		})
 		.strict(),
 	z
