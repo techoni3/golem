@@ -1,0 +1,100 @@
+{
+  "$id": "urn:golem:contracts:endpoint-record:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "delivery_mode": {
+      "enum": [
+        "pull",
+        "native_channel",
+        "prompt_bridge",
+        "managed_app_server",
+        "next_turn"
+      ],
+      "type": "string"
+    },
+    "endpoint_id": {
+      "pattern": "^ep_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "type": "string"
+    },
+    "generation": {
+      "additionalProperties": false,
+      "properties": {
+        "generation_id": {
+          "pattern": "^gen_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "project_id": {
+          "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "session_id": {
+          "pattern": "^ses_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "session_id",
+        "generation_id"
+      ],
+      "type": "object"
+    },
+    "last_heartbeat_at": {
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+      "type": "string"
+    },
+    "owner_fence": {
+      "maxLength": 256,
+      "minLength": 1,
+      "type": "string"
+    },
+    "readiness": {
+      "enum": [
+        "ready",
+        "held_busy",
+        "held_waiting",
+        "pull_only",
+        "next_turn",
+        "unsupported",
+        "unhealthy",
+        "uninitialized"
+      ],
+      "type": "string"
+    },
+    "revision": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "schema_version": {
+      "const": "golem.endpoint-record/v1",
+      "type": "string"
+    },
+    "state": {
+      "enum": [
+        "claiming",
+        "healthy",
+        "degraded",
+        "released",
+        "expired",
+        "superseded"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "endpoint_id",
+    "generation",
+    "state",
+    "owner_fence",
+    "delivery_mode",
+    "readiness",
+    "revision"
+  ],
+  "type": "object",
+  "x-golem-contract-semver": "1.0.0",
+  "x-golem-wire-version": "golem.endpoint-record/v1"
+}

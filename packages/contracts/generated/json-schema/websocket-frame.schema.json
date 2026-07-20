@@ -1,0 +1,166 @@
+{
+  "$defs": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "propertyNames": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$id": "urn:golem:contracts:websocket-frame:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "correlation_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "type": "string"
+    },
+    "instance_id": {
+      "pattern": "^cpi_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "type": "string"
+    },
+    "payload": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            "kind": {
+              "const": "snapshot",
+              "type": "string"
+            },
+            "payload": {
+              "$ref": "#/$defs/__schema0"
+            }
+          },
+          "required": [
+            "kind",
+            "cursor",
+            "payload"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            "delta": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "kind": {
+              "const": "delta",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "cursor",
+            "delta"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "resync_required",
+              "type": "string"
+            },
+            "reason": {
+              "enum": [
+                "instance_changed",
+                "cursor_gap",
+                "cursor_compacted",
+                "protocol_mismatch"
+              ],
+              "type": "string"
+            },
+            "snapshot_url": {
+              "format": "uri",
+              "maxLength": 2048,
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "reason",
+            "snapshot_url"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "resource_revision": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "schema_version": {
+      "const": "golem.websocket-frame/v1",
+      "type": "string"
+    },
+    "sequence": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "stream": {
+      "enum": [
+        "runtime.live",
+        "runtime.history",
+        "runtime.diagnostics",
+        "projects",
+        "tracker.tree",
+        "tracker.board",
+        "communication.operations"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "instance_id",
+    "stream",
+    "sequence",
+    "resource_revision",
+    "correlation_id",
+    "payload"
+  ],
+  "type": "object",
+  "x-golem-contract-semver": "1.0.0",
+  "x-golem-wire-version": "golem.websocket-frame/v1"
+}

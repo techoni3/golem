@@ -1,0 +1,72 @@
+{
+  "$id": "urn:golem:contracts:alias-reference:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "alias": {
+      "maxLength": 512,
+      "minLength": 1,
+      "type": "string"
+    },
+    "alias_kind": {
+      "enum": [
+        "native_conversation",
+        "native_run",
+        "legacy_canonical_id",
+        "supervisor_thread",
+        "bridge_session",
+        "migration_relation"
+      ],
+      "type": "string"
+    },
+    "harness": {
+      "enum": [
+        "claude",
+        "codex",
+        "opencode",
+        "pi"
+      ],
+      "type": "string"
+    },
+    "producer_id": {
+      "pattern": "^prod_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "type": "string"
+    },
+    "project_id": {
+      "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "golem.alias-reference/v1",
+      "type": "string"
+    },
+    "session": {
+      "additionalProperties": false,
+      "properties": {
+        "project_id": {
+          "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "session_id": {
+          "pattern": "^ses_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "session_id"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "project_id",
+    "harness",
+    "alias_kind",
+    "alias"
+  ],
+  "type": "object",
+  "x-golem-contract-semver": "1.0.0",
+  "x-golem-wire-version": "golem.alias-reference/v1"
+}

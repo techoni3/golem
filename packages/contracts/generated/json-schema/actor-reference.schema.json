@@ -1,0 +1,37 @@
+{
+  "$id": "urn:golem:contracts:actor-reference:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "actor_id": {
+      "pattern": "^act_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "type": "string"
+    },
+    "display_name": {
+      "maxLength": 160,
+      "minLength": 1,
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "human",
+        "service",
+        "adapter",
+        "session"
+      ],
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "golem.actor-reference/v1",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "actor_id",
+    "kind"
+  ],
+  "type": "object",
+  "x-golem-contract-semver": "1.0.0",
+  "x-golem-wire-version": "golem.actor-reference/v1"
+}
