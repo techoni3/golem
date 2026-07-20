@@ -18,6 +18,10 @@ import { openControlPlanePersistence } from "../../apps/control-plane/dist/persi
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const childFixture = path.join(repositoryRoot, "test/runtime/materializer-child.mjs");
 const producerFixture = path.join(repositoryRoot, "test/runtime/inbox-producer.mjs");
+const outboxConsumerFixture = path.join(
+	repositoryRoot,
+	"test/runtime/outbox-consumer-child.mjs",
+);
 const require = createRequire(new URL("../../packages/persistence/package.json", import.meta.url));
 const Database = require("better-sqlite3");
 
@@ -103,6 +107,31 @@ function runProducer(home, envelope) {
 		child.once("close", (code) => {
 			if (code === 0) resolve();
 			else reject(new Error(`independent runtime producer exited ${code}: ${stderr}`));
+		});
+	});
+}
+
+function deliverThroughConsumerChild({ databasePath, id: deliveryId, payload, crashAfterWrite }) {
+	return new Promise((resolve, reject) => {
+		const child = spawn(process.execPath, [outboxConsumerFixture], {
+			cwd: repositoryRoot,
+			env: {
+				GOLEM_RUNTIME_CONSUMER_DB: databasePath,
+				GOLEM_RUNTIME_CONSUMER_ID: deliveryId,
+				GOLEM_RUNTIME_CONSUMER_PAYLOAD: JSON.stringify(payload),
+				GOLEM_RUNTIME_CONSUMER_CRASH_AFTER_WRITE: crashAfterWrite ? "1" : "0",
+			},
+			stdio: ["ignore", "ignore", "pipe"],
+		});
+		let stderr = "";
+		child.stderr.setEncoding("utf8");
+		child.stderr.on("data", (chunk) => {
+			stderr += chunk;
+		});
+		child.once("error", reject);
+		child.once("close", (code) => {
+			if (code === 0) resolve();
+			else reject(new Error(`outbox consumer child exited ${code}: ${stderr}`));
 		});
 	});
 }
@@ -248,11 +277,17 @@ test("J3 durable inbox materializer crash/concurrency/outbox matrix", async (t) 
 			home: home.root,
 			writer: owner,
 			inboxOptions: { now: () => poisonNow, maxAttempts: 3 },
-			handlers: [{ kinds: ["project.observed"], materialize: () => { throw new Error("secret=never-persist-this"); } }],
+			handlers: [{ kinds: ["project.observed"], materialize: () => { throw new Error("Bearer ghp-abcdef123456"); } }],
 		});
 		poison.inbox.accept(signal(1_600));
 		assert.equal(poison.materializer.drain().retrying, 1, "first poison effect retains bounded retry metadata");
-		poisonNow += 1_000;
+		poisonNow += 500;
+		const pendingPoisonHealth = poison.inbox.metrics();
+		assert.equal(pendingPoisonHealth.retrying, 1, "retry health exposes the deferred poison envelope");
+		assert.equal(pendingPoisonHealth.oldestRetryAgeMs, 500, "inbox retry age is positive and bounded while retry work is pending");
+		const retryMetadata = fs.readFileSync(path.join(poison.inbox.root, "retry", `${id("evt", 1_600)}.json`), "utf8");
+		assert(!retryMetadata.includes("ghp-abcdef123456"), "retry metadata redacts bearer credentials");
+		poisonNow += 500;
 		assert.equal(poison.materializer.drain().retrying, 1, "second poison effect is deferred with backoff");
 		poisonNow += 2_000;
 		assert.equal(poison.materializer.drain().quarantined, 1, "third poison effect becomes inspectable quarantine evidence");
@@ -260,7 +295,7 @@ test("J3 durable inbox materializer crash/concurrency/outbox matrix", async (t) 
 		const quarantineNames = fs.readdirSync(path.join(poison.inbox.root, "quarantine"));
 		const poisonMetadata = quarantineNames.find((name) => name.endsWith(".metadata.json"));
 		assert(poisonMetadata, "poison quarantine writes bounded metadata");
-		assert(!fs.readFileSync(path.join(poison.inbox.root, "quarantine", poisonMetadata), "utf8").includes("never-persist-this"), "poison metadata redacts secrets");
+		assert(!fs.readFileSync(path.join(poison.inbox.root, "quarantine", poisonMetadata), "utf8").includes("ghp-abcdef123456"), "poison metadata redacts bearer credentials");
 
 		const noClobber = signal(1_700);
 		runtime.inbox.accept(noClobber);
@@ -286,18 +321,58 @@ test("J3 durable inbox materializer crash/concurrency/outbox matrix", async (t) 
 		const runtimeDatabase = new Database(home.runtimeDb, { readonly: true });
 		try {
 			assert.equal(count(runtimeDatabase, "status = 'pending'"), 0, "baseline delivery has no pending rows");
+			runtime.inbox.accept(signal(1_799));
+			assert.equal(runtime.materializer.drain().materialized, 1);
+			const crashingConsumerDrainer = new RuntimeOutboxDrainer({
+				writer: owner,
+				workerId: "runtime-j3-consumer-crash",
+				destinations: {
+					tracker: {
+						deliver: async (delivery) =>
+							deliverThroughConsumerChild({
+								databasePath: consumerPath,
+								id: delivery.id,
+								payload: delivery.payload,
+								crashAfterWrite: true,
+							}),
+					},
+				},
+			});
+			assert.equal((await crashingConsumerDrainer.drain(1)).deferred, 1, "a real idempotent consumer child writes then exits before acknowledgement");
+			clock.advance(1_000);
+			const restartedConsumerDrainer = new RuntimeOutboxDrainer({
+				writer: owner,
+				workerId: "runtime-j3-consumer-restart",
+				destinations: {
+					tracker: {
+						deliver: async (delivery) =>
+							deliverThroughConsumerChild({
+								databasePath: consumerPath,
+								id: delivery.id,
+								payload: delivery.payload,
+								crashAfterWrite: false,
+							}),
+					},
+				},
+			});
+			assert.equal((await restartedConsumerDrainer.drain(1)).acknowledged, 1, "a restarted drainer redelivers after the child crash and completes ack CAS");
+			assert.equal(countRows(consumer, "deliveries"), count(runtimeDatabase, "status = 'published'"), "consumer crash/restart preserves one idempotency row per published outbox id");
 			runtime.inbox.accept(signal(1_800));
 			assert.equal(runtime.materializer.drain().materialized, 1);
 			const failingDrainer = new RuntimeOutboxDrainer({
 				writer: owner,
 				workerId: "runtime-j3-failing-drainer",
-				destinations: { tracker: { deliver: async () => { throw new Error("https://user:credential@example.invalid/path?token=private"); } } },
+				destinations: { tracker: { deliver: async () => { throw new Error("Bearer ghp-abcdef123456"); } } },
 			});
 			assert.deepEqual(await failingDrainer.drain(1), { claimed: 1, acknowledged: 0, acknowledgementConflicts: 0, failureConflicts: 0, deferred: 1, permanentFailures: 0 }, "first failure records one pending retry transition");
 			let retryRow = runtimeDatabase.prepare("SELECT status, attempts, last_error FROM runtime_outbox WHERE status = 'pending' ORDER BY created_at DESC LIMIT 1").get();
 			assert.deepEqual({ status: retryRow.status, attempts: retryRow.attempts }, { status: "pending", attempts: 1 }, "outbox persists exact pending/attempt state after a transient failure");
-			assert(!retryRow.last_error.includes("credential") && !retryRow.last_error.includes("private"), "outbox errors are redacted before persistence");
-			clock.advance(1_000);
+			assert(!retryRow.last_error.includes("ghp-abcdef123456"), "outbox bearer errors are redacted before persistence");
+			clock.advance(500);
+			const pendingOutboxHealth = owner.runtimeOutboxHealth();
+			assert.equal(pendingOutboxHealth.oldestRetryAgeMs, 500, "outbox retry age is positive and bounded while a transient retry is pending");
+			assert(!JSON.stringify(pendingOutboxHealth).includes("ghp-abcdef123456"), "payload-free health never leaks a bearer credential");
+			clock.advance(500);
 			assert.deepEqual(await failingDrainer.drain(1), { claimed: 1, acknowledged: 0, acknowledgementConflicts: 0, failureConflicts: 0, deferred: 1, permanentFailures: 0 }, "second transient failure records deterministic backoff state");
 			clock.advance(2_000);
 			assert.deepEqual(await successDrainer.drain(1), { claimed: 1, acknowledged: 1, acknowledgementConflicts: 0, failureConflicts: 0, deferred: 0, permanentFailures: 0 }, "replayed delivery reaches published through ack CAS");

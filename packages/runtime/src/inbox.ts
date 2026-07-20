@@ -45,6 +45,7 @@ export interface ClaimedInboxEntry {
 
 interface RetryMetadata {
 	readonly attempts: number;
+	readonly retryStartedAt: number;
 	readonly nextAttemptAt: number;
 	readonly lastError: string;
 }
@@ -87,6 +88,7 @@ function eventFileName(eventId: string): string {
 function redactDiagnostic(value: string): string {
 	return value
 		.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/giu, "$1[REDACTED]@")
+		.replace(/\bBearer\s+[A-Za-z0-9._-]+/giu, "Bearer [REDACTED]")
 		.replace(
 			/\b(token|authorization|password|secret)=([^\s&]+)/giu,
 			"$1=[REDACTED]",
@@ -367,7 +369,7 @@ export class RuntimeInbox {
 			.map((entry) => this.#readRetry(entry.name.slice(0, -".json".length)))
 			.filter((value): value is RetryMetadata => value !== undefined);
 		const oldestRetry = retries
-			.map((entry) => entry.nextAttemptAt)
+			.map((entry) => entry.retryStartedAt)
 			.sort((left, right) => left - right)[0];
 		return Object.freeze({
 			pending: pendingEntries.length,
@@ -394,6 +396,7 @@ export class RuntimeInbox {
 			if (
 				!Number.isInteger(decoded.attempts) ||
 				decoded.attempts < 1 ||
+				!Number.isFinite(decoded.retryStartedAt) ||
 				!Number.isFinite(decoded.nextAttemptAt) ||
 				typeof decoded.lastError !== "string"
 			)
@@ -441,6 +444,7 @@ export class RuntimeInbox {
 	): void {
 		this.#writeRetry(eventId, {
 			attempts: attempt,
+			retryStartedAt: this.#now(),
 			nextAttemptAt: this.#now() + delayMs,
 			lastError: redactDiagnostic(reason),
 		});

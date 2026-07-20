@@ -36,6 +36,7 @@ function retryDelayMs(attempts: number): number {
 function redactOutboxError(value: string): string {
 	return value
 		.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/giu, "$1[REDACTED]@")
+		.replace(/\bBearer\s+[A-Za-z0-9._-]+/giu, "Bearer [REDACTED]")
 		.replace(
 			/\b(token|authorization|password|secret)=([^\s&]+)/giu,
 			"$1=[REDACTED]",
@@ -316,10 +317,11 @@ export class RuntimeRepository {
 			: this.#clock.after(retryDelayMs(row.attempts));
 		this.#database
 			.prepare(
-				"UPDATE runtime_outbox SET status = ?, claim_owner = NULL, claim_token = NULL, claim_until = NULL, next_attempt_at = ?, last_error = ?, permanent_failure_at = ? WHERE id = ? AND status = 'claimed' AND claim_token = ?",
+				"UPDATE runtime_outbox SET status = ?, claim_owner = NULL, claim_token = NULL, claim_until = NULL, retry_started_at = ?, next_attempt_at = ?, last_error = ?, permanent_failure_at = ? WHERE id = ? AND status = 'claimed' AND claim_token = ?",
 			)
 			.run(
 				permanent ? "permanent_failure" : "pending",
+				permanent ? null : at,
 				nextAttemptAt ?? null,
 				redactOutboxError(error),
 				permanent ? at : null,
@@ -432,7 +434,7 @@ export class RuntimeRepository {
 				readonly oldest_retry_at: string | null;
 				readonly last_success_at: string | null;
 			}>(
-				"SELECT SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending, SUM(CASE WHEN status = 'claimed' THEN 1 ELSE 0 END) AS claimed, SUM(CASE WHEN status = 'published' THEN 1 ELSE 0 END) AS published, SUM(CASE WHEN status = 'permanent_failure' THEN 1 ELSE 0 END) AS permanent_failures, MIN(CASE WHEN status = 'pending' AND next_attempt_at IS NOT NULL THEN next_attempt_at END) AS oldest_retry_at, MAX(published_at) AS last_success_at FROM runtime_outbox",
+				"SELECT SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending, SUM(CASE WHEN status = 'claimed' THEN 1 ELSE 0 END) AS claimed, SUM(CASE WHEN status = 'published' THEN 1 ELSE 0 END) AS published, SUM(CASE WHEN status = 'permanent_failure' THEN 1 ELSE 0 END) AS permanent_failures, MIN(CASE WHEN status = 'pending' AND retry_started_at IS NOT NULL THEN retry_started_at END) AS oldest_retry_at, MAX(published_at) AS last_success_at FROM runtime_outbox",
 			)
 			.get();
 		const oldestRetryAt = row?.oldest_retry_at ?? undefined;
