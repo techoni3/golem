@@ -5,7 +5,10 @@ import { sha256 } from "./schema.js";
 import type {
 	ClaimedOutboxRecord,
 	PersistenceClock,
+	RuntimeMaterializationInput,
+	RuntimeMaterializationResult,
 	RuntimeOutboxFailure,
+	RuntimeOutboxHealth,
 	RuntimeTransactionInput,
 	RuntimeTransactionResult,
 } from "./types.js";
@@ -28,6 +31,18 @@ function boundedLimit(limit: number): number {
 
 function retryDelayMs(attempts: number): number {
 	return Math.min(60_000, 1_000 * 2 ** Math.max(0, attempts - 1));
+}
+
+function redactOutboxError(value: string): string {
+	return value
+		.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/giu, "$1[REDACTED]@")
+		.replace(/\bBearer\s+[A-Za-z0-9._-]+/giu, "Bearer [REDACTED]")
+		.replace(
+			/\b(token|authorization|password|secret)=([^\s&]+)/giu,
+			"$1=[REDACTED]",
+		)
+		.replace(/\/[A-Za-z0-9._~\-/]{12,}/gu, "[PATH]")
+		.slice(0, 512);
 }
 
 function terminal(state: string): boolean {
@@ -155,6 +170,133 @@ export class RuntimeRepository {
 		return result;
 	}
 
+	/**
+	 * The materializer's atomic boundary: source event, producer watermark,
+	 * canonical mutation, explanation, and optional cross-store outbox record.
+	 * A lower-or-equal producer sequence is retained as an auditable stale event
+	 * but cannot mutate canonical rows or enqueue delivery.
+	 */
+	materialize(
+		input: RuntimeMaterializationInput,
+	): RuntimeMaterializationResult {
+		return this.#database.transaction(() => {
+			const receivedAt = this.#clock.now();
+			const materializedAt = this.#clock.now();
+			const currentWatermark = this.#database
+				.prepare<{ readonly watermark: string }>(
+					"SELECT watermark FROM producer_watermarks WHERE producer_id = ?",
+				)
+				.get(input.producer.id);
+			const priorSequence = currentWatermark
+				? Number(/^([0-9]+):/u.exec(currentWatermark.watermark)?.[1])
+				: undefined;
+			const stale =
+				input.producer.sequence !== undefined &&
+				priorSequence !== undefined &&
+				Number.isSafeInteger(priorSequence) &&
+				input.producer.sequence <= priorSequence;
+			const disposition = stale ? "stale" : input.disposition;
+			const inserted = this.#database
+				.prepare(
+					"INSERT OR IGNORE INTO runtime_events(event_id, deduplication_key, event_kind, payload_json, provenance_json, source_observed_at, received_at, materialized_at, activity_at, metadata_version, disposition) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'golem.runtime-signal/v1', ?)",
+				)
+				.run(
+					input.eventId,
+					input.deduplicationKey,
+					input.eventKind,
+					json(input.payload),
+					json(input.provenance),
+					input.occurredAt,
+					receivedAt,
+					materializedAt,
+					disposition === "accepted" ? input.occurredAt : null,
+					disposition,
+				);
+			if (inserted.changes === 0)
+				return Object.freeze({ disposition: "duplicate" as const });
+
+			this.#database
+				.prepare(
+					"INSERT OR REPLACE INTO diagnostics(id, code, details_json, created_at) VALUES (?, ?, ?, ?)",
+				)
+				.run(
+					sha256(`${input.eventId}:${input.explanation.code}`).slice(0, 32),
+					input.explanation.code,
+					json({
+						event_id: input.eventId,
+						disposition,
+						...input.explanation.details,
+					}),
+					materializedAt,
+				);
+
+			if (disposition !== "accepted")
+				return Object.freeze({
+					disposition: disposition as "stale" | "illegal",
+					materializedAt,
+				});
+
+			if (input.producer.sequence !== undefined) {
+				const watermark = `${input.producer.sequence}:${input.eventId}`;
+				this.#database
+					.prepare(
+						"INSERT INTO producer_watermarks(producer_id, watermark, source_observed_at, received_at, materialized_at, provenance_json) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(producer_id) DO UPDATE SET watermark = excluded.watermark, source_observed_at = excluded.source_observed_at, received_at = excluded.received_at, materialized_at = excluded.materialized_at, provenance_json = excluded.provenance_json",
+					)
+					.run(
+						input.producer.id,
+						watermark,
+						input.occurredAt,
+						receivedAt,
+						materializedAt,
+						json(input.provenance),
+					);
+			}
+			if (input.mutation?.project) {
+				const project = input.mutation.project;
+				this.#database
+					.prepare(
+						"INSERT OR IGNORE INTO projects(project_id, name, created_at) VALUES (?, ?, ?)",
+					)
+					.run(project.projectId, project.name, materializedAt);
+				this.#database
+					.prepare(
+						"INSERT OR IGNORE INTO project_locations(location_id, project_id, canonical_path, observed_path, relation, source_observed_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+					)
+					.run(
+						project.locationId,
+						project.projectId,
+						project.canonicalPath,
+						project.observedPath ?? null,
+						project.relation,
+						input.occurredAt,
+						materializedAt,
+					);
+			}
+			let outboxId: string | undefined;
+			if (input.outbox) {
+				outboxId = sha256(`${input.eventId}:${input.outbox.destination}`).slice(
+					0,
+					32,
+				);
+				this.#database
+					.prepare(
+						"INSERT INTO runtime_outbox(id, destination, payload_json, status, created_at, attempts) VALUES (?, ?, ?, 'pending', ?, 0)",
+					)
+					.run(
+						outboxId,
+						input.outbox.destination,
+						json(input.outbox.payload),
+						materializedAt,
+					);
+			}
+			return Object.freeze({
+				disposition: "accepted" as const,
+				...(outboxId ? { outboxId } : {}),
+				materializedAt,
+			});
+		})();
+	}
+
 	#failClaim(
 		id: string,
 		claimToken: string,
@@ -175,12 +317,13 @@ export class RuntimeRepository {
 			: this.#clock.after(retryDelayMs(row.attempts));
 		this.#database
 			.prepare(
-				"UPDATE runtime_outbox SET status = ?, claim_owner = NULL, claim_token = NULL, claim_until = NULL, next_attempt_at = ?, last_error = ?, permanent_failure_at = ? WHERE id = ? AND status = 'claimed' AND claim_token = ?",
+				"UPDATE runtime_outbox SET status = ?, claim_owner = NULL, claim_token = NULL, claim_until = NULL, retry_started_at = ?, next_attempt_at = ?, last_error = ?, permanent_failure_at = ? WHERE id = ? AND status = 'claimed' AND claim_token = ?",
 			)
 			.run(
 				permanent ? "permanent_failure" : "pending",
+				permanent ? null : at,
 				nextAttemptAt ?? null,
-				error.slice(0, 1_024),
+				redactOutboxError(error),
 				permanent ? at : null,
 				id,
 				claimToken,
@@ -278,5 +421,37 @@ export class RuntimeRepository {
 		return this.#database.transaction(() =>
 			this.#failClaim(id, claimToken, error),
 		)();
+	}
+
+	health(): RuntimeOutboxHealth {
+		const now = this.#clock.now();
+		const row = this.#database
+			.prepare<{
+				readonly pending: number;
+				readonly claimed: number;
+				readonly published: number;
+				readonly permanent_failures: number;
+				readonly oldest_retry_at: string | null;
+				readonly last_success_at: string | null;
+			}>(
+				"SELECT SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending, SUM(CASE WHEN status = 'claimed' THEN 1 ELSE 0 END) AS claimed, SUM(CASE WHEN status = 'published' THEN 1 ELSE 0 END) AS published, SUM(CASE WHEN status = 'permanent_failure' THEN 1 ELSE 0 END) AS permanent_failures, MIN(CASE WHEN status = 'pending' AND retry_started_at IS NOT NULL THEN retry_started_at END) AS oldest_retry_at, MAX(published_at) AS last_success_at FROM runtime_outbox",
+			)
+			.get();
+		const oldestRetryAt = row?.oldest_retry_at ?? undefined;
+		return Object.freeze({
+			pending: Number(row?.pending ?? 0),
+			claimed: Number(row?.claimed ?? 0),
+			published: Number(row?.published ?? 0),
+			permanentFailures: Number(row?.permanent_failures ?? 0),
+			...(oldestRetryAt
+				? {
+						oldestRetryAgeMs: Math.max(
+							0,
+							Date.parse(now) - Date.parse(oldestRetryAt),
+						),
+					}
+				: {}),
+			...(row?.last_success_at ? { lastSuccessAt: row.last_success_at } : {}),
+		});
 	}
 }

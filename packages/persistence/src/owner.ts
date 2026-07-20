@@ -31,6 +31,8 @@ import {
 	type PersistencePaths,
 	type PersistenceStatus,
 	type PersistenceWriteCapability,
+	type RuntimeMaterializationInput,
+	type RuntimeMaterializationResult,
 	type RuntimeTransactionInput,
 	type RuntimeTransactionResult,
 } from "./types.js";
@@ -177,6 +179,12 @@ class PersistenceOwner implements PersistenceWriteCapability {
 		return this.#runtimeRepository.record(input);
 	}
 
+	materializeRuntimeEvent(
+		input: RuntimeMaterializationInput,
+	): RuntimeMaterializationResult {
+		return this.#runtimeRepository.materialize(input);
+	}
+
 	claimRuntimeOutbox(
 		workerId: string,
 		limit: number,
@@ -195,6 +203,10 @@ class PersistenceOwner implements PersistenceWriteCapability {
 
 	failRuntimeOutbox(id: string, claimToken: string, error: string) {
 		return this.#runtimeRepository.fail(id, claimToken, error);
+	}
+
+	runtimeOutboxHealth() {
+		return this.#runtimeRepository.health();
 	}
 
 	status(): PersistenceStatus {

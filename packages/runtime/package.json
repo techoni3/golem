@@ -9,7 +9,11 @@
 			"import": "./dist/index.js"
 		}
 	},
+	"scripts": {
+		"build": "tsc -b"
+	},
 	"dependencies": {
+		"@golem/contracts": "file:../contracts",
 		"@golem/domain": "file:../domain",
 		"@golem/persistence": "file:../persistence"
 	}

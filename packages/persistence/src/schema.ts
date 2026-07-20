@@ -215,6 +215,7 @@ CREATE TABLE runtime_outbox (
   claim_owner TEXT,
   claim_token TEXT,
   claim_until TEXT,
+  retry_started_at TEXT,
   next_attempt_at TEXT,
   last_error TEXT,
   permanent_failure_at TEXT,

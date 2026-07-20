@@ -210,6 +210,7 @@ export interface RuntimeTables {
 		readonly claim_owner: string | null;
 		readonly claim_token: string | null;
 		readonly claim_until: string | null;
+		readonly retry_started_at: string | null;
 		readonly next_attempt_at: string | null;
 		readonly last_error: string | null;
 		readonly permanent_failure_at: string | null;

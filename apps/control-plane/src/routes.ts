@@ -1,3 +1,4 @@
+import { RuntimeSignalV1Schema } from "@golem/contracts";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
@@ -8,6 +9,8 @@ import { controlPlaneOpenApiDocument } from "./openapi.js";
 import type {
 	ControlPlaneProjectionPort,
 	ControlPlaneReplayPort,
+	RuntimeHealthPort,
+	RuntimeIngressPort,
 } from "./ports.js";
 import {
 	ApiErrorResponseJsonSchema,
@@ -20,6 +23,8 @@ import {
 	OpenApiDocumentSchema,
 	ProjectionParamsSchema,
 	ProjectionResponseSchema,
+	RuntimeIngestReceiptSchema,
+	RuntimeIngestRequestSchema,
 } from "./schemas.js";
 
 function jsonSchema(value: z.ZodType): Record<string, unknown> {
@@ -50,6 +55,8 @@ export function registerValidatedRoutes(options: {
 	readonly replay: ControlPlaneReplayPort;
 	readonly legacy: LegacyCompatibilityPublisher;
 	readonly sessions: BrowserSessionAuthority;
+	readonly runtimeIngress?: RuntimeIngressPort;
+	readonly runtimeHealth?: RuntimeHealthPort;
 	readonly invalidResponseForTest?: boolean;
 }): void {
 	const responseSchemas = {
@@ -58,6 +65,7 @@ export function registerValidatedRoutes(options: {
 		403: ApiErrorResponseJsonSchema,
 		409: ApiErrorResponseJsonSchema,
 		500: ApiErrorResponseJsonSchema,
+		503: ApiErrorResponseJsonSchema,
 	};
 
 	options.app.get(
@@ -81,6 +89,9 @@ export function registerValidatedRoutes(options: {
 							schema_version: "golem.control-plane-health/v1",
 							status: "live",
 							instance_id: options.instanceId,
+							...(options.runtimeHealth
+								? { runtime: options.runtimeHealth.health() }
+								: {}),
 						},
 			),
 	);
@@ -98,6 +109,9 @@ export function registerValidatedRoutes(options: {
 				schema_version: "golem.control-plane-health/v1",
 				status: "ready",
 				instance_id: options.instanceId,
+				...(options.runtimeHealth
+					? { runtime: options.runtimeHealth.health() }
+					: {}),
 			});
 		},
 	);
@@ -170,6 +184,50 @@ export function registerValidatedRoutes(options: {
 				resource_revision: options.projection.revision(stream),
 				payload: options.projection.read(stream),
 			});
+		},
+	);
+
+	options.app.post(
+		"/api/v1/runtime/events",
+		{
+			schema: {
+				body: jsonSchema(RuntimeIngestRequestSchema),
+				response: {
+					202: jsonSchema(RuntimeIngestReceiptSchema),
+					...responseSchemas,
+				},
+			},
+		},
+		async (request, reply) => {
+			if (!requireBearer(request, reply, options.token)) return;
+			if (!options.runtimeIngress)
+				return fail(
+					request,
+					reply,
+					503,
+					"runtime.unavailable",
+					"durable runtime ingress is not composed",
+				);
+			const parsed = RuntimeSignalV1Schema.safeParse(request.body);
+			if (!parsed.success)
+				return fail(
+					request,
+					reply,
+					400,
+					"request.invalid",
+					"runtime signal is invalid or uses an unsupported schema version",
+				);
+			const receipt = options.runtimeIngress.ingest(parsed.data);
+			return sendValidated(
+				request,
+				reply.code(202),
+				RuntimeIngestReceiptSchema,
+				{
+					schema_version: "golem.runtime-ingest-receipt/v1",
+					event_id: receipt.eventId,
+					status: receipt.status,
+				},
+			);
 		},
 	);
 

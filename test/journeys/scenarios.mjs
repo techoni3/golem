@@ -44,6 +44,18 @@ export const scenarios = [
 		regression: "two SQLite writers, migration drift, or a crash loses a committed runtime event or makes tracker recovery unsafe",
 	}),
 	registerScenario({
+		id: "materializer-crash-matrix",
+		journey: "J3",
+		tier: "pr",
+		regression: "concurrent runtime producers, a killed materializer, or duplicate delivery loses canonical state or emits a second outbox effect",
+	}),
+	registerScenario({
+		id: "dashboard-down-inbox-replay",
+		journey: "J1",
+		tier: "pr",
+		regression: "a temporary management/tracker outage drops durable runtime work instead of bounded, idempotent replay",
+	}),
+	registerScenario({
 		id: "testkit-browser",
 		journey: "J8",
 		tier: "release",

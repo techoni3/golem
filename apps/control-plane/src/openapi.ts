@@ -8,6 +8,8 @@ import {
 	HealthResponseSchema,
 	MetaResponseSchema,
 	ProjectionResponseSchema,
+	RuntimeIngestReceiptSchema,
+	RuntimeIngestRequestSchema,
 } from "./schemas.js";
 
 type JsonRecord = Record<string, unknown>;
@@ -34,6 +36,34 @@ export function controlPlaneOpenApiDocument(): JsonRecord {
 		openapi: "3.1.1",
 		info: { title: "Golem control plane", version: "v1" },
 		paths: {
+			"/api/v1/runtime/events": {
+				post: {
+					operationId: "controlPlaneRuntimeIngest",
+					requestBody: {
+						required: true,
+						content: {
+							"application/json": {
+								schema: schema(RuntimeIngestRequestSchema),
+							},
+						},
+					},
+					responses: {
+						"202": response("durably spooled", RuntimeIngestReceiptSchema),
+						"400": {
+							description: "invalid runtime signal",
+							content: { "application/json": { schema: error } },
+						},
+						"401": {
+							description: "unauthorized",
+							content: { "application/json": { schema: error } },
+						},
+						"503": {
+							description: "runtime ingress unavailable",
+							content: { "application/json": { schema: error } },
+						},
+					},
+				},
+			},
 			"/api/v1/health/live": {
 				get: {
 					operationId: "controlPlaneLive",
