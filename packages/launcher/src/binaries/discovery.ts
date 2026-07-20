@@ -166,6 +166,14 @@ export function discoverUpstreamBinary(
 				"PATH contains an empty entry and cannot safely select an upstream executable.",
 				["Remove empty PATH entries before launching the native harness."],
 			);
+		if (!path.isAbsolute(entry))
+			throw executionFailure(
+				"launcher.binary.path_entry_invalid",
+				"PATH contains a non-absolute entry and cannot safely select an upstream executable.",
+				["Use only absolute PATH entries before launching the native harness."],
+			);
+	}
+	for (const entry of entries) {
 		const candidate = path.join(entry, input.commandName);
 		if (!fs.existsSync(candidate)) continue;
 		const realpath = realpathOrFailure(candidate);

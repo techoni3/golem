@@ -8,9 +8,10 @@ one native child process.
 
 - An explicit executable is accepted only when it is absolute, realpath-equal
   to a trusted configured path, regular, executable, and not world-writable.
-- PATH search uses a bare command name and exact PATH order. Its first present
-  candidate is decisive: an unsafe shadow, symlink loop, Golem executable, or
-  compatibility shim is refused instead of falling through to another binary.
+- PATH search uses a bare command name, absolute entries only, and exact PATH
+  order. Its first present candidate is decisive: an unsafe shadow, relative
+  entry, symlink loop, Golem executable, or compatibility shim is refused
+  instead of falling through to another binary.
 - Execution builds an argv array and uses `shell:false`. Spaces, `$()`,
   backticks, globs, and semicolons are data, never command language.
 - The child receives only an intentional environment allowlist plus the plan's

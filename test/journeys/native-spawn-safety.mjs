@@ -155,6 +155,15 @@ function proveTrustedDiscovery(home) {
 			compatibilityShims: [],
 		});
 		assert.equal(selected.path, fs.realpathSync(firstNative), "first safe PATH entry wins deterministically");
+			expectExecutionFailure(
+			() => discoverUpstreamBinary({
+				commandName: "native",
+				pathValue: `${first}${path.delimiter}.`,
+				golemExecutable: path.join(root, "golem"),
+				compatibilityShims: [],
+			}),
+			"launcher.binary.path_entry_invalid",
+		);
 
 		const recursion = writeExecutable(root, "recursion");
 		expectExecutionFailure(
@@ -163,6 +172,33 @@ function proveTrustedDiscovery(home) {
 				pathValue: root,
 				golemExecutable: recursion,
 				compatibilityShims: [],
+			}),
+			"launcher.binary.recursion",
+		);
+
+		const golem = writeExecutable(root, "golem");
+		const golemc = writeExecutable(root, "golemc");
+		const golemx = writeExecutable(root, "golemx");
+		for (const commandName of ["golemc", "golemx"]) {
+			expectExecutionFailure(
+				() => discoverUpstreamBinary({
+					commandName,
+					pathValue: root,
+					golemExecutable: golem,
+					compatibilityShims: [golemc, golemx],
+				}),
+				"launcher.binary.recursion",
+			);
+		}
+		const shimDirectory = fs.mkdtempSync(path.join(root, "shim-"));
+		const pathShim = path.join(shimDirectory, "native");
+		fs.symlinkSync(golemc, pathShim);
+		expectExecutionFailure(
+			() => discoverUpstreamBinary({
+				commandName: "native",
+				pathValue: `${shimDirectory}${path.delimiter}${first}`,
+				golemExecutable: golem,
+				compatibilityShims: [golemc, golemx],
 			}),
 			"launcher.binary.recursion",
 		);
@@ -233,15 +269,30 @@ export async function exerciseNativeSpawnSafety() {
 		assert.equal(started.kind, "running");
 		if (started.kind !== "running") throw new Error("native launch did not start");
 		ownedLaunches.add(started.running);
+		const launchStart = await waitForRow(logPath, (row) => row.event === "start", "fake native start");
 		const start = await waitForRow(logPath, (row) => row.event === "ready", "fake native readiness");
 		assert.equal(started.running.record.stdio, "capture");
 		assert.equal(started.running.record.controlPlane, "not_required");
 		assert.equal(stableLaunchRecordJson(started.running.record).includes(secret), false);
 		assert.equal(started.running.record.environmentKeys.includes("UPSTREAM_TOKEN"), true);
 		assert.equal(started.running.record.environmentKeys.includes("FORBIDDEN_INHERITED"), false);
-		assert.equal(started.running.output().stdout.includes("ready"), true);
-		assert.equal(started.running.output().stdout.includes(secret), false);
+		const capture = await waitFor(() => {
+			const output = started.running.output();
+			return output.stdout.includes("ready") && output.stderr.includes("fixture-stderr")
+				? output
+				: undefined;
+		}, "fake native captured stdout and stderr");
+		assert.equal(capture.stdout.includes(secret), false);
+		assert.equal(capture.stderr.includes(secret), false);
 		assert.deepEqual(start.args.slice(-5), ["space value", "$(not-expanded)", "`not-expanded`", "*.glob", "semi;colon"]);
+		assert.equal(launchStart.cwd, repositoryRoot, "fake native receives the real adapter cwd");
+		assert.deepEqual(launchStart.stdio, {
+			stdin_is_tty: false,
+			stdout_is_tty: false,
+			stderr_is_tty: false,
+		}, "captured launch uses non-TTY child streams");
+		const capturedStdin = await waitForRow(logPath, (row) => row.event === "stdin", "captured stdin close");
+		assert.equal(capturedStdin.stdin, "", "captured launch does not inherit caller stdin");
 		assert.deepEqual(start.env, {
 			TESTKIT_FAKE_VALUE: "allowed-value",
 			has_upstream_secret: true,
@@ -251,6 +302,23 @@ export async function exerciseNativeSpawnSafety() {
 		assert.equal(exited.code, 0, "owned process groups stop cleanly after noninteractive launch");
 		assert.equal(typeof start.worker_pid, "number");
 		await childIsGone(start.worker_pid);
+
+		const ttyLog = path.join(home.root, "tty.ndjson");
+		const interactive = await executeLaunch(executionInput(home, directPlan, ttyLog, "ready", {
+			interactive: true,
+			isTTY: true,
+		}));
+		assert.equal(interactive.kind, "running");
+		if (interactive.kind !== "running") throw new Error("interactive native launch did not start");
+		ownedLaunches.add(interactive.running);
+		const ttyStart = await waitForRow(ttyLog, (row) => row.event === "start", "interactive native start");
+		assert.equal(interactive.running.record.stdio, "inherit");
+		assert.deepEqual(ttyStart.stdio, {
+			stdin_is_tty: process.stdin.isTTY === true,
+			stdout_is_tty: process.stdout.isTTY === true,
+			stderr_is_tty: process.stderr.isTTY === true,
+		}, "interactive launch inherits the real parent TTY state");
+		await interactive.running.stop(100);
 
 		const dryLog = path.join(home.root, "dry-run.ndjson");
 		const dryRun = await executeLaunch(executionInput(home, directPlan, dryLog, "ready", {
@@ -302,7 +370,7 @@ export async function exerciseNativeSpawnSafety() {
 			(error) => error instanceof LauncherExecutionError && error.code === "launcher.control_plane.ensure_failed" && !String(error).includes(secret),
 		);
 		assert.equal(fs.existsSync(failedManagedLog), false, "ensure failure blocks spawn before native execution");
-		return "trusted discovery, shell-free argv/env, dry-run, process-group cleanup, managed ensure, and redacted records verified";
+		return "absolute PATH/named-shim refusal, shell-free argv/env, real cwd/capture/TTY, dry-run, process groups, managed ensure, and redacted records verified";
 	} finally {
 		await Promise.all(
 			[...ownedLaunches].map(async (running) => {
@@ -329,8 +397,23 @@ export async function exerciseLauncherSignalCleanup() {
 		if (started.kind !== "running") throw new Error("signal fixture did not start");
 		ownedLaunches.add(started.running);
 		const ready = await waitForRow(signalLog, (row) => row.event === "ready", "signal fixture readiness");
-		started.running.forwardResize();
-		await waitForRow(signalLog, (row) => row.event === "signal" && row.signal === "SIGWINCH", "resize forwarding");
+		const listenerCounts = Object.freeze({
+			SIGINT: process.listenerCount("SIGINT"),
+			SIGTERM: process.listenerCount("SIGTERM"),
+			SIGWINCH: process.listenerCount("SIGWINCH"),
+		});
+		const restoreForwarding = started.running.installSignalForwarding();
+		assert.equal(process.listenerCount("SIGINT"), listenerCounts.SIGINT + 1);
+		assert.equal(process.listenerCount("SIGTERM"), listenerCounts.SIGTERM + 1);
+		assert.equal(process.listenerCount("SIGWINCH"), listenerCounts.SIGWINCH + 1);
+		process.kill(process.pid, "SIGWINCH");
+		await waitForRow(signalLog, (row) => row.event === "signal" && row.signal === "SIGWINCH", "installed resize forwarding");
+		restoreForwarding();
+		assert.deepEqual({
+			SIGINT: process.listenerCount("SIGINT"),
+			SIGTERM: process.listenerCount("SIGTERM"),
+			SIGWINCH: process.listenerCount("SIGWINCH"),
+		}, listenerCounts, "signal forwarding listeners restore exactly");
 		started.running.forwardSignal("SIGINT");
 		const exited = await started.running.wait();
 		assert.equal(exited.code, 0, "SIGINT exits the upstream process cleanly");
@@ -338,14 +421,18 @@ export async function exerciseLauncherSignalCleanup() {
 		await childIsGone(ready.worker_pid);
 
 		const timeoutLog = path.join(home.root, "timeout.ndjson");
-		const timed = await executeLaunch(executionInput(home, directPlan, timeoutLog, "delayed", { timeoutMs: 50 }));
+		const timed = await executeLaunch(executionInput(home, directPlan, timeoutLog, "stubborn-tree", { timeoutMs: 50 }));
 		assert.equal(timed.kind, "running");
 		if (timed.kind !== "running") throw new Error("timeout launch did not start");
 		ownedLaunches.add(timed.running);
 		const timeoutExit = await timed.running.wait();
 		assert.equal(timeoutExit.timedOut, true, "timeout terminates the owned process group");
+		assert.equal(timeoutExit.signal, "SIGKILL", "SIGTERM-resistant root receives bounded SIGKILL");
+		const timeoutReady = await waitForRow(timeoutLog, (row) => row.event === "ready", "timeout fixture readiness");
 		await waitForRow(timeoutLog, (row) => row.event === "signal" && row.signal === "SIGTERM", "timeout termination");
-		return "SIGINT, SIGWINCH, exit status, timeout, and process-group cleanup verified";
+		assert.equal(typeof timeoutReady.worker_pid, "number");
+		await childIsGone(timeoutReady.worker_pid);
+		return "SIGINT/SIGWINCH forwarding, listener restoration, TERM-to-KILL timeout, and descendant cleanup verified";
 	} finally {
 		await Promise.all(
 			[...ownedLaunches].map(async (running) => {

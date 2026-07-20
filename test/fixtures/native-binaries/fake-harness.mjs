@@ -8,6 +8,12 @@ const logPath = process.env.TESTKIT_FAKE_LOG;
 const escapePath = process.env.TESTKIT_ESCAPE_PATH;
 if (!logPath) throw new Error("TESTKIT_FAKE_LOG is required");
 
+const actualStdio = {
+	stdin_is_tty: process.stdin.isTTY === true,
+	stdout_is_tty: process.stdout.isTTY === true,
+	stderr_is_tty: process.stderr.isTTY === true,
+};
+
 const record = (event, extra = {}) => {
 	fs.appendFileSync(logPath, `${JSON.stringify({
 		event,
@@ -25,11 +31,14 @@ let stdin = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => { stdin += chunk; });
 process.stdin.on("end", () => record("stdin", { stdin }));
-process.once("SIGTERM", () => { record("signal", { signal: "SIGTERM" }); process.exit(0); });
+process.once("SIGTERM", () => {
+	record("signal", { signal: "SIGTERM" });
+	if (mode !== "stubborn-tree") process.exit(0);
+});
 process.once("SIGINT", () => { record("signal", { signal: "SIGINT" }); process.exit(0); });
 process.on("SIGWINCH", () => record("signal", { signal: "SIGWINCH" }));
 
-record("start", { mode });
+record("start", { mode, cwd: process.cwd(), stdio: actualStdio });
 if (mode === "crash") {
 	record("exit", { code: 23 });
 	process.exit(23);
@@ -47,10 +56,20 @@ if (mode === "escape") {
 if (mode === "delayed") {
 	setTimeout(() => { record("ready"); process.stdout.write("ready\n"); }, 80);
 	setInterval(() => {}, 1_000);
-} else if (mode === "tree") {
-	const worker = spawn(process.execPath, ["--eval", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+} else if (mode === "tree" || mode === "stubborn-tree") {
+	const worker = spawn(
+		process.execPath,
+		[
+			"--eval",
+			mode === "stubborn-tree"
+				? "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"
+				: "setInterval(() => {}, 1000)",
+		],
+		{ stdio: "ignore" },
+	);
 	record("ready", { worker_pid: worker.pid });
 	process.stdout.write("ready\n");
+	process.stderr.write("fixture-stderr\n");
 	setInterval(() => {}, 1_000);
 } else {
 	record("ready");
