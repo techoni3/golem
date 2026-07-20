@@ -46,6 +46,21 @@ function safePassthrough(
 	return undefined;
 }
 
+function safeModelSelector(value: string): LauncherIssue | undefined {
+	if (
+		!value.trim() ||
+		hasControlCharacter(value) ||
+		secretArgument.test(value) ||
+		secretInlineValue.test(value)
+	)
+		return issue(
+			"launcher.model.invalid",
+			"Model selectors must be non-blank and cannot contain secrets or control characters.",
+			["Use a model name or wildcard pattern without credential values."],
+		);
+	return undefined;
+}
+
 export function resolveLaunch(input: ResolveLaunchInput): LaunchResolution {
 	const trace: LaunchExplanation[] = [];
 	const config = mergeLauncherConfig(input);
@@ -77,6 +92,8 @@ export function resolveLaunch(input: ResolveLaunchInput): LaunchResolution {
 			),
 			trace,
 		);
+	const modelIssue = safeModelSelector(modelSelector);
+	if (modelIssue) return failure(modelIssue, trace);
 	if (
 		harness !== selected.preset.harness ||
 		mode !== presetMode ||

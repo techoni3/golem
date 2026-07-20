@@ -13,8 +13,11 @@ read/write port or pure values, then returns an immutable, redacted
 - A missing version is read only through the v0 adapter. A write requires an
   explicit `save_launcher_config` intent and a redacted plan. Its injected port
   performs backup → temporary write → atomic commit; interruption rolls back
-  from backup and removes the temporary target. Raw text is never exposed by a
-  write plan, while comments and unknown user-owned regions remain intact.
+  from backup and removes the temporary target. A temporary is cleanup-eligible
+  before its write await, and rollback/cleanup port failures remain subordinate
+  to one redacted public error. Raw text is never exposed by a write plan,
+  while comments and unknown user-owned regions remain intact whenever rollback
+  remains possible.
 - Project configuration may select presets but may not supply a binary
   override. Arguments are argv data, never a shell string, and secret-bearing
   values are rejected before a plan is produced.
@@ -30,12 +33,15 @@ preset, but an explicit harness, mode, backend, or delivery change fails closed
 with `launcher.override.preset_incompatible`: executable, env-key, and argv
 dependencies must never come from an incompatible preset. The resulting plan
 keeps harness mode, backend, delivery mode, env-key references, argv intent,
-and capability qualification separate. Capability evidence is keyed by
+and capability qualification separate. A public model selector must be
+non-blank and free of credential/control-looking values before wildcard
+capability matching. Capability evidence is keyed by
 harness/mode/backend/model pattern/delivery/control features; it includes
 source, version, and observation time.
 Resolve, list, and doctor all project the same capability truth. Registration
 can never authorize launch at any claimed qualification. Missing/malformed
-observed evidence time fails closed; observed facts age out by policy, while
+observed evidence time or an unrecognized evidence source/policy fails closed;
+observed facts age out by policy, while
 the built-in compatibility snapshot is deliberately version-qualified and does
 not self-expire on a 30-day wall clock. Experimental real evidence is surfaced
 as a warning.

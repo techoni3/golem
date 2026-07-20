@@ -1,10 +1,10 @@
 # REPO-MAP.md
-> Last verified: 2026-07-20 @ 558ca83 — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-20 @ dd78276 — maintained via golem:docs-maintenance.
 
 ## Structure
 
 - `apps/` — private TypeScript seams; legacy entrypoints lead through cutover.
-- `packages/` — `contracts` owns schemas; `launcher` owns redacted JSONC/capability plans and atomic writes; `testkit` and journeys own proof.
+- `packages/` — `contracts` owns schemas; `launcher` owns redacted JSONC, fail-closed capability plans, and atomic writes; `testkit`/journeys own proof.
 - `tools/openapi-codegen/` — isolated TS5/OpenAPI source generator, never runtime or public packaging.
 - `substrate/` is source; `plugin/` and `dashboard/dist/` are generated products.
 - `cli/`, `lib/`, `dashboard/server/`, `mcp/channel/`, and `shims/` are public/compatibility surfaces; `test/` has journey fixtures.
@@ -13,7 +13,7 @@
 
 ### Root `package.json`, `tsconfig*.json`, and `biome.json`
 
-- One npm 11 lock owns `apps/`, `packages/`, and `tools/`; applications use TS 7 while untouched JS stays unchecked.
+- One npm 11 lock owns `apps/`, `packages/`, and `tools/`; TS 7 apps leave JS unchecked.
 - Typed scaffold: `typecheck`/build/boundaries/lint/clean/`api:*`; clean removes named outputs.
 - `api-client` owns runtime `openapi-fetch@0.17.0`; codegen owns exact TS 5.9.3/OpenAPI Typescript 7.13.0 without `npx`.
 - `contracts:*` checks deterministic v1 registry; `test:contracts` is one table JSON-wire journey.

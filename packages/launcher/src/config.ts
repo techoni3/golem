@@ -182,21 +182,34 @@ export async function writeJsoncConfig(
 			),
 		);
 	let backupWritten = false;
-	let temporaryWritten = false;
+	let temporaryCleanupEligible = false;
 	try {
 		await port.writeBackup(plan.backupPath, document.text);
 		backupWritten = true;
+		// A port may create bytes and then throw; cleanup must not depend on await returning.
+		temporaryCleanupEligible = true;
 		await port.writeTemporary(
 			plan.temporaryPath,
 			renderConfigText(document, config),
 		);
-		temporaryWritten = true;
 		await port.commitTemporary(plan.temporaryPath, plan.targetPath);
 	} catch {
 		try {
-			if (backupWritten) await port.rollback(plan.targetPath, plan.backupPath);
+			if (backupWritten) {
+				try {
+					await port.rollback(plan.targetPath, plan.backupPath);
+				} catch {
+					// The public failure remains stable and redacted even when rollback fails.
+				}
+			}
 		} finally {
-			if (temporaryWritten) await port.removeTemporary(plan.temporaryPath);
+			if (temporaryCleanupEligible) {
+				try {
+					await port.removeTemporary(plan.temporaryPath);
+				} catch {
+					// A cleanup-port error must not replace the stable write failure.
+				}
+			}
 		}
 		throw new LauncherResolutionError(
 			issue(

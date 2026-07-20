@@ -82,7 +82,14 @@ function assertPlan(result, expected) {
 	return result;
 }
 
-function atomicPort(initial, interruptCommit = false) {
+function atomicPort(
+	initial,
+	{
+		interruptCommit = false,
+		partialTemporaryFailure = false,
+		rollbackFailure = false,
+	} = {},
+) {
 	const files = new Map([["/virtual/config.jsonc", initial]]);
 	const operations = [];
 	return {
@@ -97,6 +104,8 @@ function atomicPort(initial, interruptCommit = false) {
 			writeTemporary: async (path, text) => {
 				operations.push("temporary");
 				files.set(path, text);
+				if (partialTemporaryFailure)
+					throw new Error("temporary-sentinel-secret-value");
 			},
 			commitTemporary: async (temporaryPath, targetPath) => {
 				operations.push("commit");
@@ -108,6 +117,8 @@ function atomicPort(initial, interruptCommit = false) {
 			},
 			rollback: async (targetPath, backupPath) => {
 				operations.push("rollback");
+				if (rollbackFailure)
+					throw new Error("rollback-sentinel-secret-value");
 				files.set(targetPath, files.get(backupPath));
 			},
 			removeTemporary: async (path) => {
@@ -346,6 +357,28 @@ export async function runLauncherResolutionReplay() {
 	assertFailure({ harness: "opencode", globalPreset: "glm", user, isTTY: false, now }, "launcher.input.conflict", "global conflict");
 	assertFailure({ harness: "unknown", isTTY: false, now }, "launcher.harness.unknown", "unknown harness");
 	assertFailure({ harness: "codex", explicit: { backend: "not-a-backend" }, isTTY: false, now }, "launcher.selection.invalid", "unknown backend");
+	for (const [label, modelSelector] of [
+		["blank model", ""],
+		["whitespace model", "   "],
+		["secret-bearing model", "api_key=sentinel-secret-value"],
+	]) {
+		const modelFailure = assertFailure(
+			{
+				harness: "opencode",
+				explicit: { modelSelector },
+				isTTY: false,
+				now,
+			},
+			"launcher.model.invalid",
+			label,
+		);
+		assert.equal(modelFailure.error.remediation.length, 1, `${label} has one remedy`);
+		assert.equal(
+			stableLaunchPlanJson(modelFailure).includes("sentinel-secret-value"),
+			false,
+			`${label} is redacted from public failure serialization`,
+		);
+	}
 	const passthroughFailure = resolveLaunch({
 		harness: "codex",
 		passthrough: ["--token=secret-value"],
@@ -441,7 +474,7 @@ export async function runLauncherResolutionReplay() {
 	assert.match(saved, /user-owned comment/);
 	assert.match(saved, /user_owned/);
 	assert.deepEqual(success.operations, ["backup", "temporary", "commit"]);
-	const interrupted = atomicPort(user.text, true);
+	const interrupted = atomicPort(user.text, { interruptCommit: true });
 	await assert.rejects(
 		() => writeJsoncConfig(interrupted.port, writePlan, user, user.config, "save_launcher_config"),
 		/launcher.config.atomic_write_failed/,
@@ -449,6 +482,59 @@ export async function runLauncherResolutionReplay() {
 	assert.equal(interrupted.files.get("/virtual/config.jsonc"), user.text, "interrupted commit rolls back original text");
 	assert.equal(interrupted.files.has(writePlan.temporaryPath), false, "temporary write is cleaned up");
 	assert.deepEqual(interrupted.operations, ["backup", "temporary", "commit", "rollback", "remove-temporary"]);
+
+	const partialTemporary = atomicPort(user.text, { partialTemporaryFailure: true });
+	await assert.rejects(
+		() => writeJsoncConfig(partialTemporary.port, writePlan, user, user.config, "save_launcher_config"),
+		(error) => {
+			assert.equal(error?.name, "LauncherResolutionError");
+			assert.equal(error?.message, "launcher.config.atomic_write_failed");
+			assert.equal(String(error).includes("temporary-sentinel-secret-value"), false);
+			return true;
+		},
+	);
+	assert.equal(partialTemporary.files.get("/virtual/config.jsonc"), user.text, "partial temporary failure preserves the original target");
+	assert.equal(partialTemporary.files.has(writePlan.temporaryPath), false, "partial temporary bytes are cleaned up even when the port throws");
+	assert.deepEqual(partialTemporary.operations, ["backup", "temporary", "rollback", "remove-temporary"]);
+
+	const rollbackFailure = atomicPort(user.text, {
+		interruptCommit: true,
+		rollbackFailure: true,
+	});
+	await assert.rejects(
+		() => writeJsoncConfig(rollbackFailure.port, writePlan, user, user.config, "save_launcher_config"),
+		(error) => {
+			assert.equal(error?.name, "LauncherResolutionError");
+			assert.equal(error?.message, "launcher.config.atomic_write_failed");
+			assert.equal(error?.issue?.code, "launcher.config.atomic_write_failed");
+			assert.equal(String(error).includes("rollback-sentinel-secret-value"), false);
+			assert.equal(JSON.stringify(error?.issue).includes("rollback-sentinel-secret-value"), false);
+			return true;
+		},
+	);
+	assert.equal(rollbackFailure.files.has(writePlan.temporaryPath), false, "rollback failure still cleans the temporary target");
+	assert.deepEqual(rollbackFailure.operations, ["backup", "temporary", "commit", "rollback", "remove-temporary"]);
+
+	for (const invalidEvidence of [
+		snapshot({ id: "invalid-policy", policy: "not-a-policy" }),
+		snapshot({ id: "invalid-source", source: "not-a-source" }),
+	]) {
+		assertFailure(
+			{ harness: "codex", isTTY: false, now, capabilities: [invalidEvidence] },
+			"launcher.capability.invalid_evidence",
+			`${invalidEvidence.capability.capability_id} fails closed at resolve`,
+		);
+		assert.deepEqual(
+			listLauncher({ capabilities: [invalidEvidence], now }).capabilities.map((entry) => [entry.qualification, entry.launchable]),
+			doctorFacts([invalidEvidence], now).map((entry) => [entry.qualification, entry.launchable]),
+			`${invalidEvidence.capability.capability_id} projects one false capability truth`,
+		);
+		assert.deepEqual(
+			doctorFacts([invalidEvidence], now).map((entry) => [entry.qualification, entry.launchable]),
+			[["invalid_evidence", false]],
+			`${invalidEvidence.capability.capability_id} is never authorized`,
+		);
+	}
 
 	const openCode = mergeOpenCodeManagedRegion(
 		'{\n  // keep this provider\n  "provider": { "openai": { "keep": true } },\n  "other": 1\n}\n',
@@ -474,5 +560,5 @@ export async function runLauncherResolutionReplay() {
 		/launcher.config.managed_invalid/,
 	);
 
-	return "precedence permutations, atomic JSONC rollback, unified capability truth, version-qualified evidence, redaction, and read-only launcher APIs verified";
+	return "precedence permutations, model-boundary redaction, partial JSONC cleanup, stable rollback errors, closed evidence truth, and read-only launcher APIs verified";
 }

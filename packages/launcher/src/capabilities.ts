@@ -10,6 +10,13 @@ import type {
 import { deepFreeze } from "./types.js";
 
 export const defaultQualificationMaxAgeMs = 1000 * 60 * 60 * 24 * 30;
+const evidenceSources = new Set([
+	"built_in",
+	"real_journey",
+	"manual_probe",
+	"registration",
+]);
+const evidencePolicies = new Set(["observed", "version_qualified"]);
 
 function deliveryFlow(mode: DeliveryMode): CapabilitySnapshot["deliveryFlow"] {
 	if (mode === "pull") return "pull";
@@ -110,6 +117,16 @@ export function capabilityTruth(
 	now: string,
 	maxAge = defaultQualificationMaxAgeMs,
 ): CapabilityTruth {
+	if (
+		!evidenceSources.has(snapshot.evidenceSource) ||
+		!evidencePolicies.has(snapshot.evidencePolicy)
+	)
+		return deepFreeze({
+			status: "invalid_evidence",
+			launchable: false,
+			remediation:
+				"Record evidence with a recognized source and qualification policy before authorizing launch.",
+		});
 	if (snapshot.evidenceSource === "registration")
 		return deepFreeze({
 			status: "registration_only",
