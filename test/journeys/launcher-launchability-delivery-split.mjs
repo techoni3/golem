@@ -71,8 +71,10 @@ export async function exerciseLauncherLaunchabilityDeliverySplit() {
 				reason: "fixture launch contribution is available",
 				remediation: "Keep the installed adapter contribution available.",
 			},
-			deliveryReason: "adapter token=marker-token credential=marker-credential",
-			deliveryRemediation: "adapter password=marker-password api_key=marker-api-key",
+			deliveryReason:
+				"adapter token=marker-token credential=marker-credential provider OPENAI_API_KEY=marker-openai-api-key",
+			deliveryRemediation:
+				"adapter password=marker-password api_key=marker-api-key Clear accessToken=marker-access-token",
 		};
 		const hostileDeliveryPlan = assertPlan(
 			resolveLaunch({
@@ -94,15 +96,32 @@ export async function exerciseLauncherLaunchabilityDeliverySplit() {
 			bridge: hostileBridge,
 			plan: hostileDeliveryPlan,
 		});
-		for (const pattern of [/token\s*=/iu, /credential\s*=/iu, /password\s*=/iu, /api_key\s*=/iu])
+		for (const pattern of [
+			/token\s*=/iu,
+			/credential\s*=/iu,
+			/password\s*=/iu,
+			/api_key\s*=/iu,
+			/owner_token\s*=/iu,
+			/OPENAI_API_KEY\s*=/u,
+			/accessToken\s*=/u,
+		])
 			assert.equal(pattern.test(hostilePublicJson), false, `adapter diagnostic leaked ${pattern}`);
+		for (const marker of [
+			"marker-token",
+			"marker-credential",
+			"marker-password",
+			"marker-api-key",
+			"marker-openai-api-key",
+			"marker-access-token",
+		])
+			assert.equal(hostilePublicJson.includes(marker), false, `adapter marker leaked ${marker}`);
 
 		const hostileLaunch = {
 			...hostileDelivery,
 			capability: { ...hostileDelivery.capability, capability_id: "fixture-hostile-launch" },
 			launchContribution: {
 				status: "launchable",
-				reason: "adapter password=marker-password",
+				reason: "upstream owner_token=marker-owner-token",
 				remediation: "adapter api_key=marker-api-key",
 			},
 		};
@@ -117,8 +136,18 @@ export async function exerciseLauncherLaunchabilityDeliverySplit() {
 		if (!hostileLaunchFailure.ok) {
 			assert.equal(hostileLaunchFailure.error.code, "launcher.launch.unavailable");
 			const failureJson = stableLaunchPlanJson(hostileLaunchFailure);
-			for (const pattern of [/token\s*=/iu, /credential\s*=/iu, /password\s*=/iu, /api_key\s*=/iu])
+			for (const pattern of [
+				/token\s*=/iu,
+				/credential\s*=/iu,
+				/password\s*=/iu,
+				/api_key\s*=/iu,
+				/owner_token\s*=/iu,
+				/OPENAI_API_KEY\s*=/u,
+				/accessToken\s*=/u,
+			])
 				assert.equal(pattern.test(failureJson), false, `launch failure leaked ${pattern}`);
+			for (const marker of ["marker-owner-token", "marker-api-key"])
+				assert.equal(failureJson.includes(marker), false, `launch marker leaked ${marker}`);
 		}
 
 		const missingCredential = resolveLaunch({

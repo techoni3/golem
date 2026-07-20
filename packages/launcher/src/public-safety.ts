@@ -1,13 +1,16 @@
 import type { DeliveryFacts, LaunchFacts } from "./types.js";
 
-const diagnosticSecretAssignment =
-	/\b(?:api[_-]?key|token|credential|password|secret)\b\s*(?:=|:)/iu;
+// Adapter diagnostics are untrusted text.  Match the complete assignment key
+// first, then normalize separators/camel case before deciding whether it is a
+// credential-bearing identifier.  A word-boundary around the sensitive suffix
+// alone misses keys such as `owner_token`, `OPENAI_API_KEY`, and `accessToken`.
+const diagnosticAssignment = /\b([a-z][a-z0-9_-]*)\s*(?:=|:)/giu;
 const diagnosticSecretShape =
 	/\b(?:bearer\s+[a-z0-9._~+/=-]{8,}|sk-[a-z0-9_-]{8,}|gh[pousr]_[a-z0-9_]{8,}|xox[baprs]-[a-z0-9-]{8,}|eyj[a-z0-9_-]{10,}\.[a-z0-9._-]{10,})\b/iu;
 const diagnosticMarkerShape =
 	/\b(?:marker|secret|credential|token|password|api[_-]?key)[-_][a-z0-9][a-z0-9_-]{2,}\b/iu;
 const diagnosticKey =
-	/^(?:reason|remediation|message|detail|error|diagnostic|token|credential|password|secret|api[_-]?key)$/iu;
+	/^(?:reason|remediation|message|detail|error|diagnostic)$/iu;
 
 const REDACTED_DIAGNOSTIC = "Adapter diagnostic redacted.";
 const REDACTED_REMEDIATION = "Use the configured credential provider.";
@@ -15,10 +18,30 @@ const MAX_DIAGNOSTIC_LENGTH = 512;
 
 function hasCredentialShape(value: string): boolean {
 	return (
-		diagnosticSecretAssignment.test(value) ||
+		hasSensitiveAssignment(value) ||
 		diagnosticSecretShape.test(value) ||
 		diagnosticMarkerShape.test(value)
 	);
+}
+
+function normalizeIdentifier(value: string): string {
+	return value
+		.replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+		.replace(/-/g, "_")
+		.toLowerCase();
+}
+
+function isSensitiveIdentifier(value: string): boolean {
+	return /(?:^|_)(?:api_key|token|credential|password|secret)(?:$|_)/u.test(
+		normalizeIdentifier(value),
+	);
+}
+
+function hasSensitiveAssignment(value: string): boolean {
+	for (const match of value.matchAll(diagnosticAssignment)) {
+		if (match[1] && isSensitiveIdentifier(match[1])) return true;
+	}
+	return false;
 }
 
 /** Adapter-owned fact text is untrusted even when the type says string. */
@@ -90,7 +113,7 @@ export function redactDeliveryFacts(value: {
 /** Clone a public JSON projection while applying the same diagnostic boundary. */
 export function sanitizePublicValue(value: unknown, key?: string): unknown {
 	if (typeof value === "string") {
-		if (key && diagnosticKey.test(key)) {
+		if (key && (diagnosticKey.test(key) || isSensitiveIdentifier(key))) {
 			const kind = /remediation/iu.test(key) ? "remediation" : "reason";
 			return redactDiagnostic(value, kind);
 		}
