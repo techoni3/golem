@@ -112,6 +112,13 @@ export async function exerciseBrowserPrincipalScopeAuthority() {
 		}));
 		assert.equal(betaCreate.status, 201, "durably bound bearer resolves its server-owned scope");
 		const betaTicket = betaCreate.body.result;
+		const betaCommentCreate = await json(await fetch(`${origin}/api/v1/tracker/tickets/${betaTicket.id}/comments`, {
+			method: "POST",
+			headers: { authorization: `Bearer ${betaToken}`, "content-type": "application/json" },
+			body: JSON.stringify({ body: "beta-owned parent comment" }),
+		}));
+		assert.equal(betaCommentCreate.status, 201, "the beta bearer can create its own parent comment");
+		const betaComment = betaCommentCreate.body.result;
 		const auditBeforeForgery = writer.trackerCoreStorage().auditCore().length;
 		const forged = await json(await fetch(`${origin}/api/v1/tracker/tickets`, {
 			method: "POST",
@@ -134,6 +141,21 @@ export async function exerciseBrowserPrincipalScopeAuthority() {
 			body: JSON.stringify({ body: "must not reach beta" }),
 		}));
 		assert.equal(browserCrossCommand.status, 404, "cross-project browser command is non-disclosing");
+		const betaCommentCountBeforeReply = core.compatibility.getTicket(betaTicket.id).comments.length;
+		const auditBeforeCrossReply = writer.trackerCoreStorage().auditCore().length;
+		const bearerCrossReply = await json(await fetch(`${origin}/api/v1/tracker/tickets/${betaTicket.id}/comments/${betaComment.id}/reply`, {
+			method: "POST",
+			headers: {
+				authorization: `Bearer ${alphaToken}`,
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({ body: "alpha must not reply to beta" }),
+		}));
+		assert.equal(bearerCrossReply.status, 404, "cross-project typed reply is non-disclosing");
+		assert.equal(bearerCrossReply.body.code, "tracker.not_found");
+		assert.equal(JSON.stringify(bearerCrossReply.body).includes(betaTicket.id), false, "cross-project reply does not disclose its target");
+		assert.equal(core.compatibility.getTicket(betaTicket.id).comments.length, betaCommentCountBeforeReply, "denied typed reply creates no comment");
+		assert.equal(writer.trackerCoreStorage().auditCore().length, auditBeforeCrossReply, "denied typed reply creates no audit or outbox event");
 		const legacyCrossDetail = await json(await fetch(`${origin}/api/tickets/${betaTicket.id}`, {
 			headers: browserHeaders(origin, session, csrf),
 		}));

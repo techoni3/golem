@@ -209,6 +209,24 @@ export function registerApiV1Routes(options: {
 		}
 		return input;
 	};
+	/**
+	 * A ticket path parameter is never authority. Resolve it through the
+	 * canonical compatibility facade and deliberately collapse a foreign target
+	 * into the same result as an absent one before a command can run.
+	 */
+	const ticketInCallerScope = (callerValue: Caller, id: string): boolean => {
+		const ticket = options.core.compatibility.getTicket(id);
+		return (
+			ticket !== undefined &&
+			typeof ticket.project_id === "string" &&
+			options.principal.policy.allowsProject(
+				callerValue.principal,
+				ticket.project_id,
+			)
+		);
+	};
+	const ticketNotFound = (request: FastifyRequest, reply: FastifyReply) =>
+		fail(request, reply, 404, "tracker.not_found", "ticket was not found");
 
 	options.app.get("/api/v1/tracker/tickets", async (request, reply) => {
 		const callerValue = guard(request, reply);
@@ -434,15 +452,8 @@ export function registerApiV1Routes(options: {
 			if (!input) return;
 			try {
 				const id = (request.params as { id: string }).id;
-				const ticket = options.core.compatibility.getTicket(id);
-				if (!ticket || ticket.project_id !== callerValue.projectId)
-					return fail(
-						request,
-						reply,
-						404,
-						"tracker.not_found",
-						"ticket was not found",
-					);
+				if (!ticketInCallerScope(callerValue, id))
+					return ticketNotFound(request, reply);
 				const suppliedAnchor = record(input.anchor);
 				const anchor =
 					Object.keys(suppliedAnchor).length > 0
@@ -485,6 +496,8 @@ export function registerApiV1Routes(options: {
 			if (!input) return;
 			try {
 				const params = request.params as { id: string; commentId: string };
+				if (!ticketInCallerScope(callerValue, params.id))
+					return ticketNotFound(request, reply);
 				return reply.code(201).send(
 					command(
 						options.core.compatibility.replyComment({
@@ -510,15 +523,8 @@ export function registerApiV1Routes(options: {
 			if (!input) return;
 			try {
 				const params = request.params as { id: string; commentId: string };
-				const ticket = options.core.compatibility.getTicket(params.id);
-				if (!ticket || ticket.project_id !== callerValue.projectId)
-					return fail(
-						request,
-						reply,
-						404,
-						"tracker.not_found",
-						"ticket was not found",
-					);
+				if (!ticketInCallerScope(callerValue, params.id))
+					return ticketNotFound(request, reply);
 				return reply.send(
 					command(
 						options.core.compatibility.updateComment({
