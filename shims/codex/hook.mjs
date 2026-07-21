@@ -3,6 +3,9 @@
 // intentionally ignored because OpenAI documents that format as unstable.
 import { upsertSessionFact } from '../lib/session-facts.js';
 import { upsertSessionRegistration } from '../lib/session-registry.js';
+import { golemHome } from '../lib/golem-home.js';
+import { resolveProjectRoot } from '../lib/project-id.js';
+import { recordCodexLifecycle } from './direct-lifecycle.mjs';
 
 const chunks = [];
 for await (const chunk of process.stdin) chunks.push(chunk);
@@ -13,10 +16,8 @@ const event = process.argv[2] || 'unknown';
 const documented = {
   hook_event_name: input.hook_event_name, source: input.source, turn_id: input.turn_id,
   model: input.model, permission_mode: input.permission_mode, tool_name: input.tool_name,
-  tool_use_id: input.tool_use_id, tool_input: input.tool_input, tool_response: input.tool_response,
-  prompt: input.prompt, trigger: input.trigger, agent_id: input.agent_id,
+  tool_use_id: input.tool_use_id, trigger: input.trigger, agent_id: input.agent_id,
   agent_type: input.agent_type, stop_hook_active: input.stop_hook_active,
-  last_assistant_message: input.last_assistant_message,
 };
 const observations = Object.fromEntries(Object.entries(documented).filter(([, value]) => value !== undefined));
 if (event === 'session-start') {
@@ -29,12 +30,32 @@ if (event === 'session-start') {
     });
   } catch {}
 }
+let lifecycle;
+try {
+  const projectRoot = await resolveProjectRoot(input.cwd);
+  lifecycle = recordCodexLifecycle({
+    home: golemHome(),
+    projectPath: projectRoot,
+    rawSessionId: input.session_id,
+    event,
+    model: typeof input.model === 'string' ? input.model : undefined,
+    threadId: typeof input.thread_id === 'string' ? input.thread_id : (typeof input.turn_id === 'string' ? input.turn_id : undefined),
+  });
+} catch {
+  // Lifecycle integration is fail-open: a native Codex launch must continue
+  // even if the optional Golem home or its filesystem inbox is unavailable.
+}
 try {
   const fact = {
     canonical_id: input.session_id, continuation_key: input.session_id,
     harness: 'codex', locator: { raw_session_id: input.session_id }, project_path: input.cwd,
     model: input.model,
-    ...(event === 'stop' ? { status: 'idle' } : event === 'subagent-stop' ? {} : { status: 'active' }),
+    ...(event === 'stop' ? { status: 'ended' } : event === 'subagent-stop' ? {} : { status: lifecycle?.terminal ? 'ended' : 'active' }),
+    lifecycle_state: lifecycle?.record?.state ?? (event === 'stop' ? 'ended' : 'active'),
+    generation_id: lifecycle?.record?.generation_id,
+    project_id: lifecycle?.record?.project_id,
+    canonical_project_id: lifecycle?.record?.project_id,
+    aliases: lifecycle?.record?.aliases,
     delivery: { mode: 'pull', push: false }, lifecycle_event: event, observations,
   };
   upsertSessionFact(fact);

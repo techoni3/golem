@@ -7,14 +7,18 @@ import { scenarios } from "./scenarios.mjs";
 const arguments_ = process.argv.slice(2);
 const selectorIndex = arguments_.indexOf("--scenario");
 const requestedId = selectorIndex === -1 ? undefined : arguments_[selectorIndex + 1];
+const targetIndex = arguments_.indexOf("--target");
+const requestedTarget = targetIndex === -1 ? undefined : arguments_[targetIndex + 1];
 
 if (arguments_.includes("--list")) {
 	for (const scenario of scenarios) process.stdout.write(`${scenario.id}\t${scenario.journey}\t${scenario.tier}\t${scenario.regression}\n`);
 	process.exit(0);
 }
 if (selectorIndex !== -1 && !requestedId) throw new Error("--scenario requires a scenario id");
-if (arguments_.some((argument) => argument !== "--scenario" && argument !== requestedId))
-	throw new Error(`unknown journey runner argument: ${arguments_.find((argument) => argument !== "--scenario" && argument !== requestedId)}`);
+if (targetIndex !== -1 && !requestedTarget) throw new Error("--target requires a target id");
+const allowedArguments = new Set(["--scenario", requestedId, "--target", requestedTarget]);
+if (arguments_.some((argument) => !allowedArguments.has(argument)))
+	throw new Error(`unknown journey runner argument: ${arguments_.find((argument) => !allowedArguments.has(argument))}`);
 
 const selected = requestedId ? scenarios.filter((scenario) => scenario.id === requestedId) : scenarios;
 if (requestedId && selected.length === 0) throw new Error(`unknown journey scenario: ${requestedId}`);
@@ -24,7 +28,7 @@ for (const scenario of selected) {
 	const exercise = exercises[scenario.id];
 	if (!exercise) throw new Error(`no journey implementation is registered for ${scenario.id}`);
 	try {
-		const evidence = await exercise();
+		const evidence = await exercise(requestedTarget);
 		results.push({ ...scenario, status: "PASS", evidence });
 	} catch (error) {
 		const loopbackGate = isLoopbackUnavailable(error);
