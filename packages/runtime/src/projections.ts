@@ -56,10 +56,16 @@ export interface RuntimeLegacyDriftPort {
 }
 
 const terminalStates = new Set(["ended", "errored", "superseded"]);
+const safeIdentifierKey =
+	/^(?:id|event(?:_id|_uuid)?|fence(?:_id)?|schema(?:_version)?|revision|resource_revision|cursor|sequence|ordinal|code|topic|watermark|project_id|session_id|generation_id|endpoint_id)$/iu;
 const secretKey =
-	/(?:token|credential|password|secret|api[_-]?key|authorization)/iu;
+	/(?:token|credential|password|secret|api[_-]?key|authorization|env(?:ironment)?|prompt|(?:unrelated_)?path|pathname|file(?:name)?|directory|cwd|home|root)/iu;
 const assignment =
 	/\b(?:owner[_-]?token|access[_-]?token|openai[_-]?api[_-]?key|token|credential|password|secret|api[_-]?key|authorization)\s*[=:]\s*[^\s,;}]+/giu;
+const environmentAssignment =
+	/\b(?:HOME|PATH|PWD|USER|SHELL|GOLEM_HOME|NODE_PATH|[A-Z][A-Z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL|API|AUTH)[A-Z0-9_]*)\s*=\s*[^\s,;}]+/gu;
+const filesystemPath =
+	/\/(?:Users|private\/tmp|tmp|var\/folders|home)\/[^\s,;}"]+/gu;
 const bearer = /\bBearer\s+[A-Za-z0-9._-]+/giu;
 const maxDiagnosticDepth = 5;
 const maxDiagnosticBytes = 2_048;
@@ -68,17 +74,23 @@ function redact(value: unknown, depth = 0): unknown {
 	if (depth > maxDiagnosticDepth) return "[DEPTH_REDACTED]";
 	if (typeof value === "string")
 		return value
+			.replace(
+				environmentAssignment,
+				(match) => `${match.split("=")[0]}=[REDACTED]`,
+			)
 			.replace(assignment, (match) => `${match.split(/[=:]/u)[0]}=[REDACTED]`)
 			.replace(bearer, "Bearer [REDACTED]")
+			.replace(filesystemPath, "[PATH_REDACTED]")
 			.slice(0, 512);
 	if (Array.isArray(value))
 		return value.slice(0, 64).map((entry) => redact(entry, depth + 1));
 	if (value && typeof value === "object") {
 		const output: Record<string, unknown> = {};
 		for (const [key, entry] of Object.entries(value).slice(0, 64))
-			output[key] = secretKey.test(key)
-				? "[REDACTED]"
-				: redact(entry, depth + 1);
+			output[key] =
+				!safeIdentifierKey.test(key) && secretKey.test(key)
+					? "[REDACTED]"
+					: redact(entry, depth + 1);
 		return output;
 	}
 	return value;

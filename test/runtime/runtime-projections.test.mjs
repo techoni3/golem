@@ -140,7 +140,22 @@ test("GOL-46 live/history/diagnostics are canonical, explainable, and restart-st
 			occurredAt: "2026-07-21T00:00:03.000Z",
 			producer: { id: "projection-diagnostics", sequence: 1 },
 			disposition: "accepted",
-			explanation: { code: "runtime.stale", details: { token: "token=do-not-leak", password: "secret-value" } },
+			explanation: {
+				code: "runtime.stale",
+				details: {
+					token: "token=do-not-leak",
+					password: "secret-value",
+					event_id: "evt_00000000-0000-4000-8000-000000000052",
+					fence_id: "fence_00000000-0000-4000-8000-000000000052",
+					schema_version: "golem.runtime-signal/v1",
+					revision: 52,
+					nested: {
+						env: { HOME: "HOME=/private/tmp/gol46-sensitive" },
+						prompt: "gol46-private-prompt",
+						unrelated_path: "/Users/laveesingh/private/unrelated.txt",
+					},
+				},
+			},
 		});
 		owner.materializeRuntimeEvent({
 			eventId: "evt_00000000-0000-4000-8000-000000000053",
@@ -170,7 +185,11 @@ test("GOL-46 live/history/diagnostics are canonical, explainable, and restart-st
 		assert.equal(diagnostics.status, 200);
 		const diagnosticsText = JSON.stringify(diagnostics.body);
 		assert.match(diagnosticsText, /runtime\.stale/u);
-		assert.doesNotMatch(diagnosticsText, /do-not-leak|secret-value|api-key-value|Bearer /u);
+		assert.match(diagnosticsText, /evt_00000000-0000-4000-8000-000000000052/u);
+		assert.match(diagnosticsText, /fence_00000000-0000-4000-8000-000000000052/u);
+		assert.match(diagnosticsText, /golem\.runtime-signal\/v1/u);
+		assert.match(diagnosticsText, /52/u);
+		assert.doesNotMatch(diagnosticsText, /do-not-leak|secret-value|api-key-value|Bearer |gol46-sensitive|gol46-private-prompt|unrelated\.txt|HOME=\/private\/tmp/u);
 		assert.equal(owner.runtimeProjectionStorage().revision(), before, "read projections do not mutate revision");
 		await control.service.close();
 		control = undefined;
