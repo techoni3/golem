@@ -6,9 +6,13 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { openCodeManagedProviderRegion, openCodeProviderCapabilities, openCodeRuntimeProjectId, probeOpenCodeProviders, setupOpenCodeConfig, } from "@golem/adapter-opencode";
 import { executeLaunch, LauncherExecutionError, LauncherResolutionError, launchPlanBridge, parseJsoncConfig, resolveLaunch, } from "@golem/launcher";
+import { runAliases } from "./commands/aliases.js";
+import { runCompletions } from "./commands/completions.js";
+import { choosePreset } from "./commands/picker.js";
+import { pickerCandidates, recordRecentPreset, runPresets, } from "./commands/presets.js";
 import { CLI_EXIT_CODES, CliResolutionError, CliUsageError } from "./errors.js";
 import { conciseSelection, stableCliJson } from "./format.js";
-import { commandDefinition, commandMetadata, createProgram, } from "./registry.js";
+import { commandDefinition, commandMetadata, commandRegistry, createProgram, } from "./registry.js";
 const harnesses = new Set(["codex", "opencode", "claude", "pi"]);
 const backends = new Set([
     "openai",
@@ -190,6 +194,31 @@ export function parseCliInput(argv) {
             json: false,
             passthrough: split.passthrough,
             help: true,
+            positionals: [],
+        };
+    }
+    const administrative = new Set(["presets", "completions", "aliases"]);
+    if (administrative.has(parsed.command)) {
+        const options = parsed.options;
+        return {
+            command: parsed.command,
+            ...(typeof options.backend === "string"
+                ? { backend: options.backend }
+                : {}),
+            ...(typeof options.model === "string" ? { model: options.model } : {}),
+            ...(typeof options.delivery === "string"
+                ? { delivery: options.delivery }
+                : {}),
+            ...(typeof options.scope === "string" ? { scope: options.scope } : {}),
+            ...(typeof options.shell === "string" ? { shell: options.shell } : {}),
+            ...(typeof options.name === "string" ? { name: options.name } : {}),
+            dryRun: false,
+            apply: options.apply === true,
+            explain: false,
+            json: options.json === true,
+            passthrough: split.passthrough,
+            help: false,
+            positionals: commandArgs,
         };
     }
     const globalPreset = normalized.globalPreset;
@@ -221,6 +250,7 @@ export function parseCliInput(argv) {
         json: options.json === true,
         passthrough: split.passthrough,
         help: false,
+        positionals: [],
     };
     return result;
 }
@@ -408,13 +438,29 @@ function renderSuccess(result, input, io) {
         output(io, stableCliJson(publicPlan));
         return CLI_EXIT_CODES.ok;
     }
-    output(io, `selected ${conciseSelection(result)}`);
-    output(io, `launch ${bridge.launch.status}; delivery ${bridge.delivery.mode}/${bridge.delivery.qualification}/${bridge.delivery.readiness}`);
+    output(io, `selected ${conciseSelection(result)} · launch ${bridge.launch.status} · delivery ${bridge.delivery.mode}/${bridge.delivery.qualification}/${bridge.delivery.readiness}`);
+    if (result.warnings[0])
+        output(io, `warning: ${result.warnings[0].message} Remedy: ${result.warnings[0].remediation}`);
     if (input.explain) {
         for (const trace of result.trace)
             output(io, `${trace.code}: ${trace.detail}`);
     }
     return CLI_EXIT_CODES.ok;
+}
+async function runPicker(io) {
+    const documents = launcherDocuments();
+    const entries = pickerCandidates({
+        now: io.now ?? new Date().toISOString(),
+        ...(documents.user ? { user: documents.user } : {}),
+        ...(documents.project ? { project: documents.project } : {}),
+    });
+    const chosen = await choosePreset(entries, {
+        stdout: (line) => output(io, line),
+        ...(io.readLine ? { readLine: io.readLine } : {}),
+    });
+    if (!chosen)
+        return CLI_EXIT_CODES.ok;
+    return runCli([chosen.harness, chosen.name], io);
 }
 function launcherDocuments() {
     const userPath = process.env.GOLEM_LAUNCHER_CONFIG ??
@@ -488,9 +534,22 @@ export async function runCli(argv = process.argv.slice(2), io = {}) {
         }));
         return CLI_EXIT_CODES.ok;
     }
+    if (argv.length === 0) {
+        if (!(io.isTTY ?? Boolean(process.stdin.isTTY))) {
+            return runCli(["help"], io);
+        }
+        try {
+            return await runPicker(io);
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : "picker failed";
+            errorOutput(io, `launcher.picker.unavailable: ${message}`);
+            return CLI_EXIT_CODES.runtime;
+        }
+    }
     let input;
     try {
-        input = parseCliInput(argv.length === 0 ? ["help"] : argv);
+        input = parseCliInput(argv);
     }
     catch (error) {
         const message = error instanceof Error ? error.message : "invalid command";
@@ -521,6 +580,41 @@ export async function runCli(argv = process.argv.slice(2), io = {}) {
         return CLI_EXIT_CODES.usage;
     }
     try {
+        if (input.command === "presets")
+            return await runPresets({
+                positionals: input.positionals,
+                ...(input.scope ? { scope: input.scope } : {}),
+                ...(input.backend ? { backend: input.backend } : {}),
+                ...(input.model ? { model: input.model } : {}),
+                ...(input.delivery ? { delivery: input.delivery } : {}),
+                apply: input.apply,
+                json: input.json,
+                now: io.now ?? new Date().toISOString(),
+            }, {
+                stdout: (line) => output(io, line),
+                stderr: (line) => errorOutput(io, line),
+            });
+        if (input.command === "completions")
+            return await runCompletions({
+                positionals: input.positionals,
+                ...(input.shell ? { shell: input.shell } : {}),
+                apply: input.apply,
+                json: input.json,
+            }, {
+                stdout: (line) => output(io, line),
+                stderr: (line) => errorOutput(io, line),
+            }, commandRegistry);
+        if (input.command === "aliases")
+            return await runAliases({
+                positionals: input.positionals,
+                ...(input.shell ? { shell: input.shell } : {}),
+                ...(input.name ? { name: input.name } : {}),
+                apply: input.apply,
+                json: input.json,
+            }, {
+                stdout: (line) => output(io, line),
+                stderr: (line) => errorOutput(io, line),
+            });
         if (input.command === "opencode:setup" ||
             input.command === "opencode:refresh" ||
             input.command === "opencode:doctor")
@@ -595,7 +689,10 @@ export async function runCli(argv = process.argv.slice(2), io = {}) {
         if (launched !== undefined)
             return launched;
         const openCodeLaunched = await launchOpenCode(result, input, io);
-        return openCodeLaunched ?? renderSuccess(result, input, io);
+        const rendered = openCodeLaunched ?? renderSuccess(result, input, io);
+        if (rendered === CLI_EXIT_CODES.ok && !input.dryRun && !input.json)
+            recordRecentPreset(result.preset.name);
+        return rendered;
     }
     catch (error) {
         if (error instanceof CliResolutionError) {
