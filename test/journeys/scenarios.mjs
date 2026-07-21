@@ -98,6 +98,12 @@ export const scenarios = [
 		regression: "a stale plan, weak alias, partial canonical import, or generated compatibility projection can become authoritative after a failed migration",
 	}),
 	registerScenario({
+		id: "legacy-compat-projection",
+		journey: "J7",
+		tier: "integration",
+		regression: "a compatibility export reads legacy inputs as authority, loses canonical revision facts, or fails to rebuild after a safe strong-alias import",
+	}),
+	registerScenario({
 		id: "testkit-smoke",
 		journey: "J3",
 		tier: "pr",

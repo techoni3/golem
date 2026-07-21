@@ -806,6 +806,10 @@ export async function exerciseMigrationApplyCrashRollback() {
 	return runMigrationApplyReplay();
 }
 
+export async function exerciseLegacyCompatProjection() {
+	return runMigrationApplyReplay();
+}
+
 const sessionJourney = path.join(repositoryRoot, "test/sessions/session-service.test.mjs");
 const endpointJourney = path.join(repositoryRoot, "test/endpoints/endpoint-service.test.mjs");
 
@@ -902,6 +906,7 @@ export const exercises = Object.freeze({
 	"launcher-signal-cleanup": exerciseLauncherSignalCleanup,
 	"migration-dry-run-ambiguity": exerciseMigrationDryRunAmbiguity,
 	"migration-apply-crash-rollback": exerciseMigrationApplyCrashRollback,
+	"legacy-compat-projection": exerciseLegacyCompatProjection,
 	"testkit-smoke": exerciseSmoke,
 	"testkit-fake-harness": exerciseFakeHarness,
 	"testkit-semantic-parity": exerciseSemanticParity,
