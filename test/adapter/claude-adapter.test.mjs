@@ -5,7 +5,11 @@ import path from "node:path";
 import test from "node:test";
 
 import { RuntimeSignalV1Schema } from "@golem/contracts";
-import { createEndpointService, createSessionService } from "@golem/runtime";
+import {
+	createEndpointService,
+	createProjectService,
+	createSessionService,
+} from "@golem/runtime";
 import { openControlPlanePersistence } from "../../apps/control-plane/dist/persistence.js";
 import {
 	CLAUDE_CHANNEL_PROTOCOL,
@@ -119,6 +123,60 @@ test("GOL-47 Claude hooks produce canonical lifecycle/activity signals", async (
 		clock,
 	);
 	assert.equal(JSON.stringify(hostileWaiting).includes("do-not-log"), false);
+});
+
+test("GOL-47 GitHub OAuth values stay redacted through persisted runtime events", async () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "golem-gol47-redaction-"));
+	const secret = "gho_abcdef1234567890";
+	const owner = openControlPlanePersistence(
+		{ runtimePath: path.join(root, "runtime.db"), trackerPath: path.join(root, "tracker.db") },
+		{ ownerId: "gol47-redaction-owner", clock },
+	);
+	try {
+		const parsed = parseClaudeHook(
+			{
+				hook_event_name: "SessionStart",
+				session_id: sessionId,
+				model: secret,
+				source: secret,
+			},
+			{
+				...context(),
+				canonicalPath: `/private/golem-47/${secret}/canonical`,
+				observedPath: `/private/golem-47/${secret}/observed`,
+			},
+			clock,
+		);
+		const projectSignal = parsed.signals.find((signal) => signal.event_kind === "project.observed");
+		const sessionSignal = parsed.signals.find((signal) => signal.event_kind === "session.started");
+		assert(projectSignal);
+		assert(sessionSignal);
+		const projects = createProjectService({ storage: owner.runtimeProjectStorage(), now: clock.now });
+		const sessions = createSessionService({ projects: owner.runtimeProjectStorage(), sessions: owner.runtimeSessionStorage() });
+		const projectView = projects.ingest(projectSignal);
+		assert.equal(sessions.apply(sessionSignal).disposition, "accepted");
+		const sessionView = sessions.get(projectId, sessionId);
+		assert(sessionView);
+		const projection = owner.runtimeProjectionStorage();
+		const events = projection.events();
+		assert(events.length >= 1, "canonical runtime event was persisted");
+		assert.equal(JSON.stringify({ projectView, sessionView, events }).includes(secret), false);
+		await owner.close();
+		const files = [];
+		const visit = (directory) => {
+			for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+				const target = path.join(directory, entry.name);
+				if (entry.isDirectory()) visit(target);
+				else files.push(target);
+			}
+		};
+		visit(root);
+		const marker = Buffer.from(secret);
+		assert.equal(files.some((file) => fs.readFileSync(file).includes(marker)), false, "runtime/tracker DBs and artifacts contain no raw OAuth token");
+	} finally {
+		await owner.close();
+		fs.rmSync(root, { recursive: true, force: true });
+	}
 });
 
 test("GOL-47 Claude channel readiness requires authenticated addressed consumption", async () => {

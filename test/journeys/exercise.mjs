@@ -855,7 +855,7 @@ export async function exerciseClaudeLifecycleChannelRecovery() {
 			{ cwd: repositoryRoot, encoding: "utf8", env: home.env },
 		);
 		if (result.status !== 0) throw new Error(`Claude adapter journey failed: ${result.stdout}\n${result.stderr}`);
-		assert.match(result.stdout, /pass 3/u);
+		assert.match(result.stdout, /pass 4/u);
 		return "real SQLite-backed Claude lifecycle signals, fenced channel handshake, addressed consumption qualification, and explicit unqualified failure evidence verified";
 	} finally {
 		home.cleanup();
