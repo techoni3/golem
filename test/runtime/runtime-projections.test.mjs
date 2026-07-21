@@ -14,6 +14,8 @@ const projectId = "prj_00000000-0000-4000-8000-000000000046";
 const sessionId = "ses_00000000-0000-4000-8000-000000000046";
 const liveGenerationId = "gen_00000000-0000-4000-8000-000000000046";
 const endedGenerationId = "gen_00000000-0000-4000-8000-000000000047";
+const erroredGenerationId = "gen_00000000-0000-4000-8000-000000000048";
+const supersededGenerationId = "gen_00000000-0000-4000-8000-000000000049";
 
 function clock() {
 	return {
@@ -67,6 +69,7 @@ function seed(owner) {
 	assert.equal(sessions.apply(signal("evt_00000000-0000-4000-8000-000000000041", 1, "session.started", endedGenerationId, { metadata: { model: "haiku", role: "reviewer" } })).disposition, "accepted");
 	assert.equal(sessions.apply(signal("evt_00000000-0000-4000-8000-000000000042", 2, "session.ended", endedGenerationId, { disposition: "ended" })).disposition, "accepted");
 	assert.equal(sessions.apply(signal("evt_00000000-0000-4000-8000-000000000043", 3, "session.resumed", liveGenerationId, { resumed_from_generation_id: endedGenerationId, metadata: { model: "sonnet", role: "worker" } })).disposition, "accepted");
+	assert.equal(sessions.apply(signal("evt_00000000-0000-4000-8000-000000000044", 4, "session.activity", liveGenerationId)).disposition, "accepted");
 	const endpoint = owner.runtimeEndpointStorage().claim({
 		generationId: liveGenerationId,
 		routeKind: "delivery",
@@ -77,6 +80,10 @@ function seed(owner) {
 	});
 	assert.equal(endpoint.disposition, "accepted", `${endpoint.code} ${JSON.stringify(owner.runtimeSessionStorage().get(projectId, sessionId))}`);
 	return sessions;
+}
+
+function generationIds(projection) {
+	return projection.body.items.map((item) => item.generation_id).sort();
 }
 
 function projectionAdapter(projection) {
@@ -119,7 +126,7 @@ test("GOL-46 live/history/diagnostics are canonical, explainable, and restart-st
 	let control;
 	try {
 		owner = openControlPlanePersistence({ runtimePath: home.runtimeDb, trackerPath: home.trackerDb }, { ownerId: "gol46-projection-owner", clock: clock() });
-		seed(owner);
+		const sessions = seed(owner);
 		owner.materializeRuntimeEvent({
 			eventId: "evt_00000000-0000-4000-8000-000000000051",
 			deduplicationKey: "diagnostic-accepted",
@@ -173,14 +180,21 @@ test("GOL-46 live/history/diagnostics are canonical, explainable, and restart-st
 		const live = await jsonGet(control.service.origin, "/api/v1/runtime/live");
 		assert.equal(live.status, 200);
 		assert.equal(live.body.stream, "runtime.live");
-		assert.equal(live.body.items.length, 1);
-		assert.equal(live.body.items[0].generation_id, liveGenerationId);
+		assert.deepEqual(generationIds(live), [liveGenerationId]);
 		assert.equal(live.body.items[0].observation.read_only, true);
 		assert.equal(live.body.items[0].endpoints[0].readiness, "pull_only");
-		const history = await jsonGet(control.service.origin, "/api/v1/runtime/history?limit=1");
+		const actorActivityAt = live.body.items[0].actor_activity_at;
+		assert.equal(actorActivityAt, "2026-07-21T00:00:04.000Z");
+		const history = await jsonGet(control.service.origin, "/api/v1/runtime/history");
 		assert.equal(history.status, 200);
-		assert.equal(history.body.items.length, 1);
-		assert.equal(history.body.next_cursor, 1);
+		assert.deepEqual(generationIds(history), [endedGenerationId]);
+		assert.equal(
+			generationIds(live).filter((generationId) =>
+				generationIds(history).includes(generationId),
+			).length,
+			0,
+			"canonical live and history projections never overlap",
+		);
 		const diagnostics = await jsonGet(control.service.origin, "/api/v1/runtime/diagnostics");
 		assert.equal(diagnostics.status, 200);
 		const diagnosticsText = JSON.stringify(diagnostics.body);
@@ -191,6 +205,64 @@ test("GOL-46 live/history/diagnostics are canonical, explainable, and restart-st
 		assert.match(diagnosticsText, /52/u);
 		assert.doesNotMatch(diagnosticsText, /do-not-leak|secret-value|api-key-value|Bearer |gol46-sensitive|gol46-private-prompt|unrelated\.txt|HOME=\/private\/tmp/u);
 		assert.equal(owner.runtimeProjectionStorage().revision(), before, "read projections do not mutate revision");
+		assert.equal(
+			sessions.apply(signal("evt_00000000-0000-4000-8000-000000000054", 5, "session.ended", liveGenerationId, { disposition: "ended" })).disposition,
+			"accepted",
+		);
+		const movedLive = await jsonGet(control.service.origin, "/api/v1/runtime/live");
+		const movedHistory = await jsonGet(control.service.origin, "/api/v1/runtime/history");
+		assert.deepEqual(generationIds(movedLive), []);
+		assert.deepEqual(
+			generationIds(movedHistory),
+			[endedGenerationId, liveGenerationId].sort(),
+			"the transitioned generation appears once in terminal history",
+		);
+		const movedGeneration = movedHistory.body.items.find(
+			(item) => item.generation_id === liveGenerationId,
+		);
+		assert.equal(
+			movedGeneration.actor_activity_at,
+			actorActivityAt,
+			"terminal lifecycle changes do not rewrite actor activity",
+		);
+		assert.equal(
+			sessions.apply(signal("evt_00000000-0000-4000-8000-000000000055", 6, "session.resumed", erroredGenerationId, { resumed_from_generation_id: liveGenerationId })).disposition,
+			"accepted",
+		);
+		assert.equal(
+			sessions.apply(signal("evt_00000000-0000-4000-8000-000000000056", 7, "session.ended", erroredGenerationId, { disposition: "errored" })).disposition,
+			"accepted",
+		);
+		assert.equal(
+			sessions.apply(signal("evt_00000000-0000-4000-8000-000000000057", 8, "session.resumed", supersededGenerationId, { resumed_from_generation_id: erroredGenerationId })).disposition,
+			"accepted",
+		);
+		assert.equal(
+			sessions.apply(signal("evt_00000000-0000-4000-8000-000000000058", 9, "session.ended", supersededGenerationId, { disposition: "superseded" })).disposition,
+			"accepted",
+		);
+		const finalLive = await jsonGet(control.service.origin, "/api/v1/runtime/live");
+		const finalHistory = await jsonGet(control.service.origin, "/api/v1/runtime/history");
+		assert.deepEqual(generationIds(finalLive), []);
+		assert.deepEqual(
+			generationIds(finalHistory),
+			[
+				endedGenerationId,
+				liveGenerationId,
+				erroredGenerationId,
+				supersededGenerationId,
+			].sort(),
+			"history is restricted to ended, errored, and superseded generations",
+		);
+		assert.deepEqual(
+			Object.fromEntries(finalHistory.body.items.map((item) => [item.generation_id, item.state])),
+			{
+				[endedGenerationId]: "ended",
+				[liveGenerationId]: "ended",
+				[erroredGenerationId]: "errored",
+				[supersededGenerationId]: "superseded",
+			},
+		);
 		await control.service.close();
 		control = undefined;
 		await owner.close();
@@ -198,7 +270,18 @@ test("GOL-46 live/history/diagnostics are canonical, explainable, and restart-st
 		control = await serviceFor(home, owner);
 		const reopened = await jsonGet(control.service.origin, "/api/v1/runtime/history?project_id=" + projectId);
 		assert.equal(reopened.status, 200);
-		assert.equal(reopened.body.items[0].generation_id, endedGenerationId);
+		assert.deepEqual(
+			generationIds(reopened),
+			[
+				endedGenerationId,
+				liveGenerationId,
+				erroredGenerationId,
+				supersededGenerationId,
+			].sort(),
+			"SQLite reload preserves each terminal generation exactly once",
+		);
+		const reopenedLive = await jsonGet(control.service.origin, "/api/v1/runtime/live?project_id=" + projectId);
+		assert.deepEqual(generationIds(reopenedLive), []);
 		assert.equal(reopened.body.drift.status, "not_configured");
 	} finally {
 		if (control) await control.service.close();
