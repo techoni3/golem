@@ -198,6 +198,11 @@ export interface ClaudeRenderContribution {
 }
 
 const CLAUDE_PLUGIN_ROOT = "$" + "{CLAUDE_PLUGIN_ROOT}";
+const REDACTED = "$REDACTED";
+const SENSITIVE_TEXT_RE =
+	/(?:token|credential|password|secret|api[_-]?key|authorization)\s*[:=]\s*[^\s"'`;,/\\]+|\bbearer\s+[A-Za-z0-9._~+/=-]{8,}\b|\b(?:ghp|github_pat|glpat)-[A-Za-z0-9_]{8,}\b/iu;
+const SENSITIVE_TEXT_GLOBAL_RE =
+	/(?:token|credential|password|secret|api[_-]?key|authorization)\s*[:=]\s*[^\s"'`;,/\\]+|\bbearer\s+[A-Za-z0-9._~+/=-]{8,}\b|\b(?:ghp|github_pat|glpat)-[A-Za-z0-9_]{8,}\b/giu;
 
 export interface ClaudeLaunchContribution {
 	readonly executable: "claude";
@@ -249,26 +254,30 @@ function timestamp(input: string | undefined, clock: ClaudeClock): string {
 
 function cleanText(value: string | undefined, fallback: string): string {
 	const text = value?.trim();
-	if (
-		!text ||
-		/(?:token|credential|password|secret|api[_-]?key|authorization|bearer)\s*[:=]/iu.test(
-			text,
-		)
-	)
-		return fallback;
-	return text.slice(0, 128);
+	if (!text) return fallback;
+	return redactSensitiveText(text).slice(0, 128);
 }
 
 function safeVersion(value: string | undefined): string | undefined {
 	const text = value?.trim();
-	if (
-		!text ||
-		/(?:token|credential|password|secret|api[_-]?key|authorization|bearer)\s*[:=]/iu.test(
-			text,
-		)
-	)
-		return undefined;
+	if (!text || SENSITIVE_TEXT_RE.test(text)) return undefined;
 	return text.slice(0, 128);
+}
+
+function redactSensitiveText(value: string): string {
+	return value.replace(SENSITIVE_TEXT_GLOBAL_RE, REDACTED);
+}
+
+function safePath(value: string | undefined, fallback: string): string {
+	const text = value?.trim();
+	if (!text) return fallback;
+	return text
+		.split(/([\\/])/u)
+		.map((part) =>
+			part === "/" || part === "\\" ? part : redactSensitiveText(part),
+		)
+		.join("")
+		.slice(0, 4096);
 }
 
 function eventName(input: ClaudeHookInput): string {
@@ -277,10 +286,10 @@ function eventName(input: ClaudeHookInput): string {
 
 function metadata(input: ClaudeHookInput): Record<string, string> {
 	const result: Record<string, string> = {};
-	const model = safeVersion(input.model);
-	const source = cleanText(input.source, "");
-	if (model) result.model = model;
-	if (source) result.source = source.slice(0, 64);
+	const model = input.model?.trim();
+	const source = input.source?.trim();
+	if (model) result.model = redactSensitiveText(model).slice(0, 128);
+	if (source) result.source = redactSensitiveText(source).slice(0, 64);
 	return result;
 }
 
@@ -379,9 +388,14 @@ export function parseClaudeHook(
 						project_id: projectId,
 						location_id: locationId,
 						relation: context.relation ?? "registered",
-						canonical_path: context.canonicalPath.slice(0, 4096),
+						canonical_path: safePath(context.canonicalPath, "$REDACTED_PATH"),
 						...(context.observedPath
-							? { observed_path: context.observedPath.slice(0, 4096) }
+							? {
+									observed_path: safePath(
+										context.observedPath,
+										"$REDACTED_PATH",
+									),
+								}
 							: {}),
 					},
 				},
