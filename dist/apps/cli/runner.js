@@ -210,6 +210,9 @@ export function parseCliInput(argv) {
         ...(typeof options.backend === "string"
             ? { backend: options.backend }
             : {}),
+        ...(typeof options.session === "string"
+            ? { session: options.session }
+            : {}),
         ...(typeof options.cwd === "string" ? { cwd: options.cwd } : {}),
         dryRun: options.dryRun === true,
         apply: options.apply === true,
@@ -365,6 +368,7 @@ async function launchManagedCodex(_result, input, io) {
             GOLEM_MANAGED_CODEX_CWD: cwd,
             GOLEM_MANAGED_CODEX_BACKEND: input.backend ?? "openai",
             GOLEM_MANAGED_CODEX_MODEL: input.model ?? "gpt-4o",
+            ...(input.session ? { GOLEM_MANAGED_CODEX_SESSION: input.session } : {}),
             ...(process.env.GOLEM_CODEX_COMMAND
                 ? { GOLEM_MANAGED_CODEX_COMMAND: process.env.GOLEM_CODEX_COMMAND }
                 : {}),
@@ -499,16 +503,21 @@ export async function runCli(argv = process.argv.slice(2), io = {}) {
         const help = command && input.command !== "help"
             ? command.helpInformation()
             : program.helpInformation();
-        // Keep the legacy TUI invocation discoverable while the typed command
-        // remains the canonical managed resolver. This is text-only compatibility;
-        // it does not add a second parser or spawn path.
         output(io, `${help}\nUsage: golem codex [--session <canonical-id>] [--cwd <dir>]\n` +
             "With no flags it uses the current directory and creates one canonical tracker session.\n" +
-            "All other Codex arguments are passed through.\n");
+            "Managed Codex accepts only registry options; use `golem codex --legacy -- …` for the explicit compatibility TUI.\n");
         return CLI_EXIT_CODES.ok;
     }
     if (input.cwd === "") {
         errorOutput(io, "cli.usage: --cwd requires a non-empty path");
+        return CLI_EXIT_CODES.usage;
+    }
+    if (input.session !== undefined && !input.session.trim()) {
+        errorOutput(io, "cli.usage: --session requires a non-empty canonical id");
+        return CLI_EXIT_CODES.usage;
+    }
+    if (input.command === "codex" && input.passthrough.length > 0) {
+        errorOutput(io, "cli.usage: managed codex does not accept native passthrough arguments; use `golem codex --legacy -- …` explicitly");
         return CLI_EXIT_CODES.usage;
     }
     try {

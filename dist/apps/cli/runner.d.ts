@@ -11,6 +11,7 @@ export interface ParsedCliInput {
     readonly scopedPreset?: string;
     readonly model?: string;
     readonly backend?: string;
+    readonly session?: string;
     readonly cwd?: string;
     readonly dryRun: boolean;
     readonly apply: boolean;

@@ -31,6 +31,8 @@ export interface ManagedCodexControlBinding {
 export interface ManagedCodexControlOptions {
 	readonly golemHome: string;
 	readonly cwd: string;
+	/** A caller-selected canonical session identity for the managed host. */
+	readonly sessionId?: string;
 	readonly backend?: string;
 	readonly model?: string;
 	readonly command?: string;
@@ -44,6 +46,12 @@ export interface ManagedCodexControlOptions {
 export interface ManagedCodexControl {
 	readonly binding: ManagedCodexControlBinding;
 	readonly supervisor: ManagedCodexSupervisor;
+	/**
+	 * Record that the owned foreground consumer is installed. Delivery cannot
+	 * start until this succeeds, so endpoint readiness never gets ahead of the
+	 * process that claims durable envelopes.
+	 */
+	startDeliveryConsumer(): Promise<void>;
 	enqueue(input: { readonly id: string; readonly text: string }): void;
 	drain(): Promise<
 		readonly { readonly deliveryId: string; readonly status: string }[]
@@ -75,11 +83,15 @@ function stringField(
 export async function startManagedCodexControl(
 	options: ManagedCodexControlOptions,
 ): Promise<ManagedCodexControl> {
+	const requestedSessionId = options.sessionId?.trim();
+	if (options.sessionId !== undefined && !requestedSessionId)
+		throw new Error("adapter.codex.managed.session_required");
 	const owner = openControlPlanePersistence({
 		runtimePath: path.join(options.golemHome, "runtime.db"),
 		trackerPath: path.join(options.golemHome, "tracker.db"),
 	});
 	let supervisor: ManagedCodexSupervisor | undefined;
+	let consumerStarted = false;
 	try {
 		const project = createProjectService({
 			storage: owner.runtimeProjectStorage(),
@@ -88,7 +100,7 @@ export async function startManagedCodexControl(
 			options.binding ??
 			Object.freeze({
 				projectId: project.projectId,
-				sessionId: id("ses"),
+				sessionId: requestedSessionId ?? id("ses"),
 				generationId: id("gen"),
 				endpointId: id("ep"),
 				ownerInstanceId: id("owner"),
@@ -159,12 +171,17 @@ export async function startManagedCodexControl(
 				},
 			},
 		});
-		await supervisor.start();
-		await supervisor.markConsumerReady();
+		const activeSupervisor = supervisor;
+		await activeSupervisor.start();
 		const workerId = `managed-codex-${binding.ownerInstanceId}`;
 		return Object.freeze({
 			binding,
-			supervisor,
+			supervisor: activeSupervisor,
+			async startDeliveryConsumer() {
+				if (consumerStarted) return;
+				await activeSupervisor.markConsumerReady();
+				consumerStarted = true;
+			},
 			enqueue(input: { readonly id: string; readonly text: string }) {
 				deliveries.delivery.enqueue({
 					id: input.id,
@@ -176,6 +193,8 @@ export async function startManagedCodexControl(
 				});
 			},
 			async drain() {
+				if (!consumerStarted)
+					throw new Error("control_plane.managed_codex.consumer_not_started");
 				const outcomes: { deliveryId: string; status: string }[] = [];
 				for (const claim of deliveries.delivery.claim(workerId, 32)) {
 					const text = claim.envelope.payload.text;
@@ -186,9 +205,6 @@ export async function startManagedCodexControl(
 					}
 					activePort = createManagedCodexDeliveryPort({ claim });
 					try {
-						const activeSupervisor = supervisor;
-						if (!activeSupervisor)
-							throw new Error("control_plane.managed_codex.supervisor_missing");
 						const result = await activeSupervisor.deliver({
 							deliveryId: claim.envelope.id,
 							text,

@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-07-21 @ 55c1735 — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-21 @ a7b6456 — maintained via golem:docs-maintenance.
 
 ## Structure
 
@@ -19,7 +19,7 @@
 - Projections read canonical rows only; diagnostics are redacted/bounded; HTTP/WS share revision/cursor facts.
 - Endpoint claims are generation/route scoped: fences gate heartbeat, readiness, capability, delivery, and release; registration alone never qualifies delivery.
 - Typed mutators require caller project/session/actor headers; delivery rechecks generation/fence/readiness/capability before transport.
-- Managed Codex is OpenAI/GPT-only; `golem codex` starts the control-plane-owned host, whose adapter emits signals and fences durable sends. Local/OSS fails pre-spawn with the direct-Codex remedy.
+- Managed Codex is OpenAI/GPT-only; its host persists ingress through Tracker and marks delivery ready only after its serialized consumer loop starts, so duplicate envelopes cannot start duplicate App Server turns. Local/OSS fails pre-spawn.
 - Pi is pull/next-turn only; unbound legacy rows remain diagnostic.
 - Migration audits an exact plan hash under a home lock, refuses review/quarantine before mutation, snapshots source + canonical state, and exports a read-only projection.
 

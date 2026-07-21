@@ -436,9 +436,18 @@ test("J3 managed Codex control-plane delivery survives send-before-ack recovery"
 		assert.equal(cliFailure.error.code, "adapter.codex.managed.qualification_required");
 		assert.equal(cli.stdout.includes("ollama_local"), false, "policy diagnostic does not echo hostile selector");
 		const productionHome = path.join(home.root, "production-home");
+		const productionTurnLog = path.join(home.root, "production-turns.log");
+		const productionTurnState = path.join(home.root, "production-turns.json");
 		const production = spawn(
 			process.execPath,
-			[path.join(repositoryRoot, "cli/golem.js"), "codex", "--cwd", repositoryRoot],
+			[
+				path.join(repositoryRoot, "cli/golem.js"),
+				"codex",
+				"--session",
+				"managed-root-host",
+				"--cwd",
+				repositoryRoot,
+			],
 			{
 				cwd: repositoryRoot,
 				env: {
@@ -447,40 +456,100 @@ test("J3 managed Codex control-plane delivery survives send-before-ack recovery"
 					GOLEM_HOME: productionHome,
 					GOLEM_CODEX_COMMAND: process.execPath,
 					GOLEM_MANAGED_CODEX_ARGS_JSON: JSON.stringify([fixture]),
+					GOLEM_CODEX_TURN_LOG: productionTurnLog,
+					GOLEM_CODEX_TURN_STATE: productionTurnState,
 					NODE_PATH: "",
 				},
-				stdio: ["ignore", "pipe", "pipe"],
+				stdio: ["pipe", "pipe", "pipe"],
 			},
 		);
-		const productionReady = await new Promise((resolveReady, rejectReady) => {
-			let output = "";
-			let errors = "";
-			const timeout = setTimeout(
-				() => rejectReady(new Error("managed production codex host did not become ready")),
-				4_000,
-			);
-			production.stdout.setEncoding("utf8");
-			production.stdout.on("data", (chunk) => {
-				output += chunk;
-				if (output.includes('"type":"managed-codex-ready"')) {
-					clearTimeout(timeout);
-					resolveReady(output);
+		const productionEvents = [];
+		let productionOutput = "";
+		let productionErrors = "";
+		production.stdout.setEncoding("utf8");
+		production.stdout.on("data", (chunk) => {
+			productionOutput += chunk;
+			let newline = productionOutput.indexOf("\n");
+			while (newline !== -1) {
+				const line = productionOutput.slice(0, newline);
+				productionOutput = productionOutput.slice(newline + 1);
+				try {
+					productionEvents.push(JSON.parse(line));
+				} catch {
+					// The host uses JSONL; non-protocol process diagnostics stay isolated.
 				}
-			});
-			production.stderr.setEncoding("utf8");
-			production.stderr.on("data", (chunk) => {
-				errors += chunk;
-			});
-			production.once("error", rejectReady);
-			production.once("exit", (code) => {
-				clearTimeout(timeout);
-				rejectReady(new Error(`managed production codex host exited ${code}: ${errors}`));
-			});
+				newline = productionOutput.indexOf("\n");
+			}
 		});
-		assert.match(productionReady, /managed-codex-ready/, "root golem codex selects the canonical managed host");
+		production.stderr.setEncoding("utf8");
+		production.stderr.on("data", (chunk) => {
+			productionErrors += chunk;
+		});
+		const waitForProductionEvent = async (after, predicate, label) => {
+			const startedAt = Date.now();
+			while (Date.now() - startedAt < 4_000) {
+				const event = productionEvents.slice(after).find(predicate);
+				if (event) return event;
+				if (production.exitCode !== null)
+					throw new Error(
+						`managed production codex host exited ${production.exitCode}: ${productionErrors}`,
+					);
+				await new Promise((resolveNext) => setTimeout(resolveNext, 20));
+			}
+			throw new Error(`managed production codex host did not emit ${label}: ${productionErrors}`);
+		};
+		const productionReady = await waitForProductionEvent(
+			0,
+			(event) => event.type === "managed-codex-ready",
+			"ready",
+		);
+		assert.equal(
+			productionReady.sessionId,
+			"managed-root-host",
+			"root golem codex routes --session through the managed host",
+		);
+		const productionDelivery = {
+			type: "delivery",
+			id: "root-host-envelope",
+			text: "root host durable delivery",
+		};
+		const firstDeliveryOffset = productionEvents.length;
+		production.stdin.write(`${JSON.stringify(productionDelivery)}\n`);
+		const firstDelivery = await waitForProductionEvent(
+			firstDeliveryOffset,
+			(event) =>
+				event.type === "managed-codex-drained" &&
+				event.deliveryId === productionDelivery.id,
+			"first durable delivery result",
+		);
+		assert.deepEqual(
+			firstDelivery.outcomes,
+			[{ deliveryId: productionDelivery.id, status: "accepted" }],
+			"the root host claims the canonical durable envelope and sends one App Server turn",
+		);
+		const duplicateDeliveryOffset = productionEvents.length;
+		production.stdin.write(`${JSON.stringify(productionDelivery)}\n`);
+		const rootHostDuplicateDelivery = await waitForProductionEvent(
+			duplicateDeliveryOffset,
+			(event) =>
+				event.type === "managed-codex-drained" &&
+				event.deliveryId === productionDelivery.id,
+			"duplicate durable delivery result",
+		);
+		assert.deepEqual(
+			rootHostDuplicateDelivery.outcomes,
+			[],
+			"the duplicate durable envelope is not claimed a second time",
+		);
+		assert.equal(
+			fs.readFileSync(productionTurnLog, "utf8").trim().split("\n").filter(Boolean)
+				.length,
+			1,
+			"root-host duplicate suppression creates exactly one spawned App Server turn",
+		);
 		production.kill("SIGTERM");
 		await new Promise((resolveExit) => production.once("exit", resolveExit));
-		return "production golem codex host + temporary Fastify control plane + canonical SQLite endpoint/session + durable send-before-ack restart exercised one spawned JSONL App Server turn, stale fence refusal, and managed policy";
+		return "production golem codex host + temporary Fastify control plane + canonical SQLite endpoint/session + durable root-host enqueue/claim/exactly-once turn + send-before-ack restart exercised one spawned JSONL App Server turn, stale fence refusal, and managed policy";
 	} finally {
 		await supervisor?.stop().catch(() => {});
 		await service?.close();
