@@ -3,6 +3,9 @@
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
+	"scripts": {
+		"build": "tsc -b"
+	},
 	"exports": {
 		".": {
 			"types": "./dist/index.d.ts",
@@ -10,6 +13,7 @@
 		}
 	},
 	"dependencies": {
-		"@golem/adapter-sdk": "file:../../adapter-sdk"
+		"@golem/adapter-sdk": "file:../../adapter-sdk",
+		"@golem/contracts": "file:../../contracts"
 	}
 }

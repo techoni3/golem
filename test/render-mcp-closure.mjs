@@ -502,7 +502,7 @@ function assertRefusalPreservesTarget(root, manifest, name, lockContents) {
 	assert.equal(readFileSync(owner, "utf8"), `owner bytes for ${name}\n`, `${name} refusal leaves owner bytes untouched`);
 }
 
-export async function exerciseRenderMcpClosure() {
+export async function exerciseRenderMcpClosure(target) {
 	const root = mkdtempSync(path.join(os.tmpdir(), "golem-render-mcp-"));
 	try {
 		const plans = plansByTarget();
@@ -527,6 +527,58 @@ export async function exerciseRenderMcpClosure() {
 			assert.equal(first.outputSha256, second.outputSha256, `${target} output hash is deterministic`);
 			manifests.set(target, { manifest, outputDir });
 		}
+		if (target === "codex") {
+			const codexTarget = manifests.get("codex");
+			assert(codexTarget, "codex target must be compiled");
+			const codexRoot = path.join(codexTarget.outputDir, "plugins", "golem");
+			assert(existsSync(path.join(codexRoot, ".codex-plugin", "plugin.json")), "targeted Codex render has a plugin manifest");
+			assert(existsSync(path.join(codexRoot, "hooks", "direct-lifecycle.mjs")), "targeted Codex render carries the lifecycle codec");
+			assert.deepEqual(JSON.parse(readFileSync(path.join(codexRoot, "capabilities.json"), "utf8")), {
+				schema: 1,
+				harness: "codex",
+				tier: "B",
+				lifecycle: true,
+				mcp: true,
+				subagents: true,
+				delivery: ["pull"],
+				push_delivery: false,
+				control: false,
+				discovery: true,
+				readiness: "pull_only",
+				delivery_qualification: "unproven",
+				limitation: "Ordinary Codex CLI exposes no documented out-of-band turn injection or queued-message pickup API; work must be pulled with Golem MCP tools.",
+			}, "targeted Codex capability truth is explicit and stable");
+			for (const file of codexTarget.manifest.sources) {
+				assert.doesNotMatch(file.contents, new RegExp(repositoryRoot.replaceAll("/", "[\\\\/]")), `Codex render source ${file.outputPath} is checkout-independent`);
+			}
+			const codexLock = inspectRender(codexTarget.outputDir);
+			const codexFile = codexLock?.files.find((file) => !file.managedRegion);
+			assert(codexFile, "Codex lock records an owned source for tamper recovery");
+			const codexTamperedPath = path.join(codexTarget.outputDir, codexFile.outputPath);
+			const codexOwnerPath = path.join(codexTarget.outputDir, "owner-preserved-by-force.txt");
+			writeFileSync(codexOwnerPath, "unowned Codex force bytes\n");
+			writeFileSync(codexTamperedPath, "hand edit\n");
+			const refused = compileRender(codexTarget.manifest, { outputDir: codexTarget.outputDir });
+			assert.equal(refused.status, "refused", "Codex tamper is refused without force");
+			assert.equal(refused.refusal?.code, "render.tampered");
+			assert.equal(readFileSync(codexTamperedPath, "utf8"), "hand edit\n", "Codex tamper refusal preserves user bytes");
+			const forced = compileRender(codexTarget.manifest, { outputDir: codexTarget.outputDir, force: true });
+			assert.equal(forced.status, "rendered", "Codex force repairs a refused target");
+			assert.equal(readFileSync(codexOwnerPath, "utf8"), "unowned Codex force bytes\n", "Codex force retains unowned bytes");
+			const priorBytes = readFileSync(codexTamperedPath, "utf8");
+			const interrupted = createRenderManifest({
+				...codexTarget.manifest,
+				sources: codexTarget.manifest.sources.map((source, index) =>
+					index === 0 ? { ...source, contents: `${source.contents}\nCodex rollback probe\n` } : source,
+				),
+			});
+			await assert.rejects(
+				async () => compileRender(interrupted, { outputDir: codexTarget.outputDir, failBeforeSwap: true }),
+				/render\.staged_failure/,
+			);
+			assert.equal(readFileSync(codexTamperedPath, "utf8"), priorBytes, "Codex interrupted swap preserves the prior target");
+			return "targeted Codex render is deterministic, checkout-independent, carries the direct lifecycle hook, and exposes pull-only discovery without control readiness";
+		}
 		const packed = assertPackedSyncTargets(root);
 		await assertPackedLegacyChannel(packed);
 		const compatibilityOut = path.join(root, "compatibility-cc");
@@ -541,13 +593,15 @@ export async function exerciseRenderMcpClosure() {
 		assert.match(generatedMcpConfig, /mcp\/channel\/index\.js/);
 		const pluginLock = inspectRender(path.join(repositoryRoot, "plugin"));
 		assert(pluginLock, "plugin records generator ownership in a typed render lock");
-		assert.equal(pluginLock.manifestSha256, manifestSha256(manifestFor("cc", plans.cc)), "plugin lock matches the typed cc generator manifest");
-		for (const file of pluginLock.files) {
-			assert.deepEqual(
-				readFileSync(path.join(repositoryRoot, "plugin", file.outputPath)),
-				readFileSync(path.join(compatibilityOut, file.outputPath)),
-				`plugin ${file.outputPath} is compiler round-trip output, not a hand edit`,
-			);
+		if (target !== "codex") {
+			assert.equal(pluginLock.manifestSha256, manifestSha256(manifestFor("cc", plans.cc)), "plugin lock matches the typed cc generator manifest");
+			for (const file of pluginLock.files) {
+				assert.deepEqual(
+					readFileSync(path.join(repositoryRoot, "plugin", file.outputPath)),
+					readFileSync(path.join(compatibilityOut, file.outputPath)),
+					`plugin ${file.outputPath} is compiler round-trip output, not a hand edit`,
+				);
+			}
 		}
 
 		const ccTarget = manifests.get("cc");
@@ -555,7 +609,7 @@ export async function exerciseRenderMcpClosure() {
 		assertRefusalPreservesTarget(root, ccTarget.manifest, "malformed", "{");
 		assertRefusalPreservesTarget(root, ccTarget.manifest, "invalid", "{}\n");
 		assertRefusalPreservesTarget(root, ccTarget.manifest, "unmanaged");
-		await assertCatalogContracts();
+		if (target !== "codex") await assertCatalogContracts();
 
 		const ccLock = inspectRender(ccTarget.outputDir);
 		const regularFile = ccLock?.files.find((file) => !file.managedRegion);

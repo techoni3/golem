@@ -2,6 +2,12 @@ import { registerScenario } from "@golem/testkit";
 
 export const scenarios = [
 	registerScenario({
+		id: "codex-direct-seamless-integration",
+		journey: "J2",
+		tier: "integration",
+		regression: "plain installed Codex loses canonical project/session lifecycle, restart-safe generation identity, or truthful pull-only capability",
+	}),
+	registerScenario({
 		id: "project-identity-git-worktree-relocation",
 		journey: "J2",
 		tier: "integration",

@@ -1549,7 +1549,7 @@ async function runTypedCli(args) {
 }
 
 function hasTypedCodexOptions(args) {
-  return args.some((arg) => arg === '--dry-run' || arg === '--explain' || arg === '--json'
+  return args[0] === 'direct' || args.some((arg) => arg === '--dry-run' || arg === '--explain' || arg === '--json'
     || arg === '--model' || arg.startsWith('--model=')
     || arg === '--backend' || arg.startsWith('--backend=')
     || arg === '--preset' || arg.startsWith('--preset='));
