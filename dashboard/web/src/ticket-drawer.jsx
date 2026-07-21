@@ -108,8 +108,20 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
   const [transitionNote, setTransitionNote] = React.useState(null);
 
   // The live ticket from the store (kept fresh by ticket-updated deltas).
-  const ticket = ticketId ? (window.Store.getState().trackerTickets.get(ticketId) ?? null) : null;
-  const flatComments = ticketId ? window.Store.getTicketComments(ticketId) : [];
+  // Routes are human-facing and commonly carry a display id such as GOL-12,
+  // while the store is canonically keyed by the underlying tracker id
+  // (TKT-0013). Resolve that display-id route after getTicket seeds the store;
+  // otherwise a valid standalone spec page stays blank and its child-work
+  // composer can never be reached.
+  const trackerTickets = window.Store.getState().trackerTickets;
+  const ticket = ticketId
+    ? (trackerTickets.get(ticketId)
+      ?? [...trackerTickets.values()].find((candidate) => candidate.display_id === ticketId)
+      ?? null)
+    : null;
+  const flatComments = ticket
+    ? window.Store.getTicketComments(ticket.id)
+    : (ticketId ? window.Store.getTicketComments(ticketId) : []);
   // Group flat top-level comments + replies by parent_id. The schema stores
   // replies as separate rows (parent_id set), but the annotation rail renders
   // them nested under their parent card — so assemble the tree here.

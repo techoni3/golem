@@ -2247,7 +2247,11 @@ select.ct-input { appearance: none; cursor: pointer; padding-right: 26px;
   max-width: 100vw;
   display: flex;
   flex-direction: column;
+  /* A composer opened from a ticket is a child modal. Keep its visual layer
+     aligned with DrawerPanel's focus stack, above the ticket it came from. */
+  z-index: 80;
 }
+.drawer-compose-backdrop { z-index: 70; }
 .ct-header { padding-bottom: 12px; }
 .drawer-compose .drawer-title-row { flex-wrap: wrap; }
 .drawer-compose .td-width-group { flex: 0 0 auto; }

@@ -212,7 +212,10 @@ try {
   await wait(400);
 
   // ── 4. Spec drawer Work-items panel ──────────────────────────────────────
-  await page.goto(`${ORIGIN}/tickets/${encodeURIComponent(specId)}`, { waitUntil: 'networkidle' });
+  // Human-facing links use display ids (GOL-123), not only the canonical
+  // storage id (TKT-0123). The standalone page must resolve either form so
+  // its + Work item composer remains reachable from shared/spec links.
+  await page.goto(`${ORIGIN}/tickets/${encodeURIComponent(specRes.display_id || specId)}`, { waitUntil: 'networkidle' });
   await wait(700);
   // Poll for the children to render (live from the store snapshot).
   let panel = null;
@@ -240,7 +243,7 @@ try {
   await wait(500);
 
   // click a child row → opens that ticket as an overlay drawer
-  await page.goto(`${ORIGIN}/tickets/${encodeURIComponent(specId)}`, { waitUntil: 'networkidle' });
+  await page.goto(`${ORIGIN}/tickets/${encodeURIComponent(specRes.display_id || specId)}`, { waitUntil: 'networkidle' });
   await wait(600);
   await page.evaluate(() => document.querySelectorAll('.td-child-row')[0]?.click());
   await wait(600);

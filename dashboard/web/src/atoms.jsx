@@ -92,9 +92,9 @@ function ConnectionPill({ status }) {
   );
 }
 
-function DrawerBackdrop({ open, onClose }) {
+function DrawerBackdrop({ open, onClose, className = '' }) {
   if (!open) return null;
-  return <div className="drawer-backdrop open" onClick={onClose} aria-hidden="true"/>;
+  return <div className={`drawer-backdrop open${className ? ` ${className}` : ''}`} onClick={onClose} aria-hidden="true"/>;
 }
 
 // One modal authority for every right drawer. Entries are ordered by mount,

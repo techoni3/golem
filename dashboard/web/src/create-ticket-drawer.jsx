@@ -277,15 +277,9 @@ function CreateTicketDrawer({ open, preselectProject, preselectKind, preselectPa
     }
   }, [projectId, open, restore]);
 
-  // Esc closes (→ App pops ?compose via onClose). Draft flush happens in the
-  // close effect below when `open` flips false.
-  React.useEffect(() => {
-    if (!open) return;
-    const onKey = (e) => { if (e.key === 'Escape') onClose && onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
-
+  // DrawerPanel owns Escape so nested drawers close only their top layer. The
+  // flush below still covers Escape, backdrop, ×, Back, and submit once the
+  // router flips `open` to false.
   // Flush the draft whenever the drawer closes (Esc / backdrop / × / Back / submit)
   // and on tab close / refresh — so in-progress work always lands in localStorage.
   React.useEffect(() => {
@@ -494,8 +488,8 @@ const discard = () => {
 
   return (
     <>
-      <div className={`drawer-backdrop ${open ? 'open' : ''}`} onClick={close}/>
-      <aside className={`drawer ${open ? 'open' : ''} drawer-compose`} style={{ width: `${widthPct}vw` }}>
+      <DrawerBackdrop open={open} onClose={close} className="drawer-compose-backdrop"/>
+      <DrawerPanel open={open} onClose={close} label="New ticket" className="drawer-compose" style={{ width: `${widthPct}vw` }}>
         {/* ── Header ── */}
         <div className="drawer-header ct-header">
           <div className="drawer-title-row">
@@ -629,7 +623,7 @@ const discard = () => {
             {submitting ? 'Saving…' : 'Save'}
           </button>
         </div>
-      </aside>
+      </DrawerPanel>
     </>
   );
 }
