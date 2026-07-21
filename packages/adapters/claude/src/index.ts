@@ -200,9 +200,9 @@ export interface ClaudeRenderContribution {
 const CLAUDE_PLUGIN_ROOT = "$" + "{CLAUDE_PLUGIN_ROOT}";
 const REDACTED = "$REDACTED";
 const SENSITIVE_TEXT_RE =
-	/(?:token|credential|password|secret|api[_-]?key|authorization)\s*[:=]\s*[^\s"'`;,/\\]+|\bbearer\s+[A-Za-z0-9._~+/=-]{8,}\b|\b(?:ghp|github_pat|glpat)[-_][A-Za-z0-9_]{8,}\b/iu;
+	/(?:token|credential|password|secret|api[_-]?key|authorization)\s*[:=]\s*[^\s"'`;,/\\]+|\bbearer\s+[A-Za-z0-9._~+/=-]{8,}\b|\b(?:ghp|github_pat|gho|ghu|ghs|ghr|glpat)[-_][A-Za-z0-9_]{8,}\b/iu;
 const SENSITIVE_TEXT_GLOBAL_RE =
-	/(?:token|credential|password|secret|api[_-]?key|authorization)\s*[:=]\s*[^\s"'`;,/\\]+|\bbearer\s+[A-Za-z0-9._~+/=-]{8,}\b|\b(?:ghp|github_pat|glpat)[-_][A-Za-z0-9_]{8,}\b/giu;
+	/(?:token|credential|password|secret|api[_-]?key|authorization)\s*[:=]\s*[^\s"'`;,/\\]+|\bbearer\s+[A-Za-z0-9._~+/=-]{8,}\b|\b(?:ghp|github_pat|gho|ghu|ghs|ghr|glpat)[-_][A-Za-z0-9_]{8,}\b/giu;
 
 export interface ClaudeLaunchContribution {
 	readonly executable: "claude";

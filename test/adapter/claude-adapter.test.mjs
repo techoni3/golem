@@ -81,7 +81,14 @@ test("GOL-47 Claude hooks produce canonical lifecycle/activity signals", async (
 	assert.equal(JSON.stringify(seen).includes("claude-secret"), false);
 	assert.equal(JSON.stringify(seen).includes("do-not-log"), false);
 	assert.equal(JSON.stringify(seen).includes("prompt"), true, "only the activity kind is retained");
-	for (const hostileSecret of ["ghp_abcdef1234567890", "github_pat_11AA22bb33CC44dd55EE"]) {
+	for (const hostileSecret of [
+		"ghp_abcdef1234567890",
+		"github_pat_11AA22bb33CC44dd55EE",
+		"gho_abcdef1234567890",
+		"ghu_abcdef1234567890",
+		"ghs_abcdef1234567890",
+		"ghr_abcdef1234567890",
+	]) {
 		const hostile = parseClaudeHook(
 			{
 				hook_event_name: "SessionStart",
