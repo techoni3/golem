@@ -260,8 +260,11 @@ export class ProjectService {
 					...(evidence.identityKey
 						? { identityKey: evidence.identityKey }
 						: {}),
-					metadata: { registration: "explicit" },
-					source: "register",
+					metadata: input.name ? { registration: "explicit" } : {},
+					// A host restart calls register({ cwd }) without an operator-supplied
+					// name. It must refresh the discovered location without turning an
+					// automatic project name into a manual one.
+					source: input.name ? "register" : source,
 				})
 			: this.#options.storage.observe({
 					...(explicitProjectId ? { projectId: explicitProjectId } : {}),

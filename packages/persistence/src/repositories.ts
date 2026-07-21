@@ -227,7 +227,7 @@ export class RuntimeProjectRepository implements RuntimeProjectStorage {
 		location: RuntimeProjectLocationInput,
 		provenance: Readonly<Record<string, unknown>>,
 		now: string,
-	): void {
+	): string {
 		const existingPath = this.#database
 			.prepare<LocationRow>(
 				"SELECT location_id, project_id, canonical_path, observed_path, relation FROM project_locations WHERE canonical_path = ?",
@@ -245,7 +245,8 @@ export class RuntimeProjectRepository implements RuntimeProjectStorage {
 			existingLocation.canonical_path !== location.canonicalPath
 		)
 			throw new Error("runtime.project.location_conflict");
-		if (!existingLocation) {
+		const resolvedLocation = existingLocation ?? existingPath;
+		if (!resolvedLocation) {
 			this.#database
 				.prepare(
 					"INSERT INTO project_locations(location_id, project_id, canonical_path, observed_path, relation, source_observed_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -260,13 +261,14 @@ export class RuntimeProjectRepository implements RuntimeProjectStorage {
 					now,
 				);
 		}
+		const resolvedLocationId = resolvedLocation?.location_id ?? location.locationId;
 		this.#database
 			.prepare(
 				"INSERT INTO project_location_state(project_id, location_id, status, last_confirmed_at, provenance_json) VALUES (?, ?, ?, ?, ?) ON CONFLICT(project_id, location_id) DO UPDATE SET status = excluded.status, last_confirmed_at = excluded.last_confirmed_at, provenance_json = excluded.provenance_json",
 			)
 			.run(
 				projectIdValue,
-				location.locationId,
+				resolvedLocationId,
 				location.status ?? "active",
 				now,
 				json(provenance),
@@ -277,7 +279,7 @@ export class RuntimeProjectRepository implements RuntimeProjectStorage {
 			)
 			.run(
 				projectIdValue,
-				location.locationId,
+				resolvedLocationId,
 				location.canonicalPath,
 				now,
 				json(provenance),
@@ -289,11 +291,12 @@ export class RuntimeProjectRepository implements RuntimeProjectStorage {
 				)
 				.run(
 					projectIdValue,
-					location.locationId,
+					resolvedLocationId,
 					location.observedPath,
 					now,
 					json(provenance),
 				);
+		return resolvedLocationId;
 	}
 
 	#identityKey(
@@ -428,7 +431,7 @@ export class RuntimeProjectRepository implements RuntimeProjectStorage {
 				input.provenance,
 				now,
 			);
-			this.#ensureLocation(
+			const locationId = this.#ensureLocation(
 				resolvedProjectId,
 				input.location,
 				input.provenance,
@@ -436,7 +439,7 @@ export class RuntimeProjectRepository implements RuntimeProjectStorage {
 			);
 			this.#worktreeAlias(
 				resolvedProjectId,
-				input.location.locationId,
+				locationId,
 				input.identityKey,
 				input.provenance,
 				now,
@@ -468,14 +471,14 @@ export class RuntimeProjectRepository implements RuntimeProjectStorage {
 				{
 					event_id: input.eventId,
 					project_id: resolvedProjectId,
-					location_id: input.location.locationId,
+					location_id: locationId,
 				},
 				now,
 			);
 			return Object.freeze({
 				disposition: "accepted" as const,
 				projectId: resolvedProjectId,
-				locationId: input.location.locationId,
+				locationId,
 				outboxId,
 			});
 		})() as RuntimeProjectObservationResult;
@@ -505,10 +508,15 @@ export class RuntimeProjectRepository implements RuntimeProjectStorage {
 				provenance,
 				now,
 			);
-			this.#ensureLocation(input.projectId, input.location, provenance, now);
+			const locationId = this.#ensureLocation(
+				input.projectId,
+				input.location,
+				provenance,
+				now,
+			);
 			this.#worktreeAlias(
 				input.projectId,
-				input.location.locationId,
+				locationId,
 				input.identityKey,
 				provenance,
 				now,
@@ -523,7 +531,7 @@ export class RuntimeProjectRepository implements RuntimeProjectStorage {
 			const eventId = this.#writeProjectEvent(
 				input.projectId,
 				"project.location.attached",
-				{ project_id: input.projectId, location_id: input.location.locationId },
+				{ project_id: input.projectId, location_id: locationId },
 				provenance,
 				now,
 			);
@@ -533,7 +541,7 @@ export class RuntimeProjectRepository implements RuntimeProjectStorage {
 				{
 					event_id: eventId,
 					project_id: input.projectId,
-					location_id: input.location.locationId,
+					location_id: locationId,
 				},
 				now,
 			);

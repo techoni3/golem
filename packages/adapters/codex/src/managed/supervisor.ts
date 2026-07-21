@@ -158,6 +158,8 @@ export class ManagedCodexSupervisor {
 	#sequence = 0;
 	#capabilitySequence = 0;
 	#started = false;
+	#terminalEmission: Promise<void> | undefined;
+	#stopping = false;
 
 	constructor(options: ManagedCodexSupervisorOptions) {
 		this.#options = options;
@@ -197,6 +199,11 @@ export class ManagedCodexSupervisor {
 		);
 	}
 
+	#emitTerminal(): Promise<void> {
+		this.#terminalEmission ??= this.#emit("session.ended");
+		return this.#terminalEmission;
+	}
+
 	#handleNotification(message: Readonly<Record<string, unknown>>): void {
 		if (
 			message.method === "turn/completed" ||
@@ -223,6 +230,7 @@ export class ManagedCodexSupervisor {
 				qualification: this.#qualification,
 			};
 		}
+		this.#stopping = false;
 		const binding = this.#options.binding;
 		// Endpoint fencing is defined over a canonical generation. Materialize the
 		// deterministic lifecycle identity before claiming the native endpoint so
@@ -254,9 +262,14 @@ export class ManagedCodexSupervisor {
 			...(this.#options.env === undefined ? {} : { env: this.#options.env }),
 			onNotification: (message) =>
 				this.#handleNotification(message as Readonly<Record<string, unknown>>),
-			onExit: () => {
-				this.#started = false;
-				void this.#options.endpoints.reportHealth?.({
+				onExit: () => {
+					this.#started = false;
+					if (!this.#stopping)
+						void this.#emitTerminal().catch(() => {
+							// The endpoint health fact below remains useful even if the
+							// terminal lifecycle write is temporarily unavailable.
+						});
+					void this.#options.endpoints.reportHealth?.({
 					endpointId: binding.endpointId,
 					generationId: binding.generationId,
 					ownerInstanceId: binding.ownerInstanceId,
@@ -560,19 +573,30 @@ export class ManagedCodexSupervisor {
 
 	async stop(options: { readonly release?: boolean } = {}): Promise<void> {
 		const binding = this.#options.binding;
-		if (
-			options.release !== false &&
-			this.#options.endpoints.release &&
-			this.#ownerFence !== undefined
-		)
-			await this.#options.endpoints.release({
-				endpointId: binding.endpointId,
-				generationId: binding.generationId,
-				ownerInstanceId: binding.ownerInstanceId,
-				ownerFence: this.#ownerFence,
-			});
-		await this.#rpc?.close();
-		this.#rpc = undefined;
-		this.#started = false;
+		this.#stopping = true;
+		try {
+			// release:false models a supervisor hand-off: the same canonical
+			// generation is intentionally retained for its replacement. A normal
+			// foreground shutdown is terminal and must never leave a ghost session.
+			if (options.release !== false) await this.#emitTerminal();
+		} finally {
+			try {
+				if (
+					options.release !== false &&
+					this.#options.endpoints.release &&
+					this.#ownerFence !== undefined
+				)
+					await this.#options.endpoints.release({
+						endpointId: binding.endpointId,
+						generationId: binding.generationId,
+						ownerInstanceId: binding.ownerInstanceId,
+						ownerFence: this.#ownerFence,
+					});
+			} finally {
+				await this.#rpc?.close();
+				this.#rpc = undefined;
+				this.#started = false;
+			}
+		}
 	}
 }

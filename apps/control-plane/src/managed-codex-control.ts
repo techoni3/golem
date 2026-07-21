@@ -221,8 +221,11 @@ export async function startManagedCodexControl(
 				return Object.freeze(outcomes);
 			},
 			async stop() {
-				await supervisor?.stop();
-				await owner.close();
+				try {
+					await supervisor?.stop();
+				} finally {
+					await owner.close();
+				}
 			},
 		});
 	} catch (error) {

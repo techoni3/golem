@@ -43,6 +43,9 @@ test("J2 project identity follows Git roots, worktrees, relocation, and explicit
 		const rootAgain = service.resolve(repo);
 		assert.equal(rootAgain.view?.projectId, first.view?.projectId, "nested and root paths share one opaque project UUID");
 		assert.equal(rootAgain.view?.nameSource, "git");
+		const repeated = service.register({ cwd: repo });
+		assert.equal(repeated.projectId, first.view?.projectId, "repeated explicit registration reuses the existing project");
+		assert.equal(repeated.locations.length, 1, "repeated explicit registration reuses the existing canonical location");
 
 		const worktree = path.join(home.root, "repo-worktree");
 		runGit(repo, "worktree", "add", "-q", "-b", "linked-fixture", worktree);
