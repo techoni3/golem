@@ -1578,10 +1578,15 @@ function hasTypedCodexOptions(args) {
   // TUI bridge and has no typed `--session` counterpart.
   const separator = args.indexOf('--');
   const wrapperArgs = separator === -1 ? args : args.slice(0, separator);
-  return wrapperArgs[0] === 'direct' || wrapperArgs.some((arg) => arg === '--dry-run' || arg === '--explain' || arg === '--json'
-    || arg === '--model' || arg.startsWith('--model=')
-    || arg === '--backend' || arg.startsWith('--backend=')
-    || arg === '--preset' || arg.startsWith('--preset='));
+  // Bare `golem codex` is now the canonical managed OpenAI/GPT host. An
+  // explicit stored-session/TUI invocation remains the narrow legacy rollback
+  // path until the private TUI bridge is independently cut over.
+  if (separator !== -1) return false;
+  // Reserved transport/cwd flags must reach the legacy boundary so it can
+  // reject them before any process is spawned. The typed parser should never
+  // turn that ownership diagnostic into an unrelated option error.
+  if (wrapperArgs.some(isReservedCodexTuiArgument)) return false;
+  return !wrapperArgs.some((arg) => arg === '--session' || arg.startsWith('--session='));
 }
 
 async function main() {

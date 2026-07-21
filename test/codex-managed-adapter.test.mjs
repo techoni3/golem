@@ -1,125 +1,490 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import Database from "better-sqlite3";
-import { RuntimeSignalV1Schema } from "@golem/contracts";
+import {
+	composeControlPlaneEndpointEligibility,
+	composeControlPlaneTrackerCoreServices,
+	composeControlPlaneTrackerServices,
+	composeManagedCodexSupervisor,
+	createManagedCodexDeliveryPort,
+	startControlPlane,
+} from "../apps/control-plane/dist/index.js";
+import { openControlPlanePersistence } from "../apps/control-plane/dist/persistence.js";
 import {
 	ManagedCodexQualificationError,
 	ManagedCodexSupervisor,
 	validateManagedTuiBinding,
 } from "@golem/adapter-codex";
+import {
+	createEndpointService,
+	createProjectService,
+	createRuntimeMaterializer,
+	createSessionService,
+} from "@golem/runtime";
+import { createTemporaryHome } from "@golem/testkit";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
 const fixture = path.join(repositoryRoot, "test/fixtures/codex-managed-app-server.mjs");
 
-test("managed Codex App Server lifecycle, fenced delivery, restart, and qualification", async () => {
-	const root = fs.mkdtempSync(path.join(os.tmpdir(), "golem-codex-managed-"));
-	const database = new Database(path.join(root, "runtime.sqlite"));
-	database.exec("CREATE TABLE signals (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, generation TEXT NOT NULL); CREATE TABLE deliveries (id TEXT PRIMARY KEY, status TEXT NOT NULL, turn_id TEXT)");
-	const signalInsert = database.prepare("INSERT INTO signals(kind,generation) VALUES (?,?)");
-	const deliveryInsert = database.prepare("INSERT OR REPLACE INTO deliveries(id,status,turn_id) VALUES (?,?,?)");
-	const signals = [];
-	const reports = [];
-	let eligible = false;
-	let priorThread;
-	let claims = 0;
-	const turnLog = path.join(root, "turns.log");
-	const endpoints = {
-		claim(input) {
-			claims += 1;
-			priorThread ??= "thread-managed-1";
-			return { disposition: "accepted", ownerFence: 1, ...(claims > 1 ? { threadId: priorThread } : {}), endpointId: input.endpointId };
+function createClock(initial = "2026-07-21T00:00:00.000Z") {
+	let current = initial;
+	return Object.freeze({
+		now: () => current,
+		after: (milliseconds) =>
+			new Date(Date.parse(current) + milliseconds).toISOString(),
+		advance: (milliseconds) => {
+			current = new Date(Date.parse(current) + milliseconds).toISOString();
+			return current;
 		},
-		eligibility() { return { disposition: eligible ? "eligible" : "ineligible", code: eligible ? "endpoint.ready" : "endpoint.not_ready" }; },
-		reportReadiness(input) { reports.push({ kind: "readiness", ...input }); eligible = input.readiness === "ready"; },
-		reportCapability(input) { reports.push({ kind: "capability", ...input }); },
-		reportHealth(input) { reports.push({ kind: "health", ...input }); },
-		reportDelivery(input) { reports.push({ kind: "delivery", ...input }); },
-		release(input) { reports.push({ kind: "release", ...input }); },
-	};
-	const ingress = {
-		ingest(signal) {
-			signals.push(signal);
-			signalInsert.run(signal.event_kind, signal.payload.generation.generation_id);
-		},
-	};
-	const delivery = {
-		async claim(input) { return { disposition: "accepted", ...input }; },
-		async ack(input) { deliveryInsert.run(input.deliveryId, "completed", input.turnId ?? null); },
-		async fail(input) { deliveryInsert.run(input.deliveryId, "failed", null); },
-	};
-	const base = {
-		binding: {
-			projectId: "prj_11111111-1111-4111-8111-111111111111",
-			sessionId: "ses_22222222-2222-4222-8222-222222222222",
-			generationId: "gen_33333333-3333-4333-8333-333333333333",
-			endpointId: "ep_44444444-4444-4444-8444-444444444444",
-			ownerInstanceId: "prod_55555555-5555-4555-8555-555555555555",
-			producerInstanceId: "prod_66666666-6666-4666-8666-666666666666",
-		},
-		projectPath: root,
-		command: process.execPath,
-		rpc: { args: [fixture], requestTimeoutMs: 2_000 },
-		env: { ...process.env, NODE_PATH: "", GOLEM_CODEX_TURN_LOG: turnLog },
-		endpoints,
-		ingress,
-		delivery,
-	};
+	});
+}
+
+function id(prefix) {
+	return `${prefix}_${randomUUID()}`;
+}
+
+/**
+ * J3: the production composition, not an adapter-only port fake. It starts a
+ * real Fastify control plane against temporary SQLite files, creates a
+ * canonical endpoint/session, then exercises the durable Tracker claim through
+ * a spawned JSONL App Server. It exercises both crash windows: a pre-turn
+ * process exit leaves the canonical envelope retryable, while a post-turn /
+ * pre-ack crash writes the durable sent marker so replacement cannot replay
+ * the same App Server client delivery id.
+ */
+test("J3 managed Codex control-plane delivery survives send-before-ack recovery", async () => {
+	const home = createTemporaryHome("golem-j3-codex-managed-");
+	const clock = createClock();
+	const staticDirectory = path.join(home.root, "static");
+	fs.mkdirSync(staticDirectory, { recursive: true, mode: 0o700 });
+	fs.writeFileSync(path.join(staticDirectory, "index.html"), "<!doctype html><title>GOL-50 J3</title>");
+	const turnLog = path.join(home.root, "turns.log");
+	const turnState = path.join(home.root, "turns.json");
+	let owner;
+	let service;
 	let supervisor;
 	try {
-		assert.throws(() => new ManagedCodexSupervisor({ ...base, backend: "ollama_local" }), ManagedCodexQualificationError, "local/OSS managed requests fail before spawn");
-		supervisor = new ManagedCodexSupervisor({ ...base, backend: "openai", model: "gpt-4o" });
-		const first = await supervisor.start();
-		assert.equal(first.launchable, true);
-		assert.equal(first.deliveryReady, false, "launchability does not imply consumer readiness");
+		owner = openControlPlanePersistence(
+			{
+				runtimePath: home.runtimeDb,
+				trackerPath: home.trackerDb,
+				lockPath: path.join(home.root, "owner.lock"),
+			},
+			{ clock, ownerId: "gol50-j3-owner" },
+		);
+		const endpoints = createEndpointService({
+			storage: owner.runtimeEndpointStorage(),
+		});
+		const tracker = composeControlPlaneTrackerServices({
+			writer: owner,
+			clock,
+			eligibility: composeControlPlaneEndpointEligibility({
+				endpoints: owner.runtimeEndpointStorage(),
+				clock,
+			}),
+		});
+		service = await startControlPlane({
+			token: home.token,
+			stateDirectory: path.join(home.root, "control-plane"),
+			staticDirectory,
+			trackerCore: composeControlPlaneTrackerCoreServices({ writer: owner, clock }),
+			trackerServices: tracker,
+		});
+		const ready = await fetch(`${service.origin}/api/v1/health/ready`, {
+			headers: { authorization: `Bearer ${home.token}` },
+		});
+		assert.equal(ready.status, 200, "temporary control plane is live");
+
+		const projects = createProjectService({
+			storage: owner.runtimeProjectStorage(),
+			golemHome: home.root,
+		});
+		const project = projects.register({ cwd: repositoryRoot });
+		const sessions = createSessionService({
+			projects: owner.runtimeProjectStorage(),
+			sessions: owner.runtimeSessionStorage(),
+		});
+		const runtime = createRuntimeMaterializer({
+			home: home.root,
+			writer: owner,
+			sessions,
+		});
+		const binding = {
+			projectId: project.projectId,
+			sessionId: id("ses"),
+			generationId: id("gen"),
+			endpointId: id("endpoint"),
+			ownerInstanceId: id("owner"),
+			producerInstanceId: id("prod"),
+		};
+		assert.throws(
+			() =>
+				new ManagedCodexSupervisor({
+					binding,
+					projectPath: repositoryRoot,
+					backend: "ollama_local",
+					endpoints: {},
+					ingress: { ingest() {} },
+				}),
+			ManagedCodexQualificationError,
+			"unsupported local/OSS managed requests fail before a child can spawn",
+		);
+		supervisor = composeManagedCodexSupervisor({
+			endpoints,
+			ingress: {
+				ingest(signal) {
+					runtime.inbox.ingest(signal);
+					runtime.materializer.drain();
+				},
+			},
+			supervisor: {
+				binding,
+				projectPath: repositoryRoot,
+				backend: "openai",
+				model: "gpt-4o",
+				command: process.execPath,
+				rpc: { args: [fixture], requestTimeoutMs: 2_000 },
+				env: {
+					...process.env,
+					NODE_PATH: "",
+					GOLEM_CODEX_TURN_LOG: turnLog,
+					GOLEM_CODEX_TURN_STATE: turnState,
+				},
+				now: clock.now,
+			},
+		});
+		const started = await supervisor.start();
+		assert.equal(started.deliveryReady, false, "launchability precedes consumer evidence");
 		await supervisor.markConsumerReady();
-		assert.equal(await supervisor.deliveryReady(), true);
-		const accepted = await supervisor.deliver({ deliveryId: "delivery-one", text: "hello" });
-		assert.equal(accepted.status, "accepted");
-		const duplicate = await supervisor.deliver({ deliveryId: "delivery-one", text: "different hostile replacement" });
-		assert.equal(duplicate.status, "duplicate");
-		eligible = false;
-		const stale = await supervisor.deliver({ deliveryId: "delivery-stale", text: "must not spawn" });
-		assert.deepEqual(stale, { status: "rejected", code: "adapter.codex.managed.delivery_ineligible", deliveryId: "delivery-stale" });
-		await supervisor.stop();
-		supervisor = new ManagedCodexSupervisor({ ...base, backend: "openai", model: "gpt-4o" });
-		const resumed = await supervisor.start();
-		assert.equal(resumed.resumed, true, "restart resumes the stored canonical App Server thread");
+		const readyEligibility = endpoints.eligibility({
+			generationId: binding.generationId,
+			routeKind: "delivery",
+			requiredCapability: "delivery",
+			expectedOwnerFence: started.ownerFence,
+		});
+		assert.equal(readyEligibility.disposition, "eligible", readyEligibility.code);
+		assert.equal(await supervisor.deliveryReady(), true, "observed consumer readiness makes the canonical endpoint dispatchable");
+		assert.equal(
+			sessions.get(binding.projectId, binding.sessionId)?.generations.length,
+			1,
+			"managed start materializes one canonical generation through runtime ingress",
+		);
+		// Before the App Server accepts a turn, the envelope remains retryable. This
+		// uses a real spawned process that exits on `turn/start`, not a port fake.
+		await supervisor.stop({ release: false });
+		supervisor = composeManagedCodexSupervisor({
+			endpoints,
+			ingress: {
+				ingest(signal) {
+					runtime.inbox.ingest(signal);
+					runtime.materializer.drain();
+				},
+			},
+			supervisor: {
+				binding,
+				projectPath: repositoryRoot,
+				backend: "openai",
+				model: "gpt-4o",
+				command: process.execPath,
+				rpc: { args: [fixture], requestTimeoutMs: 2_000 },
+				env: {
+					...process.env,
+					NODE_PATH: "",
+					GOLEM_CODEX_TURN_LOG: turnLog,
+					GOLEM_CODEX_TURN_STATE: turnState,
+					GOLEM_CODEX_FAIL_TURN_START: "1",
+				},
+				now: clock.now,
+			},
+		});
+		await supervisor.start();
 		await supervisor.markConsumerReady();
-		assert.equal((await supervisor.control("interrupt")).status, "accepted");
-		assert.equal((await supervisor.control("halt")).status, "accepted");
-		assert.equal(validateManagedTuiBinding({ socketPath: "/tmp/golem.sock", remote: "unix:///tmp/golem.sock", generationId: base.binding.generationId, cwd: root }, { generationId: base.binding.generationId, cwd: root }).generationId, base.binding.generationId);
-		assert.throws(() => validateManagedTuiBinding({ socketPath: "/tmp/golem.sock", remote: "unix:///tmp/golem.sock", generationId: "gen_wrong", cwd: root }, { generationId: base.binding.generationId, cwd: root }), /tui_binding_mismatch/);
-		assert.equal(signals.filter((signal) => signal.event_kind === "session.started").length, 1);
-		assert.equal(signals.filter((signal) => signal.event_kind === "session.resumed").length, 1);
-		for (const signal of signals) RuntimeSignalV1Schema.parse(signal);
-		assert.equal(database.prepare("SELECT COUNT(*) AS count FROM deliveries WHERE status='completed'").get().count, 1);
-		assert.equal(fs.readFileSync(turnLog, "utf8").trim().split("\n").filter(Boolean).length, 1, "duplicate and stale delivery never create a second App Server turn");
-		assert.equal(reports.some((report) => report.kind === "health" && report.state === "healthy"), true);
-		assert.equal(reports.some((report) => report.kind === "release"), true);
-		assert.equal(JSON.stringify(signals).includes("different hostile"), false);
-		const cli = spawnSync(process.execPath, [
-			path.join(repositoryRoot, "dist/apps/cli/golem.js"),
-			"codex",
-			"--backend",
-			"ollama_local",
-			"--dry-run",
-			"--json",
-		], { cwd: repositoryRoot, env: { ...process.env, GOLEM_HOME: root }, encoding: "utf8" });
-		assert.notEqual(cli.status, 0, "unsupported managed backend fails before spawn");
+		const beforeStartEnvelope = tracker.delivery.enqueue({
+			id: id("env"),
+			idempotencyKey: id("idem"),
+			senderId: id("sender"),
+			recipientId: binding.endpointId,
+			kind: "ticket_dispatch",
+			payload: { text: "retry before turn" },
+		});
+		const [beforeStartClaim] = tracker.delivery.claim("codex-managed-j3-before", 1, 50);
+		assert(beforeStartClaim, "pre-turn envelope is durably leased");
+		const beforeStart = await supervisor.deliver({
+			deliveryId: beforeStartEnvelope.id,
+			text: "retry before turn",
+			expectedOwnerFence: beforeStartEnvelope.endpoint.ownerFence,
+			delivery: createManagedCodexDeliveryPort({ claim: beforeStartClaim }),
+		});
+		assert.equal(beforeStart.status, "retry", "a process exit before turn acceptance keeps the durable envelope retryable");
+		assert.equal(fs.existsSync(turnLog), false, "pre-turn process exit creates no external turn");
+		await supervisor.stop({ release: false });
+		supervisor = composeManagedCodexSupervisor({
+			endpoints,
+			ingress: {
+				ingest(signal) {
+					runtime.inbox.ingest(signal);
+					runtime.materializer.drain();
+				},
+			},
+			supervisor: {
+				binding,
+				projectPath: repositoryRoot,
+				backend: "openai",
+				model: "gpt-4o",
+				command: process.execPath,
+				rpc: { args: [fixture], requestTimeoutMs: 2_000 },
+				env: {
+					...process.env,
+					NODE_PATH: "",
+					GOLEM_CODEX_TURN_LOG: turnLog,
+					GOLEM_CODEX_TURN_STATE: turnState,
+				},
+				now: clock.now,
+			},
+		});
+		await supervisor.start();
+		await supervisor.markConsumerReady();
+		clock.advance(1_000);
+		const [beforeStartRecoveredClaim] = tracker.delivery.claim(
+			"codex-managed-j3-before-recovery",
+			1,
+			50,
+		);
+		assert(beforeStartRecoveredClaim, "replacement supervisor reclaims the pre-turn envelope");
+		const beforeStartRecovered = await supervisor.deliver({
+			deliveryId: beforeStartEnvelope.id,
+			text: "retry before turn",
+			expectedOwnerFence: beforeStartEnvelope.endpoint.ownerFence,
+			delivery: createManagedCodexDeliveryPort({ claim: beforeStartRecoveredClaim }),
+		});
+		assert.equal(beforeStartRecovered.status, "accepted", "pre-turn retry reaches exactly one App Server turn");
+		assert.equal(
+			fs.readFileSync(turnLog, "utf8").trim().split("\n").filter(Boolean).length,
+			1,
+			"recovered pre-turn delivery creates its first and only turn",
+		);
+
+		const envelope = tracker.delivery.enqueue({
+			id: id("env"),
+			idempotencyKey: id("idem"),
+			senderId: id("sender"),
+			recipientId: binding.endpointId,
+			kind: "ticket_dispatch",
+			payload: { text: "send exactly once" },
+		});
+		const [firstClaim] = tracker.delivery.claim("codex-managed-j3", 1, 50);
+		assert(firstClaim, "canonical durable queue leases the ready managed endpoint");
+		const firstPort = createManagedCodexDeliveryPort({ claim: firstClaim });
+		const afterSendBeforeAck = await supervisor.deliver({
+			deliveryId: envelope.id,
+			text: "send exactly once",
+			expectedOwnerFence: envelope.endpoint.ownerFence,
+			delivery: {
+				...firstPort,
+				async ack() {
+					throw new Error("test crash after turn/start before durable ack");
+				},
+			},
+		});
+		assert.equal(
+			afterSendBeforeAck.status,
+			"retry",
+			"the crashed process reports its local acknowledgement failure",
+		);
+		// Model an abrupt supervisor loss: the process dies without releasing its
+		// durable owner lease. The replacement binds the same persisted identity;
+		// its delivery service must observe the committed send marker rather than
+		// replaying the leased envelope.
+		await supervisor.stop({ release: false });
+		const restartedBinding = binding;
+		supervisor = composeManagedCodexSupervisor({
+			endpoints,
+			ingress: {
+				ingest(signal) {
+					runtime.inbox.ingest(signal);
+					runtime.materializer.drain();
+				},
+			},
+			supervisor: {
+				binding: restartedBinding,
+				projectPath: repositoryRoot,
+				backend: "openai",
+				model: "gpt-4o",
+				command: process.execPath,
+				rpc: { args: [fixture], requestTimeoutMs: 2_000 },
+				env: {
+					...process.env,
+					NODE_PATH: "",
+					GOLEM_CODEX_TURN_LOG: turnLog,
+					GOLEM_CODEX_TURN_STATE: turnState,
+				},
+				now: clock.now,
+			},
+		});
+		await supervisor.start();
+		await supervisor.markConsumerReady();
+		assert.equal(await supervisor.deliveryReady(), true, "replacement supervisor has a fresh qualified fenced endpoint");
+		clock.advance(1_000);
+		tracker.delivery.recover();
+		assert.equal(
+			tracker.delivery.claim("codex-managed-j3-recovery", 1, 50).length,
+			0,
+			"the durable send marker prevents a restarted supervisor from reclaiming the sent delivery",
+		);
+		const duplicateDelivery = tracker.delivery.enqueue({
+			id: envelope.id,
+			idempotencyKey: envelope.idempotencyKey,
+			senderId: envelope.senderId,
+			recipientId: envelope.recipientId,
+			kind: envelope.kind,
+			payload: envelope.payload,
+		});
+		assert.equal(
+			duplicateDelivery.status,
+			"delivered",
+			"the persistent post-turn marker survives replacement as the canonical duplicate record",
+		);
+		assert.equal(
+			fs.readFileSync(turnLog, "utf8").trim().split("\n").filter(Boolean).length,
+			2,
+			"the same delivery id after supervisor restart cannot create a second App Server turn",
+		);
+		assert.equal(
+			tracker.delivery.claim("codex-managed-j3-duplicate", 1, 50).length,
+			0,
+			"acknowledged envelope cannot be claimed as a duplicate delivery",
+		);
+
+		const staleEnvelope = tracker.delivery.enqueue({
+			id: id("env"),
+			idempotencyKey: id("idem"),
+			senderId: id("sender"),
+			recipientId: restartedBinding.endpointId,
+			kind: "ticket_dispatch",
+			payload: { text: "must be fenced" },
+		});
+		const [staleClaim] = tracker.delivery.claim("codex-managed-j3-stale", 1, 50);
+		assert(staleClaim);
+		endpoints.claim({
+			endpointId: id("endpoint"),
+			generationId: binding.generationId,
+			routeKind: "delivery",
+			ownerInstanceId: id("replacement"),
+			deliveryMode: "managed_app_server",
+			leaseMs: 30_000,
+		});
+		const stale = await supervisor.deliver({
+			deliveryId: staleEnvelope.id,
+			text: "must be fenced",
+			expectedOwnerFence: staleEnvelope.endpoint.ownerFence,
+			delivery: createManagedCodexDeliveryPort({ claim: staleClaim }),
+		});
+		assert.equal(stale.status, "rejected", "a superseding endpoint fence reaches no App Server transport");
+		assert.equal(
+			fs.readFileSync(turnLog, "utf8").trim().split("\n").filter(Boolean).length,
+			2,
+			"stale fence refusal cannot add a second turn",
+		);
+		assert.equal((await supervisor.control("interrupt")).status, "rejected", "a superseded owner cannot control the replacement endpoint");
+		assert.equal(
+			validateManagedTuiBinding(
+				{
+					socketPath: "/tmp/golem.sock",
+					remote: "unix:///tmp/golem.sock",
+					generationId: binding.generationId,
+					cwd: repositoryRoot,
+				},
+				{ generationId: binding.generationId, cwd: repositoryRoot },
+			).generationId,
+			binding.generationId,
+		);
+		assert.throws(
+			() =>
+				validateManagedTuiBinding(
+					{
+						socketPath: "/tmp/golem.sock",
+						remote: "unix:///tmp/golem.sock",
+						generationId: id("gen"),
+						cwd: repositoryRoot,
+					},
+					{ generationId: binding.generationId, cwd: repositoryRoot },
+				),
+			/tui_binding_mismatch/,
+		);
+		const cli = spawnSync(
+			process.execPath,
+			[
+				path.join(repositoryRoot, "cli/golem.js"),
+				"codex",
+				"--backend",
+				"ollama_local",
+				"--dry-run",
+				"--json",
+			],
+			{
+				cwd: repositoryRoot,
+				env: { ...process.env, GOLEM_HOME: home.root, GOLEM_ROOT: repositoryRoot },
+				encoding: "utf8",
+			},
+		);
+		assert.notEqual(cli.status, 0, "CLI rejects unsupported backend before spawn");
 		const cliFailure = JSON.parse(cli.stdout);
 		assert.equal(cliFailure.error.code, "adapter.codex.managed.qualification_required");
-		assert.deepEqual(cliFailure.error.remediation, ["Use direct Codex for local/OSS models, or select a qualified OpenAI/GPT managed preset."]);
-		assert.equal(cli.stdout.includes("ollama_local"), false, "managed qualification diagnostics do not echo the backend selector");
-		return "real Node App Server process, SQLite signal/delivery records, canonical resume, fenced duplicate/stale refusal, control ownership, and TUI binding verified";
+		assert.equal(cli.stdout.includes("ollama_local"), false, "policy diagnostic does not echo hostile selector");
+		const productionHome = path.join(home.root, "production-home");
+		const production = spawn(
+			process.execPath,
+			[path.join(repositoryRoot, "cli/golem.js"), "codex", "--cwd", repositoryRoot],
+			{
+				cwd: repositoryRoot,
+				env: {
+					...process.env,
+					GOLEM_ROOT: repositoryRoot,
+					GOLEM_HOME: productionHome,
+					GOLEM_CODEX_COMMAND: process.execPath,
+					GOLEM_MANAGED_CODEX_ARGS_JSON: JSON.stringify([fixture]),
+					NODE_PATH: "",
+				},
+				stdio: ["ignore", "pipe", "pipe"],
+			},
+		);
+		const productionReady = await new Promise((resolveReady, rejectReady) => {
+			let output = "";
+			let errors = "";
+			const timeout = setTimeout(
+				() => rejectReady(new Error("managed production codex host did not become ready")),
+				4_000,
+			);
+			production.stdout.setEncoding("utf8");
+			production.stdout.on("data", (chunk) => {
+				output += chunk;
+				if (output.includes('"type":"managed-codex-ready"')) {
+					clearTimeout(timeout);
+					resolveReady(output);
+				}
+			});
+			production.stderr.setEncoding("utf8");
+			production.stderr.on("data", (chunk) => {
+				errors += chunk;
+			});
+			production.once("error", rejectReady);
+			production.once("exit", (code) => {
+				clearTimeout(timeout);
+				rejectReady(new Error(`managed production codex host exited ${code}: ${errors}`));
+			});
+		});
+		assert.match(productionReady, /managed-codex-ready/, "root golem codex selects the canonical managed host");
+		production.kill("SIGTERM");
+		await new Promise((resolveExit) => production.once("exit", resolveExit));
+		return "production golem codex host + temporary Fastify control plane + canonical SQLite endpoint/session + durable send-before-ack restart exercised one spawned JSONL App Server turn, stale fence refusal, and managed policy";
 	} finally {
 		await supervisor?.stop().catch(() => {});
-		database.close();
-		fs.rmSync(root, { recursive: true, force: true });
+		await service?.close();
+		await owner?.close();
+		home.cleanup();
 	}
 });

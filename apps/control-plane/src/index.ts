@@ -31,6 +31,17 @@ export {
 	stopLaunchAgent,
 	updateLaunchAgent,
 } from "./launch-agent.js";
+export {
+	composeManagedCodexSupervisor,
+	createManagedCodexDeliveryPort,
+	createManagedCodexEndpointPort,
+} from "./managed-codex.js";
+export {
+	type ManagedCodexControl,
+	type ManagedCodexControlBinding,
+	type ManagedCodexControlOptions,
+	startManagedCodexControl,
+} from "./managed-codex-control.js";
 export { stableOpenApiJson } from "./openapi.js";
 export type {
 	ControlPlaneProjectionPort,

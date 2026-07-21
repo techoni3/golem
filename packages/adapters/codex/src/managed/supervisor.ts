@@ -25,6 +25,7 @@ export interface ManagedCodexEndpointPort {
 	reportReadiness?(
 		input: Readonly<Record<string, unknown>>,
 	): Promise<unknown> | unknown;
+	probe?(input: Readonly<Record<string, unknown>>): Promise<unknown> | unknown;
 	reportCapability?(
 		input: Readonly<Record<string, unknown>>,
 	): Promise<unknown> | unknown;
@@ -44,11 +45,22 @@ export interface ManagedCodexIngress {
 }
 
 export interface ManagedCodexDeliveryPort {
-	claim?(
+	/**
+	 * A supervisor never invents an accepted claim from process-local state.
+	 * The control-plane composition supplies a fence-checked durable envelope
+	 * claim, and a restarted supervisor receives a fresh instance of that claim.
+	 */
+	claim(
 		input: Readonly<Record<string, unknown>>,
 	): Promise<Readonly<Record<string, unknown>>>;
-	ack?(input: Readonly<Record<string, unknown>>): Promise<unknown>;
-	fail?(input: Readonly<Record<string, unknown>>): Promise<unknown>;
+	/**
+	 * Records the accepted delivery in the canonical durable port before the
+	 * App Server process boundary. A restarted supervisor must therefore not
+	 * reclaim an envelope after a successful `turn/start` but before ack.
+	 */
+	markSent(input: Readonly<Record<string, unknown>>): Promise<unknown>;
+	ack(input: Readonly<Record<string, unknown>>): Promise<unknown>;
+	fail(input: Readonly<Record<string, unknown>>): Promise<unknown>;
 }
 
 export interface ManagedCodexBinding {
@@ -92,6 +104,11 @@ export interface ManagedCodexDeliveryInput {
 	readonly deliveryId: string;
 	readonly text: string;
 	readonly expectedOwnerFence?: number;
+	/**
+	 * The queue worker supplies the claim for this particular envelope. It must
+	 * not be cached by the supervisor because the lease belongs to persistence.
+	 */
+	readonly delivery?: ManagedCodexDeliveryPort;
 }
 
 export interface ManagedCodexDeliveryResult {
@@ -134,12 +151,12 @@ function recordNumber(
 export class ManagedCodexSupervisor {
 	readonly #options: ManagedCodexSupervisorOptions;
 	readonly #qualification: ManagedCodexQualification;
-	readonly #seenDeliveries = new Map<string, ManagedCodexDeliveryResult>();
 	readonly #now: () => string;
 	#rpc: ManagedCodexRpc | undefined;
 	#threadId: string | undefined;
 	#ownerFence: number | undefined;
 	#sequence = 0;
+	#capabilitySequence = 0;
 	#started = false;
 
 	constructor(options: ManagedCodexSupervisorOptions) {
@@ -207,6 +224,12 @@ export class ManagedCodexSupervisor {
 			};
 		}
 		const binding = this.#options.binding;
+		// Endpoint fencing is defined over a canonical generation. Materialize the
+		// deterministic lifecycle identity before claiming the native endpoint so
+		// a real control-plane never accepts an orphaned App Server owner.
+		await this.#emit("session.started", {
+			model: this.#qualification.model,
+		});
 		const claimed = await this.#options.endpoints.claim({
 			endpointId: binding.endpointId,
 			generationId: binding.generationId,
@@ -273,9 +296,7 @@ export class ManagedCodexSupervisor {
 			const threadId = typeof thread?.id === "string" ? thread.id : undefined;
 			if (!threadId) throw new Error("adapter.codex.managed.thread_missing");
 			this.#threadId = threadId;
-			await this.#emit(existingThread ? "session.resumed" : "session.started", {
-				model: this.#qualification.model,
-			});
+			if (existingThread) await this.#emit("session.resumed");
 			await this.#options.endpoints.reportHealth?.({
 				endpointId: binding.endpointId,
 				generationId: binding.generationId,
@@ -283,18 +304,7 @@ export class ManagedCodexSupervisor {
 				ownerFence: this.#ownerFence,
 				state: "healthy",
 			});
-			await this.#options.endpoints.reportCapability?.({
-				endpointId: binding.endpointId,
-				generationId: binding.generationId,
-				ownerInstanceId: binding.ownerInstanceId,
-				ownerFence: this.#ownerFence,
-				capability: "codex.openai.managed",
-				qualification: "supported",
-				evidenceKind: "observed",
-				deliveryMode: "managed_app_server",
-				readiness: mcpReady ? "uninitialized" : "unsupported",
-				observedAt: nowIso(this.#now),
-			});
+			await this.#reportCapability(mcpReady ? "uninitialized" : "unsupported");
 			this.#started = true;
 			return {
 				launchable: true,
@@ -327,17 +337,52 @@ export class ManagedCodexSupervisor {
 			readiness: "ready",
 			controlState: "enabled",
 		});
-		await this.#options.endpoints.reportCapability?.({
+		await this.#options.endpoints.probe?.({
 			endpointId: binding.endpointId,
 			generationId: binding.generationId,
 			ownerInstanceId: binding.ownerInstanceId,
 			ownerFence: this.#ownerFence,
-			capability: "codex.openai.managed",
-			qualification: "supported",
-			evidenceKind: "observed",
-			deliveryMode: "managed_app_server",
+			consumerReady: true,
 			readiness: "ready",
-			observedAt: nowIso(this.#now),
+		});
+		await this.#reportCapability("ready");
+	}
+
+	async #reportCapability(
+		readiness: "ready" | "uninitialized" | "unsupported",
+	): Promise<void> {
+		const binding = this.#options.binding;
+		this.#capabilitySequence += 1;
+		const observedAt = new Date(
+			Date.parse(nowIso(this.#now)) + this.#capabilitySequence,
+		).toISOString();
+		const common = {
+			endpointId: binding.endpointId,
+			generationId: binding.generationId,
+			ownerInstanceId: binding.ownerInstanceId,
+			ownerFence: this.#ownerFence,
+			qualification: "supported",
+			evidenceKind: readiness === "ready" ? "observed" : "probe",
+			deliveryMode: "managed_app_server",
+			readiness,
+			observedAt,
+			consumptionObserved: readiness === "ready",
+		};
+		await this.#options.endpoints.reportCapability?.({
+			...common,
+			capability: "codex.openai.managed",
+		});
+		// GOL-36's canonical durable delivery port qualifies the universal
+		// `delivery` capability. Preserve the adapter-specific fact above while
+		// publishing the matching consumable capability instead of treating
+		// registration as delivery readiness.
+		await this.#options.endpoints.reportCapability?.({
+			...common,
+			capability: "delivery",
+		});
+		await this.#options.endpoints.reportCapability?.({
+			...common,
+			capability: "control",
 		});
 	}
 
@@ -345,7 +390,7 @@ export class ManagedCodexSupervisor {
 		const result = await this.#options.endpoints.eligibility({
 			generationId: this.#options.binding.generationId,
 			routeKind: "delivery",
-			requiredCapability: "codex.openai.managed",
+			requiredCapability: "delivery",
 			expectedOwnerFence: this.#ownerFence,
 		});
 		return result.disposition === "eligible";
@@ -354,8 +399,6 @@ export class ManagedCodexSupervisor {
 	async deliver(
 		input: ManagedCodexDeliveryInput,
 	): Promise<ManagedCodexDeliveryResult> {
-		const prior = this.#seenDeliveries.get(input.deliveryId);
-		if (prior) return { ...prior, status: "duplicate" };
 		if (!this.#rpc || !this.#threadId)
 			return {
 				status: "rejected",
@@ -363,28 +406,25 @@ export class ManagedCodexSupervisor {
 				deliveryId: input.deliveryId,
 			};
 		const expected = input.expectedOwnerFence ?? this.#ownerFence;
-		const eligibility = await this.#options.endpoints.eligibility({
-			generationId: this.#options.binding.generationId,
-			routeKind: "delivery",
-			requiredCapability: "codex.openai.managed",
-			expectedOwnerFence: expected,
-		});
-		if (eligibility.disposition !== "eligible")
+		const delivery = input.delivery ?? this.#options.delivery;
+		if (!delivery)
 			return {
 				status: "rejected",
-				code: "adapter.codex.managed.delivery_ineligible",
+				code: "adapter.codex.managed.delivery_port_unavailable",
 				deliveryId: input.deliveryId,
 			};
-		const claim = (await this.#options.delivery?.claim?.({
+		const claim = await delivery.claim({
 			deliveryId: input.deliveryId,
 			generationId: this.#options.binding.generationId,
 			expectedOwnerFence: expected,
-		})) ?? { disposition: "accepted" };
+		});
+		const duplicateTurnId = recordString(claim, "turnId");
 		if (recordString(claim, "disposition") === "duplicate")
 			return {
 				status: "duplicate",
 				code: "adapter.codex.managed.delivery_duplicate",
 				deliveryId: input.deliveryId,
+				...(duplicateTurnId ? { turnId: duplicateTurnId } : {}),
 			};
 		if (
 			recordString(claim, "disposition") &&
@@ -395,16 +435,20 @@ export class ManagedCodexSupervisor {
 				code: "adapter.codex.managed.delivery_claim_rejected",
 				deliveryId: input.deliveryId,
 			};
+		// The durable claim is prepared before local eligibility. That preparation
+		// re-resolves a queued endpoint and settles a stale recipient lease; doing
+		// it after this check would strand stale claimed envelopes until their
+		// lease expired. We still fence again immediately before `turn/start`.
 		// Claiming a durable envelope can yield; fence again at the last possible
 		// boundary so a replacement supervisor cannot race this process call.
 		const finalEligibility = await this.#options.endpoints.eligibility({
 			generationId: this.#options.binding.generationId,
 			routeKind: "delivery",
-			requiredCapability: "codex.openai.managed",
+			requiredCapability: "delivery",
 			expectedOwnerFence: expected,
 		});
 		if (finalEligibility.disposition !== "eligible") {
-			await this.#options.delivery?.fail?.({
+			await delivery.fail({
 				deliveryId: input.deliveryId,
 				reason: "managed_codex_fence_changed",
 			});
@@ -415,6 +459,9 @@ export class ManagedCodexSupervisor {
 			};
 		}
 		try {
+			// `clientUserMessageId` is the durable idempotency key at the App
+			// Server boundary. It makes the small crash window before our marker
+			// safe to retry rather than dropping a never-started turn.
 			const result = await this.#rpc.request("turn/start", {
 				threadId: this.#threadId,
 				cwd: this.#options.projectPath,
@@ -431,14 +478,20 @@ export class ManagedCodexSupervisor {
 						?.turn ?? {},
 					"id",
 				);
+			// Persist only after `turn/start` has succeeded. A crash before here
+			// retries this exact client id; a crash after here cannot issue a second
+			// transport request while acknowledgement is reconciled durably.
+			await delivery.markSent({
+				deliveryId: input.deliveryId,
+				...(turnId ? { turnId } : {}),
+			});
 			const delivered: ManagedCodexDeliveryResult = {
 				status: "accepted",
 				code: "adapter.codex.managed.delivery_accepted",
 				deliveryId: input.deliveryId,
 				...(turnId ? { turnId } : {}),
 			};
-			this.#seenDeliveries.set(input.deliveryId, delivered);
-			await this.#options.delivery?.ack?.({
+			await delivery.ack({
 				deliveryId: input.deliveryId,
 				turnId,
 			});
@@ -452,7 +505,7 @@ export class ManagedCodexSupervisor {
 			});
 			return delivered;
 		} catch {
-			await this.#options.delivery?.fail?.({
+			await delivery.fail({
 				deliveryId: input.deliveryId,
 				reason: "managed_codex_delivery_failed",
 			});
@@ -472,8 +525,12 @@ export class ManagedCodexSupervisor {
 			return { status: "rejected", code: "adapter.codex.managed.not_started" };
 		const eligible = await this.#options.endpoints.eligibility({
 			generationId: this.#options.binding.generationId,
-			routeKind: "control",
-			requiredCapability: "codex.openai.managed",
+			// Managed App Server control is exercised by the same fenced owner as
+			// delivery. It still requires the independently observed `control`
+			// capability; using the delivery route avoids inventing an unclaimed
+			// second endpoint for this one owned process.
+			routeKind: "delivery",
+			requiredCapability: "control",
 			expectedOwnerFence: this.#ownerFence,
 		});
 		if (eligible.disposition !== "eligible")
@@ -501,9 +558,13 @@ export class ManagedCodexSupervisor {
 		}
 	}
 
-	async stop(): Promise<void> {
+	async stop(options: { readonly release?: boolean } = {}): Promise<void> {
 		const binding = this.#options.binding;
-		if (this.#options.endpoints.release && this.#ownerFence !== undefined)
+		if (
+			options.release !== false &&
+			this.#options.endpoints.release &&
+			this.#ownerFence !== undefined
+		)
 			await this.#options.endpoints.release({
 				endpointId: binding.endpointId,
 				generationId: binding.generationId,

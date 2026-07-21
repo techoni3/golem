@@ -342,6 +342,40 @@ async function launchOpenCode(result, input, io) {
             await ingress.stop();
     }
 }
+/**
+ * The CLI never opens a runtime/tracker database. The managed host is a
+ * foreground control-plane composition process, so the Codex adapter receives
+ * the same durable endpoint and delivery ports as every other producer.
+ */
+async function launchManagedCodex(_result, input, io) {
+    if (input.command !== "codex" || input.dryRun || input.json)
+        return undefined;
+    const host = controlPlaneArtifact("../../../apps/control-plane/dist/managed-codex-host.js");
+    if (!host) {
+        errorOutput(io, "adapter.codex.managed.host_unavailable: managed Codex was not launched");
+        return CLI_EXIT_CODES.runtime;
+    }
+    const cwd = resolve(input.cwd ?? process.cwd());
+    const child = spawn(process.execPath, [host], {
+        cwd,
+        stdio: "inherit",
+        env: {
+            ...process.env,
+            GOLEM_HOME: process.env.GOLEM_HOME ?? join(homedir(), ".golem"),
+            GOLEM_MANAGED_CODEX_CWD: cwd,
+            GOLEM_MANAGED_CODEX_BACKEND: input.backend ?? "openai",
+            GOLEM_MANAGED_CODEX_MODEL: input.model ?? "gpt-4o",
+            ...(process.env.GOLEM_CODEX_COMMAND
+                ? { GOLEM_MANAGED_CODEX_COMMAND: process.env.GOLEM_CODEX_COMMAND }
+                : {}),
+        },
+    });
+    const exited = await new Promise((resolveExit) => {
+        child.once("error", () => resolveExit({ code: CLI_EXIT_CODES.runtime }));
+        child.once("exit", (code) => resolveExit({ code }));
+    });
+    return exited.code ?? CLI_EXIT_CODES.runtime;
+}
 function renderFailure(result, input, io) {
     if (input.json)
         output(io, stableCliJson(result));
@@ -482,6 +516,26 @@ export async function runCli(argv = process.argv.slice(2), io = {}) {
             input.command === "opencode:refresh" ||
             input.command === "opencode:doctor")
             return await runOpenCodeOperation(input, io);
+        // This closed predicate is deliberately evaluated before resolver or host
+        // construction. The fallback is direct Codex, never a local/OSS process
+        // hidden behind a managed endpoint claim.
+        if (input.command === "codex" &&
+            ((input.backend !== undefined && input.backend !== "openai") ||
+                (input.model !== undefined &&
+                    !/^gpt(?:-|$)/iu.test(input.model.trim()))))
+            return renderFailure({
+                schemaVersion: "golem.launch-plan/v1",
+                ok: false,
+                error: {
+                    code: "adapter.codex.managed.qualification_required",
+                    severity: "error",
+                    message: "Managed Codex requires a qualified OpenAI/GPT model.",
+                    remediation: [
+                        "Use direct Codex for local/OSS models, or select a qualified OpenAI/GPT managed preset.",
+                    ],
+                },
+                trace: [],
+            }, input, io);
         const result = resolveForInput(input, io);
         if (!result.ok) {
             // Managed Codex has a deliberately closed backend/model gate. Keep the
@@ -528,8 +582,11 @@ export async function runCli(argv = process.argv.slice(2), io = {}) {
                 trace: result.trace,
             }, input, io);
         }
-        const launched = await launchOpenCode(result, input, io);
-        return launched ?? renderSuccess(result, input, io);
+        const launched = await launchManagedCodex(result, input, io);
+        if (launched !== undefined)
+            return launched;
+        const openCodeLaunched = await launchOpenCode(result, input, io);
+        return openCodeLaunched ?? renderSuccess(result, input, io);
     }
     catch (error) {
         if (error instanceof CliResolutionError) {
