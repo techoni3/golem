@@ -102,6 +102,11 @@ const knownSources: readonly KnownSource[] = [
 	{ id: "renders", relative: "renders", category: "render", recursive: true },
 ];
 
+/** The bounded legacy inventory is shared by read-only audit and apply backup. */
+export const legacySourceRelativePaths = Object.freeze(
+	knownSources.map(({ id, relative }) => Object.freeze({ id, relative })),
+);
+
 const maxJsonBytes = 1_048_576;
 const maxInventoryEntries = 5_000;
 

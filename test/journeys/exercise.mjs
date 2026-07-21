@@ -25,6 +25,7 @@ import {
 import { normalizeLegacyObservation } from "../parity/normalization.mjs";
 import { exerciseControlPlaneShell } from "../control-plane/control-plane-shell.mjs";
 import { runMigrationPlanReplay } from "../migration/replay.mjs";
+import { runMigrationApplyReplay } from "../migration/apply-replay.mjs";
 import { exerciseRenderMcpClosure } from "../render-mcp-closure.mjs";
 import { exerciseDomainReplay } from "./domain-replay.mjs";
 import { exerciseCompactLaunchDryRunMatrix } from "./compact-launch-dry-run-matrix.mjs";
@@ -801,6 +802,10 @@ export async function exerciseMigrationDryRunAmbiguity() {
 	return runMigrationPlanReplay();
 }
 
+export async function exerciseMigrationApplyCrashRollback() {
+	return runMigrationApplyReplay();
+}
+
 const sessionJourney = path.join(repositoryRoot, "test/sessions/session-service.test.mjs");
 const endpointJourney = path.join(repositoryRoot, "test/endpoints/endpoint-service.test.mjs");
 
@@ -896,6 +901,7 @@ export const exercises = Object.freeze({
 	"native-spawn-safety": exerciseNativeSpawnSafety,
 	"launcher-signal-cleanup": exerciseLauncherSignalCleanup,
 	"migration-dry-run-ambiguity": exerciseMigrationDryRunAmbiguity,
+	"migration-apply-crash-rollback": exerciseMigrationApplyCrashRollback,
 	"testkit-smoke": exerciseSmoke,
 	"testkit-fake-harness": exerciseFakeHarness,
 	"testkit-semantic-parity": exerciseSemanticParity,

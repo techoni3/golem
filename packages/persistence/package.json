@@ -8,6 +8,10 @@
 			"types": "./dist/index.d.ts",
 			"import": "./dist/index.js"
 		},
+		"./migration-compat": {
+			"types": "./dist/migration-compat.d.ts",
+			"import": "./dist/migration-compat.js"
+		},
 		"./control-plane": {
 			"types": "./dist/control-plane.d.ts",
 			"import": "./dist/control-plane.js"

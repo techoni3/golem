@@ -5,6 +5,11 @@
 		"rootDir": "./src",
 		"types": ["node"]
 	},
-	"references": [{ "path": "../runtime" }, { "path": "../tracker" }],
+	"references": [
+		{ "path": "../contracts" },
+		{ "path": "../persistence" },
+		{ "path": "../runtime" },
+		{ "path": "../tracker" }
+	],
 	"include": ["src/**/*.ts"]
 }

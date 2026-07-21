@@ -92,6 +92,12 @@ export const scenarios = [
 		regression: "a legacy audit mutates a supplied home or auto-merges unsafe, corrupt, name/PID, or ambiguous identity evidence",
 	}),
 	registerScenario({
+		id: "migration-apply-crash-rollback",
+		journey: "J7",
+		tier: "integration",
+		regression: "a stale plan, weak alias, partial canonical import, or generated compatibility projection can become authoritative after a failed migration",
+	}),
+	registerScenario({
 		id: "testkit-smoke",
 		journey: "J3",
 		tier: "pr",
