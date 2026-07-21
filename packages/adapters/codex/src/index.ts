@@ -14,6 +14,7 @@ export {
 	codexRuntimeSignal,
 	codexSessionId,
 } from "./direct/index.js";
+export * from "./managed/index.js";
 
 export interface CodexAdapterBoundary {
 	readonly adapter: AdapterBoundary;

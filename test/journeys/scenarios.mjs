@@ -8,6 +8,12 @@ export const scenarios = [
 		regression: "plain installed Codex loses canonical project/session lifecycle, restart-safe generation identity, or truthful pull-only capability",
 	}),
 	registerScenario({
+		id: "codex-managed-delivery-crash-matrix",
+		journey: "J3",
+		tier: "integration",
+		regression: "managed Codex App Server lifecycle, canonical thread resume, fenced delivery idempotency, and unsupported-provider pre-spawn rejection drift",
+	}),
+	registerScenario({
 		id: "project-identity-git-worktree-relocation",
 		journey: "J2",
 		tier: "integration",

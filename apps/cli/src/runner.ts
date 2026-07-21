@@ -591,11 +591,18 @@ export async function runCli(
 		const command = program.commands.find(
 			(entry) => entry.name() === input.command,
 		);
-		output(
-			io,
+		const help =
 			command && input.command !== "help"
 				? command.helpInformation()
-				: program.helpInformation(),
+				: program.helpInformation();
+		// Keep the legacy TUI invocation discoverable while the typed command
+		// remains the canonical managed resolver. This is text-only compatibility;
+		// it does not add a second parser or spawn path.
+		output(
+			io,
+			`${help}\nUsage: golem codex [--session <canonical-id>] [--cwd <dir>]\n` +
+				"With no flags it uses the current directory and creates one canonical tracker session.\n" +
+				"All other Codex arguments are passed through.\n",
 		);
 		return CLI_EXIT_CODES.ok;
 	}
@@ -611,7 +618,36 @@ export async function runCli(
 		)
 			return await runOpenCodeOperation(input, io);
 		const result = resolveForInput(input, io);
-		if (!result.ok) return renderFailure(result, input, io);
+		if (!result.ok) {
+			// Managed Codex has a deliberately closed backend/model gate. Keep the
+			// resolver's generic capability diagnostics private to the launcher and
+			// expose one stable direct-Codex remedy before any process can spawn.
+			if (
+				input.command === "codex" &&
+				((input.backend !== undefined && input.backend !== "openai") ||
+					(input.model !== undefined &&
+						!/^gpt(?:-|$)/iu.test(input.model.trim())))
+			) {
+				return renderFailure(
+					{
+						schemaVersion: "golem.launch-plan/v1",
+						ok: false,
+						error: {
+							code: "adapter.codex.managed.qualification_required",
+							severity: "error",
+							message: "Managed Codex requires a qualified OpenAI/GPT model.",
+							remediation: [
+								"Use direct Codex for local/OSS models, or select a qualified OpenAI/GPT managed preset.",
+							],
+						},
+						trace: result.trace,
+					},
+					input,
+					io,
+				);
+			}
+			return renderFailure(result, input, io);
+		}
 		const bridge = launchPlanBridge(result);
 		// A canonical launchable plan is a valid foundation result even when its
 		// delivery fact is pull-only/not-ready. Only an actually unavailable

@@ -60,6 +60,7 @@ const controlPlaneProgram = path.join(repositoryRoot, "apps/control-plane/dist/m
 const trackerCoreJourney = path.join(repositoryRoot, "test/tracker/tracker-core.test.mjs");
 const managementJourney = path.join(repositoryRoot, "test/management/management-services.test.mjs");
 const codexDirectJourney = path.join(repositoryRoot, "test/codex-direct-adapter.test.mjs");
+const codexManagedJourney = path.join(repositoryRoot, "test/codex-managed-adapter.test.mjs");
 const runtimeProjectionJourney = path.join(repositoryRoot, "test/runtime/runtime-projections.test.mjs");
 const claudeAdapterJourney = path.join(repositoryRoot, "test/adapter/claude-adapter.test.mjs");
 const chromeExecutable = process.env.GOLEM_CHROME_EXECUTABLE || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -769,6 +770,17 @@ export function exerciseCodexDirectSeamlessIntegration() {
 	return "temporary-home rendered Codex hook emits canonical typed identities, terminal-to-resume lineage, bounded concurrent callbacks without lost revisions, redacts prompt data, and advertises pull-only discovery";
 }
 
+export function exerciseCodexManagedDeliveryCrashMatrix() {
+	const result = spawnSync(process.execPath, ["--test", "--test-concurrency=1", codexManagedJourney], {
+		cwd: repositoryRoot,
+		encoding: "utf8",
+		env: process.env,
+	});
+	if (result.status !== 0)
+		throw new Error(`codex managed journey exited ${result.status}: ${result.stdout}\n${result.stderr}`);
+	return "real App Server process and SQLite boundary verified canonical managed start/resume, endpoint readiness, duplicate/stale fence refusal, one-turn delivery, control ownership, and direct-Codex remedy";
+}
+
 export async function exerciseBrowser() {
 	const home = createTemporaryHome("golem-j8-browser-");
 	const artifactRoot = path.join(home.root, "browser-artifacts");
@@ -952,6 +964,7 @@ export const exercises = Object.freeze({
 	"render-mcp-closure": exerciseRenderMcpClosure,
 	"control-plane-auth-ws-lifecycle": exerciseControlPlaneShell,
 	"codex-direct-seamless-integration": exerciseCodexDirectSeamlessIntegration,
+	"codex-managed-delivery-crash-matrix": exerciseCodexManagedDeliveryCrashMatrix,
 	"roles-gates-ideas-controls": exerciseRolesGatesIdeasControls,
 	"ticket-assets-security": exerciseTicketAssetsSecurity,
 	"live-history-diagnostics": exerciseRuntimeProjectionLiveHistoryDiagnostics,

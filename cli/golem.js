@@ -1572,7 +1572,13 @@ async function runTypedCli(args) {
 }
 
 function hasTypedCodexOptions(args) {
-  return args[0] === 'direct' || args.some((arg) => arg === '--dry-run' || arg === '--explain' || arg === '--json'
+  // Options after `--` are native Codex/TUI arguments. They must never select
+  // the typed resolver: a stored-thread resume such as
+  // `golem codex --session <id> -- --model <model>` belongs to the private
+  // TUI bridge and has no typed `--session` counterpart.
+  const separator = args.indexOf('--');
+  const wrapperArgs = separator === -1 ? args : args.slice(0, separator);
+  return wrapperArgs[0] === 'direct' || wrapperArgs.some((arg) => arg === '--dry-run' || arg === '--explain' || arg === '--json'
     || arg === '--model' || arg.startsWith('--model=')
     || arg === '--backend' || arg.startsWith('--backend=')
     || arg === '--preset' || arg.startsWith('--preset='));
