@@ -4,7 +4,8 @@
 ## Structure
 
 - `apps/` holds private composition (CLI, Fastify control plane); `dashboard/web` is the legacy island.
-- `packages/` holds typed domain layers, clients, testkit, UI, and adapters. OpenCode's boundary is `packages/adapters/opencode/src/`; its shim is the compatibility host.
+- `packages/` holds typed domain layers, clients, testkit, UI, and adapters. OpenCode's boundary is `packages/adapters/opencode/src/`; its shim is the compatibility host. Claude's boundary is `packages/adapters/claude/src/`, which consumes canonical ports without storage authority.
+- `packages/adapters/claude` owns Claude hook-to-signal codecs, fenced channel ownership, addressed consumption qualification, and render/launch contributions; it is storage-free and consumes injected canonical ports.
 - `packages/adapters/pi` is the Pi control boundary. It requires a strong supplied binding before a raw Pi id can become canonical lifecycle or delivery state.
 - `apps/control-plane/src/api-v1.ts` is authenticated tracker/delivery/bus; `tracker-core-routes.ts` is legacy. Generated client and MCP are storage-free.
 - `substrate/` is render source; `plugin/` and `dashboard/dist/` are generated. Legacy dashboard remains authoritative.

@@ -61,6 +61,7 @@ const trackerCoreJourney = path.join(repositoryRoot, "test/tracker/tracker-core.
 const managementJourney = path.join(repositoryRoot, "test/management/management-services.test.mjs");
 const codexDirectJourney = path.join(repositoryRoot, "test/codex-direct-adapter.test.mjs");
 const runtimeProjectionJourney = path.join(repositoryRoot, "test/runtime/runtime-projections.test.mjs");
+const claudeAdapterJourney = path.join(repositoryRoot, "test/adapter/claude-adapter.test.mjs");
 const chromeExecutable = process.env.GOLEM_CHROME_EXECUTABLE || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
 class JourneyDiagnosticError extends Error {
@@ -845,6 +846,22 @@ export async function exerciseReadinessCapabilityMatrix() {
 	return runEndpointJourney("GOL-42 readiness/capability matrix");
 }
 
+export async function exerciseClaudeLifecycleChannelRecovery() {
+	const home = createTemporaryHome("golem-j4-claude-adapter-");
+	try {
+		const result = spawnSync(
+			process.execPath,
+			["--test", "--test-concurrency=1", claudeAdapterJourney],
+			{ cwd: repositoryRoot, encoding: "utf8", env: home.env },
+		);
+		if (result.status !== 0) throw new Error(`Claude adapter journey failed: ${result.stdout}\n${result.stderr}`);
+		assert.match(result.stdout, /pass 3/u);
+		return "real SQLite-backed Claude lifecycle signals, fenced channel handshake, addressed consumption qualification, and explicit unqualified failure evidence verified";
+	} finally {
+		home.cleanup();
+	}
+}
+
 const typedCliEntry = path.join(repositoryRoot, "dist/apps/cli/golem.js");
 
 function runTypedCliFixture(home, args) {
@@ -907,6 +924,7 @@ export const exercises = Object.freeze({
 	"session-reorder-restart-replay": exerciseSessionReorderRestartReplay,
 	"endpoint-fence-concurrency-crash": exerciseEndpointFenceConcurrencyCrash,
 	"readiness-capability-matrix": exerciseReadinessCapabilityMatrix,
+	"claude-lifecycle-channel-recovery": exerciseClaudeLifecycleChannelRecovery,
 	"launcher-resolution-matrix": exerciseLauncherResolution,
 	"launcher-launchability-delivery-split": exerciseLauncherLaunchabilityDeliverySplit,
 	"native-spawn-safety": exerciseNativeSpawnSafety,

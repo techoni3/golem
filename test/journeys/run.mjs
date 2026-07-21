@@ -10,15 +10,27 @@ const requestedId = selectorIndex === -1 ? undefined : arguments_[selectorIndex 
 const targetIndex = arguments_.indexOf("--target");
 const requestedTarget = targetIndex === -1 ? undefined : arguments_[targetIndex + 1];
 
+for (let index = 0; index < arguments_.length; index += 1) {
+	const argument = arguments_[index];
+	if (argument === "--target") {
+		const target = arguments_[index + 1];
+		if (target !== "cc" && target !== "cc-marketplace") throw new Error("--target requires cc or cc-marketplace");
+		index += 1;
+	}
+}
+
 if (arguments_.includes("--list")) {
 	for (const scenario of scenarios) process.stdout.write(`${scenario.id}\t${scenario.journey}\t${scenario.tier}\t${scenario.regression}\n`);
 	process.exit(0);
 }
 if (selectorIndex !== -1 && !requestedId) throw new Error("--scenario requires a scenario id");
 if (targetIndex !== -1 && !requestedTarget) throw new Error("--target requires a target id");
-const allowedArguments = new Set(["--scenario", requestedId, "--target", requestedTarget]);
-if (arguments_.some((argument) => !allowedArguments.has(argument)))
-	throw new Error(`unknown journey runner argument: ${arguments_.find((argument) => !allowedArguments.has(argument))}`);
+const unexpectedArgument = arguments_.find((argument, index) => {
+	if (argument === "--scenario" || argument === requestedId) return false;
+	if (argument === "--target") return false;
+	return arguments_[index - 1] !== "--target";
+});
+if (unexpectedArgument) throw new Error(`unknown journey runner argument: ${unexpectedArgument}`);
 
 const targetScenarios = {
 	opencode: new Set([
