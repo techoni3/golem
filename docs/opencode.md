@@ -9,6 +9,12 @@ sessions out of dispatchability. The SDK bridge accepts an addressed prompt
 only after the canonical generation, endpoint fence, and eligibility facts are
 rechecked; a rejected or stale fence is reported before `promptAsync`.
 
+When `GOLEM_RUNTIME_PROJECT_ID`, `GOLEM_CONTROL_PLANE_URL`, and
+`GOLEM_CONTROL_PLANE_TOKEN` are present, the native shim composes that adapter
+with authenticated runtime ingress. The control plane, not the shim, owns
+canonical SQLite materialization; the shim awaits no unbounded host-side work
+and falls back to its legacy registry when that optional composition is absent.
+
 Provider setup is a separate operation. It computes a redacted dry-run and
 only an explicit apply writes the marked `provider.golem` JSONC region through
 backup → temporary → atomic commit. Unknown providers, keys, and comments are
@@ -16,6 +22,13 @@ not owned by the adapter. OpenAI/GPT, Ollama cloud, and Ollama local are
 independent capability entries: a missing local daemon does not suppress the
 other two, and launchability never follows from delivery readiness. Launch
 does not run `ollama launch opencode` or mutate user configuration.
+
+The typed CLI exposes this boundary explicitly: `golem opencode:setup` prints
+a redacted dry-run by default, `golem opencode:setup --apply` makes the
+recoverable provider-region change, and `golem opencode:refresh` or
+`golem opencode:doctor` records only observed provider facts. A normal
+`golem opencode …` launch invokes the upstream `opencode` executable directly
+and never changes configuration.
 
 golem's substrate compiler renders to more than one agentic harness. Alongside
 the Claude Code adapter (`--target cc`), there is an **opencode** adapter

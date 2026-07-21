@@ -35,7 +35,7 @@ function validJsonc(text: string): boolean {
 	);
 }
 
-function managedValue(
+export function openCodeManagedProviderRegion(
 	observations: readonly OpenCodeProviderObservation[],
 ): Record<string, unknown> {
 	const providers: Record<string, unknown> = {};
@@ -114,7 +114,7 @@ export async function setupOpenCodeConfig(input: {
 	const next = mergeOpenCodeManagedRegion(
 		source,
 		OPENCODE_PROVIDER_PATH,
-		managedValue(input.observations),
+		openCodeManagedProviderRegion(input.observations),
 	);
 	const setup: OpenCodeConfigSetup = {
 		targetPath: input.path,

@@ -22,8 +22,10 @@ import type {
 } from "./types.js";
 
 export * from "./bridge.js";
+export * from "./composition.js";
 export * from "./config.js";
 export * from "./events.js";
+export * from "./probes.js";
 export * from "./providers.js";
 export * from "./types.js";
 

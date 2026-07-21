@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { LauncherResolutionError, launchPlanBridge, parseJsoncConfig, resolveLaunch, } from "@golem/launcher";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
+import { openCodeManagedProviderRegion, openCodeProviderCapabilities, probeOpenCodeProviders, setupOpenCodeConfig, } from "@golem/adapter-opencode";
+import { executeLaunch, LauncherExecutionError, LauncherResolutionError, launchPlanBridge, parseJsoncConfig, resolveLaunch, } from "@golem/launcher";
 import { CLI_EXIT_CODES, CliResolutionError, CliUsageError } from "./errors.js";
 import { conciseSelection, stableCliJson } from "./format.js";
 import { commandDefinition, commandMetadata, createProgram, } from "./registry.js";
@@ -64,6 +66,7 @@ export function parseCliInput(argv) {
         return {
             command: parsed.command,
             dryRun: false,
+            apply: false,
             explain: false,
             json: false,
             passthrough: split.passthrough,
@@ -90,12 +93,116 @@ export function parseCliInput(argv) {
             : {}),
         ...(typeof options.cwd === "string" ? { cwd: options.cwd } : {}),
         dryRun: options.dryRun === true,
+        apply: options.apply === true,
+        ...(typeof options.config === "string" ? { config: options.config } : {}),
         explain: options.explain === true,
         json: options.json === true,
         passthrough: split.passthrough,
         help: false,
     };
     return result;
+}
+function openCodeConfigPath(input) {
+    if (input.config)
+        return resolve(input.config);
+    if (process.env.OPENCODE_CONFIG_PATH)
+        return resolve(process.env.OPENCODE_CONFIG_PATH);
+    return join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "opencode", "opencode.jsonc");
+}
+function publicCapabilities(observations) {
+    return openCodeProviderCapabilities(observations).map((entry) => ({
+        id: entry.capability.capability_id,
+        backend: entry.backend,
+        qualification: entry.capability.qualification,
+        launch: entry.launchContribution?.status,
+        delivery: entry.deliveryFlow,
+    }));
+}
+async function runOpenCodeOperation(input, io) {
+    const probe = probeOpenCodeProviders();
+    if (input.command === "opencode:setup") {
+        try {
+            const setup = await setupOpenCodeConfig({
+                path: openCodeConfigPath(input),
+                observations: probe.observations,
+                apply: input.apply,
+            });
+            const result = {
+                operation: "opencode:setup",
+                setup: {
+                    targetPath: setup.targetPath,
+                    managedPath: setup.managedPath,
+                    sourceBytes: setup.sourceBytes,
+                    nextBytes: setup.nextBytes,
+                    changed: setup.changed,
+                    dryRun: setup.dryRun,
+                },
+                managedRegion: openCodeManagedProviderRegion(probe.observations),
+                probes: probe.records,
+            };
+            if (input.json)
+                output(io, stableCliJson(result));
+            else {
+                output(io, `${setup.dryRun ? "dry-run" : "applied"} OpenCode provider.golem (${setup.changed ? "changed" : "unchanged"})`);
+                output(io, JSON.stringify(result.managedRegion, null, 2));
+            }
+            return CLI_EXIT_CODES.ok;
+        }
+        catch {
+            errorOutput(io, "adapter.opencode.config.atomic_write_failed: OpenCode configuration was not changed safely");
+            return CLI_EXIT_CODES.runtime;
+        }
+    }
+    const result = {
+        operation: input.command,
+        probes: probe.records,
+        capabilities: publicCapabilities(probe.observations),
+    };
+    if (input.json)
+        output(io, stableCliJson(result));
+    else {
+        for (const capability of result.capabilities)
+            output(io, `${capability.id}: launch ${capability.launch ?? "unavailable"}; delivery ${capability.delivery}; ${capability.qualification}`);
+    }
+    return CLI_EXIT_CODES.ok;
+}
+async function launchOpenCode(result, input, io) {
+    if (input.command !== "opencode" || input.dryRun || input.json)
+        return undefined;
+    try {
+        const execution = await executeLaunch({
+            plan: result,
+            discovery: {
+                commandName: "opencode",
+                golemExecutable: process.argv[1] ?? process.execPath,
+                compatibilityShims: [],
+            },
+            adapter: {
+                cwd: resolve(input.cwd ?? process.cwd()),
+                ...(input.model ? { argv: ["--model", input.model] } : { argv: [] }),
+            },
+            resolveSecret: (reference) => process.env[reference],
+            interactive: io.isTTY ?? Boolean(process.stdin.isTTY),
+            isTTY: io.isTTY ?? Boolean(process.stdin.isTTY),
+        });
+        if (execution.kind === "dry_run")
+            return CLI_EXIT_CODES.ok;
+        const removeSignalForwarding = execution.running.installSignalForwarding();
+        try {
+            const exited = await execution.running.wait();
+            return exited.code ?? CLI_EXIT_CODES.runtime;
+        }
+        finally {
+            removeSignalForwarding();
+        }
+    }
+    catch (error) {
+        const code = error instanceof LauncherExecutionError
+            ? error.code
+            : "launcher.process.failed";
+        errorOutput(io, `${code}: OpenCode was not launched`);
+        return CLI_EXIT_CODES.runtime;
+    }
 }
 function renderFailure(result, input, io) {
     if (input.json)
@@ -227,6 +334,10 @@ export async function runCli(argv = process.argv.slice(2), io = {}) {
         return CLI_EXIT_CODES.usage;
     }
     try {
+        if (input.command === "opencode:setup" ||
+            input.command === "opencode:refresh" ||
+            input.command === "opencode:doctor")
+            return await runOpenCodeOperation(input, io);
         const result = resolveForInput(input, io);
         if (!result.ok)
             return renderFailure(result, input, io);
@@ -251,7 +362,8 @@ export async function runCli(argv = process.argv.slice(2), io = {}) {
                 trace: result.trace,
             }, input, io);
         }
-        return renderSuccess(result, input, io);
+        const launched = await launchOpenCode(result, input, io);
+        return launched ?? renderSuccess(result, input, io);
     }
     catch (error) {
         if (error instanceof CliResolutionError) {

@@ -20,7 +20,17 @@ const allowedArguments = new Set(["--scenario", requestedId, "--target", request
 if (arguments_.some((argument) => !allowedArguments.has(argument)))
 	throw new Error(`unknown journey runner argument: ${arguments_.find((argument) => !allowedArguments.has(argument))}`);
 
-const selected = requestedId ? scenarios.filter((scenario) => scenario.id === requestedId) : scenarios;
+const targetScenarios = {
+	opencode: new Set([
+		"render-mcp-closure",
+		"opencode-provider-coexistence",
+		"opencode-resume-bridge-recovery",
+	]),
+};
+if (requestedTarget && !targetScenarios[requestedTarget])
+	throw new Error(`unknown journey target: ${requestedTarget}`);
+const selected = (requestedId ? scenarios.filter((scenario) => scenario.id === requestedId) : scenarios)
+	.filter((scenario) => !requestedTarget || targetScenarios[requestedTarget].has(scenario.id));
 if (requestedId && selected.length === 0) throw new Error(`unknown journey scenario: ${requestedId}`);
 
 const results = [];

@@ -13,6 +13,7 @@
 		"build": "npm run build -w @golem/contracts && npm run build -w @golem/launcher && npm run build -w @golem/api-client && tsc -b"
 	},
 	"dependencies": {
+		"@golem/adapter-opencode": "file:../../packages/adapters/opencode",
 		"@golem/api-client": "file:../../packages/api-client",
 		"@golem/compiler": "file:../../packages/compiler",
 		"@golem/contracts": "file:../../packages/contracts",
