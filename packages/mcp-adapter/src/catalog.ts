@@ -161,9 +161,11 @@ function defined(input: Record<string, unknown>): Record<string, unknown> {
 }
 
 function projectFor(input: Record<string, unknown>): string | undefined {
-	return typeof input.project === "string"
-		? input.project
-		: trustedCaller(input).projectId;
+	// Scope selection is server-owned. Retain old tool fields for schema
+	// compatibility, but never serialize model/composition project metadata into
+	// the HTTP request: the durable bearer binding supplies the active scope.
+	void input;
+	return undefined;
 }
 
 function definition(input: {

@@ -375,6 +375,66 @@ export interface PersistenceOpenOptions {
 	readonly clock?: PersistenceClock;
 }
 
+/** Durable, server-owned policy identity. Values exposed here are opaque ids
+ * and policy facts only; the credential and browser cookie values never leave
+ * the resolver that hashes them. */
+export type PrincipalAdapter = "browser" | "bearer" | "mcp" | "internal";
+export type PrincipalRole = "operator" | "viewer";
+
+export interface PrincipalBinding {
+	readonly id: string;
+	readonly actorId: string;
+	readonly role: PrincipalRole;
+	readonly defaultProjectId: string;
+	readonly scopeProjectIds: readonly string[];
+	readonly enabled: boolean;
+	readonly version: number;
+	readonly expiresAt?: string;
+	readonly revokedAt?: string;
+}
+
+/** Server-composition input. It is intentionally unavailable to HTTP/MCP
+ * adapters, which may only resolve an already-provisioned binding. */
+export interface PrincipalBindingProvision {
+	readonly id: string;
+	readonly actorId: string;
+	readonly role: PrincipalRole;
+	readonly defaultProjectId: string;
+	readonly scopeProjectIds: readonly string[];
+	readonly enabled?: boolean;
+	readonly expiresAt?: string;
+}
+
+export interface BrowserPrincipalStorage {
+	provision(input: PrincipalBindingProvision): PrincipalBinding;
+	bindCredential(input: {
+		readonly bindingId: string;
+		readonly adapter: Exclude<PrincipalAdapter, "browser">;
+		/** Raw material is hashed before persistence and is never returned. */
+		readonly credential: string;
+		readonly expiresAt?: string;
+	}): void;
+	resolveCredential(input: {
+		readonly adapter: Exclude<PrincipalAdapter, "browser">;
+		readonly credential: string;
+		readonly now: string;
+	}): PrincipalBinding | undefined;
+	createBrowserSession(input: {
+		readonly bindingId: string;
+		/** Raw cookie and CSRF material is hashed before persistence. */
+		readonly session: string;
+		readonly csrf: string;
+		readonly expiresAt: string;
+		readonly now: string;
+	}): boolean;
+	resolveBrowserSession(input: {
+		readonly session: string;
+		readonly csrf?: string;
+		readonly now: string;
+	}): PrincipalBinding | undefined;
+	revokeBinding(id: string, now: string): boolean;
+}
+
 export interface MigrationDefinition {
 	readonly id: string;
 	readonly checksum: string;
@@ -1302,6 +1362,8 @@ export interface PersistenceWriteCapability {
 	trackerCoreStorage(): TrackerCoreStorageCapability;
 	/** Typed management records owned by the same tracker SQLite owner. */
 	managementStorage(): TrackerManagementStorageCapability;
+	/** Durable principal bindings/scopes for the control-plane auth composition. */
+	browserPrincipalStorage(): BrowserPrincipalStorage;
 	status(): PersistenceStatus;
 	close(): Promise<void>;
 }

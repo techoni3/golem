@@ -225,6 +225,12 @@ export const scenarios = [
 		regression: "typed tracker HTTP and storage-free MCP delegation diverge, lose CAS conflicts, or accept forged caller identity",
 	}),
 	registerScenario({
+		id: "browser-principal-scope-authority",
+		journey: "J6",
+		tier: "integration",
+		regression: "browser cookies, bearer/MCP callers, or internal adapters can forge principal scope, survive revocation, or disclose a foreign project",
+	}),
+	registerScenario({
 		id: "delivery-api-fence-recheck",
 		journey: "J4",
 		tier: "integration",

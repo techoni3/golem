@@ -7,14 +7,18 @@ import type {
 } from "@golem/tracker";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
-import { bearerIsValid } from "./auth.js";
+import {
+	type ActorContext,
+	type BrowserPrincipalResolver,
+	hasRequestAuthorityOverride,
+} from "./auth.js";
 import { fail } from "./errors.js";
 
 type JsonRecord = Record<string, unknown>;
 type Caller = Readonly<{
 	projectId: string;
 	actor: string;
-	sessionId?: string;
+	principal: ActorContext;
 }>;
 
 function record(value: unknown): JsonRecord {
@@ -27,84 +31,14 @@ function value(request: FastifyRequest): JsonRecord {
 	return record(request.body);
 }
 
-function headerValue(
-	request: FastifyRequest,
-	names: readonly string[],
-): string | undefined {
-	const values = names
-		.map((name) => request.headers[name])
-		.filter(
-			(candidate): candidate is string =>
-				typeof candidate === "string" && candidate.trim().length > 0,
-		)
-		.map((candidate) => candidate.trim());
-	if (new Set(values).size > 1) throw new Error("caller.identity.ambiguous");
-	return values[0];
-}
-
-function caller(
-	request: FastifyRequest,
-	reply: FastifyReply,
-): Caller | undefined {
-	try {
-		const projectId = headerValue(request, [
-			"x-golem-caller-project",
-			"x-golem-project-id",
-		]);
-		const actor = headerValue(request, [
-			"x-golem-caller-actor",
-			"x-golem-actor",
-		]);
-		const sessionId = headerValue(request, [
-			"x-golem-caller-session",
-			"x-golem-session-id",
-		]);
-		if (!projectId || !actor) {
-			fail(
-				request,
-				reply,
-				403,
-				"caller.identity.required",
-				"an explicit trusted caller identity is required",
-			);
-			return undefined;
-		}
-		return Object.freeze({
-			projectId,
-			actor,
-			...(sessionId ? { sessionId } : {}),
-		});
-	} catch (_error) {
-		fail(
-			request,
-			reply,
-			403,
-			"caller.identity.ambiguous",
-			"caller identity is ambiguous",
-		);
-		return undefined;
-	}
-}
-
-function rejectForgedIdentity(
-	input: JsonRecord,
-	callerValue: Caller,
-): string | undefined {
-	for (const key of [
-		"actor",
-		"created_by",
-		"createdBy",
-		"session_id",
-		"sessionId",
-	]) {
-		if (key in input)
-			return "caller identity is process-composed and cannot be supplied in request JSON";
-	}
-	for (const key of ["project_id", "projectId"]) {
-		if (key in input && input[key] !== callerValue.projectId)
-			return "request project does not match the trusted caller project";
-	}
-	return undefined;
+function rejectForgedIdentity(input: JsonRecord): string | undefined {
+	return Object.keys(input).some((key) =>
+		/^(?:actor|created_?by|role|project(?:_?id)?|session(?:_?id)?|bearer|authorization|owner(?:_?fence|_?id)?|fence|approval|storage|principal|scope|sender_?id|worker_?id)$/iu.test(
+			key,
+		),
+	)
+		? "request authority is server-owned"
+		: undefined;
 }
 
 function command(
@@ -205,7 +139,7 @@ type ClaimRecord = ReturnType<TrackerServices["delivery"]["claim"]>[number];
  */
 export function registerApiV1Routes(options: {
 	readonly app: FastifyInstance;
-	readonly token: string;
+	readonly principal: BrowserPrincipalResolver;
 	readonly core: TrackerCoreServices;
 	readonly services: TrackerServices;
 }): void {
@@ -220,31 +154,79 @@ export function registerApiV1Routes(options: {
 		request: FastifyRequest,
 		reply: FastifyReply,
 	): Caller | undefined => {
-		if (!bearerIsValid(request, options.token)) {
+		if (hasRequestAuthorityOverride(request)) {
+			fail(
+				request,
+				reply,
+				403,
+				"browser.forbidden",
+				"request authority is server-owned",
+			);
+			return undefined;
+		}
+		const action = request.method === "GET" ? "read" : "mutate";
+		const context = options.principal.resolve(request, {
+			action,
+			allowBrowser: true,
+			allowBearer: true,
+		});
+		if (!context) {
 			fail(
 				request,
 				reply,
 				401,
-				"auth.invalid",
-				"a valid bearer token is required",
+				"browser.auth.required",
+				"an authenticated principal binding is required",
 			);
 			return undefined;
 		}
-		return caller(request, reply);
+		if (!options.principal.policy.allows(context, action)) {
+			fail(
+				request,
+				reply,
+				403,
+				"browser.forbidden",
+				"the authenticated principal is not authorized",
+			);
+			return undefined;
+		}
+		return Object.freeze({
+			projectId: context.defaultProjectId,
+			actor: context.actorId,
+			principal: context,
+		});
 	};
 	const withIdentity = (
 		request: FastifyRequest,
 		reply: FastifyReply,
-		callerValue: Caller,
+		_callerValue: Caller,
 	): JsonRecord | undefined => {
 		const input = value(request);
-		const forged = rejectForgedIdentity(input, callerValue);
+		const forged = rejectForgedIdentity(input);
 		if (forged) {
 			fail(request, reply, 403, "caller.identity.spoofed", forged);
 			return undefined;
 		}
 		return input;
 	};
+	/**
+	 * A ticket path parameter is never authority. Resolve it through the
+	 * canonical compatibility facade and deliberately collapse a foreign target
+	 * into the same result as an absent one before a command can run.
+	 */
+	const ticketInCallerScope = (callerValue: Caller, id: string): boolean => {
+		const ticket = options.core.compatibility.getTicket(id);
+		return (
+			ticket !== undefined &&
+			typeof ticket.project_id === "string" &&
+			options.principal.policy.allowsProject(
+				callerValue.principal,
+				ticket.project_id,
+			)
+		);
+	};
+	const ticketNotFound = (request: FastifyRequest, reply: FastifyReply) =>
+		fail(request, reply, 404, "tracker.not_found", "ticket was not found");
 
 	options.app.get("/api/v1/tracker/tickets", async (request, reply) => {
 		const callerValue = guard(request, reply);
@@ -470,15 +452,8 @@ export function registerApiV1Routes(options: {
 			if (!input) return;
 			try {
 				const id = (request.params as { id: string }).id;
-				const ticket = options.core.compatibility.getTicket(id);
-				if (!ticket || ticket.project_id !== callerValue.projectId)
-					return fail(
-						request,
-						reply,
-						404,
-						"tracker.not_found",
-						"ticket was not found",
-					);
+				if (!ticketInCallerScope(callerValue, id))
+					return ticketNotFound(request, reply);
 				const suppliedAnchor = record(input.anchor);
 				const anchor =
 					Object.keys(suppliedAnchor).length > 0
@@ -521,6 +496,8 @@ export function registerApiV1Routes(options: {
 			if (!input) return;
 			try {
 				const params = request.params as { id: string; commentId: string };
+				if (!ticketInCallerScope(callerValue, params.id))
+					return ticketNotFound(request, reply);
 				return reply.code(201).send(
 					command(
 						options.core.compatibility.replyComment({
@@ -546,15 +523,8 @@ export function registerApiV1Routes(options: {
 			if (!input) return;
 			try {
 				const params = request.params as { id: string; commentId: string };
-				const ticket = options.core.compatibility.getTicket(params.id);
-				if (!ticket || ticket.project_id !== callerValue.projectId)
-					return fail(
-						request,
-						reply,
-						404,
-						"tracker.not_found",
-						"ticket was not found",
-					);
+				if (!ticketInCallerScope(callerValue, params.id))
+					return ticketNotFound(request, reply);
 				return reply.send(
 					command(
 						options.core.compatibility.updateComment({
@@ -808,7 +778,7 @@ export function registerApiV1Routes(options: {
 				name:
 					(input.name as string) ||
 					`mcp:${callerValue.actor}:${input.topic as string}`,
-				recipientId: callerValue.sessionId || callerValue.actor,
+				recipientId: callerValue.actor,
 				topic: input.topic as string,
 				...(Array.isArray(input.classes)
 					? { classes: input.classes as never }
@@ -825,7 +795,7 @@ export function registerApiV1Routes(options: {
 	options.app.get("/api/v1/subscriptions", async (request, reply) => {
 		const callerValue = guard(request, reply);
 		if (!callerValue) return;
-		const recipientId = callerValue.sessionId || callerValue.actor;
+		const recipientId = callerValue.actor;
 		return reply.send(
 			page(
 				[...subscriptions.values()].filter(
@@ -842,7 +812,7 @@ export function registerApiV1Routes(options: {
 			if (!callerValue) return;
 			const input = withIdentity(request, reply, callerValue);
 			if (!input) return;
-			const recipientId = callerValue.sessionId || callerValue.actor;
+			const recipientId = callerValue.actor;
 			const subscription = [...subscriptions.values()].find(
 				(candidate) =>
 					candidate.recipientId === recipientId &&

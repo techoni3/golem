@@ -10,6 +10,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import fastify from "fastify";
 
 import {
+	createBrowserPrincipalResolver,
 	composeControlPlaneTrackerCoreServices,
 	registerTrackerCoreCompatibilityRoutes,
 } from "../../apps/control-plane/dist/index.js";
@@ -175,6 +176,8 @@ test("tracker core compatibility journey", async () => {
 	const clock = fixtureClock();
 	const initialHome = process.env.GOLEM_HOME;
 	const initialXdg = process.env.XDG_CONFIG_HOME;
+	const initialPrincipalCredential =
+		process.env.GOLEM_CONTROL_PLANE_PRINCIPAL_CREDENTIAL;
 	let writer;
 	let app;
 	let legacy;
@@ -195,9 +198,9 @@ test("tracker core compatibility journey", async () => {
 		try {
 			const freshStatus = freshOwner.status();
 			assert.equal(freshStatus.tracker.baseline, "managed", "a fresh tracker is managed on first owner open");
-			assert.equal(freshStatus.tracker.userVersion, 5, "a fresh tracker reaches the canonical schema version on first owner open");
+			assert.equal(freshStatus.tracker.userVersion, 6, "a fresh tracker reaches the canonical schema version on first owner open");
 			const freshTables = sqliteTableNames(freshTrackerPath);
-			for (const table of ["golem_migrations", "tickets", "comments", "comment_dispatches", "streams", "links", "events"]) {
+			for (const table of ["golem_migrations", "tickets", "comments", "comment_dispatches", "browser_principal_bindings", "browser_principal_scopes", "browser_principal_credentials", "browser_principal_sessions", "streams", "links", "events"]) {
 				assert.equal(freshTables.includes(table), true, `fresh managed tracker contains canonical ${table} table`);
 			}
 			const freshPlan = freshOwner.plan("tracker");
@@ -279,6 +282,7 @@ test("tracker core compatibility journey", async () => {
 		const applied = writer.apply("tracker", plan.planHash);
 		assert(applied.applied.includes("tracker/003-live-tracker-core"), "explicit migration creates the canonical live tracker tables");
 		assert(applied.applied.includes("tracker/005-comment-dispatches"), "explicit migration records the canonical comment-dispatch relation");
+		assert(applied.applied.includes("tracker/006-browser-principal-policy"), "explicit migration adds durable opaque principal bindings without rewriting legacy tracker rows");
 		const afterApply = legacyCounts(home.trackerDb);
 		assert.deepEqual(
 			{
@@ -541,12 +545,35 @@ test("tracker core compatibility journey", async () => {
 		assert.doesNotThrow(() => services.tickets.get(processCreates[0].id), "typed read remains valid after child connections close");
 		assert.doesNotThrow(() => legacy.createTicket({ project_id: "process-concurrency", kind: "fix", title: "post-child probe", created_by: "session:probe", priority: "P1" }), "typed delegate remains writable after child connections close");
 
+		const principalCredential = "tracker-core-bound-principal-000000000000";
+		const principals = writer.browserPrincipalStorage();
+		principals.provision({
+			id: "principal_tracker_core_journey",
+			actorId: "session:agent",
+			role: "operator",
+			defaultProjectId: "project-core",
+			scopeProjectIds: ["project-core"],
+		});
+		principals.bindCredential({
+			bindingId: "principal_tracker_core_journey",
+			adapter: "bearer",
+			credential: principalCredential,
+		});
+		const principalResolver = createBrowserPrincipalResolver({
+			storage: principals,
+			clock: { now: () => Date.parse(clock.now()) },
+		});
 		app = fastify();
-		registerTrackerCoreCompatibilityRoutes({ app, tracker: services.compatibility });
+		registerTrackerCoreCompatibilityRoutes({
+			app,
+			tracker: services.compatibility,
+			principal: principalResolver,
+		});
 		const address = await app.listen({ host: "127.0.0.1", port: 0 });
 		fs.writeFileSync(path.join(home.root, "dashboard.json"), JSON.stringify({ url: address }));
 		process.env.GOLEM_HOME = home.root;
 		process.env.XDG_CONFIG_HOME = path.join(home.root, "xdg");
+		process.env.GOLEM_CONTROL_PLANE_PRINCIPAL_CREDENTIAL = principalCredential;
 		const client = await import(`${pathToFileURL(trackerClientPath).href}?tracker-core=${Date.now()}`);
 
 		const created = await client.createTicket({
@@ -599,8 +626,11 @@ test("tracker core compatibility journey", async () => {
 			Array.from({ length: 8 }, (_, index) =>
 				fetch(`${address}/api/tickets`, {
 					method: "POST",
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify({ project_id: "project-core", kind: "fix", title: `parallel-${index}`, created_by: "session:agent", priority: "P1" }),
+					headers: {
+						authorization: `Bearer ${principalCredential}`,
+						"content-type": "application/json",
+					},
+					body: JSON.stringify({ kind: "fix", title: `parallel-${index}`, priority: "P1" }),
 				}).then((response) => response.json()),
 			),
 		);
@@ -609,8 +639,11 @@ test("tracker core compatibility journey", async () => {
 		assert.deepEqual(parallelNumbers, Array.from({ length: 8 }, (_, index) => parallelNumbers[0] + index), "parallel display ids are monotonic without gaps from concurrent requests");
 		const linkResponse = await fetch(`${address}/api/tickets/${created.id}/links`, {
 			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ target_ticket_id: parallel[0].id, relation: "relates", actor: "session:agent" }),
+			headers: {
+				authorization: `Bearer ${principalCredential}`,
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({ target_ticket_id: parallel[0].id, relation: "relates" }),
 		});
 		assert.equal(linkResponse.status, 200, "parent/link compatibility route persists a typed link");
 		assert.equal(services.tickets.get(created.id).links.length, 1, "typed ticket projection includes the legacy-compatible link");
@@ -619,14 +652,20 @@ test("tracker core compatibility journey", async () => {
 
 		const revisionConflict = await fetch(`${address}/api/tickets/${created.id}`, {
 			method: "PATCH",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ title: "stale", expected_revision: 1, actor: "session:agent" }),
+			headers: {
+				authorization: `Bearer ${principalCredential}`,
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({ title: "stale", expected_revision: 1 }),
 		});
 		assert.equal(revisionConflict.status, 409, "bad ticket revision returns the stable conflict status");
 		const illegalPhase = await fetch(`${address}/api/tickets/${created.id}/transition`, {
 			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ phase: "built", actor: "session:agent" }),
+			headers: {
+				authorization: `Bearer ${principalCredential}`,
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({ phase: "built" }),
 		});
 		assert.equal(illegalPhase.status, 400, "phase artifact/legality failures stay at the typed service boundary");
 		const artifactBypass = services.tickets.get(created.id).ticket;
@@ -735,6 +774,11 @@ test("tracker core compatibility journey", async () => {
 		else process.env.GOLEM_HOME = initialHome;
 		if (initialXdg === undefined) delete process.env.XDG_CONFIG_HOME;
 		else process.env.XDG_CONFIG_HOME = initialXdg;
+		if (initialPrincipalCredential === undefined)
+			delete process.env.GOLEM_CONTROL_PLANE_PRINCIPAL_CREDENTIAL;
+		else
+			process.env.GOLEM_CONTROL_PLANE_PRINCIPAL_CREDENTIAL =
+				initialPrincipalCredential;
 		home.cleanup();
 		assert.equal(fs.existsSync(home.root), false, "tracker core journey cleans its temporary home");
 	}

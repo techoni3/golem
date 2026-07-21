@@ -5,7 +5,10 @@ import {
 } from "@golem/tracker";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { bearerIsValid } from "./auth.js";
+import {
+	type BrowserPrincipalResolver,
+	hasRequestAuthorityOverride,
+} from "./auth.js";
 import { fail, sendValidated } from "./errors.js";
 
 const responseSchema = z
@@ -35,11 +38,45 @@ function jsonSchema(value: z.ZodType): Record<string, unknown> {
 function authorized(
 	request: FastifyRequest,
 	reply: FastifyReply,
-	token: string,
+	principal: BrowserPrincipalResolver,
 ): boolean {
-	if (bearerIsValid(request, token)) return true;
-	fail(request, reply, 401, "auth.invalid", "a valid bearer token is required");
-	return false;
+	if (hasRequestAuthorityOverride(request)) {
+		fail(
+			request,
+			reply,
+			403,
+			"browser.forbidden",
+			"request authority is server-owned",
+		);
+		return false;
+	}
+	const action = request.method === "GET" ? "read" : "mutate";
+	const context = principal.resolve(request, {
+		action,
+		allowBrowser: true,
+		allowBearer: true,
+	});
+	if (!context) {
+		fail(
+			request,
+			reply,
+			401,
+			"browser.auth.required",
+			"an authenticated principal binding is required",
+		);
+		return false;
+	}
+	if (!principal.policy.allows(context, action)) {
+		fail(
+			request,
+			reply,
+			403,
+			"browser.forbidden",
+			"the authenticated principal is not authorized",
+		);
+		return false;
+	}
+	return true;
 }
 
 function managementFailure(
@@ -107,7 +144,7 @@ function field(input: Record<string, unknown>, name: string): string {
 
 export function registerManagementRoutes(options: {
 	readonly app: FastifyInstance;
-	readonly token: string;
+	readonly principal: BrowserPrincipalResolver;
 	readonly management: TrackerManagementServices;
 }): void {
 	const schema = {
@@ -138,7 +175,7 @@ export function registerManagementRoutes(options: {
 			route,
 			{ schema: routeSchema },
 			async (request, reply) => {
-				if (!authorized(request, reply, options.token)) return;
+				if (!authorized(request, reply, options.principal)) return;
 				try {
 					return await handler(request, reply);
 				} catch (error) {

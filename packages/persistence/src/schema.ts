@@ -5,7 +5,7 @@ import type { DatabaseScope, MigrationDefinition } from "./types.js";
 
 export const busyTimeoutMs = 2_500;
 export const latestRuntimeVersion = 1;
-export const latestTrackerVersion = 5;
+export const latestTrackerVersion = 6;
 
 function migrationChecksum(value: string): string {
 	return crypto.createHash("sha256").update(value).digest("hex");
@@ -616,7 +616,7 @@ CREATE INDEX management_ideas_project_status ON management_ideas(project_id, sta
 CREATE INDEX management_operations_project_created ON management_operations(project_id, created_at);
 CREATE INDEX management_audit_project_created ON management_audit(project_id, created_at);
 `,
-		),
+	),
 	migration(
 		"tracker/005-comment-dispatches",
 		`
@@ -635,6 +635,47 @@ CREATE TABLE IF NOT EXISTS comment_dispatches (
 CREATE INDEX IF NOT EXISTS idx_comment_dispatches_comment ON comment_dispatches(comment_id);
 CREATE INDEX IF NOT EXISTS idx_comment_dispatches_ticket_session_status ON comment_dispatches(ticket_id, session_id, status);
 CREATE INDEX IF NOT EXISTS idx_comment_dispatches_pending ON comment_dispatches(status) WHERE status IN ('pending', 'delivered');
+`,
+	),
+	migration(
+		"tracker/006-browser-principal-policy",
+		`
+CREATE TABLE browser_principal_bindings (
+  id TEXT PRIMARY KEY CHECK(length(id) >= 8),
+  actor_id TEXT NOT NULL CHECK(length(trim(actor_id)) > 0),
+  role TEXT NOT NULL CHECK(role IN ('operator', 'viewer')),
+  default_project_id TEXT NOT NULL CHECK(length(trim(default_project_id)) > 0),
+  enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+  version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+  expires_at TEXT,
+  revoked_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE browser_principal_scopes (
+  binding_id TEXT NOT NULL REFERENCES browser_principal_bindings(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL CHECK(length(trim(project_id)) > 0),
+  PRIMARY KEY(binding_id, project_id)
+);
+CREATE TABLE browser_principal_credentials (
+  adapter TEXT NOT NULL CHECK(adapter IN ('bearer', 'mcp', 'internal')),
+  credential_digest TEXT NOT NULL CHECK(length(credential_digest) = 64),
+  binding_id TEXT NOT NULL REFERENCES browser_principal_bindings(id) ON DELETE CASCADE,
+  expires_at TEXT,
+  revoked_at TEXT,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(adapter, credential_digest)
+);
+CREATE TABLE browser_principal_sessions (
+  session_digest TEXT PRIMARY KEY CHECK(length(session_digest) = 64),
+  csrf_digest TEXT NOT NULL CHECK(length(csrf_digest) = 64),
+  binding_id TEXT NOT NULL REFERENCES browser_principal_bindings(id) ON DELETE CASCADE,
+  expires_at TEXT NOT NULL,
+  revoked_at TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX browser_principal_scope_project ON browser_principal_scopes(project_id, binding_id);
+CREATE INDEX browser_principal_sessions_binding ON browser_principal_sessions(binding_id, expires_at);
 `,
 	),
 ];

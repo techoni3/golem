@@ -11,8 +11,8 @@ import type {
 import Fastify from "fastify";
 import { registerApiV1Routes } from "./api-v1.js";
 import {
-	type BrowserSessionAuthority,
-	createBrowserSessionAuthority,
+	type BrowserPrincipalResolver,
+	createFailClosedBrowserPrincipalResolver,
 	isExpectedHost,
 } from "./auth.js";
 import {
@@ -53,8 +53,8 @@ export interface ControlPlaneLifecycleOptions {
 	/** Optional until the Wave-5 runtime composition becomes the service main. */
 	readonly runtimeIngress?: RuntimeIngressPort;
 	readonly runtimeHealth?: RuntimeHealthPort;
-	/** Injectable only for bounded composition and deterministic journey clocks. */
-	readonly browserSessions?: BrowserSessionAuthority;
+	/** Server-owned durable authority. Omission is deliberately fail-closed. */
+	readonly principalResolver?: BrowserPrincipalResolver;
 	readonly replayWindowSize?: number;
 	readonly invalidResponseForTest?: boolean;
 	/** Typed management capability composed by the application owner. */
@@ -100,7 +100,8 @@ export async function startControlPlane(
 		options.replay ?? new BoundedReplayWindow(options.replayWindowSize ?? 32);
 	const legacyCompatibility =
 		options.legacyCompatibility ?? createLegacyCompatibilitySource();
-	const sessions = options.browserSessions ?? createBrowserSessionAuthority();
+	const principal =
+		options.principalResolver ?? createFailClosedBrowserPrincipalResolver();
 	const sockets = new Set<ControlPlaneSocket>();
 	const app = Fastify({
 		logger: {
@@ -140,7 +141,7 @@ export async function startControlPlane(
 				: {}),
 			replay,
 			legacy: legacyCompatibility,
-			sessions,
+			principal,
 			...(options.runtimeIngress
 				? { runtimeIngress: options.runtimeIngress }
 				: {}),
@@ -155,29 +156,29 @@ export async function startControlPlane(
 			registerTrackerCoreCompatibilityRoutes({
 				app,
 				tracker: options.trackerCore.compatibility,
+				principal,
 			});
 		}
 		if (options.trackerCore && options.trackerServices)
 			registerApiV1Routes({
 				app,
-				token: options.token,
+				principal,
 				core: options.trackerCore,
 				services: options.trackerServices,
 			});
 		if (options.management)
 			registerManagementRoutes({
 				app,
-				token: options.token,
+				principal,
 				management: options.management,
 			});
 		closeTypedReplay = registerWsReplay({
 			app,
 			instanceId,
-			token: options.token,
+			principal,
 			replay,
 			read: (stream: ControlPlaneStream) => projection.read(stream),
 			revision: (stream: ControlPlaneStream) => projection.revision(stream),
-			sessions,
 			sockets,
 		});
 		closeLegacyWebSocket = registerLegacyWebSocket({
