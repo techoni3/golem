@@ -826,6 +826,25 @@ async function cmdMigrateHome(args) {
   log(`  (or restore from backup: tar -xzf ${backupPath} -C ${home})`);
 }
 
+/**
+ * Migration apply intentionally stays a one-way bridge to @golem/compat. The
+ * root CLI owns process execution; the compat package owns all legacy reads,
+ * exact plan validation, backup, canonical writes, and rollback semantics.
+ */
+function cmdMigrate(args) {
+  const entry = resolve(GOLEM_ROOT, 'packages', 'compat', 'bin', 'migration-plan.mjs');
+  if (!existsSync(entry)) {
+    fatal(1, 'migration CLI is unavailable in this installation; reinstall a build containing @golem/compat');
+  }
+  const result = spawnSync(process.execPath, [entry, ...args], {
+    cwd: GOLEM_ROOT,
+    stdio: 'inherit',
+    env: process.env,
+  });
+  if (result.error) fatal(1, `migration command failed to start: ${result.error.message}`);
+  if (typeof result.status === 'number' && result.status !== 0) process.exitCode = result.status;
+}
+
 const ADAPTERS = { cc: ccAdapter, codex: codexAdapter, pi: piAdapter };
 const KNOWN_TARGETS = ['cc', 'cc-marketplace', 'opencode', 'codex', 'pi'];
 
@@ -1488,6 +1507,10 @@ Run:
   sessions dedup [--apply]
                          Dry-run named-session duplicate cleanup; --apply marks
                          stale duplicate rows ended_at under sessions.json.lock.
+  migrate <plan|apply|status|rollback> --home <dir> [--plan-hash <sha256>] [--json]
+                         Audit first, then apply only the exact plan hash. Apply
+                         backs up sources, writes canonical state separately, and
+                         emits a generated read-only compatibility projection.
   migrate-home         One-time move of ~/.config/golem -> ~/.golem (ADR-4).
                        Backs up first, stops the dashboard, moves, symlinks
                        the old path to the new one, restarts. Explicit only —
@@ -1606,6 +1629,9 @@ async function main() {
       break;
     case 'migrate-home':
       await cmdMigrateHome(rest);
+      break;
+    case 'migrate':
+      cmdMigrate(rest);
       break;
     case 'sync':
       await cmdSync(rest);

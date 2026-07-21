@@ -1,11 +1,11 @@
 # REPO-MAP.md
-> Last verified: 2026-07-21 @ 63e3ec7 — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-21 @ be5f123 — maintained via golem:docs-maintenance.
 
 ## Structure
 
 - `apps/` holds private composition (CLI, Fastify control plane, typed shell); `dashboard/web` is the legacy island.
-- `packages/` holds contracts, domain, SQLite persistence, runtime/tracker, launcher, compat, compiler, MCP, generated API client, testkit, and UI. Sessions live in `packages/runtime/src/sessions/` + `packages/persistence/src/session-repository.ts`; endpoint fences in `packages/runtime/src/endpoints/` + `packages/persistence/src/endpoint-repository.ts`; runtime projections in `packages/runtime/src/projections.ts` over the typed `packages/persistence/src/runtime-projection-repository.ts` capability.
-- `apps/control-plane/src/api-v1.ts` is the authenticated typed tracker/delivery/bus/subscriptions plugin over composed capabilities; `tracker-core-routes.ts` is the legacy-name delegate. `api-client/src/generated/openapi.ts` is generated; MCP injects caller headers without storage access.
+- `packages/` holds contracts, persistence, runtime/tracker, compat, compiler, MCP, API client, testkit, and UI. `compat/src/apply/` is the sole legacy-home apply path and uses the narrow `persistence/migration-compat` target.
+- `apps/control-plane/src/api-v1.ts` is the authenticated tracker/delivery/bus API; `tracker-core-routes.ts` is its legacy delegate. Generated API client and MCP are storage-free.
 - `substrate/` is render source; `plugin/` and `dashboard/dist/` are generated. Legacy dashboard root is authoritative; typed static output is parallel.
 
 ## Invariants and flow
@@ -14,16 +14,16 @@
 - One npm11 lock; `packages/persistence` is the sole SQLite writer. Producers spool; the owner handles recovery/quarantine/replay.
 - Tracker owns durable delivery and typed work-item/phase/comment/link/stream services. Exceptional close is server-composed `{id, expectedRevision, reason}`.
 - Launcher owns fail-closed writes and immutable LaunchPlan launchability/delivery facts; the CLI registry owns parser/help/metadata.
-- Control plane owns REST/WS; bearer is CLI/MCP-only. Browser bootstrap is same-origin/CSRF-protected; `api-client` owns generated validation/resync. Runtime reads are authenticated at `/api/v1/runtime/{live,history,diagnostics}` and typed WS.
+- Control plane owns REST/WS; bearer is CLI/MCP-only and browser reads are same-origin/CSRF-protected. API client owns validation/resync.
 - Project identity uses canonical Git paths; sessions are project-first with immutable generations, scoped aliases, provenance, terminal monotonicity, and deterministic outbox effects.
-- Runtime projections read canonical SQLite rows only: live excludes terminal generations, history retains lifecycle facts, diagnostics are recursively redacted/bounded, observation stays separate from actor activity, and reads never mutate state. HTTP/WS share revision/cursor facts.
+- Runtime projections read canonical rows only: live excludes terminal generations; diagnostics are redacted/bounded; reads never mutate; HTTP/WS share revision/cursor facts.
+- Migration re-audits an exact plan hash under a home lock, refuses review/quarantine before mutation, snapshots source + canonical state, and exports a generated read-only projection. Rollback restores the canonical snapshot.
 - Endpoint claims are generation/route scoped: fences gate heartbeat, health, readiness, capability, delivery, and release; eligibility returns stable redacted facts and registration alone never qualifies delivery.
-- Typed management (`packages/tracker/src/management.ts`) owns roles, gates, ideas, assets, communications, controls, audit, and outbox; routes cannot open SQLite, mutate runtime lifecycle, or deliver native transport.
-- Typed API mutators require bearer plus explicit caller project/session/actor headers; request JSON cannot forge identity. Delivery claim preparation rechecks generation/fence/readiness/capability before any adapter boundary.
+- Typed management owns roles, gates, ideas, assets, communications, controls, audit, and outbox; routes cannot open SQLite or mutate runtime lifecycle.
+- Typed mutators require caller project/session/actor headers; delivery rechecks generation/fence/readiness/capability before transport.
 
 ## Checks and gotchas
 
 - Tests use disposable homes; never mutate user state, shared ports, Docker, or renders. Loopback denial is `UNMET`.
 - `mcp/channel` is the GOL-29 render entrypoint; do not hand-edit renders or bypass boundaries.
-- Node24 gates cover build/typecheck, boundaries, lint, named journeys, and `git diff --check`.
-- Gates cover build/typecheck, boundaries, lint, render, journeys, and `git diff --check`.
+- Node24 gates: build/typecheck, boundaries, lint, named journeys, render, and `git diff --check`.

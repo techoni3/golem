@@ -1,4 +1,16 @@
 export {
+	applyLegacyMigration,
+	MigrationApplyError,
+	migrationStatus,
+	rollbackLegacyMigration,
+} from "./apply/service.js";
+export type {
+	ApplyMigrationOptions,
+	ApplyMigrationResult,
+	MigrationApplyStatus,
+	MigrationStatus,
+} from "./apply/types.js";
+export {
 	auditLegacyHome,
 	formatAuditPlanText,
 	stableAuditPlanJson,
@@ -12,3 +24,4 @@ export type {
 	AuditSource,
 	AuditSourceStatus,
 } from "./plan/types.js";
+export { redactDiagnosticText } from "./redact/redact.js";

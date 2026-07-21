@@ -214,7 +214,12 @@ export async function runMigrationPlanReplay() {
 		assert(hasAction(currentFirst, "attach", "compat.session.strong_alias"), "strong project/session/harness evidence must attach");
 		assert(hasAction(currentFirst, "retire", "compat.session.terminal_history"), "terminal evidence must remain history, not a live auto-merge");
 		assert(hasAction(currentFirst, "review", "compat.session.weak_evidence"), "name/PID-only evidence must remain review-only");
-		assert(hasAction(currentFirst, "ignore", "compat.config.unknown_keys_preserved"), "unknown config regions must remain preserved for a later managed merge");
+		for (const source of ["config", "channels", "journals"]) {
+			assert(
+				hasAction(currentFirst, "review", `compat.${source}.typed_importer_required`),
+				`present ${source} source must remain an explicit typed-importer review gate`,
+			);
+		}
 		assert.equal(stableAuditPlanJson(currentFirst).includes("fixture-secret-must-not-appear"), false, "config secret values must not appear in plan JSON");
 		assert.equal(stableAuditPlanJson(currentFirst).includes("channel-secret-value"), false, "state secret values must not appear in plan JSON");
 		assert(currentFirst.sources.some((source) => source.id === "tracker" && source.status === "present" && source.fingerprint && source.details?.format === "sqlite"), "real SQLite metadata must be fingerprinted and header-inspected without opening a writable database");

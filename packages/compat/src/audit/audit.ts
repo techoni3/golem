@@ -25,6 +25,6 @@ export function formatAuditPlanText(plan: AuditPlan): string {
 		`backup: ${plan.requirements.backup.estimated_source_bytes} source bytes; minimum free: ${plan.requirements.disk.minimum_free_bytes}`,
 		counts ? `reasons:\n${counts}` : "reasons: none",
 		"No source files, databases, render targets, or configuration were modified.",
-		"Apply/import is intentionally unavailable in this wave.",
+		"To apply: golem migrate apply --home <GOLEM_HOME> --plan-hash <hash>. Apply re-audits this exact hash and never makes legacy sources writers.",
 	].join("\n")}\n`;
 }

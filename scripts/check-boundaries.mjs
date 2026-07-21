@@ -134,6 +134,12 @@ function forbiddenRule(owner, specifier) {
 		return "persistence-writer-constructor";
 	}
 	if (
+		specifier === "@golem/persistence/migration-compat" &&
+		owner !== "@golem/compat"
+	) {
+		return "persistence-migration-composition-only";
+	}
+	if (
 		owner !== "@golem/openapi-codegen" &&
 		/(?:^|\/)tools(?:\/|$)/u.test(specifier)
 	) {
