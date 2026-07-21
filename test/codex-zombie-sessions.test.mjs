@@ -120,6 +120,9 @@ fs.writeFileSync(codexSupervisorsJsonPath(), JSON.stringify({
     health: { state: 'dead' },
   }],
 }, null, 2));
+// Registry row under the RAW thread id (what ordinary hooks write) — this is
+// the live dual-card failure mode; shadow must delete it from the map.
+await upsertSessionRegistration({ sessionId: thread, cwd: project, harness: 'codex', model });
 upsertSessionFact({
   canonical_id: canonical,
   harness: 'codex',
@@ -139,8 +142,51 @@ upsertSessionFact({
   model,
 });
 native = await readNativeSessions(() => true, []);
-assert.equal(native.some((r) => r.session_id === thread), false, 'raw twin shadowed without healthy lease');
+assert.equal(native.some((r) => r.session_id === thread), false, 'raw twin registry+fact shadowed without healthy lease');
 assert.equal(native.some((r) => r.session_id === canonical && r.alive), false, 'dead managed canonical not alive');
+
+// Live managed pair: only canonical card
+const liveCanon = 'codex-managed-live';
+const liveThread = 'thread-raw-live';
+fs.writeFileSync(codexSupervisorsJsonPath(), JSON.stringify({
+  version: 1,
+  supervisors: [{
+    canonical_id: liveCanon,
+    thread_id: liveThread,
+    thread_name: 'testing',
+    cwd: project,
+    health: { state: 'healthy' },
+  }],
+}, null, 2));
+await upsertSessionRegistration({ sessionId: liveThread, cwd: project, harness: 'codex', model });
+await upsertSessionRegistration({ sessionId: liveCanon, cwd: project, harness: 'codex', model });
+upsertSessionFact({
+  canonical_id: liveCanon,
+  harness: 'codex',
+  locator: { raw_session_id: liveThread },
+  project_path: project,
+  name: 'testing',
+  status: 'idle',
+  model,
+});
+upsertSessionFact({
+  canonical_id: liveThread,
+  harness: 'codex',
+  locator: { raw_session_id: liveThread },
+  project_path: project,
+  status: 'idle',
+  model,
+});
+native = await readNativeSessions(() => true, [{
+  session_id: liveCanon,
+  endpoint_health: 'healthy',
+  kind: 'codex-supervisor',
+  delivery_ready: true,
+}]);
+assert.equal(native.filter((r) => r.session_id === liveCanon || r.session_id === liveThread).length, 1,
+  'live managed pair yields exactly one card');
+assert.equal(native.find((r) => r.session_id === liveCanon)?.alive, true, 'canonical live');
+assert.equal(native.some((r) => r.session_id === liveThread), false, 'raw twin absent when live');
 
 // managed bind writes under canonical id
 runHook('session-start', {

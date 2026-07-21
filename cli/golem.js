@@ -434,18 +434,25 @@ function keptSessionLabel(row, reason) {
   return `${row.session_id || '(no session_id)'} (${reason}${row.model ? `, model=${row.model}` : ''})`;
 }
 
+function sessionProjectScope(row) {
+  return row?.project_path || row?.project_id || row?.cwd || '';
+}
+
 function sessionsDedupPlan(sessions) {
+  // Scope by project so same role name in different projects never collapses.
   const groups = new Map();
   sessions.forEach((row, index) => {
     const name = typeof row?.name === 'string' ? row.name.trim() : '';
     if (!name) return;
-    if (!groups.has(name)) groups.set(name, []);
-    groups.get(name).push({ row, index });
+    const key = `${sessionProjectScope(row)}\0${name}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ row, index });
   });
 
   const plans = [];
-  for (const [name, rows] of groups) {
+  for (const [key, rows] of groups) {
     if (rows.length < 2) continue;
+    const name = key.split('\0').slice(1).join('\0') || key;
     const live = rows.filter(({ row }) => isLiveSessionRow(row));
     const candidates = live.length ? live : rows;
     const keep = candidates
@@ -457,39 +464,67 @@ function sessionsDedupPlan(sessions) {
   return plans;
 }
 
-/** Stale unnamed Codex rows with no activity inside the recency window. */
+function readManagedRawThreadIds() {
+  try {
+    const file = join(golemHome(), 'codex-supervisors.json');
+    const parsed = JSON.parse(readFileSync(file, 'utf8'));
+    const ids = new Set();
+    for (const row of Array.isArray(parsed?.supervisors) ? parsed.supervisors : []) {
+      if (row?.thread_id) ids.add(row.thread_id);
+    }
+    return ids;
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * Codex twin / zombie cleanup:
+ *  - raw thread ids owned by any managed supervisor (dual-id twins)
+ *  - unnamed codex rows outside recency
+ *  - codex rows with status superseded/dead still missing ended_at
+ */
 function sessionsStaleCodexPlan(sessions, { staleMs = 15 * 60 * 1000, now = Date.now() } = {}) {
+  const managedRaw = readManagedRawThreadIds();
   const mark = [];
+  const seen = new Set();
   sessions.forEach((row, index) => {
     if (row?.harness !== 'codex') return;
     if (row.ended_at) return;
-    if (typeof row?.name === 'string' && row.name.trim()) return;
-    const fresh = rowFreshness(row, true);
-    if (fresh && now - fresh < staleMs) return;
-    // status superseded/dead already terminal-ish but may lack ended_at
-    mark.push({ row, index });
+    const id = row.session_id;
+    let reason = null;
+    if (id && managedRaw.has(id)) reason = 'managed-raw-twin';
+    else if (['superseded', 'dead', 'stopped', 'failed'].includes(String(row.status || '').toLowerCase())) reason = 'terminal-status';
+    else if (!(typeof row?.name === 'string' && row.name.trim())) {
+      const fresh = rowFreshness(row, true);
+      if (!fresh || now - fresh >= staleMs) reason = 'stale-unnamed';
+    }
+    if (!reason || seen.has(index)) return;
+    seen.add(index);
+    mark.push({ row, index, reason });
   });
   if (!mark.length) return [];
-  return [{ kind: 'stale-codex', name: '(unnamed codex)', keep: null, mark, liveKept: false }];
+  return [{ kind: 'stale-codex', name: '(codex twins/stale)', keep: null, mark, liveKept: false }];
 }
 
 function printSessionsDedupPlan(plans, apply) {
   if (!plans.length) {
-    log(`golem sessions dedup: no named duplicates or stale unnamed Codex rows found (${apply ? 'applied' : 'dry-run'})`);
+    log(`golem sessions dedup: no project-scoped named duplicates or Codex twins/stale rows found (${apply ? 'applied' : 'dry-run'})`);
     return;
   }
   log(`golem sessions dedup ${apply ? '--apply' : '(dry-run; pass --apply to write)'}`);
   for (const plan of plans) {
     if (plan.kind === 'stale-codex') {
-      log(`stale unnamed codex: would mark ended: ${plan.mark.map(({ row }) => sessionLabel(row)).join(', ')}`);
+      log(`codex twins/stale: would mark ended: ${plan.mark.map(({ row, reason }) => `${sessionLabel(row)}${reason ? ` [${reason}]` : ''}`).join(', ')}`);
       continue;
     }
     const reason = plan.liveKept ? 'freshest live' : 'freshest ended';
-    log(`name ${plan.name}: would keep ${keptSessionLabel(plan.keep.row, reason)}`);
+    const scope = sessionProjectScope(plan.keep.row) || '(no project)';
+    log(`name ${plan.name} @ ${scope}: would keep ${keptSessionLabel(plan.keep.row, reason)}`);
     if (plan.mark.length) {
-      log(`name ${plan.name}: would mark ended: ${plan.mark.map(({ row }) => sessionLabel(row)).join(', ')}`);
+      log(`name ${plan.name} @ ${scope}: would mark ended: ${plan.mark.map(({ row }) => sessionLabel(row)).join(', ')}`);
     } else {
-      log(`name ${plan.name}: no un-ended duplicates to mark`);
+      log(`name ${plan.name} @ ${scope}: no un-ended duplicates to mark`);
     }
   }
 }
@@ -512,10 +547,10 @@ Options:
   if (rest.includes('-h') || rest.includes('--help')) {
     log(`Usage: golem sessions dedup [--apply]
 
-Dry-run by default. Groups rows in ~/.golem/sessions.json by non-empty name,
-keeps the freshest live row for each name, and with --apply marks the other
-un-ended rows ended_at=<now>. Also marks stale unnamed Codex rows (no name,
-outside the 15m recency window, still missing ended_at).`);
+Dry-run by default. Groups rows in ~/.golem/sessions.json by non-empty name
+within the same project path, keeps the freshest live row, and with --apply
+marks other un-ended rows ended_at=<now>. Also marks Codex managed raw-thread
+twins and stale/terminal unnamed Codex rows.`);
     return;
   }
   const unknown = rest.filter((a) => a !== '--apply');

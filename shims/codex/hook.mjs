@@ -23,26 +23,39 @@ const documented = {
 };
 const observations = Object.fromEntries(Object.entries(documented).filter(([, value]) => value !== undefined));
 
-// Managed TUI binds hooks to the Golem canonical id so ordinary raw-thread facts
-// do not become a second Agents card beside the supervisor row.
-const managedBound = process.env.GOLEM_MANAGED_CODEX_BOUND === '1'
+const rawSessionId = input.session_id;
+
+// Lightweight read — the Codex plugin bundle does not ship codex-supervisor.js.
+function readSupervisorRows() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(golemHome(), 'codex-supervisors.json'), 'utf8'));
+    return Array.isArray(parsed?.supervisors) ? parsed.supervisors : [];
+  } catch {
+    return [];
+  }
+}
+
+// Prefer env bind, else map raw thread id → managed canonical when a supervisor
+// already owns this thread (ordinary hooks run without GOLEM_MANAGED_* env).
+const envBound = process.env.GOLEM_MANAGED_CODEX_BOUND === '1'
   && typeof process.env.GOLEM_MANAGED_CODEX_BOUND_SESSION_ID === 'string'
   && process.env.GOLEM_MANAGED_CODEX_BOUND_SESSION_ID.trim()
   ? process.env.GOLEM_MANAGED_CODEX_BOUND_SESSION_ID.trim()
   : null;
-const rawSessionId = input.session_id;
+const ownerByThread = (() => {
+  const map = new Map();
+  for (const row of readSupervisorRows()) {
+    if (row?.thread_id && row?.canonical_id) map.set(row.thread_id, row.canonical_id);
+  }
+  return map;
+})();
+const managedBound = envBound || ownerByThread.get(rawSessionId) || null;
 const canonicalId = managedBound || rawSessionId;
 
-// Lightweight read — the Codex plugin bundle does not ship codex-supervisor.js.
 function protectOtherManagedCanonicals(keepId) {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(path.join(golemHome(), 'codex-supervisors.json'), 'utf8'));
-    return (Array.isArray(parsed?.supervisors) ? parsed.supervisors : [])
-      .filter((row) => row?.canonical_id && row.canonical_id !== keepId && row.thread_id)
-      .map((row) => row.canonical_id);
-  } catch {
-    return [];
-  }
+  return readSupervisorRows()
+    .filter((row) => row?.canonical_id && row.canonical_id !== keepId && row.thread_id)
+    .map((row) => row.canonical_id);
 }
 
 let projectRoot = input.cwd;

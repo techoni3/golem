@@ -452,23 +452,26 @@ export async function readNativeSessions(registeredIdLookup, verifiedChannels = 
   const verifiedBySession = new Map(verifiedChannels.filter((channel) => channel.endpoint_health === 'healthy').map((channel) => [channel.session_id, channel]));
   const supervisors = readCodexSupervisorRows();
   const supervisorByCanonical = new Map(supervisors.map((row) => [row.canonical_id, row]));
-  // Shadow raw-as-canonical hook facts whenever ANY supervisor row maps that
-  // thread — not only while the lease is healthy. Lease-down used to leave a
-  // nameless twin card beside the (dead or recovering) canonical row.
+  // Shadow raw thread ids whenever ANY supervisor row maps that thread — not
+  // only while the lease is healthy. Ordinary hooks still write under the raw
+  // id into sessions.json + facts; those must never become a second card.
   const managedOwnerByRawThread = new Map(supervisors
     .filter((row) => row.thread_id)
     .map((row) => [row.thread_id, row.canonical_id]));
+  const managedRawThreadIds = new Set(managedOwnerByRawThread.keys());
   const mergedById = new Map(merged.filter((row) => row.session_id).map((row) => [row.session_id, row]));
+  // Drop registry/golem rows that are only the raw twin of a managed actor.
+  for (const rawId of managedRawThreadIds) mergedById.delete(rawId);
   for (const fact of facts) {
-    // A managed TUI also emits ordinary Codex hook facts under the raw thread
-    // id. That raw row is the same actor as the supervisor canonical — never a
-    // second session card.
-    if (fact.harness === 'codex'
-      && fact.canonical_id === fact.locator?.raw_session_id
-      && managedOwnerByRawThread.has(fact.canonical_id)) continue;
+    const rawThreadId = fact.locator?.raw_session_id;
+    // Managed TUI: ordinary hooks still emit under the raw thread id. That is
+    // the same actor as the supervisor canonical — never a second card.
+    if (fact.harness === 'codex' && rawThreadId && managedRawThreadIds.has(rawThreadId)) {
+      const owner = managedOwnerByRawThread.get(rawThreadId);
+      if (fact.canonical_id === rawThreadId || fact.canonical_id !== owner) continue;
+    }
     const previous = mergedById.get(fact.canonical_id) || {};
     const supervisor = supervisorByCanonical.get(fact.canonical_id);
-    const rawThreadId = fact.locator?.raw_session_id;
     const presentation = managedCodexPresentation(
       supervisor,
       verifiedBySession.get(fact.canonical_id),
@@ -490,6 +493,9 @@ export async function readNativeSessions(registeredIdLookup, verifiedChannels = 
       _fact: fact,
     });
   }
+  // Never leave a raw-thread id in the map after fact merge (registry rows
+  // or a fact that slipped through under the raw id).
+  for (const rawId of managedRawThreadIds) mergedById.delete(rawId);
 
   const out = [];
   for (const s of mergedById.values()) {
