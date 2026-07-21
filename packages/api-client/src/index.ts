@@ -64,6 +64,12 @@ export function createFetchApiClient(
 			const headers: Record<string, string> = {};
 			if (options.bearerToken)
 				headers.authorization = `Bearer ${options.bearerToken}`;
+			if (options.caller?.projectId)
+				headers["x-golem-caller-project"] = options.caller.projectId;
+			if (options.caller?.sessionId)
+				headers["x-golem-caller-session"] = options.caller.sessionId;
+			if (options.caller?.sessionId)
+				headers["x-golem-caller-actor"] = options.caller.sessionId;
 			if (input.body !== undefined) {
 				headers["content-type"] = "application/json";
 				init.body = JSON.stringify(input.body);

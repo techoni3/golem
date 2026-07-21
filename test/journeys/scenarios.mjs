@@ -159,6 +159,18 @@ export const scenarios = [
 			"a tracker core extraction loses display ids, phase artifacts, transactional audit/outbox, or MCP-compatible ticket/comment/link/stream semantics",
 	}),
 	registerScenario({
+		id: "tracker-http-mcp-parity",
+		journey: "J4",
+		tier: "integration",
+		regression: "typed tracker HTTP and storage-free MCP delegation diverge, lose CAS conflicts, or accept forged caller identity",
+	}),
+	registerScenario({
+		id: "delivery-api-fence-recheck",
+		journey: "J4",
+		tier: "integration",
+		regression: "durable delivery claims skip the canonical endpoint generation/fence/readiness recheck before adapter transport",
+	}),
+	registerScenario({
 		id: "testkit-browser",
 		journey: "J8",
 		tier: "release",

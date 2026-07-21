@@ -12,8 +12,10 @@ import {
 	startControlPlane,
 } from "./server.js";
 import {
+	composeControlPlaneEndpointEligibility,
 	composeControlPlaneManagementServices,
 	composeControlPlaneTrackerCoreServices,
+	composeControlPlaneTrackerServices,
 } from "./tracker.js";
 
 const token = process.env.GOLEM_CONTROL_PLANE_TOKEN;
@@ -86,6 +88,14 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 		writer: owner,
 		clock,
 	});
+	const trackerServices = composeControlPlaneTrackerServices({
+		writer: owner,
+		clock,
+		eligibility: composeControlPlaneEndpointEligibility({
+			endpoints: owner.runtimeEndpointStorage(),
+			clock,
+		}),
+	});
 	const management = composeControlPlaneManagementServices({
 		writer: owner,
 		clock,
@@ -155,6 +165,8 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 			projection: controlProjection,
 			runtimeProjection,
 			management,
+			trackerCore,
+			trackerServices,
 			...(replayWindowSize ? { replayWindowSize } : {}),
 			...testProjection,
 		});

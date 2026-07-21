@@ -5,6 +5,7 @@
 
 - `apps/` holds private composition (CLI, Fastify control plane, typed shell); `dashboard/web` is the legacy island.
 - `packages/` holds contracts, domain, SQLite persistence, runtime/tracker, launcher, compat, compiler, MCP, generated API client, testkit, and UI. Sessions live in `packages/runtime/src/sessions/` + `packages/persistence/src/session-repository.ts`; endpoint fences in `packages/runtime/src/endpoints/` + `packages/persistence/src/endpoint-repository.ts`; runtime projections in `packages/runtime/src/projections.ts` over the typed `packages/persistence/src/runtime-projection-repository.ts` capability.
+- `apps/control-plane/src/api-v1.ts` is the authenticated typed tracker/delivery/bus/subscriptions plugin over composed capabilities; `tracker-core-routes.ts` is the legacy-name delegate. `api-client/src/generated/openapi.ts` is generated; MCP injects caller headers without storage access.
 - `substrate/` is render source; `plugin/` and `dashboard/dist/` are generated. Legacy dashboard root is authoritative; typed static output is parallel.
 
 ## Invariants and flow
@@ -18,9 +19,11 @@
 - Runtime projections read canonical SQLite rows only: live excludes terminal generations, history retains lifecycle facts, diagnostics are recursively redacted/bounded, observation stays separate from actor activity, and reads never mutate state. HTTP/WS share revision/cursor facts.
 - Endpoint claims are generation/route scoped: fences gate heartbeat, health, readiness, capability, delivery, and release; eligibility returns stable redacted facts and registration alone never qualifies delivery.
 - Typed management (`packages/tracker/src/management.ts`) owns roles, gates, ideas, assets, communications, controls, audit, and outbox; routes cannot open SQLite, mutate runtime lifecycle, or deliver native transport.
+- Typed API mutators require bearer plus explicit caller project/session/actor headers; request JSON cannot forge identity. Delivery claim preparation rechecks generation/fence/readiness/capability before any adapter boundary.
 
 ## Checks and gotchas
 
 - Tests use disposable homes; never mutate user state, shared ports, Docker, or renders. Loopback denial is `UNMET`.
 - `mcp/channel` is the GOL-29 render entrypoint; do not hand-edit renders or bypass boundaries.
 - Node24 gates cover build/typecheck, boundaries, lint, named journeys, and `git diff --check`.
+- Gates cover build/typecheck, boundaries, lint, render, journeys, and `git diff --check`.

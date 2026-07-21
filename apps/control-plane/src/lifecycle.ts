@@ -3,8 +3,13 @@ import fs from "node:fs";
 import path from "node:path";
 
 import websocket from "@fastify/websocket";
-import type { TrackerManagementServices } from "@golem/tracker";
+import type {
+	TrackerCoreServices,
+	TrackerManagementServices,
+	TrackerServices,
+} from "@golem/tracker";
 import Fastify from "fastify";
+import { registerApiV1Routes } from "./api-v1.js";
 import {
 	type BrowserSessionAuthority,
 	createBrowserSessionAuthority,
@@ -28,6 +33,7 @@ import type {
 import { registerValidatedRoutes } from "./routes.js";
 import type { ControlPlaneStream } from "./schemas.js";
 import { acquireServiceLock } from "./service-lock.js";
+import { registerTrackerCoreCompatibilityRoutes } from "./tracker-core-routes.js";
 import {
 	BoundedReplayWindow,
 	type ControlPlaneSocket,
@@ -53,6 +59,10 @@ export interface ControlPlaneLifecycleOptions {
 	readonly invalidResponseForTest?: boolean;
 	/** Typed management capability composed by the application owner. */
 	readonly management?: TrackerManagementServices;
+	/** Canonical tracker-core capability composed by the single persistence owner. */
+	readonly trackerCore?: TrackerCoreServices;
+	/** Durable delivery, bus, and subscription capabilities. */
+	readonly trackerServices?: TrackerServices;
 }
 
 export interface StartedControlPlane {
@@ -141,6 +151,19 @@ export async function startControlPlane(
 				? {}
 				: { invalidResponseForTest: options.invalidResponseForTest }),
 		});
+		if (options.trackerCore) {
+			registerTrackerCoreCompatibilityRoutes({
+				app,
+				tracker: options.trackerCore.compatibility,
+			});
+		}
+		if (options.trackerCore && options.trackerServices)
+			registerApiV1Routes({
+				app,
+				token: options.token,
+				core: options.trackerCore,
+				services: options.trackerServices,
+			});
 		if (options.management)
 			registerManagementRoutes({
 				app,

@@ -1,5 +1,6 @@
 import type {
 	PersistenceWriteCapability,
+	RuntimeEndpointStorage,
 	RuntimeSessionStorage,
 } from "@golem/persistence";
 import {
@@ -28,6 +29,43 @@ export function composeControlPlaneTrackerServices(options: {
 		storage: options.writer.trackerStorage(),
 		eligibility: options.eligibility,
 		clock: options.clock,
+	});
+}
+
+/** Adapt the canonical GOL-42 endpoint capability into the tracker delivery
+ * port.  The tracker re-resolves this snapshot at prepare(), so a queued
+ * envelope cannot retain a stale generation/fence/readiness decision. */
+export function composeControlPlaneEndpointEligibility(options: {
+	readonly endpoints: RuntimeEndpointStorage;
+	readonly clock: TrackerClock;
+}): DeliveryEligibilityPort {
+	return Object.freeze({
+		resolve(recipientId: string) {
+			const direct = options.endpoints.get(recipientId);
+			const generationId = direct?.generationId ?? recipientId;
+			const eligibility = options.endpoints.eligibility({
+				generationId,
+				routeKind: "delivery",
+				requiredCapability: "delivery",
+				now: options.clock.now(),
+			});
+			if (eligibility.disposition !== "eligible" || !eligibility.endpoint)
+				return undefined;
+			const endpoint = eligibility.endpoint;
+			return Object.freeze({
+				recipientId,
+				generationId: endpoint.generationId,
+				endpointId: endpoint.endpointId,
+				ownerFence: endpoint.ownerFence,
+				readiness: endpoint.readiness,
+				mode: endpoint.deliveryMode,
+				capabilities: endpoint.capabilities.map((capability) => ({
+					capability: capability.capability,
+					qualification: capability.qualification,
+					observedAt: capability.observedAt,
+				})),
+			});
+		},
 	});
 }
 

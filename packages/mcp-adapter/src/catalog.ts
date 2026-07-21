@@ -263,7 +263,7 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 		},
 		request: (input) => ({
 			method: "GET",
-			path: query("/api/tickets", {
+			path: query("/api/v1/tracker/tickets", {
 				project: input.all ? undefined : projectFor(input),
 				assignee: input.mine ? trustedCaller(input).sessionId : input.assignee,
 				state: input.state,
@@ -278,13 +278,14 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 		required: ["id"],
 		request: (input) => ({
 			method: "GET",
-			path: `/api/tickets/${encodeURIComponent(String(input.id))}`,
+			path: `/api/v1/tracker/tickets/${encodeURIComponent(String(input.id))}`,
 		}),
 	}),
 	definition({
 		name: "ticket_create",
 		description: "Create a tracker ticket.",
 		fields: {
+			idempotency_key: string(),
 			title: string(),
 			body: string(),
 			kind: string(),
@@ -300,9 +301,10 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 		required: ["title"],
 		request: (input) => ({
 			method: "POST",
-			path: "/api/tickets",
+			path: "/api/v1/tracker/tickets",
 			body: defined({
 				project_id: projectFor(input),
+				idempotency_key: input.idempotency_key,
 				title: input.title,
 				body: input.body,
 				kind: input.kind,
@@ -313,7 +315,6 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 				parent_id: input.parent_id,
 				wave: input.wave,
 				assignee: input.assignee,
-				created_by: trustedCaller(input).sessionId,
 			}),
 		}),
 	}),
@@ -322,6 +323,7 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 		description: "Patch tracker ticket metadata.",
 		fields: {
 			...ticketFields,
+			expected_revision: integer,
 			state: string(),
 			title: string(),
 			body: string(),
@@ -336,8 +338,9 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 		required: ["id"],
 		request: (input) => ({
 			method: "PATCH",
-			path: `/api/tickets/${encodeURIComponent(String(input.id))}`,
+			path: `/api/v1/tracker/tickets/${encodeURIComponent(String(input.id))}`,
 			body: defined({
+				expected_revision: input.expected_revision,
 				state: input.state,
 				title: input.title,
 				body: input.body,
@@ -348,7 +351,6 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 				parent_id: input.parent_id,
 				wave: input.wave,
 				assignee: input.assignee,
-				actor: trustedCaller(input).sessionId,
 			}),
 		}),
 	}),
@@ -357,6 +359,7 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 		description: "Move a ticket through the enforced phase machine.",
 		fields: {
 			...ticketFields,
+			expected_revision: integer,
 			phase,
 			reason: string(),
 			skip_reason: string(),
@@ -364,12 +367,12 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 		required: ["id", "phase"],
 		request: (input) => ({
 			method: "POST",
-			path: `/api/tickets/${encodeURIComponent(String(input.id))}/transition`,
+			path: `/api/v1/tracker/tickets/${encodeURIComponent(String(input.id))}/transition`,
 			body: defined({
+				expected_revision: input.expected_revision,
 				phase: input.phase,
 				reason: input.reason,
 				skip_reason: input.skip_reason,
-				actor: trustedCaller(input).sessionId,
 			}),
 		}),
 	}),
@@ -391,9 +394,8 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 		required: ["id", "body"],
 		request: (input) => ({
 			method: "POST",
-			path: `/api/tickets/${encodeURIComponent(String(input.id))}/comments`,
+			path: `/api/v1/tracker/tickets/${encodeURIComponent(String(input.id))}/comments`,
 			body: defined({
-				author: trustedCaller(input).sessionId,
 				body: input.body,
 				quote: input.quote,
 				prefix: input.prefix,
@@ -419,7 +421,7 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 		required: ["id", "comment_id"],
 		request: (input) => ({
 			method: "PATCH",
-			path: `/api/tickets/${encodeURIComponent(String(input.id))}/comments/${encodeURIComponent(String(input.comment_id))}`,
+			path: `/api/v1/tracker/tickets/${encodeURIComponent(String(input.id))}/comments/${encodeURIComponent(String(input.comment_id))}`,
 			body: defined({ body: input.body, tag: input.tag, status: input.status }),
 		}),
 	}),
@@ -434,9 +436,8 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 		required: ["id", "comment_id", "body"],
 		request: (input) => ({
 			method: "POST",
-			path: `/api/tickets/${encodeURIComponent(String(input.id))}/comments/${encodeURIComponent(String(input.comment_id))}/reply`,
+			path: `/api/v1/tracker/tickets/${encodeURIComponent(String(input.id))}/comments/${encodeURIComponent(String(input.comment_id))}/reply`,
 			body: defined({
-				author: trustedCaller(input).sessionId,
 				body: input.body,
 			}),
 		}),
@@ -476,7 +477,7 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 		required: ["name"],
 		request: (input) => ({
 			method: "POST",
-			path: "/api/streams",
+			path: "/api/v1/tracker/streams",
 			body: defined({
 				project_id: projectFor(input),
 				name: input.name,
@@ -491,7 +492,7 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 		fields: { project: string() },
 		request: (input) => ({
 			method: "GET",
-			path: query("/api/streams", { project: projectFor(input) }),
+			path: query("/api/v1/tracker/streams", { project: projectFor(input) }),
 		}),
 	}),
 	definition({
@@ -510,9 +511,10 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 		required: ["topic"],
 		request: (input) => ({
 			method: "POST",
-			path: "/api/bus/subscribe",
+			path: "/api/v1/subscriptions",
 			body: defined({
-				session_id: trustedCaller(input).sessionId,
+				name: `mcp:${trustedCaller(input).sessionId ?? "caller"}:${input.topic as string}`,
+				recipient_id: trustedCaller(input).sessionId,
 				topic: input.topic,
 				classes: input.classes,
 			}),
@@ -525,9 +527,8 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 		required: ["topic"],
 		request: (input) => ({
 			method: "POST",
-			path: "/api/bus/unsubscribe",
+			path: "/api/v1/subscriptions/unsubscribe",
 			body: defined({
-				session_id: trustedCaller(input).sessionId,
 				topic: input.topic,
 			}),
 		}),
@@ -536,11 +537,9 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 		name: "subscriptions_list",
 		description: "List durable subscriptions.",
 		fields: {},
-		request: (input) => ({
+		request: (_input) => ({
 			method: "GET",
-			path: query("/api/bus/subscriptions", {
-				session_id: trustedCaller(input).sessionId,
-			}),
+			path: "/api/v1/subscriptions",
 		}),
 	}),
 	definition({
