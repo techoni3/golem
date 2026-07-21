@@ -10,7 +10,7 @@
 //                Stop and restart the admin dashboard detached.
 //   codex-supervisor
 //                Run one managed, headless Codex App Server lifecycle process.
-//   codex        Open one managed interactive Codex TUI.
+//   codex        Run the managed Codex foreground host.
 //   doctor       Sanity-check the environment.
 //   status       Dashboard health + canonical URL.
 //   help         Show this message.
@@ -1499,9 +1499,9 @@ Run:
   codex-supervisor run --session <canonical-id> [--cwd <dir>]
                        Run a version-gated, headless Codex App Server lifecycle
                        supervisor with typed delivery while idle and MCP-bound.
-  codex [--session <canonical-id>] [--cwd <dir>] [-- <codex args...>]
-                       Open a normal interactive Codex TUI through Golem's
-                       private App Server bridge; no flags are required.
+  codex [--session <canonical-id>] [--cwd <dir>]
+                       Run the managed Codex foreground host. The older TUI
+                       bridge requires explicit: codex --legacy -- [args...].
   role <role|clear> [--session <id-or-name>]
                          Set or clear a session role (${SESSION_ROLES.join(', ')}).
   sessions dedup [--apply]
@@ -1571,11 +1571,11 @@ async function runTypedCli(args) {
   return true;
 }
 
-function hasTypedCodexOptions(args) {
-  return args[0] === 'direct' || args.some((arg) => arg === '--dry-run' || arg === '--explain' || arg === '--json'
-    || arg === '--model' || arg.startsWith('--model=')
-    || arg === '--backend' || arg.startsWith('--backend=')
-    || arg === '--preset' || arg.startsWith('--preset='));
+function explicitLegacyCodexArgs(args) {
+  // Legacy TUI/session ownership remains available only as an intentional
+  // rollback. No ordinary flag shape may silently select its private bridge.
+  if (args[0] !== '--legacy') return null;
+  return args.slice(1);
 }
 
 async function main() {
@@ -1612,8 +1612,16 @@ async function main() {
       await cmdCodexSupervisor(rest);
       break;
     case 'codex':
-      if (hasTypedCodexOptions(rest) && await runTypedCli(['codex', ...rest])) break;
-      await cmdCodex(rest);
+      {
+        const legacyArgs = explicitLegacyCodexArgs(rest);
+        if (legacyArgs) {
+          await cmdCodex(legacyArgs);
+          break;
+        }
+        if (!(await runTypedCli(['codex', ...rest]))) {
+          fatal(1, 'typed CLI build is unavailable; run `npm run build -w apps/cli`');
+        }
+      }
       break;
     case 'opencode':
     case 'claude':

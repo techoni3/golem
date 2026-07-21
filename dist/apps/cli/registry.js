@@ -36,6 +36,15 @@ const commonOptions = [
     },
     { name: "json", flags: "--json", description: "print stable JSON output" },
 ];
+const codexOptions = [
+    ...commonOptions,
+    {
+        name: "session",
+        flags: "--session <canonical-id>",
+        description: "bind the managed host to a canonical session identity",
+        takesValue: true,
+    },
+];
 const openCodeSetupOptions = [
     {
         name: "apply",
@@ -58,7 +67,7 @@ export const commandRegistry = Object.freeze([
     {
         name: "codex",
         summary: "launch the managed Codex compatibility path",
-        options: commonOptions,
+        options: codexOptions,
         presetArgument: "optional",
     },
     {
@@ -134,7 +143,7 @@ export const commandRegistry = Object.freeze([
         hidden: true,
     },
 ]);
-const optionByName = new Map(commonOptions.map((option) => [option.name, option]));
+const optionByName = new Map(codexOptions.map((option) => [option.name, option]));
 export function commandDefinition(name) {
     return commandRegistry.find((definition) => definition.name === name);
 }

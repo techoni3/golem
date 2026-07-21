@@ -14,6 +14,7 @@
 		"openapi": "node ./dist/write-openapi.js"
 	},
 	"dependencies": {
+		"@golem/adapter-codex": "file:../../packages/adapters/codex",
 		"@golem/adapter-sdk": "file:../../packages/adapter-sdk",
 		"@golem/contracts": "file:../../packages/contracts",
 		"@golem/persistence": "file:../../packages/persistence",

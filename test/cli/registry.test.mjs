@@ -34,13 +34,11 @@ test("typed registry preserves compact grammar, redaction, and pre-spawn qualifi
 		assert.equal(metadata.status, 0);
 		const schema = JSON.parse(metadata.stdout);
 		assert.equal(schema.schemaVersion, "golem.cli-registry/v1");
-		assert.deepEqual(schema.commands.map((command) => command.name), ["codex", "opencode", "claude", "dashboard", "dashboard:restart", "codex-supervisor", "status", "doctor", "sync", "role", "sessions", "migrate-home", "help"]);
-		const dryRun = invoke(["codex", "--dry-run", "--json", "--", "--profile", "safe"], home);
-		assert.equal(dryRun.status, 0);
-		const plan = JSON.parse(dryRun.stdout);
-		assert.equal(plan.ok, true);
-		assert.deepEqual(plan.effectiveArgvIntent, ["codex", "--profile", "safe"]);
-		assert.equal(JSON.stringify(plan).includes("secret-value"), false);
+		assert.deepEqual(schema.commands.map((command) => command.name), ["codex", "opencode", "opencode:setup", "opencode:refresh", "opencode:doctor", "claude", "dashboard", "dashboard:restart", "codex-supervisor", "status", "doctor", "sync", "role", "sessions", "migrate-home", "help"]);
+		const managedPassthrough = invoke(["codex", "--dry-run", "--json", "--", "--profile", "safe"], home);
+		assert.equal(managedPassthrough.status, 2, "native Codex passthrough cannot silently select or be ignored by the managed route");
+		assert.match(managedPassthrough.stderr, /managed codex does not accept native passthrough arguments/);
+		assert.equal(managedPassthrough.stderr.includes("secret-value"), false);
 		const unavailable = invoke(["claude", "--dry-run", "--json"], home);
 		assert.equal(unavailable.status, 3);
 		assert.equal(JSON.parse(unavailable.stdout).error.code, "launcher.launch.unavailable");

@@ -1,5 +1,5 @@
 import { Command } from "commander";
-export type CliOptionName = "model" | "backend" | "preset" | "cwd" | "dryRun" | "apply" | "config" | "explain" | "json";
+export type CliOptionName = "model" | "backend" | "session" | "preset" | "cwd" | "dryRun" | "apply" | "config" | "explain" | "json";
 export interface CliOptionDefinition {
     readonly name: CliOptionName;
     readonly flags: string;

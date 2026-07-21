@@ -3,6 +3,7 @@ import { Command, Option } from "commander";
 export type CliOptionName =
 	| "model"
 	| "backend"
+	| "session"
 	| "preset"
 	| "cwd"
 	| "dryRun"
@@ -65,6 +66,16 @@ const commonOptions: readonly CliOptionDefinition[] = [
 	{ name: "json", flags: "--json", description: "print stable JSON output" },
 ];
 
+const codexOptions: readonly CliOptionDefinition[] = [
+	...commonOptions,
+	{
+		name: "session",
+		flags: "--session <canonical-id>",
+		description: "bind the managed host to a canonical session identity",
+		takesValue: true,
+	},
+];
+
 const openCodeSetupOptions: readonly CliOptionDefinition[] = [
 	{
 		name: "apply",
@@ -89,7 +100,7 @@ export const commandRegistry: readonly CliCommandDefinition[] = Object.freeze([
 	{
 		name: "codex",
 		summary: "launch the managed Codex compatibility path",
-		options: commonOptions,
+		options: codexOptions,
 		presetArgument: "optional",
 	},
 	{
@@ -168,7 +179,7 @@ export const commandRegistry: readonly CliCommandDefinition[] = Object.freeze([
 ]);
 
 const optionByName = new Map(
-	commonOptions.map((option) => [option.name, option]),
+	codexOptions.map((option) => [option.name, option]),
 );
 
 export function commandDefinition(

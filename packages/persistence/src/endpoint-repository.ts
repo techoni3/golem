@@ -255,8 +255,25 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 				`endpoint_${sha256(`${input.generationId}:${input.routeKind}:${input.ownerInstanceId}:${fence}`).slice(0, 24)}`;
 			// Resolve conflicts before superseding the active owner or allocating a
 			// fence so a rejected duplicate is a true zero-write transaction.
-			if (this.#row(endpointId))
+			const existing = this.#row(endpointId);
+			if (existing) {
+				// A crashed managed host may reconnect with its persisted binding
+				// before the lease expires. This is an idempotent reattachment of the
+				// *same* owner/fence, not a new claim: it allocates no fence, writes no
+				// lifecycle effect, and cannot steal an endpoint from another owner.
+				if (
+					live(existing.state) &&
+					existing.generation_id === input.generationId &&
+					existing.route_kind === input.routeKind &&
+					existing.owner_instance_id === input.ownerInstanceId
+				)
+					return accepted(
+						existing.endpoint_id,
+						existing.revision,
+						existing.owner_fence,
+					);
 				return rejected("runtime.endpoint.endpoint_conflict");
+			}
 			const prior = this.#database
 				.prepare<EndpointRow>(
 					"SELECT endpoint_id, generation_id, route_kind, revision, state, owner_fence, owner_instance_id, delivery_mode, readiness_state, control_state, consumer_ready, consumption_observed, delivery_observed, delivery_failed, claimed_at, heartbeat_at, expires_at, superseded_at FROM endpoint_claims WHERE generation_id = ? AND route_kind = ? AND state IN ('claiming', 'healthy', 'degraded') ORDER BY owner_fence DESC LIMIT 1",
@@ -496,7 +513,11 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 			const now = this.#clock.now();
 			const revision = row.revision + 1;
 			const id = sha256(
-				`${row.endpoint_id}:${input.capability.capability}:${input.capability.evidenceKind}:${input.capability.observedAt}`,
+				// A readiness transition can legitimately follow the initial status
+				// observation in the same clock tick. Include the observed capability
+				// facts, not just the timestamp, so the durable projection records that
+				// transition instead of mistaking it for a replay.
+				`${row.endpoint_id}:${input.capability.capability}:${input.capability.evidenceKind}:${input.capability.observedAt}:${input.capability.qualification}:${input.capability.deliveryMode}:${input.capability.readiness}:${json(input.evidence)}`,
 			).slice(0, 32);
 			if (
 				this.#database
@@ -772,7 +793,15 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 				endpoint,
 				facts: endpointFacts,
 			};
-		if (row.delivery_failed || !row.delivery_observed)
+		// A managed App Server can prove its addressed consumer before the first
+		// human envelope arrives (for example, by completing its authenticated MCP
+		// status probe). Treat that canonical consumption evidence as sufficient to
+		// admit the first durable delivery; otherwise delivery readiness would be a
+		// circular condition that no new endpoint could satisfy.
+		if (
+			row.delivery_failed ||
+			(!row.delivery_observed && !row.consumption_observed)
+		)
 			return {
 				disposition: "ineligible",
 				code: "runtime.endpoint.delivery_unready",

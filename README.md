@@ -75,7 +75,7 @@ intent.
 | --- | --- | --- |
 | Claude Code | Tier A | Rendered plugin with agents, skills, hooks, MCP tools, lifecycle facts, and addressed push for sessions launched as channel consumers. A plain `claude` session can use tracker tools and pull work but does not consume pushed channel notifications. |
 | OpenCode | Tier A lifecycle; pull-only direct delivery | Rendered agents, skills, and instructions plus a managed MCP entry and runtime shim. A normal `golem opencode` launch establishes canonical lifecycle through a private local control plane; it does not advertise push until a generation-scoped endpoint owner supplies a delivery fence. |
-| Codex CLI | Tier B for an ordinary TUI; Tier A for Golem-managed App Server modes | Rendered skills, documented lifecycle hooks (including observation of native `SubagentStop`), marketplace metadata, and a bundled MCP server. The adapter does not render Golem AGENTS.md or worker/reviewer/researcher definitions. An ordinary `codex` TUI remains explicit pull only and is never reported as pushed. A version-gated headless supervisor and private `golem codex` TUI bridge receive durable ticket/control envelopes only while their bound MCP is active and canonical thread is idle. |
+| Codex CLI | Tier B for an ordinary TUI; Tier A for Golem-managed App Server modes | Rendered skills, documented lifecycle hooks (including observation of native `SubagentStop`), marketplace metadata, and a bundled MCP server. The adapter does not render Golem AGENTS.md or worker/reviewer/researcher definitions. An ordinary `codex` TUI remains explicit pull only and is never reported as pushed. The default `golem codex` managed host receives durable ticket/control envelopes only after its consumer is ready; the private TUI bridge is explicit `--legacy` compatibility. |
 | Pi | Tier B | Portable rendered extension, lifecycle facts, and durable next-input pickup. Queued work is added to the next real user input and acknowledged when agent processing starts. There is no advertised live-idle push. |
 | Gemini CLI | Unsupported | No adapter or release contract is shipped. |
 
@@ -360,27 +360,25 @@ replay a recovery-pending envelope; create a new explicit dispatch after
 reviewing the supervisor record. A Codex version or schema fingerprint change
 is a hard stop until the contract is reviewed and the Codex journeys pass.
 
-### Managed Codex TUI: Tier A
+### Managed Codex host: Tier A
 
-For a normal interactive terminal that shares the exact tracker-delivery
-thread, run this from the project directory:
+The default managed path runs the foreground, control-plane-owned host from the
+project directory:
 
 ```sh
-golem codex
+golem codex --session <canonical-id> --cwd <project-path>
 ```
 
-It creates a canonical session, runs a pinned App Server on stdio, and launches
-the normal Codex TUI through one private Unix-socket WebSocket bridge. The TUI
-remains the sole App Server client: it owns model, sandbox, approvals, and
-normal turns; Golem verifies its bound MCP only after TUI initialization and
-injects a durable tracker turn only when that canonical thread is idle. A
-dashboard dispatch with `when_idle` stays queued while a human turn is active.
-Use `--session <canonical-id>` or `--cwd <path>` for advanced targeting, and
-place ordinary Codex arguments after `--`. A stored explicit session resumes
-its recorded thread through native `codex resume`; it is never silently
-replaced. Do not pass `--remote` or `-C`/`--cd`; Golem reserves the bridge and
-canonical working directory. TUI exit, SIGTERM, or App Server loss removes the
-lease, App Server, and socket; Ctrl-C belongs to the TUI's active turn.
+It binds the requested canonical session, persists each host ingress through
+the durable Tracker service, and serially claims ready envelopes for the pinned
+App Server. The endpoint is never advertised ready before that consumer loop is
+running; duplicate envelope ids cannot create a second `turn/start`. Managed
+Codex accepts only typed registry options—native Codex passthrough is rejected
+instead of being silently ignored.
+
+The older private TUI bridge remains a deliberate compatibility escape only:
+`golem codex --legacy -- [native-codex-args]`. It is not selected by
+`--session`, `--`, or any ordinary managed invocation.
 
 ### Pi: Tier B, next-input pickup
 
@@ -471,7 +469,7 @@ metadata table.
 
 | Command | Purpose |
 | --- | --- |
-| `golem codex [preset]` | Resolve the managed Codex preset; bare `golem codex` retains the managed TUI compatibility path. |
+| `golem codex [--session <id>] [--cwd <dir>]` | Run the managed Codex host; native arguments require the explicit `--legacy --` compatibility escape. |
 | `golem opencode [preset]` / `golem claude [preset]` | Resolve canonical harness presets; unqualified adapters fail before spawn. |
 | `golem @preset` | Resolve a globally named preset through the same registry. |
 | `golem dashboard [--public]` | Start the dashboard in the foreground. |

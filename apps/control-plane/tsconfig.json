@@ -2,6 +2,7 @@
 	"extends": "../../tsconfig.package.json",
 	"compilerOptions": { "outDir": "./dist", "rootDir": "./src" },
 	"references": [
+		{ "path": "../../packages/adapters/codex" },
 		{ "path": "../../packages/adapter-sdk" },
 		{ "path": "../../packages/contracts" },
 		{ "path": "../../packages/persistence" },
