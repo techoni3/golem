@@ -16,6 +16,7 @@ import {
 	acquireOwnerLock,
 	releaseOwnerLock,
 } from "./lock.js";
+import { TrackerManagementRepository } from "./management-repository.js";
 import { applyPlan, dryRunPlan, planFor } from "./migrations.js";
 import { RuntimeRepository } from "./repositories.js";
 import {
@@ -81,6 +82,7 @@ class PersistenceOwner implements PersistenceWriteCapability {
 	readonly #runtimeRepository: RuntimeRepository;
 	readonly #trackerRepository: TrackerRepository;
 	readonly #trackerCoreRepository: TrackerCoreRepository;
+	readonly #managementRepository: TrackerManagementRepository;
 	readonly #paths: Readonly<PersistencePaths>;
 	readonly #ownerId: string;
 	readonly #clock: PersistenceClock;
@@ -140,6 +142,10 @@ class PersistenceOwner implements PersistenceWriteCapability {
 			this.#runtimeRepository = new RuntimeRepository(runtime, this.#clock);
 			this.#trackerRepository = new TrackerRepository(tracker);
 			this.#trackerCoreRepository = new TrackerCoreRepository(
+				this.#trackerSql,
+				tracker,
+			);
+			this.#managementRepository = new TrackerManagementRepository(
 				this.#trackerSql,
 				tracker,
 			);
@@ -251,6 +257,10 @@ class PersistenceOwner implements PersistenceWriteCapability {
 
 	trackerCoreStorage(): TrackerCoreStorageCapability {
 		return this.#trackerCoreRepository;
+	}
+
+	managementStorage() {
+		return this.#managementRepository;
 	}
 
 	status(): PersistenceStatus {

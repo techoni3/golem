@@ -159,6 +159,18 @@ export const scenarios = [
 		regression: "the typed control plane accepts an unsafe caller, loses revision resync, serves no dashboard shell, or leaks its service lock",
 	}),
 	registerScenario({
+		id: "roles-gates-ideas-controls",
+		journey: "J6",
+		tier: "integration",
+		regression: "typed management roles, human gates, idea promotion, and idempotent controls lose audit or restart state",
+	}),
+	registerScenario({
+		id: "ticket-assets-security",
+		journey: "J6",
+		tier: "integration",
+		regression: "ticket-bound assets escape the configured store, leak paths, or fail restart and authorization checks",
+	}),
+	registerScenario({
 		id: "ws-gap-resync",
 		journey: "J6",
 		tier: "pr",

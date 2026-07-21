@@ -51,6 +51,7 @@ export {
 export type { ServiceLockStatus } from "./service-lock.js";
 export { serviceLockStatus } from "./service-lock.js";
 export {
+	composeControlPlaneManagementServices,
 	composeControlPlaneTrackerCoreServices,
 	composeControlPlaneTrackerServices,
 } from "./tracker.js";

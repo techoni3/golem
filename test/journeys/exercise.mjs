@@ -49,6 +49,7 @@ const projectIdentityJourney = path.join(repositoryRoot, "test/projects/project-
 const projectConcurrencyJourney = path.join(repositoryRoot, "test/projects/project-register-concurrency.test.mjs");
 const controlPlaneProgram = path.join(repositoryRoot, "apps/control-plane/dist/main.js");
 const trackerCoreJourney = path.join(repositoryRoot, "test/tracker/tracker-core.test.mjs");
+const managementJourney = path.join(repositoryRoot, "test/management/management-services.test.mjs");
 const chromeExecutable = process.env.GOLEM_CHROME_EXECUTABLE || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
 class JourneyDiagnosticError extends Error {
@@ -702,6 +703,20 @@ export async function exerciseTrackerCoreCompatibility() {
 	}
 }
 
+function runManagementJourney(name) {
+	const result = spawnSync(process.execPath, ["--test", "--test-concurrency=1", "--test-name-pattern", name, managementJourney], { cwd: repositoryRoot, encoding: "utf8", env: process.env });
+	if (result.status !== 0) throw new Error(`management journey failed: ${result.stdout}\n${result.stderr}`);
+	return result.stdout.trim().split("\n").filter(Boolean).at(-1) || `${name} passed`;
+}
+
+export function exerciseRolesGatesIdeasControls() {
+	return runManagementJourney("roles gates ideas and controls");
+}
+
+export function exerciseTicketAssetsSecurity() {
+	return runManagementJourney("ticket assets are bounded");
+}
+
 export async function exerciseBrowser() {
 	const home = createTemporaryHome("golem-j8-browser-");
 	const artifactRoot = path.join(home.root, "browser-artifacts");
@@ -850,4 +865,6 @@ export const exercises = Object.freeze({
 	"legacy-parity-baseline": exerciseLegacyParityBaseline,
 	"render-mcp-closure": exerciseRenderMcpClosure,
 	"control-plane-auth-ws-lifecycle": exerciseControlPlaneShell,
+	"roles-gates-ideas-controls": exerciseRolesGatesIdeasControls,
+	"ticket-assets-security": exerciseTicketAssetsSecurity,
 });

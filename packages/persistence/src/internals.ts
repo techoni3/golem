@@ -519,4 +519,88 @@ export interface TrackerTables {
 		readonly completed_at: string | null;
 		readonly completed_event_id: number | null;
 	};
+	readonly management_roles: {
+		readonly id: string;
+		readonly project_id: string;
+		readonly name: string;
+		readonly scope: string;
+		readonly definition_json: string;
+		readonly revision: number;
+		readonly created_at: string;
+		readonly updated_at: string;
+	};
+	readonly management_role_assignments: {
+		readonly id: string;
+		readonly project_id: string;
+		readonly session_id: string | null;
+		readonly generation_id: string | null;
+		readonly role_id: string;
+		readonly actor: string;
+		readonly idempotency_key: string;
+		readonly created_at: string;
+	};
+	readonly management_gates: {
+		readonly id: string;
+		readonly project_id: string;
+		readonly kind: string;
+		readonly status: string;
+		readonly question: string;
+		readonly assignee: string;
+		readonly verdict_json: string | null;
+		readonly idempotency_key: string;
+		readonly created_at: string;
+		readonly updated_at: string;
+	};
+	readonly management_ideas: {
+		readonly id: string;
+		readonly project_id: string;
+		readonly body: string;
+		readonly status: string;
+		readonly promoted_ticket_id: string | null;
+		readonly idempotency_key: string;
+		readonly created_at: string;
+		readonly updated_at: string;
+	};
+	readonly management_assets: {
+		readonly id: string;
+		readonly project_id: string;
+		readonly ticket_id: string;
+		readonly relative_path: string;
+		readonly mime_type: string;
+		readonly byte_size: number;
+		readonly sha256: string;
+		readonly storage_path: string;
+		readonly created_at: string;
+	};
+	readonly management_operations: {
+		readonly id: string;
+		readonly project_id: string;
+		readonly session_id: string | null;
+		readonly generation_id: string | null;
+		readonly kind: string;
+		readonly command: string;
+		readonly payload_json: string;
+		readonly status: string;
+		readonly actor: string;
+		readonly idempotency_key: string;
+		readonly created_at: string;
+		readonly updated_at: string;
+	};
+	readonly management_audit: {
+		readonly id: string;
+		readonly project_id: string;
+		readonly kind: string;
+		readonly subject_id: string;
+		readonly details_json: string;
+		readonly created_at: string;
+	};
+	readonly management_outbox: {
+		readonly id: string;
+		readonly project_id: string;
+		readonly kind: string;
+		readonly payload_json: string;
+		readonly idempotency_key: string;
+		readonly status: string;
+		readonly created_at: string;
+	};
 }
