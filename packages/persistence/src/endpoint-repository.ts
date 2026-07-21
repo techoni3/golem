@@ -26,6 +26,10 @@ interface EndpointRow {
 	readonly delivery_mode: DeliveryMode;
 	readonly readiness_state: EndpointReadinessState;
 	readonly control_state: EndpointControlState;
+	readonly consumer_ready: number;
+	readonly consumption_observed: number;
+	readonly delivery_observed: number;
+	readonly delivery_failed: number;
 	readonly claimed_at: string;
 	readonly heartbeat_at: string | null;
 	readonly expires_at: string | null;
@@ -47,6 +51,10 @@ interface CapabilityRow {
 
 interface GenerationRow {
 	readonly lifecycle_state: string;
+}
+
+interface ExpiryRow extends EndpointRow {
+	readonly generation_lifecycle_state: string;
 }
 
 function json(value: Readonly<Record<string, unknown>>): string {
@@ -88,6 +96,24 @@ function terminal(state: string): boolean {
 
 function compareTime(left: string, right: string): number {
 	return Date.parse(left) - Date.parse(right);
+}
+
+/** Public endpoint diagnostics may include adapter/owner labels from untrusted adapters. */
+function redactIdentifier(value: string): string {
+	return value.replace(
+		/((?:owner[_-]?token|access[_-]?token|api[_-]?key|openai[_-]?api[_-]?key|token|credential|password|secret|bearer)\s*[=:]\s*)([^\s,;|]+)/giu,
+		"$1[REDACTED]",
+	);
+}
+
+function consumedEvidence(
+	evidence: Readonly<Record<string, unknown>>,
+): boolean {
+	return (
+		evidence.consumed === true ||
+		evidence.consumptionObserved === true ||
+		evidence.consumption === "observed"
+	);
 }
 
 /**
@@ -139,7 +165,7 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 	#row(endpointId: string): EndpointRow | undefined {
 		return this.#database
 			.prepare<EndpointRow>(
-				"SELECT endpoint_id, generation_id, route_kind, revision, state, owner_fence, owner_instance_id, delivery_mode, readiness_state, control_state, claimed_at, heartbeat_at, expires_at, superseded_at FROM endpoint_claims WHERE endpoint_id = ?",
+				"SELECT endpoint_id, generation_id, route_kind, revision, state, owner_fence, owner_instance_id, delivery_mode, readiness_state, control_state, consumer_ready, consumption_observed, delivery_observed, delivery_failed, claimed_at, heartbeat_at, expires_at, superseded_at FROM endpoint_claims WHERE endpoint_id = ?",
 			)
 			.get(endpointId);
 	}
@@ -218,17 +244,24 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 			const generationError = this.#validateGeneration(input.generationId);
 			if (generationError) return generationError;
 			const now = this.#clock.now();
-			const prior = this.#database
-				.prepare<EndpointRow>(
-					"SELECT endpoint_id, generation_id, route_kind, revision, state, owner_fence, owner_instance_id, delivery_mode, readiness_state, control_state, claimed_at, heartbeat_at, expires_at, superseded_at FROM endpoint_claims WHERE generation_id = ? AND route_kind = ? AND state IN ('claiming', 'healthy', 'degraded') ORDER BY owner_fence DESC LIMIT 1",
-				)
-				.get(input.generationId, input.routeKind);
 			const fenceRow = this.#database
 				.prepare<{ readonly fence: number | null }>(
 					"SELECT MAX(fence) AS fence FROM endpoint_fences WHERE generation_id = ? AND route_kind = ?",
 				)
 				.get(input.generationId, input.routeKind);
 			const fence = (fenceRow?.fence ?? 0) + 1;
+			const endpointId =
+				input.endpointId ??
+				`endpoint_${sha256(`${input.generationId}:${input.routeKind}:${input.ownerInstanceId}:${fence}`).slice(0, 24)}`;
+			// Resolve conflicts before superseding the active owner or allocating a
+			// fence so a rejected duplicate is a true zero-write transaction.
+			if (this.#row(endpointId))
+				return rejected("runtime.endpoint.endpoint_conflict");
+			const prior = this.#database
+				.prepare<EndpointRow>(
+					"SELECT endpoint_id, generation_id, route_kind, revision, state, owner_fence, owner_instance_id, delivery_mode, readiness_state, control_state, consumer_ready, consumption_observed, delivery_observed, delivery_failed, claimed_at, heartbeat_at, expires_at, superseded_at FROM endpoint_claims WHERE generation_id = ? AND route_kind = ? AND state IN ('claiming', 'healthy', 'degraded') ORDER BY owner_fence DESC LIMIT 1",
+				)
+				.get(input.generationId, input.routeKind);
 			const revision = this.#nextRevision(input.generationId);
 			if (prior) {
 				this.#database
@@ -237,11 +270,6 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 					)
 					.run(now, revision, prior.endpoint_id);
 			}
-			const endpointId =
-				input.endpointId ??
-				`endpoint_${sha256(`${input.generationId}:${input.routeKind}:${input.ownerInstanceId}:${fence}`).slice(0, 24)}`;
-			if (this.#row(endpointId))
-				return rejected("runtime.endpoint.endpoint_conflict");
 			const expiresAt = this.#clock.after(input.leaseMs);
 			this.#database
 				.prepare(
@@ -256,7 +284,7 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 				);
 			this.#database
 				.prepare(
-					"INSERT INTO endpoint_claims(endpoint_id, generation_id, route_kind, revision, state, owner_fence, owner_instance_id, delivery_mode, readiness_state, control_state, claimed_at, heartbeat_at, expires_at, superseded_at) VALUES (?, ?, ?, ?, 'claiming', ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+					"INSERT INTO endpoint_claims(endpoint_id, generation_id, route_kind, revision, state, owner_fence, owner_instance_id, delivery_mode, readiness_state, control_state, consumer_ready, consumption_observed, delivery_observed, delivery_failed, claimed_at, heartbeat_at, expires_at, superseded_at) VALUES (?, ?, ?, ?, 'claiming', ?, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?, ?, NULL)",
 				)
 				.run(
 					endpointId,
@@ -298,6 +326,8 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 		if (!Number.isInteger(input.leaseMs) || input.leaseMs < 1)
 			return rejected("runtime.endpoint.lease_invalid");
 		return this.#database.transaction(() => {
+			const generationError = this.#validateGeneration(input.generationId);
+			if (generationError) return generationError;
 			const checked = this.#validateOwner(input);
 			if (checked.error) return checked.error;
 			const row = checked.row as EndpointRow;
@@ -326,6 +356,8 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 		state: "healthy" | "degraded";
 	}): RuntimeEndpointMutationResult {
 		return this.#database.transaction(() => {
+			const generationError = this.#validateGeneration(input.generationId);
+			if (generationError) return generationError;
 			const checked = this.#validateOwner(input);
 			if (checked.error) return checked.error;
 			const row = checked.row as EndpointRow;
@@ -351,6 +383,8 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 		controlState?: EndpointControlState;
 	}): RuntimeEndpointMutationResult {
 		return this.#database.transaction(() => {
+			const generationError = this.#validateGeneration(input.generationId);
+			if (generationError) return generationError;
 			const checked = this.#validateOwner(input);
 			if (checked.error) return checked.error;
 			const row = checked.row as EndpointRow;
@@ -381,6 +415,8 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 		readiness?: EndpointReadinessState;
 	}): RuntimeEndpointMutationResult {
 		return this.#database.transaction(() => {
+			const generationError = this.#validateGeneration(input.generationId);
+			if (generationError) return generationError;
 			const checked = this.#validateOwner(input);
 			if (checked.error) return checked.error;
 			const row = checked.row as EndpointRow;
@@ -390,9 +426,9 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 				input.readiness ?? (input.consumerReady ? "ready" : "held_waiting");
 			this.#database
 				.prepare(
-					"UPDATE endpoint_claims SET readiness_state = ?, revision = ? WHERE endpoint_id = ?",
+					"UPDATE endpoint_claims SET readiness_state = ?, consumer_ready = ?, revision = ? WHERE endpoint_id = ?",
 				)
-				.run(readiness, revision, row.endpoint_id);
+				.run(readiness, input.consumerReady ? 1 : 0, revision, row.endpoint_id);
 			this.#emit({ ...row, revision }, "endpoint.consumer_probe", now);
 			return accepted(row.endpoint_id, revision);
 		})();
@@ -407,6 +443,8 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 		readiness?: EndpointReadinessState;
 	}): RuntimeEndpointMutationResult {
 		return this.#database.transaction(() => {
+			const generationError = this.#validateGeneration(input.generationId);
+			if (generationError) return generationError;
 			const checked = this.#validateOwner(input);
 			if (checked.error) return checked.error;
 			const row = checked.row as EndpointRow;
@@ -417,9 +455,19 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 				(input.status === "failed" ? "unhealthy" : row.readiness_state);
 			this.#database
 				.prepare(
-					"UPDATE endpoint_claims SET readiness_state = ?, revision = ? WHERE endpoint_id = ?",
+					"UPDATE endpoint_claims SET readiness_state = ?, delivery_observed = ?, delivery_failed = ?, revision = ? WHERE endpoint_id = ?",
 				)
-				.run(readiness, revision, row.endpoint_id);
+				.run(
+					readiness,
+					input.status === "delivered" ? 1 : row.delivery_observed,
+					input.status === "failed"
+						? 1
+						: input.status === "delivered"
+							? 0
+							: row.delivery_failed,
+					revision,
+					row.endpoint_id,
+				);
 			this.#emit(
 				{ ...row, revision },
 				`endpoint.delivery.${input.status}`,
@@ -440,6 +488,8 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 		if (!input.capability.capability.trim())
 			return rejected("runtime.endpoint.capability_invalid");
 		return this.#database.transaction(() => {
+			const generationError = this.#validateGeneration(input.generationId);
+			if (generationError) return generationError;
 			const checked = this.#validateOwner(input);
 			if (checked.error) return checked.error;
 			const row = checked.row as EndpointRow;
@@ -481,9 +531,13 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 				);
 			this.#database
 				.prepare(
-					"UPDATE endpoint_claims SET revision = ? WHERE endpoint_id = ?",
+					"UPDATE endpoint_claims SET consumption_observed = CASE WHEN ? = 1 THEN 1 ELSE consumption_observed END, revision = ? WHERE endpoint_id = ?",
 				)
-				.run(revision, row.endpoint_id);
+				.run(
+					consumedEvidence(input.evidence) ? 1 : 0,
+					revision,
+					row.endpoint_id,
+				);
 			this.#emit({ ...row, revision }, "endpoint.capability", now);
 			return accepted(row.endpoint_id, revision);
 		})();
@@ -496,6 +550,8 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 		ownerFence: number;
 	}): RuntimeEndpointMutationResult {
 		return this.#database.transaction(() => {
+			const generationError = this.#validateGeneration(input.generationId);
+			if (generationError) return generationError;
 			const checked = this.#validateOwner(input);
 			if (checked.error) return checked.error;
 			const row = checked.row as EndpointRow;
@@ -514,11 +570,15 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 	expire(now = this.#clock.now()): readonly RuntimeEndpointMutationResult[] {
 		return this.#database.transaction(() => {
 			const rows = this.#database
-				.prepare<EndpointRow>(
-					"SELECT endpoint_id, generation_id, route_kind, revision, state, owner_fence, owner_instance_id, delivery_mode, readiness_state, control_state, claimed_at, heartbeat_at, expires_at, superseded_at FROM endpoint_claims WHERE state IN ('claiming', 'healthy', 'degraded') AND expires_at IS NOT NULL AND expires_at <= ? ORDER BY generation_id, route_kind, owner_fence",
+				.prepare<ExpiryRow>(
+					"SELECT endpoint_claims.endpoint_id, endpoint_claims.generation_id, endpoint_claims.route_kind, endpoint_claims.revision, endpoint_claims.state, endpoint_claims.owner_fence, endpoint_claims.owner_instance_id, endpoint_claims.delivery_mode, endpoint_claims.readiness_state, endpoint_claims.control_state, endpoint_claims.consumer_ready, endpoint_claims.consumption_observed, endpoint_claims.delivery_observed, endpoint_claims.delivery_failed, endpoint_claims.claimed_at, endpoint_claims.heartbeat_at, endpoint_claims.expires_at, endpoint_claims.superseded_at, session_generations.lifecycle_state AS generation_lifecycle_state FROM endpoint_claims JOIN session_generations ON session_generations.generation_id = endpoint_claims.generation_id WHERE endpoint_claims.state IN ('claiming', 'healthy', 'degraded') AND endpoint_claims.expires_at IS NOT NULL AND endpoint_claims.expires_at <= ? ORDER BY endpoint_claims.generation_id, endpoint_claims.route_kind, endpoint_claims.owner_fence",
 				)
 				.all(now);
 			return rows.map((row) => {
+				if (terminal(row.generation_lifecycle_state))
+					return rejected("runtime.endpoint.generation_terminal", {
+						remedy: "select a non-terminal generation",
+					});
 				const revision = row.revision + 1;
 				this.#database
 					.prepare(
@@ -531,7 +591,10 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 		})();
 	}
 
-	#getCapabilities(endpointId: string): readonly RuntimeEndpointCapability[] {
+	#getCapabilities(
+		endpointId: string,
+		redact = true,
+	): readonly RuntimeEndpointCapability[] {
 		return Object.freeze(
 			this.#database
 				.prepare<CapabilityRow>(
@@ -540,8 +603,12 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 				.all(endpointId)
 				.map((row) =>
 					Object.freeze({
-						capability: row.capability,
-						adapterId: row.adapter_id,
+						capability: redact
+							? redactIdentifier(row.capability)
+							: row.capability,
+						adapterId: redact
+							? redactIdentifier(row.adapter_id)
+							: row.adapter_id,
 						adapterVersion: row.adapter_version,
 						qualification: row.qualification_state,
 						deliveryMode: row.delivery_mode,
@@ -556,16 +623,20 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 
 	#viewRow(row: EndpointRow): RuntimeEndpointView {
 		return Object.freeze({
-			endpointId: row.endpoint_id,
+			endpointId: redactIdentifier(row.endpoint_id),
 			generationId: row.generation_id,
 			routeKind: row.route_kind,
 			revision: row.revision,
 			state: row.state,
 			ownerFence: row.owner_fence,
-			ownerInstanceId: row.owner_instance_id,
+			ownerInstanceId: redactIdentifier(row.owner_instance_id),
 			deliveryMode: row.delivery_mode,
 			readiness: row.readiness_state,
 			controlState: row.control_state,
+			consumerReady: row.consumer_ready === 1,
+			consumptionObserved: row.consumption_observed === 1,
+			deliveryObserved: row.delivery_observed === 1,
+			deliveryFailed: row.delivery_failed === 1,
 			claimedAt: row.claimed_at,
 			...(row.heartbeat_at ? { heartbeatAt: row.heartbeat_at } : {}),
 			...(row.expires_at ? { expiresAt: row.expires_at } : {}),
@@ -583,7 +654,7 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 		return Object.freeze(
 			this.#database
 				.prepare<EndpointRow>(
-					"SELECT endpoint_id, generation_id, route_kind, revision, state, owner_fence, owner_instance_id, delivery_mode, readiness_state, control_state, claimed_at, heartbeat_at, expires_at, superseded_at FROM endpoint_claims WHERE generation_id = ? ORDER BY route_kind, owner_fence DESC, endpoint_id",
+					"SELECT endpoint_id, generation_id, route_kind, revision, state, owner_fence, owner_instance_id, delivery_mode, readiness_state, control_state, consumer_ready, consumption_observed, delivery_observed, delivery_failed, claimed_at, heartbeat_at, expires_at, superseded_at FROM endpoint_claims WHERE generation_id = ? ORDER BY route_kind, owner_fence DESC, endpoint_id",
 				)
 				.all(generationId)
 				.map((row) => this.#viewRow(row)),
@@ -594,6 +665,8 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 		generationId: string;
 		routeKind: EndpointRouteKind;
 		requiredCapability?: string;
+		expectedOwnerFence?: number;
+		expectedFence?: number;
 		now?: string;
 	}): RuntimeEndpointEligibility {
 		const now = input.now ?? this.#clock.now();
@@ -622,7 +695,7 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 			};
 		const row = this.#database
 			.prepare<EndpointRow>(
-				"SELECT endpoint_id, generation_id, route_kind, revision, state, owner_fence, owner_instance_id, delivery_mode, readiness_state, control_state, claimed_at, heartbeat_at, expires_at, superseded_at FROM endpoint_claims WHERE generation_id = ? AND route_kind = ? AND state IN ('claiming', 'healthy', 'degraded') ORDER BY owner_fence DESC LIMIT 1",
+				"SELECT endpoint_id, generation_id, route_kind, revision, state, owner_fence, owner_instance_id, delivery_mode, readiness_state, control_state, consumer_ready, consumption_observed, delivery_observed, delivery_failed, claimed_at, heartbeat_at, expires_at, superseded_at FROM endpoint_claims WHERE generation_id = ? AND route_kind = ? AND state IN ('claiming', 'healthy', 'degraded') ORDER BY owner_fence DESC LIMIT 1",
 			)
 			.get(input.generationId, input.routeKind);
 		if (!row)
@@ -635,9 +708,22 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 		const endpoint = this.#viewRow(row);
 		const endpointFacts = {
 			...facts,
-			endpointId: row.endpoint_id,
+			endpointId: redactIdentifier(row.endpoint_id),
 			ownerFence: row.owner_fence,
 		};
+		const expectedFence = input.expectedOwnerFence ?? input.expectedFence;
+		if (expectedFence !== undefined && expectedFence !== row.owner_fence)
+			return {
+				disposition: "ineligible",
+				code: "runtime.endpoint.queued_fence_stale",
+				remedy: "refresh endpoint eligibility before delivery",
+				endpoint,
+				facts: {
+					...endpointFacts,
+					expectedFence,
+					currentFence: row.owner_fence,
+				},
+			};
 		if (row.expires_at && compareTime(row.expires_at, now) <= 0)
 			return {
 				disposition: "ineligible",
@@ -678,12 +764,28 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 				endpoint,
 				facts: endpointFacts,
 			};
-		const capability = endpoint.capabilities.find(
+		if (!row.consumer_ready)
+			return {
+				disposition: "ineligible",
+				code: "runtime.endpoint.consumer_unready",
+				remedy: "probe a ready consumer",
+				endpoint,
+				facts: endpointFacts,
+			};
+		if (row.delivery_failed || !row.delivery_observed)
+			return {
+				disposition: "ineligible",
+				code: "runtime.endpoint.delivery_unready",
+				remedy: "report successful delivery",
+				endpoint,
+				facts: endpointFacts,
+			};
+		const storedCapability = this.#getCapabilities(row.endpoint_id, false).find(
 			(candidate) =>
 				candidate.capability === input.requiredCapability &&
 				(!candidate.expiresAt || compareTime(candidate.expiresAt, now) > 0),
 		);
-		if (!capability)
+		if (!storedCapability)
 			return {
 				disposition: "ineligible",
 				code: "runtime.endpoint.capability_unqualified",
@@ -691,10 +793,24 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 				endpoint,
 				facts: endpointFacts,
 			};
+		const capability = Object.freeze({
+			...storedCapability,
+			capability: redactIdentifier(storedCapability.capability),
+			adapterId: redactIdentifier(storedCapability.adapterId),
+		});
 		const capabilityFacts = {
 			...endpointFacts,
-			capability: capability.capability,
+			capability: redactIdentifier(capability.capability),
 		};
+		if (capability.deliveryMode !== row.delivery_mode)
+			return {
+				disposition: "ineligible",
+				code: "runtime.endpoint.capability_mode_mismatch",
+				remedy: "report capability for endpoint delivery mode",
+				endpoint,
+				capability,
+				facts: capabilityFacts,
+			};
 		if (capability.qualification !== "supported")
 			return {
 				disposition: "ineligible",
@@ -709,6 +825,15 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 				disposition: "ineligible",
 				code: "runtime.endpoint.capability_unready",
 				remedy: "report ready capability evidence",
+				endpoint,
+				capability,
+				facts: capabilityFacts,
+			};
+		if (!row.consumption_observed)
+			return {
+				disposition: "ineligible",
+				code: "runtime.endpoint.capability_consumption_unverified",
+				remedy: "report verified consumption evidence",
 				endpoint,
 				capability,
 				facts: capabilityFacts,

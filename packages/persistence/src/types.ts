@@ -163,6 +163,10 @@ export interface RuntimeEndpointView {
 	readonly deliveryMode: DeliveryMode;
 	readonly readiness: EndpointReadinessState;
 	readonly controlState: EndpointControlState;
+	readonly consumerReady: boolean;
+	readonly consumptionObserved: boolean;
+	readonly deliveryObserved: boolean;
+	readonly deliveryFailed: boolean;
 	readonly claimedAt: string;
 	readonly heartbeatAt?: string;
 	readonly expiresAt?: string;
@@ -258,6 +262,10 @@ export interface RuntimeEndpointStorage {
 		readonly generationId: string;
 		readonly routeKind: EndpointRouteKind;
 		readonly requiredCapability?: string;
+		/** Fence captured when work was queued; stale queued delivery fails closed. */
+		readonly expectedOwnerFence?: number;
+		/** Compatibility spelling for callers that persist a queued fence. */
+		readonly expectedFence?: number;
 		readonly now?: string;
 	}): RuntimeEndpointEligibility;
 	get(endpointId: string): RuntimeEndpointView | undefined;

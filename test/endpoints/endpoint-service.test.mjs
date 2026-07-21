@@ -74,13 +74,26 @@ test("GOL-42 endpoint fence concurrency/crash", async () => {
 	try {
 		seed(owner);
 		const endpoints = createEndpointService({ storage: owner.runtimeEndpointStorage() });
+		const explicit = endpoints.claim({ generationId, routeKind: "control", endpointId: "endpoint-explicit", ownerInstanceId: "explicit-owner", deliveryMode: "native_channel", leaseMs: 60_000 });
+		assert.equal(explicit.ownerFence, 1);
+		const explicitBeforeDuplicate = endpoints.get("endpoint-explicit");
+		const explicitDuplicate = endpoints.claim({ generationId, routeKind: "control", endpointId: "endpoint-explicit", ownerInstanceId: "forged-duplicate", deliveryMode: "native_channel", leaseMs: 60_000 });
+		assert.equal(explicitDuplicate.code, "runtime.endpoint.endpoint_conflict");
+		assert.deepEqual(endpoints.get("endpoint-explicit"), explicitBeforeDuplicate, "explicit duplicate-ID rejection preserves the active owner");
 		const claims = await Promise.all(Array.from({ length: 20 }, (_, index) => Promise.resolve().then(() => endpoints.claim({ generationId, routeKind: "control", ownerInstanceId: `owner-${index + 1}`, deliveryMode: "native_channel", leaseMs: 60_000 }))));
-		assert.deepEqual(claims.map((claim) => claim.ownerFence), Array.from({ length: 20 }, (_, index) => index + 1));
+		assert.deepEqual(claims.map((claim) => claim.ownerFence), Array.from({ length: 20 }, (_, index) => index + 2));
 		assert.equal(endpoints.list(generationId).filter((endpoint) => ["claiming", "healthy", "degraded"].includes(endpoint.state)).length, 1);
 		const allEffects = owner.claimRuntimeOutbox("gol42-fence-order", 100);
 		const effects = allEffects.filter((effect) => String(effect.payload.kind).startsWith("endpoint."));
-		assert.deepEqual(effects.map((effect) => effect.payload.revision), Array.from({ length: 20 }, (_, index) => index + 1), "accepted endpoint effects replay in revision order");
+		assert.deepEqual(effects.map((effect) => effect.payload.revision), Array.from({ length: 21 }, (_, index) => index + 1), "accepted endpoint effects replay in revision order");
 		for (const effect of allEffects) owner.ackRuntimeOutbox(effect.id, effect.claimToken);
+		const activeBeforeDuplicate = endpoints.list(generationId).find((endpoint) => ["claiming", "healthy", "degraded"].includes(endpoint.state));
+		assert(activeBeforeDuplicate);
+		const duplicate = endpoints.claim({ generationId, routeKind: "control", endpointId: activeBeforeDuplicate.endpointId, ownerInstanceId: "duplicate-owner", deliveryMode: "native_channel", leaseMs: 60_000 });
+		assert.equal(duplicate.disposition, "rejected");
+		assert.equal(duplicate.code, "runtime.endpoint.endpoint_conflict");
+		assert.deepEqual(endpoints.list(generationId).find((endpoint) => endpoint.endpointId === activeBeforeDuplicate.endpointId), activeBeforeDuplicate, "duplicate rejection preserves the active owner/fence and all endpoint facts");
+		assert.equal(owner.runtimeOutboxHealth().pending, 0, "duplicate rejection emits no endpoint effect");
 		const first = claims[0];
 		assert(first.endpointId && first.ownerFence);
 		assert.equal(endpoints.heartbeat({ endpointId: first.endpointId, generationId, ownerInstanceId: "owner-1", ownerFence: first.ownerFence, leaseMs: 60_000 }).code, "runtime.endpoint.fence_stale");
@@ -95,7 +108,7 @@ test("GOL-42 endpoint fence concurrency/crash", async () => {
 		const reopened = openControlPlanePersistence({ runtimePath: home.runtimeDb, trackerPath: home.trackerDb }, { clock, ownerId: "gol42-fence-reconnect" });
 		try {
 			const reconnect = createEndpointService({ storage: reopened.runtimeEndpointStorage() }).claim({ generationId, routeKind: "control", ownerInstanceId: "owner-reconnect", deliveryMode: "native_channel", leaseMs: 60_000 });
-			assert.equal(reconnect.ownerFence, 21, "reconnect allocates a strictly newer durable fence");
+			assert.equal(reconnect.ownerFence, 22, "reconnect allocates a strictly newer durable fence");
 			assert.equal(reopened.runtimeEndpointStorage().list(generationId).filter((endpoint) => ["claiming", "healthy", "degraded"].includes(endpoint.state)).length, 1);
 		} finally {
 			await reopened.close();
@@ -108,7 +121,8 @@ test("GOL-42 endpoint fence concurrency/crash", async () => {
 
 test("GOL-42 readiness/capability matrix", async () => {
 	const home = createTemporaryHome("golem-gol42-readiness-");
-	const owner = openControlPlanePersistence({ runtimePath: home.runtimeDb, trackerPath: home.trackerDb }, { clock: makeClock(), ownerId: "gol42-readiness-owner" });
+	const clock = makeClock();
+	const owner = openControlPlanePersistence({ runtimePath: home.runtimeDb, trackerPath: home.trackerDb }, { clock, ownerId: "gol42-readiness-owner" });
 	try {
 		seed(owner);
 		const endpoints = createEndpointService({ storage: owner.runtimeEndpointStorage() });
@@ -121,12 +135,28 @@ test("GOL-42 readiness/capability matrix", async () => {
 		assert.equal(endpoints.probe({ ...identity, consumerReady: false }).disposition, "accepted");
 		assert.equal(endpoints.eligibility({ generationId, routeKind: "delivery", requiredCapability: "control.dispatch" }).code, "runtime.endpoint.readiness_unready");
 		assert.equal(endpoints.reportReadiness({ ...identity, deliveryMode: "native_channel", readiness: "ready" }).disposition, "accepted");
+		assert.equal(endpoints.eligibility({ generationId, routeKind: "delivery", requiredCapability: "control.dispatch" }).code, "runtime.endpoint.consumer_unready", "generic readiness cannot overwrite a false consumer probe");
 		assert.equal(endpoints.reportDelivery({ ...identity, status: "failed" }).disposition, "accepted");
+		assert.equal(endpoints.probe({ ...identity, consumerReady: true }).disposition, "accepted");
+		assert.equal(endpoints.reportReadiness({ ...identity, deliveryMode: "native_channel", readiness: "ready" }).disposition, "accepted");
+		assert.equal(endpoints.eligibility({ generationId, routeKind: "delivery", requiredCapability: "control.dispatch" }).code, "runtime.endpoint.delivery_unready", "delivery failure remains fail-closed after generic readiness");
 		assert.equal(endpoints.reportDelivery({ ...identity, status: "delivered", readiness: "ready" }).disposition, "accepted");
 		assert.equal(endpoints.eligibility({ generationId, routeKind: "delivery", requiredCapability: "control.dispatch" }).code, "runtime.endpoint.capability_unqualified");
-		assert.equal(endpoints.reportCapability({ ...identity, capability: capability({ qualification: "unsupported", readiness: "unsupported" }), evidence: { registration: true } }).disposition, "accepted");
+		assert.equal(endpoints.reportCapability({ ...identity, capability: capability({ adapterId: "owner_token=adapter-secret", qualification: "supported", evidenceKind: "configured", observedAt: "2026-01-01T00:00:00.500Z" }), evidence: { registration: true, token: "fixture-secret" } }).disposition, "accepted");
+		const publicDiagnostics = JSON.stringify(endpoints.get(claim.endpointId));
+		assert(!publicDiagnostics.includes("adapter-secret"));
+		assert(!publicDiagnostics.includes("fixture-secret"));
+		assert.equal(endpoints.eligibility({ generationId, routeKind: "delivery", requiredCapability: "control.dispatch" }).code, "runtime.endpoint.capability_consumption_unverified", "registration-only evidence cannot qualify");
+		assert.equal(endpoints.reportCapability({ ...identity, capability: capability({ qualification: "unsupported", readiness: "unsupported", observedAt: "2026-01-01T00:00:01.000Z" }), evidence: { registration: true } }).disposition, "accepted");
 		assert.equal(endpoints.eligibility({ generationId, routeKind: "delivery", requiredCapability: "control.dispatch" }).code, "runtime.endpoint.capability_unqualified");
-		assert.equal(endpoints.reportCapability({ ...identity, capability: capability({ qualification: "supported", readiness: "pull_only", observedAt: "2026-01-01T00:00:01.000Z" }), evidence: { consumed: false } }).disposition, "accepted");
+		const staleQueued = endpoints.eligibility({ generationId, routeKind: "delivery", requiredCapability: "control.dispatch", expectedFence: claim.ownerFence - 1 });
+		assert.equal(staleQueued.code, "runtime.endpoint.queued_fence_stale", "stale queued delivery is rejected before adapter invocation");
+		let adapterCalls = 0;
+		if (staleQueued.disposition === "eligible") adapterCalls += 1;
+		assert.equal(adapterCalls, 0);
+		assert.equal(endpoints.reportCapability({ ...identity, capability: capability({ deliveryMode: "pull", qualification: "supported", readiness: "ready", observedAt: "2026-01-01T00:00:01.250Z" }), evidence: { consumed: false } }).disposition, "accepted");
+		assert.equal(endpoints.eligibility({ generationId, routeKind: "delivery", requiredCapability: "control.dispatch" }).code, "runtime.endpoint.capability_mode_mismatch");
+		assert.equal(endpoints.reportCapability({ ...identity, capability: capability({ deliveryMode: "native_channel", qualification: "supported", readiness: "pull_only", observedAt: "2026-01-01T00:00:01.500Z" }), evidence: { consumed: false } }).disposition, "accepted");
 		assert.equal(endpoints.eligibility({ generationId, routeKind: "delivery", requiredCapability: "control.dispatch" }).code, "runtime.endpoint.capability_unready");
 		assert.equal(endpoints.reportCapability({ ...identity, capability: capability({ observedAt: "2026-01-01T00:00:02.000Z" }), evidence: { consumed: true } }).disposition, "accepted");
 		const eligible = endpoints.eligibility({ generationId, routeKind: "delivery", requiredCapability: "control.dispatch" });
@@ -134,6 +164,20 @@ test("GOL-42 readiness/capability matrix", async () => {
 		assert.equal(eligible.endpoint?.generationId, generationId);
 		assert.equal(eligible.endpoint?.ownerFence, claim.ownerFence);
 		assert.equal(eligible.capability?.qualification, "supported");
+		const terminal = createSessionService({ projects: owner.runtimeProjectStorage(), sessions: owner.runtimeSessionStorage() });
+		assert.equal(terminal.apply(signal("session.ended", 4220, { disposition: "ended" })).disposition, "accepted");
+		const revisionBeforeTerminalMutators = endpoints.get(claim.endpointId)?.revision;
+		assert.equal(endpoints.claim({ generationId, routeKind: "control", ownerInstanceId: "late-owner", deliveryMode: "native_channel", leaseMs: 60_000 }).code, "runtime.endpoint.generation_terminal");
+		assert.equal(endpoints.heartbeat({ ...identity, leaseMs: 60_000 }).code, "runtime.endpoint.generation_terminal");
+		assert.equal(endpoints.reportHealth({ ...identity, state: "healthy" }).code, "runtime.endpoint.generation_terminal");
+		assert.equal(endpoints.reportReadiness({ ...identity, deliveryMode: "native_channel", readiness: "ready" }).code, "runtime.endpoint.generation_terminal");
+		assert.equal(endpoints.probe({ ...identity, consumerReady: true }).code, "runtime.endpoint.generation_terminal");
+		assert.equal(endpoints.reportDelivery({ ...identity, status: "delivered" }).code, "runtime.endpoint.generation_terminal");
+		assert.equal(endpoints.reportCapability({ ...identity, capability: capability({ observedAt: "2026-01-01T00:00:03.000Z" }), evidence: { consumed: true } }).code, "runtime.endpoint.generation_terminal");
+		assert.equal(endpoints.release(identity).code, "runtime.endpoint.generation_terminal");
+		clock.advance(61_000);
+		assert.equal(endpoints.expire()[0]?.code, "runtime.endpoint.generation_terminal");
+		assert.equal(endpoints.get(claim.endpointId)?.revision, revisionBeforeTerminalMutators, "terminal mutators leave endpoint revision and state unchanged");
 	} finally {
 		await owner.close();
 		home.cleanup();
