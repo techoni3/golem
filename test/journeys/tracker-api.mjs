@@ -66,7 +66,7 @@ async function json(response) {
 }
 
 export async function exerciseTrackerHttpMcpParity() {
-	return withControlPlane(async ({ token, service, origin }) => {
+	return withControlPlane(async ({ token, service, writer, origin }) => {
 		const caller = { projectId: "prj_gol43", sessionId: "ses_gol43" };
 		const client = createFetchApiClient(origin, { bearerToken: token, caller });
 		const created = await invokeMcpTool(client, "ticket_create", { title: "typed parity ticket", body: "MCP delegates through the typed tracker API." });
@@ -82,8 +82,25 @@ export async function exerciseTrackerHttpMcpParity() {
 		const legacy = await json(await fetch(`${origin}/api/tickets`, { headers: { authorization: `Bearer ${token}` } }));
 		assert.equal(legacy.status, 200, "legacy route remains available as a delegate");
 		assert.equal(legacy.body.some((item) => item.id === ticket.id), true, "legacy and typed views converge");
-		const conflict = await json(await fetch(`${origin}/api/v1/tracker/tickets/${ticket.id}`, { method: "PATCH", headers: headers(token), body: JSON.stringify({ expected_revision: 1, title: "stale" }) }));
-		assert.equal(conflict.status, 409, "stale optimistic revision is rejected");
+		const missingRevision = await json(await fetch(`${origin}/api/v1/tracker/tickets/${ticket.id}`, { method: "PATCH", headers: headers(token), body: JSON.stringify({ title: "unconditional" }) }));
+		assert.equal(missingRevision.status, 400, "typed HTTP mutation requires an explicit CAS revision");
+		assert.equal(missingRevision.body.code, "tracker.revision.required");
+		const fresh = await invokeMcpTool(client, "ticket_update", { id: ticket.id, expected_revision: ticket.revision, title: "fresh canonical title" });
+		assert.equal(fresh.isError, undefined, "MCP CAS update delegates successfully");
+		const freshTicket = JSON.parse(fresh.content[0].text).result;
+		assert.equal(freshTicket.revision, ticket.revision + 1, "successful CAS advances exactly one revision");
+		const auditBeforeStale = writer.trackerCoreStorage().auditCore().length;
+		const conflict = await json(await fetch(`${origin}/api/v1/tracker/tickets/${ticket.id}`, { method: "PATCH", headers: headers(token), body: JSON.stringify({ expected_revision: ticket.revision, title: "stale" }) }));
+		assert.equal(conflict.status, 409, "stale optimistic revision is rejected by typed HTTP CAS");
+		assert.equal(conflict.body.code, "tracker.conflict", "stale CAS has the stable typed conflict code");
+		const staleMcp = await invokeMcpTool(client, "ticket_update", { id: ticket.id, expected_revision: ticket.revision, title: "stale MCP" });
+		assert.equal(staleMcp.isError, true, "stale MCP CAS is rejected");
+		assert.equal(JSON.parse(staleMcp.content[0].text).code, "tracker.conflict", "MCP preserves the typed conflict code");
+		const afterStale = await json(await fetch(`${origin}/api/v1/tracker/tickets/${ticket.id}`, { headers: headers(token) }));
+		assert.equal(afterStale.status, 200);
+		assert.equal(afterStale.body.title, "fresh canonical title", "stale CAS does not mutate the ticket");
+		assert.equal(afterStale.body.revision, freshTicket.revision, "stale CAS does not advance revision");
+		assert.equal(writer.trackerCoreStorage().auditCore().length, auditBeforeStale, "stale CAS emits no event or audit side effect");
 		const forged = await json(await fetch(`${origin}/api/v1/tracker/tickets`, { method: "POST", headers: headers(token), body: JSON.stringify({ title: "must reject", actor: "human:forged" }) }));
 		assert.equal(forged.status, 403, "request JSON cannot forge actor identity");
 		assert.equal(JSON.stringify(forged.body).includes("human:forged"), false, "forged identity is not echoed");

@@ -171,6 +171,31 @@ function normalizeQuery(request: FastifyRequest): JsonRecord {
 	return record(request.query);
 }
 
+/**
+ * Typed mutations are compare-and-swap commands.  A missing or malformed
+ * precondition is rejected at the HTTP boundary instead of silently falling
+ * back to the current revision (which would turn an omitted CAS into an
+ * unconditional write).
+ */
+function expectedRevision(
+	input: JsonRecord,
+	request: FastifyRequest,
+	reply: FastifyReply,
+): number | undefined {
+	const candidate = input.expected_revision;
+	if (!Number.isSafeInteger(candidate) || (candidate as number) < 1) {
+		fail(
+			request,
+			reply,
+			400,
+			"tracker.revision.required",
+			"expected_revision must be a positive safe integer",
+		);
+		return undefined;
+	}
+	return candidate as number;
+}
+
 type ClaimRecord = ReturnType<TrackerServices["delivery"]["claim"]>[number];
 
 /**
@@ -340,10 +365,12 @@ export function registerApiV1Routes(options: {
 					"tracker.not_found",
 					"ticket was not found",
 				);
+			const revision = expectedRevision(input, request, reply);
+			if (revision === undefined) return;
 			const result = command(
 				options.core.compatibility.updateTicket({
 					id,
-					expectedRevision: Number(input.expected_revision ?? current.revision),
+					expectedRevision: revision,
 					patch: {
 						...(typeof input.title === "string" ? { title: input.title } : {}),
 						...(typeof input.body === "string" ? { body: input.body } : {}),
@@ -387,13 +414,13 @@ export function registerApiV1Routes(options: {
 						"tracker.not_found",
 						"ticket was not found",
 					);
+				const revision = expectedRevision(input, request, reply);
+				if (revision === undefined) return;
 				return reply.send(
 					command(
 						options.core.compatibility.transitionTicket({
 							id,
-							expectedRevision: Number(
-								input.expected_revision ?? current.revision,
-							),
+							expectedRevision: revision,
 							phase: input.phase as string,
 							...(typeof input.reason === "string"
 								? { reason: input.reason }

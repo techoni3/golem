@@ -116,22 +116,35 @@ function typedApiResponses() {
 }
 
 function typedApiPaths(): JsonRecord {
-	const body = {
+	const body = (
+		schemaValue: JsonRecord = {
+			type: "object",
+			additionalProperties: true,
+		},
+	) => ({
 		required: true,
-		content: {
-			"application/json": {
-				schema: { type: "object", additionalProperties: true },
-			},
+		content: { "application/json": { schema: schemaValue } },
+	});
+	const compareAndSwapBody = {
+		type: "object",
+		additionalProperties: true,
+		required: ["expected_revision"],
+		properties: {
+			expected_revision: { type: "integer", minimum: 1 },
 		},
 	};
 	const path = (
 		operationId: string,
 		method: "get" | "post" | "patch",
-		requestBody = false,
+		requestBody: false | true | JsonRecord = false,
 	) => ({
 		[method]: {
 			operationId,
-			...(requestBody ? { requestBody: body } : {}),
+			...(requestBody
+				? {
+						requestBody: body(requestBody === true ? undefined : requestBody),
+					}
+				: {}),
 			responses: typedApiResponses(),
 		},
 	});
@@ -145,10 +158,10 @@ function typedApiPaths(): JsonRecord {
 		},
 		"/api/v1/tracker/tickets/{id}": {
 			get: path("trackerGetTicket", "get").get,
-			patch: path("trackerUpdateTicket", "patch", true).patch,
+			patch: path("trackerUpdateTicket", "patch", compareAndSwapBody).patch,
 		},
 		"/api/v1/tracker/tickets/{id}/transition": {
-			post: path("trackerTransitionTicket", "post", true).post,
+			post: path("trackerTransitionTicket", "post", compareAndSwapBody).post,
 		},
 		"/api/v1/tracker/tickets/{id}/close": {
 			post: path("trackerExceptionalClose", "post", true).post,

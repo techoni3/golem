@@ -1180,6 +1180,8 @@ export interface operations {
         readonly requestBody: {
             readonly content: {
                 readonly "application/json": {
+                    readonly expected_revision: number;
+                } & {
                     readonly [key: string]: unknown;
                 };
             };
@@ -1309,6 +1311,8 @@ export interface operations {
         readonly requestBody: {
             readonly content: {
                 readonly "application/json": {
+                    readonly expected_revision: number;
+                } & {
                     readonly [key: string]: unknown;
                 };
             };
