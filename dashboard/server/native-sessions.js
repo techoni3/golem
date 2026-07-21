@@ -43,7 +43,7 @@ import {
 } from './project-id.js';
 import { channelsJsonPath, golemHome, sessionsJsonPath } from '../../lib/golem-home.js';
 import { readCodexSupervisors } from '../../lib/codex-supervisor.js';
-import { readSessionFacts } from '../../lib/session-facts.js';
+import { isSessionFactTerminal, readSessionFacts } from '../../lib/session-facts.js';
 
 const HOME = os.homedir();
 const SESSIONS_DIR = path.join(HOME, '.claude', 'sessions');
@@ -452,14 +452,17 @@ export async function readNativeSessions(registeredIdLookup, verifiedChannels = 
   const verifiedBySession = new Map(verifiedChannels.filter((channel) => channel.endpoint_health === 'healthy').map((channel) => [channel.session_id, channel]));
   const supervisors = readCodexSupervisorRows();
   const supervisorByCanonical = new Map(supervisors.map((row) => [row.canonical_id, row]));
+  // Shadow raw-as-canonical hook facts whenever ANY supervisor row maps that
+  // thread — not only while the lease is healthy. Lease-down used to leave a
+  // nameless twin card beside the (dead or recovering) canonical row.
   const managedOwnerByRawThread = new Map(supervisors
-    .filter((row) => row.thread_id && verifiedBySession.get(row.canonical_id)?.kind === 'codex-supervisor')
+    .filter((row) => row.thread_id)
     .map((row) => [row.thread_id, row.canonical_id]));
   const mergedById = new Map(merged.filter((row) => row.session_id).map((row) => [row.session_id, row]));
   for (const fact of facts) {
     // A managed TUI also emits ordinary Codex hook facts under the raw thread
-    // id. When its canonical supervisor lease is healthy, that raw row is the
-    // same actor—not a second session—and must not become a phantom card.
+    // id. That raw row is the same actor as the supervisor canonical — never a
+    // second session card.
     if (fact.harness === 'codex'
       && fact.canonical_id === fact.locator?.raw_session_id
       && managedOwnerByRawThread.has(fact.canonical_id)) continue;
@@ -482,6 +485,8 @@ export async function readNativeSessions(registeredIdLookup, verifiedChannels = 
       model: fact.model ?? previous.model ?? null,
       harness: fact.harness,
       updated_at: msFromIso(fact.observed_at),
+      // Prefer explicit fact retirement; keep prior registry ended_at if set.
+      ended_at: msFromIso(fact.ended_at) ?? previous.ended_at ?? null,
       _fact: fact,
     });
   }
@@ -499,15 +504,14 @@ export async function readNativeSessions(registeredIdLookup, verifiedChannels = 
     const bridge = harness === 'opencode' ? opencodeBridges.get(s.session_id) : null;
     const bridgePid = Number(bridge?.opencode_pid || bridge?.pid) || null;
     const factFresh = !s._fact || (s.updated_at && Date.now() - s.updated_at < GOLEM_SESSION_RECENT_MS);
-    // A managed Codex supervisor writes an explicit terminal fact when its
-    // process dies or stops. Recency alone must never resurrect that fact into
-    // a live actor while a later supervisor has not yet recovered it.
-    const factTerminal = !!s._fact
-      && ['dead', 'stopped', 'failed'].includes(String(s._fact.status || '').toLowerCase());
+    // Explicit session retirement only — never bare turn-stop `status: ended`
+    // (Codex fires stop per turn). Terminal = ended_at or dead|stopped|failed|superseded.
+    const factTerminal = isSessionFactTerminal(s._fact);
+    const rowEnded = !!s.ended_at || factTerminal;
     const verifiedEndpoint = verifiedBySession.get(s.session_id);
     const managedCodexHealthy = harness === 'codex' && verifiedEndpoint?.kind === 'codex-supervisor';
     const alive = managedCodexHealthy
-      ? !s.ended_at
+      ? !rowEnded
       : harness === 'opencode'
       ? !!(!factTerminal && !s.ended_at && factFresh && (verifiedEndpoint || (!s._fact && liveChannelSessionIds.has(s.session_id) && (bridge
         ? pidAlive(bridgePid)
@@ -517,8 +521,9 @@ export async function readNativeSessions(registeredIdLookup, verifiedChannels = 
         : pidAlive(s.pid));
     // Drop dead sessions whose only evidence is a stale registry/golem file.
     // Keep a CLI-sourced row even if pid-check disagrees (CLI just listed it
-    // live), but mark alive honestly.
-    if (!alive && (s._from === 'registry' || s._from === 'golem')) continue;
+    // live), but mark alive honestly. Fact-only terminal Codex rows must not
+    // linger as ghost agents either.
+    if (!alive && (s._from === 'registry' || s._from === 'golem' || (harness === 'codex' && rowEnded))) continue;
 
     let project_id = null;
     let project_root = null;

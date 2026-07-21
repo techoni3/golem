@@ -452,18 +452,38 @@ function sessionsDedupPlan(sessions) {
       .slice()
       .sort((a, b) => rowFreshness(b.row, live.length > 0) - rowFreshness(a.row, live.length > 0))[0];
     const mark = rows.filter((entry) => entry.index !== keep.index && !entry.row.ended_at);
-    plans.push({ name, keep, mark, liveKept: live.length > 0 });
+    plans.push({ kind: 'named', name, keep, mark, liveKept: live.length > 0 });
   }
   return plans;
 }
 
+/** Stale unnamed Codex rows with no activity inside the recency window. */
+function sessionsStaleCodexPlan(sessions, { staleMs = 15 * 60 * 1000, now = Date.now() } = {}) {
+  const mark = [];
+  sessions.forEach((row, index) => {
+    if (row?.harness !== 'codex') return;
+    if (row.ended_at) return;
+    if (typeof row?.name === 'string' && row.name.trim()) return;
+    const fresh = rowFreshness(row, true);
+    if (fresh && now - fresh < staleMs) return;
+    // status superseded/dead already terminal-ish but may lack ended_at
+    mark.push({ row, index });
+  });
+  if (!mark.length) return [];
+  return [{ kind: 'stale-codex', name: '(unnamed codex)', keep: null, mark, liveKept: false }];
+}
+
 function printSessionsDedupPlan(plans, apply) {
   if (!plans.length) {
-    log(`golem sessions dedup: no named duplicate sessions found (${apply ? 'applied' : 'dry-run'})`);
+    log(`golem sessions dedup: no named duplicates or stale unnamed Codex rows found (${apply ? 'applied' : 'dry-run'})`);
     return;
   }
   log(`golem sessions dedup ${apply ? '--apply' : '(dry-run; pass --apply to write)'}`);
   for (const plan of plans) {
+    if (plan.kind === 'stale-codex') {
+      log(`stale unnamed codex: would mark ended: ${plan.mark.map(({ row }) => sessionLabel(row)).join(', ')}`);
+      continue;
+    }
     const reason = plan.liveKept ? 'freshest live' : 'freshest ended';
     log(`name ${plan.name}: would keep ${keptSessionLabel(plan.keep.row, reason)}`);
     if (plan.mark.length) {
@@ -494,7 +514,8 @@ Options:
 
 Dry-run by default. Groups rows in ~/.golem/sessions.json by non-empty name,
 keeps the freshest live row for each name, and with --apply marks the other
-un-ended rows ended_at=<now>. Unnamed rows are never touched.`);
+un-ended rows ended_at=<now>. Also marks stale unnamed Codex rows (no name,
+outside the 15m recency window, still missing ended_at).`);
     return;
   }
   const unknown = rest.filter((a) => a !== '--apply');
@@ -504,7 +525,7 @@ un-ended rows ended_at=<now>. Unnamed rows are never touched.`);
   const file = sessionsJsonPath();
   const run = () => {
     const reg = readSessionsRegistryObject(file);
-    const plans = sessionsDedupPlan(reg.sessions);
+    const plans = [...sessionsDedupPlan(reg.sessions), ...sessionsStaleCodexPlan(reg.sessions)];
     printSessionsDedupPlan(plans, apply);
     if (!apply) return;
     const now = new Date().toISOString();
@@ -512,12 +533,12 @@ un-ended rows ended_at=<now>. Unnamed rows are never touched.`);
     for (const plan of plans) {
       for (const { index } of plan.mark) {
         if (reg.sessions[index]?.ended_at) continue;
-        reg.sessions[index] = { ...reg.sessions[index], ended_at: now };
+        reg.sessions[index] = { ...reg.sessions[index], status: 'superseded', ended_at: now };
         changed = true;
       }
     }
     if (changed) writeSessionsRegistryObject(file, reg);
-    log(changed ? `applied: marked duplicate sessions ended_at=${now}` : 'applied: no changes');
+    log(changed ? `applied: marked duplicate/stale sessions ended_at=${now}` : 'applied: no changes');
   };
   if (apply) withFileLock(`${file}.lock`, run);
   else run();

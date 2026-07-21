@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // Normalize documented Codex hook fields only. Transcript contents are
 // intentionally ignored because OpenAI documents that format as unstable.
-import { upsertSessionFact } from '../lib/session-facts.js';
-import { upsertSessionRegistration } from '../lib/session-registry.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { upsertSessionFact, supersedePriorCodexFacts } from '../lib/session-facts.js';
+import { upsertSessionRegistration, supersedePriorCodexSessions } from '../lib/session-registry.js';
 import { golemHome } from '../lib/golem-home.js';
 import { resolveProjectRoot } from '../lib/project-id.js';
 import { recordCodexLifecycle } from './direct-lifecycle.mjs';
@@ -20,23 +22,64 @@ const documented = {
   agent_type: input.agent_type, stop_hook_active: input.stop_hook_active,
 };
 const observations = Object.fromEntries(Object.entries(documented).filter(([, value]) => value !== undefined));
+
+// Managed TUI binds hooks to the Golem canonical id so ordinary raw-thread facts
+// do not become a second Agents card beside the supervisor row.
+const managedBound = process.env.GOLEM_MANAGED_CODEX_BOUND === '1'
+  && typeof process.env.GOLEM_MANAGED_CODEX_BOUND_SESSION_ID === 'string'
+  && process.env.GOLEM_MANAGED_CODEX_BOUND_SESSION_ID.trim()
+  ? process.env.GOLEM_MANAGED_CODEX_BOUND_SESSION_ID.trim()
+  : null;
+const rawSessionId = input.session_id;
+const canonicalId = managedBound || rawSessionId;
+
+// Lightweight read — the Codex plugin bundle does not ship codex-supervisor.js.
+function protectOtherManagedCanonicals(keepId) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(golemHome(), 'codex-supervisors.json'), 'utf8'));
+    return (Array.isArray(parsed?.supervisors) ? parsed.supervisors : [])
+      .filter((row) => row?.canonical_id && row.canonical_id !== keepId && row.thread_id)
+      .map((row) => row.canonical_id);
+  } catch {
+    return [];
+  }
+}
+
+let projectRoot = input.cwd;
+try {
+  projectRoot = await resolveProjectRoot(input.cwd);
+} catch {
+  projectRoot = input.cwd;
+}
+
 if (event === 'session-start') {
   try {
-    await upsertSessionRegistration({
-      sessionId: input.session_id,
+    const registered = await upsertSessionRegistration({
+      sessionId: canonicalId,
       cwd: input.cwd,
       harness: 'codex',
       model: input.model,
+    });
+    projectRoot = registered.project_path || projectRoot;
+    const protect = protectOtherManagedCanonicals(canonicalId);
+    supersedePriorCodexSessions({
+      projectPath: projectRoot,
+      keepSessionId: canonicalId,
+      protectSessionIds: protect,
+    });
+    supersedePriorCodexFacts({
+      projectPath: projectRoot,
+      keepCanonicalIds: [canonicalId, rawSessionId].filter(Boolean),
+      protectCanonicalIds: protect,
     });
   } catch {}
 }
 let lifecycle;
 try {
-  const projectRoot = await resolveProjectRoot(input.cwd);
   lifecycle = recordCodexLifecycle({
     home: golemHome(),
     projectPath: projectRoot,
-    rawSessionId: input.session_id,
+    rawSessionId,
     event,
     model: typeof input.model === 'string' ? input.model : undefined,
     threadId: typeof input.thread_id === 'string' ? input.thread_id : (typeof input.turn_id === 'string' ? input.turn_id : undefined),
@@ -47,17 +90,31 @@ try {
   // even if the optional Golem home or its filesystem inbox is unavailable.
 }
 try {
+  // Turn `stop` must NOT mark the session fact session-terminal: Codex fires
+  // stop per turn. Session retirement uses ended_at / superseded via SessionStart
+  // succession or explicit supervisor death (dead|stopped|failed).
+  const turnStop = event === 'stop';
+  const status = turnStop
+    ? 'idle'
+    : event === 'subagent-stop'
+      ? undefined
+      : 'active';
   const fact = {
-    canonical_id: input.session_id, continuation_key: input.session_id,
-    harness: 'codex', locator: { raw_session_id: input.session_id }, project_path: input.cwd,
+    canonical_id: canonicalId,
+    continuation_key: canonicalId,
+    harness: 'codex',
+    locator: { raw_session_id: rawSessionId },
+    project_path: projectRoot,
     model: input.model,
-    ...(event === 'stop' ? { status: 'ended' } : event === 'subagent-stop' ? {} : { status: lifecycle?.terminal ? 'ended' : 'active' }),
-    lifecycle_state: lifecycle?.record?.state ?? (event === 'stop' ? 'ended' : 'active'),
+    ...(status ? { status } : {}),
+    lifecycle_state: lifecycle?.record?.state ?? (turnStop ? 'idle' : 'active'),
     generation_id: lifecycle?.record?.generation_id,
     project_id: lifecycle?.record?.project_id,
     canonical_project_id: lifecycle?.record?.project_id,
     aliases: lifecycle?.record?.aliases,
-    delivery: { mode: 'pull', push: false }, lifecycle_event: event, observations,
+    delivery: managedBound ? { mode: 'supervisor-turn', push: true } : { mode: 'pull', push: false },
+    lifecycle_event: event,
+    observations,
   };
   upsertSessionFact(fact);
 } catch {}

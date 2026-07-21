@@ -220,7 +220,14 @@ name fallback for managed sessions started before those notifications were
 captured. Its authenticated health response supplies the live delivery gate;
 the slower persisted lease is recovery evidence, not the current activity
 signal. A managed TUI's raw hook fact is shadowed by its canonical supervisor
-row so one thread cannot appear as two agent cards.
+row so one thread cannot appear as two agent cards. Shadowing keys on the
+supervisor `thread_id` map (not only a currently-healthy lease), and when
+`GOLEM_MANAGED_CODEX_BOUND=1` the Codex hook writes facts under the Golem
+canonical id with `locator.raw_session_id` as the thread. Ordinary Codex
+`/clear` succession marks prior same-project Codex rows/facts
+`status: superseded` + `ended_at` on the next SessionStart — dashboard
+liveness treats those (and `dead|stopped|failed`) as terminal, but never
+bare turn-stop `status: ended`.
 
 Exactly one TUI may attach. On TUI exit, SIGTERM, or App Server loss, the
 wrapper cleans the lease, process, and socket. SIGINT is left to the foreground

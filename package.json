@@ -65,7 +65,7 @@
     "contracts:check": "npm run build -w @golem/contracts && npm run check -w @golem/contracts",
     "contracts:generate": "npm run build -w @golem/contracts && npm run generate -w @golem/contracts",
     "lint": "biome check apps packages tools scripts --no-errors-on-unmatched",
-    "test": "node test/session-facts.test.mjs && node test/codex-journey.test.mjs && node test/pi-journey.test.mjs && node test/pi-tracker-integration.test.mjs && node test/sync-enforcement.test.mjs && node shims/opencode/resume-dispatchable.test.mjs && node shims/opencode/passive-delta.test.mjs && node mcp/channel/tracker-client.test.mjs",
+    "test": "node test/session-facts.test.mjs && node test/codex-zombie-sessions.test.mjs && node test/codex-journey.test.mjs && node test/pi-journey.test.mjs && node test/pi-tracker-integration.test.mjs && node test/sync-enforcement.test.mjs && node shims/opencode/resume-dispatchable.test.mjs && node shims/opencode/passive-delta.test.mjs && node mcp/channel/tracker-client.test.mjs",
     "verify:stack": "node test/stack-certification/run.mjs",
     "test:stack-certification": "node --test test/stack-certification/version-gate.test.mjs",
     "test:ui-primitives": "npm run build -w @golem/ui && npm run build -w @golem/dashboard && node test/ui-primitives.mjs",
