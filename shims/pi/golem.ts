@@ -11,6 +11,31 @@ export default function golem(pi) {
   let producerSequence = 0;
   const opaque = (prefix, value) => typeof value === 'string' && new RegExp(`^${prefix}_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`, 'i').test(value);
   const safeSessionKey = (value) => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}$/.test(value) ? value : null;
+  const reference = (value) => crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 24);
+  const stableDiagnosticCode = (value) => {
+    const code = String(value || '').trim().toLowerCase();
+    if (code === 'pi.binding.unqualified' || code === 'pi.runtime_signal.spool_failed') return code;
+    if (/fence|generation|endpoint/.test(code)) return 'pi.next_turn.binding_changed';
+    if (/lease|recover|retry/.test(code)) return 'pi.next_turn.recovery_failed';
+    if (/record|metadata|parse|invalid/.test(code)) return 'pi.next_turn.record_invalid';
+    return 'pi.next_turn.delivery_failed';
+  };
+  // Persist only compact labels from native observations. Free-form event text
+  // can be a prompt, a credential error, or a local path, none of which belongs
+  // in an extension spool or dashboard-visible fact.
+  const safeEventLabel = (value) => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(value) ? value : '[REDACTED]';
+  const safeObservation = (observations = {}) => Object.fromEntries(Object.entries(observations).map(([key, value]) => [key, typeof value === 'string' ? safeEventLabel(value) : value]));
+  function persistDeadLetter(root, source, name, code) {
+    try {
+      const dir = path.join(root, 'dead-letter'); fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+      const key = reference(name); const target = path.join(dir, `${key}.${crypto.randomUUID()}.json`); const temporary = `${target}.${process.pid}.tmp`;
+      fs.writeFileSync(temporary, JSON.stringify({ schema_version: 'golem.pi-next-turn-dead-letter/v1', delivery_reference: key, reason: stableDiagnosticCode(code) }) + '\n', { mode: 0o600 }); fs.renameSync(temporary, target);
+      try { fs.unlinkSync(source); } catch {}
+      try { fs.unlinkSync(path.join(root, 'published', name)); } catch {}
+      try { fs.unlinkSync(path.join(root, 'processing', `${name}.lease.json`)); } catch {}
+      try { fs.unlinkSync(path.join(root, 'acks', `${name}.lease.json`)); } catch {}
+    } catch {}
+  }
   function bindingFor(rawSessionId) {
     const key = safeSessionKey(rawSessionId); if (!key) return null;
     try {
@@ -20,11 +45,11 @@ export default function golem(pi) {
     } catch { return null; }
   }
   function diagnostic(rawSessionId, code) {
-    const key = safeSessionKey(rawSessionId); if (!key) return;
+    if (typeof rawSessionId !== 'string' || !rawSessionId) return;
     try {
       const dir = path.join(home, 'pi-adapter', 'diagnostics'); fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-      const target = path.join(dir, `${key}.json`); const tmp = `${target}.${process.pid}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify({ schema_version: 'golem.pi-adapter-diagnostic/v1', session_key: key, code, delivery_mode: 'next_turn', push_ready: false }) + '\n', { mode: 0o600 });
+      const sessionReference = reference(rawSessionId); const target = path.join(dir, `${sessionReference}.json`); const tmp = `${target}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify({ schema_version: 'golem.pi-adapter-diagnostic/v1', session_reference: sessionReference, code: stableDiagnosticCode(code), delivery_mode: 'next_turn', push_ready: false }) + '\n', { mode: 0o600 });
       fs.renameSync(tmp, target);
     } catch {}
   }
@@ -51,12 +76,12 @@ export default function golem(pi) {
     };
     if (nativeEvent === 'session_start') {
       const resumed = observations.reason === 'resume';
-      signal(resumed ? 'session.resumed' : 'session.started', resumed ? { kind: 'session.resumed', generation } : { kind: 'session.started', generation, metadata: { name: ctx.sessionManager.getSessionName() || '' } });
+      signal(resumed ? 'session.resumed' : 'session.started', resumed ? { kind: 'session.resumed', generation } : { kind: 'session.started', generation, metadata: { name: safeEventLabel(ctx.sessionManager.getSessionName() || '') } });
       if (!resumed) {
         signal('endpoint.claimed', { kind: 'endpoint.claimed', endpoint: { endpoint_id: binding.endpoint_id, generation, state: 'healthy', owner_fence: binding.owner_fence, delivery_mode: 'next_turn', readiness: 'next_turn', revision: 1, last_heartbeat_at: observedAt } });
         signal('capabilities.reported', { kind: 'capabilities.reported', project: { project_id: binding.project_id }, capabilities: [{ capability_id: 'pi.next-turn.pull', harness: 'pi', adapter_version: '5.1.1', integration_layers: ['extension'], qualification: 'supported', delivery_mode: 'next_turn', readiness: 'next_turn', reason_code: 'real_user_turn_required', evidence_version: 'pi-next-turn-v1' }] });
       }
-    } else if (nativeEvent === 'session_info_changed') signal('session.metadata_patched', { kind: 'session.metadata_patched', generation, metadata: { name: observations.name || ctx.sessionManager.getSessionName() || '' } });
+    } else if (nativeEvent === 'session_info_changed') signal('session.metadata_patched', { kind: 'session.metadata_patched', generation, metadata: { name: safeEventLabel(observations.name || ctx.sessionManager.getSessionName() || '') } });
     else if (nativeEvent === 'agent_start') signal('session.activity', { kind: 'session.activity', generation, activity_kind: 'work' });
     else if (nativeEvent === 'agent_settled') signal('session.idle', { kind: 'session.idle', generation });
     else if (nativeEvent === 'tool_call') signal('session.activity', { kind: 'session.activity', generation, activity_kind: 'tool' });
@@ -65,11 +90,12 @@ export default function golem(pi) {
   function record(ctx, event, status, observations = {}) {
     const id = ctx.sessionManager.getSessionId();
     canonicalId = id;
+    const storedObservations = safeObservation(observations);
     try {
       upsertSessionFact({ canonical_id: id, continuation_key: id, harness: 'pi',
         locator: { raw_session_id: id, session_file: ctx.sessionManager.getSessionFile() }, project_path: ctx.cwd,
-        name: ctx.sessionManager.getSessionName(), status, delivery: { mode: 'next_turn', push: false },
-        lifecycle_event: event, observations, observed_at: new Date().toISOString() });
+        name: safeEventLabel(ctx.sessionManager.getSessionName() || ''), status, delivery: { mode: 'next_turn', push: false },
+        lifecycle_event: event, observations: storedObservations, observed_at: new Date().toISOString() });
     } catch {}
     try { lifecycle(ctx, event, observations); } catch { diagnostic(id, 'pi.runtime_signal.spool_failed'); }
   }
@@ -109,9 +135,7 @@ export default function golem(pi) {
         const value = JSON.parse(fs.readFileSync(processing, 'utf8'));
         if (typeof value?.text !== 'string') throw new Error('invalid text');
         messages.push(value); pendingPickup.push({ root, name });
-      } catch {
-        try { fs.mkdirSync(path.join(root, 'dead-letter'), { recursive: true }); fs.renameSync(processing, path.join(root, 'dead-letter', name)); } catch {}
-      }
+      } catch { persistDeadLetter(root, processing, name, 'pi.next_turn.record_invalid'); }
     }
     if (canonicalRoot && binding) {
       const canonicalProcessing = path.join(canonicalRoot, 'processing'); const canonicalPending = path.join(canonicalRoot, 'pending');
@@ -127,9 +151,7 @@ export default function golem(pi) {
           const matches = value?.schema_version === 'golem.pi-next-turn/v1' && value?.binding?.project_id === binding.project_id && value?.binding?.session_id === binding.session_id && value?.binding?.generation_id === binding.generation_id && value?.binding?.endpoint_id === binding.endpoint_id && value?.binding?.owner_fence === binding.owner_fence;
           if (!matches || typeof value?.text !== 'string' || typeof value?.claimToken !== 'string') throw new Error('invalid canonical next-turn record');
           messages.push(value); pendingPickup.push({ root: canonicalRoot, name, canonical: true, claimToken: value.claimToken });
-        } catch {
-          try { fs.mkdirSync(path.join(canonicalRoot, 'dead-letter'), { recursive: true }); fs.renameSync(processing, path.join(canonicalRoot, 'dead-letter', name)); } catch {}
-        }
+        } catch { persistDeadLetter(canonicalRoot, processing, name, 'pi.next_turn.record_invalid'); }
       }
     }
     if (messages.length) return { action: 'transform', text: `${_event.text}\n\n${messages.map((x) => x.text).join('\n\n')}` };

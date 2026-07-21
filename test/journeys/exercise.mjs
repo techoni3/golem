@@ -37,6 +37,7 @@ import {
 	exerciseDeliveryApiFenceRecheck,
 } from "./tracker-api.mjs";
 import { exercisePiNextTurnCrashReplay } from "./pi-next-turn-crash-replay.mjs";
+import { exercisePiHostileDiagnostics } from "./pi-hostile-diagnostics.mjs";
 import { exerciseLauncherResolution } from "./launcher-resolution.mjs";
 import {
 	exerciseLauncherSignalCleanup,
@@ -927,6 +928,7 @@ export const exercises = Object.freeze({
 	"tracker-http-mcp-parity": exerciseTrackerHttpMcpParity,
 	"delivery-api-fence-recheck": exerciseDeliveryApiFenceRecheck,
 	"pi-next-turn-crash-replay": exercisePiNextTurnCrashReplay,
+	"pi-hostile-diagnostics": exercisePiHostileDiagnostics,
 	"testkit-browser": exerciseBrowser,
 	"legacy-parity-baseline": exerciseLegacyParityBaseline,
 	"render-mcp-closure": exerciseRenderMcpClosure,

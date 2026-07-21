@@ -143,15 +143,62 @@ function safeFileName(value: string): string {
 	return `${value}.json`;
 }
 
-function redactedDiagnostic(value: string): string {
-	return value
-		.replace(/\bBearer\s+[-._A-Za-z0-9]+/giu, "Bearer [REDACTED]")
-		.replace(
-			/\b(token|authorization|password|secret|api[_-]?key)=([^\s&]+)/giu,
-			"$1=[REDACTED]",
-		)
-		.replace(/\/(?:[^\s/]+\/){2,}[^\s/]*/gu, "[PATH]")
-		.slice(0, 256);
+/**
+ * Error text from a harness, a remote API, or a malformed durable record is
+ * hostile input.  It must never become durable diagnostic data.  Keep the
+ * useful classification, but deliberately discard every caller-supplied byte
+ * (including a plausible-but-not-yet-known secret format).
+ */
+function stableDiagnosticCategory(value: string): string {
+	const normalized = value.trim().toLowerCase();
+	if (normalized === "processing_metadata_invalid")
+		return "pi.next_turn.processing_metadata_invalid";
+	if (normalized === "processing_lease_exhausted")
+		return "pi.next_turn.processing_lease_exhausted";
+	if (normalized === "pending_record_invalid")
+		return "pi.next_turn.pending_record_invalid";
+	if (normalized === "generation_or_fence_changed")
+		return "pi.next_turn.generation_or_fence_changed";
+	if (normalized === "ack_metadata_invalid")
+		return "pi.next_turn.ack_metadata_invalid";
+	if (/renderable|payload|turn text/iu.test(normalized))
+		return "pi.next_turn.payload_unrenderable";
+	if (/fence|generation|endpoint/iu.test(normalized))
+		return "pi.next_turn.binding_changed";
+	if (/lease|recover|retry/iu.test(normalized))
+		return "pi.next_turn.recovery_failed";
+	if (/record|metadata|parse|invalid/iu.test(normalized))
+		return "pi.next_turn.record_invalid";
+	return "pi.next_turn.delivery_failed";
+}
+
+function stableReference(value: string): string {
+	return crypto.createHash("sha256").update(value).digest("hex").slice(0, 24);
+}
+
+/** Runtime event metadata has no authority to carry free-form transcript text. */
+function safeEventMetadata(
+	metadata: Readonly<Record<string, string | number | boolean>> | undefined,
+): Readonly<Record<string, string | number | boolean>> | undefined {
+	if (!metadata) return undefined;
+	const sanitized: Record<string, string | number | boolean> = {};
+	for (const [key, value] of Object.entries(metadata)) {
+		if (typeof value !== "string") {
+			sanitized[key] = value;
+			continue;
+		}
+		// A one-token label is useful in projection/UI diagnostics. Multi-word
+		// values are treated as transcript-like and never persisted as an event.
+		sanitized[key] = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/u.test(value)
+			? value
+			: "[REDACTED]";
+	}
+	return Object.freeze(sanitized);
+}
+
+function safeWaitingReason(value: string | undefined): string {
+	if (value === "pi_waiting" || value === "awaiting_user_input") return value;
+	return "pi_waiting";
 }
 
 function fsyncDirectory(directory: string): void {
@@ -263,6 +310,7 @@ export class PiLifecycleEmitter {
 
 	emit(input: PiLifecycleInput): readonly RuntimeSignalV1[] {
 		const observedAt = input.observedAt ?? new Date().toISOString();
+		const metadata = safeEventMetadata(input.metadata);
 		const generation = {
 			project_id: this.#binding.projectId,
 			session_id: this.#binding.sessionId,
@@ -276,7 +324,7 @@ export class PiLifecycleEmitter {
 						{
 							kind: "session.started",
 							generation,
-							...(input.metadata ? { metadata: input.metadata } : {}),
+							...(metadata ? { metadata } : {}),
 						},
 						observedAt,
 					),
@@ -354,7 +402,7 @@ export class PiLifecycleEmitter {
 						{
 							kind: "session.waiting",
 							generation,
-							reason: input.waitingReason ?? "pi_waiting",
+							reason: safeWaitingReason(input.waitingReason),
 						},
 						observedAt,
 					),
@@ -366,7 +414,7 @@ export class PiLifecycleEmitter {
 						{
 							kind: "session.metadata_patched",
 							generation,
-							metadata: input.metadata ?? {},
+							metadata: metadata ?? {},
 						},
 						observedAt,
 					),
@@ -501,7 +549,7 @@ export function createPiControlApi(client: ApiClientBoundary): PiControlPort {
 			await request({
 				method: "POST",
 				path: `/api/v1/delivery/claims/${encodeURIComponent(input.claimToken)}/fail`,
-				body: { error: redactedDiagnostic(input.error) },
+				body: { error: stableDiagnosticCategory(input.error) },
 			});
 		},
 	};
@@ -899,27 +947,31 @@ export class PiNextTurnInbox {
 	#deadLetter(source: string, reason: string, attempt: number): void {
 		if (!fs.existsSync(source)) return;
 		const base = path.basename(source, ".json");
+		const category = stableDiagnosticCategory(reason);
+		const deliveryReference = stableReference(base);
 		const target = path.join(
 			this.#deadLetters,
-			`${base}.${crypto.randomUUID()}.json`,
+			`${deliveryReference}.${crypto.randomUUID()}.json`,
 		);
-		linkNoReplace(source, target);
+		// A dead letter is evidence of a failed delivery, not a second durable
+		// copy of a user prompt or bearer claim token.  Persist only a stable
+		// category and a one-way delivery reference before dropping the raw row.
+		writeAtomic(target, {
+			schema_version: "golem.pi-next-turn-dead-letter/v1",
+			delivery_reference: deliveryReference,
+			reason: category,
+			attempt: Number.isInteger(attempt) && attempt > 0 ? attempt : 1,
+		});
 		fs.unlinkSync(source);
+		const published = path.join(this.#published, `${base}.json`);
+		if (fs.existsSync(published)) fs.unlinkSync(published);
+		const settled = path.join(this.#published, `${base}.json.settled`);
+		if (fs.existsSync(settled)) fs.unlinkSync(settled);
+		this.#clearRetry(base);
 		for (const directory of [this.#processing, this.#acks]) {
 			const metadata = path.join(directory, `${base}.json.lease.json`);
 			if (fs.existsSync(metadata)) fs.unlinkSync(metadata);
 		}
-		writeAtomic(
-			path.join(
-				this.#deadLetters,
-				`${base}.${crypto.randomUUID()}.metadata.json`,
-			),
-			{
-				reason: reason.replace(/[^a-z0-9_-]/giu, "_").slice(0, 96),
-				attempt,
-				diagnostic: redactedDiagnostic(reason),
-			},
-		);
 	}
 
 	diagnostics(): PiNextTurnDiagnostics {
@@ -928,8 +980,7 @@ export class PiNextTurnInbox {
 			processing:
 				count(this.#processing) - count(this.#processing, ".lease.json"),
 			acknowledgements: count(this.#acks) - count(this.#acks, ".lease.json"),
-			deadLetters:
-				count(this.#deadLetters) - count(this.#deadLetters, ".metadata.json"),
+			deadLetters: count(this.#deadLetters),
 			retrying: count(this.#retry),
 		});
 	}
