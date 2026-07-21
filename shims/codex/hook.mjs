@@ -40,6 +40,7 @@ try {
     event,
     model: typeof input.model === 'string' ? input.model : undefined,
     threadId: typeof input.thread_id === 'string' ? input.thread_id : (typeof input.turn_id === 'string' ? input.turn_id : undefined),
+    resume: event === 'session-start' && input.source === 'resume',
   });
 } catch {
   // Lifecycle integration is fail-open: a native Codex launch must continue

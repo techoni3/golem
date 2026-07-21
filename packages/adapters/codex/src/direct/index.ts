@@ -145,9 +145,13 @@ export function codexRuntimeSignal(input: {
 	readonly observedAt?: string | Date;
 	readonly generationOrdinal?: number;
 	readonly resumed?: boolean;
+	readonly resumedFromGenerationId?: string;
 }): RuntimeSignalV1 {
 	const observedAt = nowIso(input.observedAt);
-	const kind = eventKind(input.event);
+	const kind =
+		input.event === "session-start" && input.resumed
+			? "session.resumed"
+			: eventKind(input.event);
 	const identity = input.generationOrdinal
 		? codexIdentity({
 				projectPath: input.identity.projectPath,
@@ -170,6 +174,17 @@ export function codexRuntimeSignal(input: {
 						...(input.resumed ? { resumed: true } : {}),
 					},
 				}
+			: kind === "session.resumed"
+				? {
+						kind: "session.resumed" as const,
+						generation,
+						...(input.resumedFromGenerationId
+							? {
+									resumed_from_generation_id:
+										input.resumedFromGenerationId,
+								}
+							: {}),
+					}
 			: kind === "session.ended"
 				? {
 						kind: "session.ended" as const,

@@ -760,7 +760,7 @@ export function exerciseCodexDirectSeamlessIntegration() {
 	});
 	if (result.status !== 0)
 		throw new Error(`codex direct journey exited ${result.status}: ${result.stdout}\n${result.stderr}`);
-	return "temporary-home rendered Codex hook emits canonical project/session/generation inbox signals, preserves terminal state across restart, redacts prompt data, and advertises pull-only discovery";
+	return "temporary-home rendered Codex hook emits canonical typed identities, terminal-to-resume lineage, bounded concurrent callbacks without lost revisions, redacts prompt data, and advertises pull-only discovery";
 }
 
 export async function exerciseBrowser() {
