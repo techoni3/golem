@@ -3,8 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 
 import websocket from "@fastify/websocket";
+import type { TrackerManagementServices } from "@golem/tracker";
 import Fastify from "fastify";
-
 import {
 	type BrowserSessionAuthority,
 	createBrowserSessionAuthority,
@@ -17,6 +17,7 @@ import {
 	registerStaticCompatibility,
 } from "./compatibility.js";
 import { fail, registerErrorEnvelope } from "./errors.js";
+import { registerManagementRoutes } from "./management-routes.js";
 import type {
 	ControlPlaneProjectionPort,
 	ControlPlaneReplayPort,
@@ -48,6 +49,8 @@ export interface ControlPlaneLifecycleOptions {
 	readonly browserSessions?: BrowserSessionAuthority;
 	readonly replayWindowSize?: number;
 	readonly invalidResponseForTest?: boolean;
+	/** Typed management capability composed by the application owner. */
+	readonly management?: TrackerManagementServices;
 }
 
 export interface StartedControlPlane {
@@ -133,6 +136,12 @@ export async function startControlPlane(
 				? {}
 				: { invalidResponseForTest: options.invalidResponseForTest }),
 		});
+		if (options.management)
+			registerManagementRoutes({
+				app,
+				token: options.token,
+				management: options.management,
+			});
 		closeTypedReplay = registerWsReplay({
 			app,
 			instanceId,

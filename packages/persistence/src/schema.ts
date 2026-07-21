@@ -5,7 +5,7 @@ import type { DatabaseScope, MigrationDefinition } from "./types.js";
 
 export const busyTimeoutMs = 2_500;
 export const latestRuntimeVersion = 1;
-export const latestTrackerVersion = 3;
+export const latestTrackerVersion = 4;
 
 function migrationChecksum(value: string): string {
 	return crypto.createHash("sha256").update(value).digest("hex");
@@ -511,6 +511,110 @@ CREATE INDEX IF NOT EXISTS idx_events_project ON events(project_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_events_uuid ON events(event_uuid) WHERE event_uuid IS NOT NULL;
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS project_prefixes (project_id TEXT PRIMARY KEY, prefix TEXT NOT NULL UNIQUE);
+		`,
+	),
+	migration(
+		"tracker/004-management-services",
+		`
+CREATE TABLE management_roles (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  name TEXT NOT NULL CHECK(length(trim(name)) > 0 AND length(name) <= 128),
+  scope TEXT NOT NULL CHECK(scope IN ('project', 'session', 'generation')),
+  definition_json TEXT NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(project_id, name)
+);
+CREATE TABLE management_role_assignments (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  session_id TEXT,
+  generation_id TEXT,
+  role_id TEXT NOT NULL REFERENCES management_roles(id) ON DELETE CASCADE,
+  actor TEXT NOT NULL CHECK(length(trim(actor)) > 0),
+  idempotency_key TEXT NOT NULL CHECK(length(trim(idempotency_key)) > 0),
+  created_at TEXT NOT NULL,
+  UNIQUE(project_id, idempotency_key)
+);
+CREATE TABLE management_gates (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK(kind IN ('approval', 'input')),
+  status TEXT NOT NULL CHECK(status IN ('awaiting', 'approved', 'denied', 'cancelled')),
+  question TEXT NOT NULL CHECK(length(trim(question)) > 0 AND length(question) <= 4096),
+  assignee TEXT NOT NULL CHECK(length(trim(assignee)) > 0),
+  verdict_json TEXT,
+  idempotency_key TEXT NOT NULL CHECK(length(trim(idempotency_key)) > 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(project_id, idempotency_key),
+  CHECK((status = 'awaiting' AND verdict_json IS NULL) OR (status <> 'awaiting' AND verdict_json IS NOT NULL))
+);
+CREATE TABLE management_ideas (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  body TEXT NOT NULL CHECK(length(trim(body)) > 0 AND length(body) <= 16384),
+  status TEXT NOT NULL CHECK(status IN ('pending', 'popped', 'promoted')),
+  promoted_ticket_id TEXT REFERENCES tickets(id) ON DELETE SET NULL,
+  idempotency_key TEXT NOT NULL CHECK(length(trim(idempotency_key)) > 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(project_id, idempotency_key),
+  CHECK((status = 'promoted' AND promoted_ticket_id IS NOT NULL) OR (status <> 'promoted'))
+);
+CREATE TABLE management_assets (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  relative_path TEXT NOT NULL CHECK(length(relative_path) > 0 AND relative_path NOT LIKE '/%' AND relative_path NOT LIKE '%..%'),
+  mime_type TEXT NOT NULL CHECK(mime_type IN ('image/png', 'image/jpeg', 'image/gif', 'image/webp')),
+  byte_size INTEGER NOT NULL CHECK(byte_size >= 0 AND byte_size <= 10485760),
+  sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
+  storage_path TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(project_id, ticket_id, relative_path)
+);
+CREATE TABLE management_operations (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  session_id TEXT,
+  generation_id TEXT,
+  kind TEXT NOT NULL CHECK(kind IN ('chat', 'brief', 'interrupt', 'halt', 'control')),
+  command TEXT NOT NULL CHECK(length(trim(command)) > 0 AND length(command) <= 128),
+  payload_json TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('queued', 'ineligible', 'delivered')),
+  actor TEXT NOT NULL CHECK(length(trim(actor)) > 0),
+  idempotency_key TEXT NOT NULL CHECK(length(trim(idempotency_key)) > 0),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(project_id, idempotency_key)
+);
+CREATE TABLE management_audit (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  subject_id TEXT NOT NULL,
+  actor TEXT NOT NULL CHECK(length(trim(actor)) > 0),
+  details_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE management_outbox (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('pending', 'published')),
+  created_at TEXT NOT NULL,
+  UNIQUE(project_id, idempotency_key)
+);
+CREATE INDEX management_roles_project ON management_roles(project_id, name);
+CREATE INDEX management_gates_project_status ON management_gates(project_id, status, created_at);
+CREATE INDEX management_ideas_project_status ON management_ideas(project_id, status, created_at);
+CREATE INDEX management_operations_project_created ON management_operations(project_id, created_at);
+CREATE INDEX management_audit_project_created ON management_audit(project_id, created_at);
 `,
 	),
 ];

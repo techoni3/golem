@@ -30,12 +30,334 @@ function response(description: string, value: z.ZodType): JsonRecord {
 }
 
 const error = ApiErrorResponseJsonSchema;
+const managementResult = {
+	type: "object",
+	additionalProperties: true,
+	properties: {
+		schema_version: { type: "string", const: "golem.management/v1" },
+		result: {},
+	},
+	required: ["schema_version", "result"],
+};
+
+function managementResponses() {
+	return {
+		"200": {
+			description: "management result",
+			content: { "application/json": { schema: managementResult } },
+		},
+		"201": {
+			description: "management result",
+			content: { "application/json": { schema: managementResult } },
+		},
+		"400": {
+			description: "invalid management request",
+			content: { "application/json": { schema: error } },
+		},
+		"401": {
+			description: "unauthorized",
+			content: { "application/json": { schema: error } },
+		},
+		"403": {
+			description: "forbidden",
+			content: { "application/json": { schema: error } },
+		},
+		"404": {
+			description: "not found",
+			content: { "application/json": { schema: error } },
+		},
+		"409": {
+			description: "conflict",
+			content: { "application/json": { schema: error } },
+		},
+	};
+}
 
 export function controlPlaneOpenApiDocument(): JsonRecord {
 	return {
 		openapi: "3.1.1",
 		info: { title: "Golem control plane", version: "v1" },
 		paths: {
+			"/api/v1/management/roles": {
+				get: {
+					operationId: "managementListRoles",
+					parameters: [
+						{
+							name: "project_id",
+							in: "query",
+							required: true,
+							schema: { type: "string" },
+						},
+					],
+					responses: managementResponses(),
+				},
+				post: {
+					operationId: "managementCreateRole",
+					requestBody: {
+						required: true,
+						content: {
+							"application/json": {
+								schema: { type: "object", additionalProperties: true },
+							},
+						},
+					},
+					responses: managementResponses(),
+				},
+			},
+			"/api/v1/management/roles/{role_id}/assign": {
+				post: {
+					operationId: "managementAssignRole",
+					parameters: [
+						{
+							name: "role_id",
+							in: "path",
+							required: true,
+							schema: { type: "string" },
+						},
+					],
+					requestBody: {
+						required: true,
+						content: {
+							"application/json": {
+								schema: { type: "object", additionalProperties: true },
+							},
+						},
+					},
+					responses: managementResponses(),
+				},
+			},
+			"/api/v1/management/gates": {
+				get: {
+					operationId: "managementListGates",
+					parameters: [
+						{
+							name: "project_id",
+							in: "query",
+							required: true,
+							schema: { type: "string" },
+						},
+					],
+					responses: managementResponses(),
+				},
+				post: {
+					operationId: "managementCreateGate",
+					requestBody: {
+						required: true,
+						content: {
+							"application/json": {
+								schema: { type: "object", additionalProperties: true },
+							},
+						},
+					},
+					responses: managementResponses(),
+				},
+			},
+			"/api/v1/management/gates/{gate_id}/verdict": {
+				post: {
+					operationId: "managementAnswerGate",
+					parameters: [
+						{
+							name: "gate_id",
+							in: "path",
+							required: true,
+							schema: { type: "string" },
+						},
+					],
+					requestBody: {
+						required: true,
+						content: {
+							"application/json": {
+								schema: { type: "object", additionalProperties: true },
+							},
+						},
+					},
+					responses: managementResponses(),
+				},
+			},
+			"/api/v1/management/ideas": {
+				get: {
+					operationId: "managementListIdeas",
+					parameters: [
+						{
+							name: "project_id",
+							in: "query",
+							required: true,
+							schema: { type: "string" },
+						},
+					],
+					responses: managementResponses(),
+				},
+				post: {
+					operationId: "managementCreateIdea",
+					requestBody: {
+						required: true,
+						content: {
+							"application/json": {
+								schema: { type: "object", additionalProperties: true },
+							},
+						},
+					},
+					responses: managementResponses(),
+				},
+			},
+			"/api/v1/management/ideas/{idea_id}/pop": {
+				post: {
+					operationId: "managementPopIdea",
+					parameters: [
+						{
+							name: "idea_id",
+							in: "path",
+							required: true,
+							schema: { type: "string" },
+						},
+					],
+					requestBody: {
+						required: true,
+						content: {
+							"application/json": {
+								schema: { type: "object", additionalProperties: true },
+							},
+						},
+					},
+					responses: managementResponses(),
+				},
+			},
+			"/api/v1/management/ideas/{idea_id}/promote": {
+				post: {
+					operationId: "managementPromoteIdea",
+					parameters: [
+						{
+							name: "idea_id",
+							in: "path",
+							required: true,
+							schema: { type: "string" },
+						},
+					],
+					requestBody: {
+						required: true,
+						content: {
+							"application/json": {
+								schema: { type: "object", additionalProperties: true },
+							},
+						},
+					},
+					responses: managementResponses(),
+				},
+			},
+			"/api/v1/management/communications": {
+				post: {
+					operationId: "managementCreateCommunication",
+					requestBody: {
+						required: true,
+						content: {
+							"application/json": {
+								schema: { type: "object", additionalProperties: true },
+							},
+						},
+					},
+					responses: managementResponses(),
+				},
+			},
+			"/api/v1/management/control": {
+				get: {
+					operationId: "managementListControls",
+					parameters: [
+						{
+							name: "project_id",
+							in: "query",
+							required: true,
+							schema: { type: "string" },
+						},
+					],
+					responses: managementResponses(),
+				},
+				post: {
+					operationId: "managementCreateControl",
+					requestBody: {
+						required: true,
+						content: {
+							"application/json": {
+								schema: { type: "object", additionalProperties: true },
+							},
+						},
+					},
+					responses: managementResponses(),
+				},
+			},
+			"/api/v1/management/control/{operation_id}": {
+				get: {
+					operationId: "managementGetControl",
+					parameters: [
+						{
+							name: "operation_id",
+							in: "path",
+							required: true,
+							schema: { type: "string" },
+						},
+						{
+							name: "project_id",
+							in: "query",
+							required: true,
+							schema: { type: "string" },
+						},
+					],
+					responses: managementResponses(),
+				},
+			},
+			"/api/v1/management/assets": {
+				post: {
+					operationId: "managementPutAsset",
+					requestBody: {
+						required: true,
+						content: {
+							"application/json": {
+								schema: { type: "object", additionalProperties: true },
+							},
+						},
+					},
+					responses: managementResponses(),
+				},
+			},
+			"/api/v1/management/assets/{asset_id}": {
+				get: {
+					operationId: "managementGetAsset",
+					parameters: [
+						{
+							name: "asset_id",
+							in: "path",
+							required: true,
+							schema: { type: "string" },
+						},
+						{
+							name: "project_id",
+							in: "query",
+							required: true,
+							schema: { type: "string" },
+						},
+						{
+							name: "ticket_id",
+							in: "query",
+							required: true,
+							schema: { type: "string" },
+						},
+					],
+					responses: managementResponses(),
+				},
+			},
+			"/api/v1/management/audit": {
+				get: {
+					operationId: "managementAudit",
+					parameters: [
+						{
+							name: "project_id",
+							in: "query",
+							required: true,
+							schema: { type: "string" },
+						},
+					],
+					responses: managementResponses(),
+				},
+			},
 			"/api/v1/runtime/events": {
 				post: {
 					operationId: "controlPlaneRuntimeIngest",

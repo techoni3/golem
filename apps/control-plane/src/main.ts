@@ -10,6 +10,10 @@ import {
 	controlPlanePortFromEnvironment,
 	startControlPlane,
 } from "./server.js";
+import {
+	composeControlPlaneManagementServices,
+	composeControlPlaneTrackerCoreServices,
+} from "./tracker.js";
 
 const token = process.env.GOLEM_CONTROL_PLANE_TOKEN;
 const golemHome = process.env.GOLEM_HOME;
@@ -72,6 +76,21 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 		runtimePath: path.join(golemHome, "runtime.db"),
 		trackerPath: path.join(golemHome, "tracker.db"),
 	});
+	const clock = {
+		now: () => new Date().toISOString(),
+		after: (milliseconds: number) =>
+			new Date(Date.now() + milliseconds).toISOString(),
+	};
+	const trackerCore = composeControlPlaneTrackerCoreServices({
+		writer: owner,
+		clock,
+	});
+	const management = composeControlPlaneManagementServices({
+		writer: owner,
+		clock,
+		assetRoot: path.join(golemHome, "ticket-assets"),
+		tickets: trackerCore.tickets,
+	});
 	const runtime = createRuntimeMaterializer({ home: golemHome, writer: owner });
 	const outbox = new RuntimeOutboxDrainer({
 		writer: owner,
@@ -114,6 +133,7 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 			),
 			runtimeIngress: runtime.inbox,
 			runtimeHealth: scheduler,
+			management,
 			...(replayWindowSize ? { replayWindowSize } : {}),
 			...testProjection,
 		});

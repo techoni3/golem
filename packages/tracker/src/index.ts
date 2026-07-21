@@ -25,6 +25,12 @@ export {
 	type TrackerLinkService,
 } from "./links/service.js";
 export {
+	createTrackerManagementServices,
+	TrackerManagementError,
+	type TrackerManagementIdentityPort,
+	type TrackerManagementServices,
+} from "./management.js";
+export {
 	createPassiveSlotService,
 	type PassiveSlotService,
 } from "./passive.js";

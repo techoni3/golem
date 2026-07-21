@@ -77,6 +77,7 @@
     "test:runtime-engine": "npm run build -w @golem/testkit -w @golem/runtime -w @golem/persistence -w @golem/control-plane && node --test --test-concurrency=1 test/runtime/materializer-crash-matrix.test.mjs test/runtime/dashboard-down-inbox-replay.test.mjs",
 		"test:delivery-bus": "npm run build -w @golem/persistence -w @golem/tracker -w @golem/testkit -w @golem/control-plane && node --test --test-concurrency=1 test/tracker/delivery-bus.test.mjs",
 		"test:tracker-core": "npm run build -w @golem/persistence -w @golem/tracker -w @golem/testkit -w @golem/control-plane && node --test --test-concurrency=1 test/tracker/tracker-core.test.mjs",
+		"test:management": "npm run build -w @golem/persistence -w @golem/tracker -w @golem/control-plane -w @golem/testkit && node --test --test-concurrency=1 test/management/management-services.test.mjs",
     "test:launcher-resolution": "npm run build -w @golem/launcher && node --test test/launcher-resolution.test.mjs",
     "test:launcher-process": "npm run build -w @golem/launcher -w @golem/testkit && node --test --test-concurrency=1 test/launcher-process.test.mjs",
     "test:cli": "npm run build -w apps/cli && node --test --test-concurrency=1 test/cli/registry.test.mjs",

@@ -994,6 +994,174 @@ export interface TrackerCoreStorageCapability {
 	auditCore(): readonly TrackerCoreAuditRecord[];
 }
 
+/** Typed management records. They reference canonical project/session/ticket IDs but never own runtime lifecycle. */
+export type ManagementRoleScope = "project" | "session" | "generation";
+export type ManagementGateKind = "approval" | "input";
+export type ManagementGateStatus =
+	| "awaiting"
+	| "approved"
+	| "denied"
+	| "cancelled";
+export type ManagementIdeaStatus = "pending" | "popped" | "promoted";
+export type ManagementOperationStatus = "queued" | "ineligible" | "delivered";
+export type ManagementCommunicationKind =
+	| "chat"
+	| "brief"
+	| "interrupt"
+	| "halt"
+	| "control";
+
+export interface TrackerManagementRole {
+	readonly id: string;
+	readonly projectId: string;
+	readonly name: string;
+	readonly scope: ManagementRoleScope;
+	readonly definition: TrackerJsonObject;
+	readonly revision: number;
+	readonly createdAt: string;
+	readonly updatedAt: string;
+}
+export interface TrackerManagementAssignment {
+	readonly id: string;
+	readonly projectId: string;
+	readonly sessionId?: string;
+	readonly generationId?: string;
+	readonly roleId: string;
+	readonly actor: string;
+	readonly idempotencyKey: string;
+	readonly createdAt: string;
+}
+export interface TrackerManagementGate {
+	readonly id: string;
+	readonly projectId: string;
+	readonly kind: ManagementGateKind;
+	readonly status: ManagementGateStatus;
+	readonly question: string;
+	readonly assignee: string;
+	readonly verdict?: TrackerJsonObject;
+	readonly idempotencyKey: string;
+	readonly createdAt: string;
+	readonly updatedAt: string;
+}
+export interface TrackerManagementIdea {
+	readonly id: string;
+	readonly projectId: string;
+	readonly body: string;
+	readonly status: ManagementIdeaStatus;
+	readonly promotedTicketId?: string;
+	readonly idempotencyKey: string;
+	readonly createdAt: string;
+	readonly updatedAt: string;
+}
+export interface TrackerManagementAsset {
+	readonly id: string;
+	readonly projectId: string;
+	readonly ticketId: string;
+	readonly relativePath: string;
+	readonly mimeType: string;
+	readonly byteSize: number;
+	readonly sha256: string;
+	readonly storagePath: string;
+	readonly createdAt: string;
+}
+export interface TrackerManagementOperation {
+	readonly id: string;
+	readonly projectId: string;
+	readonly sessionId?: string;
+	readonly generationId?: string;
+	readonly kind: ManagementCommunicationKind;
+	readonly command: string;
+	readonly payload: TrackerJsonObject;
+	readonly status: ManagementOperationStatus;
+	readonly actor: string;
+	readonly idempotencyKey: string;
+	readonly createdAt: string;
+	readonly updatedAt: string;
+}
+export interface TrackerManagementAuditRecord {
+	readonly id: string;
+	readonly projectId: string;
+	readonly kind: string;
+	readonly subjectId: string;
+	readonly actor: string;
+	readonly details: TrackerJsonObject;
+	readonly createdAt: string;
+}
+
+/** Owner-backed management capability; no raw SQLite/Kysely handle crosses the boundary. */
+export interface TrackerManagementStorageCapability {
+	createRole(
+		input: Omit<
+			TrackerManagementRole,
+			"revision" | "createdAt" | "updatedAt"
+		> & { readonly actor: string; readonly now: string },
+	): TrackerManagementRole;
+	listRoles(projectId: string): readonly TrackerManagementRole[];
+	assignRole(
+		input: Omit<TrackerManagementAssignment, "createdAt"> & {
+			readonly now: string;
+		},
+	): TrackerManagementAssignment;
+	createGate(
+		input: Omit<TrackerManagementGate, "createdAt" | "updatedAt" | "status"> & {
+			readonly actor: string;
+			readonly now: string;
+		},
+	): TrackerManagementGate;
+	answerGate(input: {
+		readonly id: string;
+		readonly projectId: string;
+		readonly status: Exclude<ManagementGateStatus, "awaiting">;
+		readonly verdict: TrackerJsonObject;
+		readonly actor: string;
+		readonly now: string;
+	}): TrackerManagementGate | undefined;
+	listGates(projectId: string): readonly TrackerManagementGate[];
+	createIdea(
+		input: Omit<TrackerManagementIdea, "createdAt" | "updatedAt" | "status"> & {
+			readonly actor: string;
+			readonly now: string;
+		},
+	): TrackerManagementIdea;
+	popIdea(input: {
+		readonly id: string;
+		readonly projectId: string;
+		readonly actor: string;
+		readonly now: string;
+	}): TrackerManagementIdea | undefined;
+	promoteIdea(input: {
+		readonly id: string;
+		readonly projectId: string;
+		readonly ticketId: string;
+		readonly actor: string;
+		readonly now: string;
+	}): TrackerManagementIdea | undefined;
+	listIdeas(projectId: string): readonly TrackerManagementIdea[];
+	putAsset(
+		input: Omit<TrackerManagementAsset, "createdAt"> & {
+			readonly actor: string;
+			readonly now: string;
+		},
+	): TrackerManagementAsset;
+	getAsset(input: {
+		readonly id: string;
+		readonly projectId: string;
+		readonly ticketId: string;
+	}): TrackerManagementAsset | undefined;
+	createOperation(
+		input: Omit<
+			TrackerManagementOperation,
+			"createdAt" | "updatedAt" | "status"
+		> & { readonly now: string },
+	): TrackerManagementOperation;
+	getOperation(
+		id: string,
+		projectId: string,
+	): TrackerManagementOperation | undefined;
+	listOperations(projectId: string): readonly TrackerManagementOperation[];
+	auditManagement(projectId: string): readonly TrackerManagementAuditRecord[];
+}
+
 export interface RuntimeOutboxFailure {
 	readonly status: "pending" | "permanent_failure";
 	readonly attempts: number;
@@ -1085,6 +1253,8 @@ export interface PersistenceWriteCapability {
 	trackerStorage(): TrackerStorageCapability;
 	/** Typed work-item/phase repository capability for @golem/tracker only. */
 	trackerCoreStorage(): TrackerCoreStorageCapability;
+	/** Typed management records owned by the same tracker SQLite owner. */
+	managementStorage(): TrackerManagementStorageCapability;
 	status(): PersistenceStatus;
 	close(): Promise<void>;
 }

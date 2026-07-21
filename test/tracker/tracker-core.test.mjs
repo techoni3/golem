@@ -170,7 +170,7 @@ test("tracker core compatibility journey", async () => {
 		try {
 			const freshStatus = freshOwner.status();
 			assert.equal(freshStatus.tracker.baseline, "managed", "a fresh tracker is managed on first owner open");
-			assert.equal(freshStatus.tracker.userVersion, 3, "a fresh tracker reaches the canonical schema version on first owner open");
+		assert.equal(freshStatus.tracker.userVersion, 4, "a fresh tracker reaches the canonical schema version on first owner open");
 			const freshTables = sqliteTableNames(freshTrackerPath);
 			for (const table of ["golem_migrations", "tickets", "comments", "streams", "links", "events"]) {
 				assert.equal(freshTables.includes(table), true, `fresh managed tracker contains canonical ${table} table`);

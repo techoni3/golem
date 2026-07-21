@@ -281,7 +281,7 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 				},
 				{
 					runtimeVersion: 1,
-					trackerVersion: 3,
+					trackerVersion: 4,
 					foreignKeys: true,
 					journal: "wal",
 					busy: 2500,
@@ -1006,6 +1006,7 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 				"tracker/001-baseline",
 				"tracker/002-durable-delivery-bus",
 				"tracker/003-live-tracker-core",
+				"tracker/004-management-services",
 			],
 		);
 		assert.deepEqual(
@@ -1017,6 +1018,7 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 					"tracker/001-baseline",
 					"tracker/002-durable-delivery-bus",
 					"tracker/003-live-tracker-core",
+					"tracker/004-management-services",
 				],
 			},
 			"dry-run clones, applies, and verifies the tracker migration before source apply",
@@ -1050,6 +1052,7 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 			"tracker/001-baseline",
 			"tracker/002-durable-delivery-bus",
 			"tracker/003-live-tracker-core",
+			"tracker/004-management-services",
 		]);
 		assert.equal(fs.existsSync(trackerApply.backupPath), true, "apply verifies a pre-migration backup");
 		assert.deepEqual(
