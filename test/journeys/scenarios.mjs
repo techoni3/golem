@@ -104,6 +104,12 @@ export const scenarios = [
 		regression: "daily compact launcher grammar, picker, preset persistence, completions, safe aliases, or compatibility shims drift from qualified resolver truth",
 	}),
 	registerScenario({
+		id: "direct-launch-retains-integration",
+		journey: "J5",
+		tier: "integration",
+		regression: "compact launcher changes replace, bypass, or weaken the installed native direct-Codex lifecycle integration",
+	}),
+	registerScenario({
 		id: "migration-dry-run-ambiguity",
 		journey: "J7",
 		tier: "integration",

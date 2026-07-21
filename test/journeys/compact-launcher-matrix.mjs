@@ -119,6 +119,15 @@ process.stdout.write(JSON.stringify({ exit, lines, cancelledExit, cancelled }));
 		assert.equal(pickerResult.exit, 0);
 		assert(pickerResult.lines.some((line) => line.startsWith("Choose a qualified launch preset")));
 		assert(pickerResult.lines.some((line) => line.startsWith("selected ")));
+		for (const expected of [
+			"opencode default · openai gpt-*",
+			"opencode local · ollama_local *",
+			"opencode cloud · ollama_cloud *",
+		])
+			assert(
+				pickerResult.lines.some((line) => line.includes(expected)),
+				`OpenCode chooser retains ${expected} even with no local daemon/binary in fixture PATH`,
+			);
 		assert.equal(pickerResult.cancelledExit, 0, "q cancels without a failed launch");
 		assert(pickerResult.cancelled.some((line) => line.startsWith("Choose a qualified launch preset")));
 		assert.equal(pickerResult.cancelled.some((line) => line.startsWith("selected ")), false, "picker cancellation never launches a preset");

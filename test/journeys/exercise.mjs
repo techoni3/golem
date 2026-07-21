@@ -32,6 +32,7 @@ import { runOpenCodeNormalLaunchJourney } from "../adapter/opencode-normal-launc
 import { exerciseDomainReplay } from "./domain-replay.mjs";
 import { exerciseCompactLaunchDryRunMatrix } from "./compact-launch-dry-run-matrix.mjs";
 import { exerciseCompactLauncherMatrix } from "./compact-launcher-matrix.mjs";
+import { exerciseDirectLaunchRetainsIntegration } from "./direct-launch-retains-integration.mjs";
 import { exerciseLauncherLaunchabilityDeliverySplit } from "./launcher-launchability-delivery-split.mjs";
 import {
 	exerciseTrackerHttpMcpParity,
@@ -931,6 +932,7 @@ export const exercises = Object.freeze({
 	"cli-command-parity": exerciseCliCommandParity,
 	"compact-launch-dry-run-matrix": exerciseCompactLaunchDryRunMatrix,
 	"compact-launcher-matrix": exerciseCompactLauncherMatrix,
+	"direct-launch-retains-integration": exerciseDirectLaunchRetainsIntegration,
 	"domain-replay": exerciseDomainReplay,
 	"project-identity-git-worktree-relocation": exerciseProjectIdentityGitWorktreeRelocation,
 	"project-register-concurrency": exerciseProjectRegisterConcurrency,

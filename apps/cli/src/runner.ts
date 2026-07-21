@@ -467,7 +467,10 @@ async function launchOpenCode(
 		const removeSignalForwarding = execution.running.installSignalForwarding();
 		try {
 			const exited = await execution.running.wait();
-			return exited.code ?? CLI_EXIT_CODES.runtime;
+			const exitCode = exited.code ?? CLI_EXIT_CODES.runtime;
+			if (exitCode === CLI_EXIT_CODES.ok)
+				recordRecentPreset(result.preset.name);
+			return exitCode;
 		} finally {
 			removeSignalForwarding();
 		}
@@ -490,7 +493,7 @@ async function launchOpenCode(
  * the same durable endpoint and delivery ports as every other producer.
  */
 async function launchManagedCodex(
-	_result: Extract<LaunchResolution, { readonly ok: true }>,
+	result: Extract<LaunchResolution, { readonly ok: true }>,
 	input: ParsedCliInput,
 	io: CliIo,
 ): Promise<number | undefined> {
@@ -527,7 +530,9 @@ async function launchManagedCodex(
 			child.once("exit", (code) => resolveExit({ code }));
 		},
 	);
-	return exited.code ?? CLI_EXIT_CODES.runtime;
+	const exitCode = exited.code ?? CLI_EXIT_CODES.runtime;
+	if (exitCode === CLI_EXIT_CODES.ok) recordRecentPreset(result.preset.name);
+	return exitCode;
 }
 
 function renderFailure(
@@ -568,7 +573,7 @@ function renderSuccess(
 	}
 	output(
 		io,
-		`selected ${conciseSelection(result)} · launch ${bridge.launch.status} · delivery ${bridge.delivery.mode}/${bridge.delivery.qualification}/${bridge.delivery.readiness}`,
+		`selected ${conciseSelection(result)}; launch ${bridge.launch.status}; delivery ${bridge.delivery.mode}/${bridge.delivery.qualification}/${bridge.delivery.readiness}`,
 	);
 	if (result.warnings[0])
 		output(
@@ -881,10 +886,7 @@ export async function runCli(
 		const launched = await launchManagedCodex(result, input, io);
 		if (launched !== undefined) return launched;
 		const openCodeLaunched = await launchOpenCode(result, input, io);
-		const rendered = openCodeLaunched ?? renderSuccess(result, input, io);
-		if (rendered === CLI_EXIT_CODES.ok && !input.dryRun && !input.json)
-			recordRecentPreset(result.preset.name);
-		return rendered;
+		return openCodeLaunched ?? renderSuccess(result, input, io);
 	} catch (error) {
 		if (error instanceof CliResolutionError) {
 			errorOutput(io, `${error.code}: ${error.message}`);

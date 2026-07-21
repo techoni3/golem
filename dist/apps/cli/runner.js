@@ -356,7 +356,10 @@ async function launchOpenCode(result, input, io) {
         const removeSignalForwarding = execution.running.installSignalForwarding();
         try {
             const exited = await execution.running.wait();
-            return exited.code ?? CLI_EXIT_CODES.runtime;
+            const exitCode = exited.code ?? CLI_EXIT_CODES.runtime;
+            if (exitCode === CLI_EXIT_CODES.ok)
+                recordRecentPreset(result.preset.name);
+            return exitCode;
         }
         finally {
             removeSignalForwarding();
@@ -380,7 +383,7 @@ async function launchOpenCode(result, input, io) {
  * foreground control-plane composition process, so the Codex adapter receives
  * the same durable endpoint and delivery ports as every other producer.
  */
-async function launchManagedCodex(_result, input, io) {
+async function launchManagedCodex(result, input, io) {
     if (input.command !== "codex" || input.dryRun || input.json)
         return undefined;
     const host = controlPlaneArtifact("../../../apps/control-plane/dist/managed-codex-host.js");
@@ -408,7 +411,10 @@ async function launchManagedCodex(_result, input, io) {
         child.once("error", () => resolveExit({ code: CLI_EXIT_CODES.runtime }));
         child.once("exit", (code) => resolveExit({ code }));
     });
-    return exited.code ?? CLI_EXIT_CODES.runtime;
+    const exitCode = exited.code ?? CLI_EXIT_CODES.runtime;
+    if (exitCode === CLI_EXIT_CODES.ok)
+        recordRecentPreset(result.preset.name);
+    return exitCode;
 }
 function renderFailure(result, input, io) {
     if (input.json)
@@ -438,7 +444,7 @@ function renderSuccess(result, input, io) {
         output(io, stableCliJson(publicPlan));
         return CLI_EXIT_CODES.ok;
     }
-    output(io, `selected ${conciseSelection(result)} · launch ${bridge.launch.status} · delivery ${bridge.delivery.mode}/${bridge.delivery.qualification}/${bridge.delivery.readiness}`);
+    output(io, `selected ${conciseSelection(result)}; launch ${bridge.launch.status}; delivery ${bridge.delivery.mode}/${bridge.delivery.qualification}/${bridge.delivery.readiness}`);
     if (result.warnings[0])
         output(io, `warning: ${result.warnings[0].message} Remedy: ${result.warnings[0].remediation}`);
     if (input.explain) {
@@ -689,10 +695,7 @@ export async function runCli(argv = process.argv.slice(2), io = {}) {
         if (launched !== undefined)
             return launched;
         const openCodeLaunched = await launchOpenCode(result, input, io);
-        const rendered = openCodeLaunched ?? renderSuccess(result, input, io);
-        if (rendered === CLI_EXIT_CODES.ok && !input.dryRun && !input.json)
-            recordRecentPreset(result.preset.name);
-        return rendered;
+        return openCodeLaunched ?? renderSuccess(result, input, io);
     }
     catch (error) {
         if (error instanceof CliResolutionError) {
