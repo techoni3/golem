@@ -16,6 +16,11 @@ import {
 	legacySourceRelativePaths,
 	readLegacyHome,
 } from "../readers/safe-reader.js";
+import {
+	redactDiagnosticText,
+	redactedDisplayPath,
+	redactedHomePath,
+} from "../redact/redact.js";
 import type {
 	ApplyMigrationOptions,
 	ApplyMigrationResult,
@@ -112,6 +117,33 @@ function statusPath(home: string): string {
 	return path.join(home, statusFilename);
 }
 
+function backupDirectoryFor(home: string, planHash: string): string {
+	return path.join(home, "migration-backups", planHash.slice(0, 24));
+}
+
+function publicBackupDirectory(planHash: string): string {
+	return redactedHomePath(`migration-backups/${planHash.slice(0, 24)}`);
+}
+
+function publicProjectionPath(): string {
+	return redactedHomePath(
+		`${compatibilityDirectoryName}/legacy-projection.json`,
+	);
+}
+
+function publicRollbackCommand(): string {
+	return "golem migrate rollback --home $GOLEM_HOME";
+}
+
+function publicStatus(status: MigrationStatus): MigrationStatus {
+	return Object.freeze({
+		...status,
+		backup_directory: publicBackupDirectory(status.plan_hash),
+		rollback_command: publicRollbackCommand(),
+		compatibility_projection: publicProjectionPath(),
+	});
+}
+
 function readStatus(home: string): MigrationStatus | undefined {
 	try {
 		const candidate: unknown = JSON.parse(
@@ -125,7 +157,7 @@ function readStatus(home: string): MigrationStatus | undefined {
 			(record.status === "applied" ||
 				record.status === "rolled_back" ||
 				record.status === "failed")
-			? (candidate as MigrationStatus)
+			? publicStatus(candidate as MigrationStatus)
 			: undefined;
 	} catch {
 		return undefined;
@@ -195,7 +227,7 @@ function copyIfPresent(source: string, target: string): void {
 }
 
 function backupSources(home: string, planHash: string): string {
-	const directory = path.join(home, "migration-backups", planHash.slice(0, 24));
+	const directory = backupDirectoryFor(home, planHash);
 	try {
 		if (fs.existsSync(directory))
 			throw new Error("backup directory already exists for this plan");
@@ -219,7 +251,7 @@ function backupSources(home: string, planHash: string): string {
 		throw new MigrationApplyError(
 			"migration.backup_failed",
 			error instanceof Error
-				? `backup failed: ${error.message}`
+				? `backup failed: ${redactDiagnosticText(error.message)}`
 				: "backup failed",
 		);
 	}
@@ -404,7 +436,9 @@ function writeCompatibilityProjection(input: {
 	const projects = input.projections.projects().map((project) => ({
 		id: project.projectId,
 		name: project.name,
-		path: project.locations[0]?.canonicalPath ?? null,
+		path: project.locations[0]
+			? redactedDisplayPath(project.locations[0].canonicalPath)
+			: null,
 	}));
 	const sessions = input.projections.sessions().map((session) => ({
 		session_id: session.sessionId,
@@ -419,7 +453,7 @@ function writeCompatibilityProjection(input: {
 		projects,
 		sessions,
 	});
-	return target;
+	return publicProjectionPath();
 }
 
 function assertApplyable(
@@ -649,8 +683,8 @@ export async function applyLegacyMigration(
 				plan_hash: plan.plan_hash,
 				source_manifest_hash: plan.source_manifest_hash,
 				applied_at: now(options),
-				backup_directory: backupDirectory,
-				rollback_command: `golem migrate rollback --home ${options.home}`,
+				backup_directory: publicBackupDirectory(plan.plan_hash),
+				rollback_command: publicRollbackCommand(),
 				compatibility_projection: projection,
 				compatibility_mode: "read_only_generated",
 				imported: {
@@ -677,7 +711,9 @@ export async function applyLegacyMigration(
 		if (error instanceof MigrationApplyError) throw error;
 		throw new MigrationApplyError(
 			"migration.import_rejected",
-			error instanceof Error ? error.message : "migration apply failed",
+			error instanceof Error
+				? redactDiagnosticText(error.message)
+				: "migration apply failed",
 		);
 	} finally {
 		release();
@@ -695,7 +731,7 @@ export async function rollbackLegacyMigration(
 		);
 	const release = acquireLock(home);
 	try {
-		restoreCanonical(home, current.backup_directory);
+		restoreCanonical(home, backupDirectoryFor(home, current.plan_hash));
 		const rolledBack: MigrationStatus = Object.freeze({
 			...current,
 			status: "rolled_back",

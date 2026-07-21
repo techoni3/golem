@@ -24,3 +24,4 @@ export type {
 	AuditSource,
 	AuditSourceStatus,
 } from "./plan/types.js";
+export { redactDiagnosticText } from "./redact/redact.js";

@@ -373,11 +373,10 @@ function configActions(document: JsonRecord | undefined): AuditAction[] {
 	if (!document) return [];
 	const managed = new Set(["schema_version", "launch"]);
 	const unknown = Object.keys(document).filter((key) => !managed.has(key));
-	if (unknown.length === 0) return [];
 	return [
 		action(
-			"ignore",
-			"compat.config.unknown_keys_preserved",
+			"review",
+			"compat.config.typed_importer_required",
 			["config"],
 			[],
 			[],
@@ -385,14 +384,24 @@ function configActions(document: JsonRecord | undefined): AuditAction[] {
 				unknown_key_count: unknown.length,
 				secret_like_key_count: unknown.filter(isSecretLikeKey).length,
 				managed_region_rewrite: false,
+				typed_importer_available: false,
 			},
 		),
 	];
 }
 
-function presentStoreActions(sources: readonly AuditSource[]): AuditAction[] {
-	const createSources = new Set([
+/**
+ * A source is not evidence that it reached canonical storage.  Until a
+ * source-specific typed importer and journey exist, its presence is an
+ * explicit human decision point, never an inventory-only success.
+ */
+function unsupportedStoreActions(
+	sources: readonly AuditSource[],
+): AuditAction[] {
+	const unsupportedSources = new Set([
 		"tracker",
+		"tracker-wal",
+		"tracker-shm",
 		"channels",
 		"leases",
 		"opencode-bridges",
@@ -408,16 +417,20 @@ function presentStoreActions(sources: readonly AuditSource[]): AuditAction[] {
 	]);
 	return sources
 		.filter(
-			(source) => source.status === "present" && createSources.has(source.id),
+			(source) =>
+				source.status === "present" && unsupportedSources.has(source.id),
 		)
 		.map((source) =>
 			action(
-				"create",
-				"compat.source.evidence_snapshot",
+				"review",
+				`compat.${source.id}.typed_importer_required`,
 				[source.id],
-				[proposal("evidence", source.id)],
 				[],
-				{ category: source.category },
+				[],
+				{
+					category: source.category,
+					typed_importer_available: false,
+				},
 			),
 		);
 }
@@ -439,7 +452,7 @@ export function planLegacyMigration(
 		...projectActions(read.documents.projects),
 		...sessionActions(read.documents.sessions, read.documents.facts),
 		...configActions(read.documents.config),
-		...presentStoreActions(sources),
+		...unsupportedStoreActions(sources),
 	].sort((left, right) => left.id.localeCompare(right.id));
 	const sourceManifestHash = hash(sources);
 	const counts = actions.reduce<Record<string, number>>((result, current) => {

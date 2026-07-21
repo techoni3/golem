@@ -4,6 +4,7 @@ import {
 	auditLegacyHome,
 	formatAuditPlanText,
 	migrationStatus,
+	redactDiagnosticText,
 	rollbackLegacyMigration,
 	stableAuditPlanJson,
 } from "@golem/compat";
@@ -78,8 +79,9 @@ if (
 			typeof error.code === "string"
 				? error.code
 				: "migration.failed";
-		const message =
-			error instanceof Error ? error.message : "migration command failed";
+		const message = redactDiagnosticText(
+			error instanceof Error ? error.message : "migration command failed",
+		);
 		process.stderr.write(`${code}: ${message}\n`);
 		process.exitCode = 3;
 	}
