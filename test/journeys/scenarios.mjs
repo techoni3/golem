@@ -44,6 +44,12 @@ export const scenarios = [
 		regression: "health, readiness, capability qualification, or delivery eligibility can drift from canonical endpoint facts",
 	}),
 	registerScenario({
+		id: "claude-lifecycle-channel-recovery",
+		journey: "J4",
+		tier: "integration",
+		regression: "Claude lifecycle signals, fenced channel authentication, addressed consumption, and unqualified delivery can drift apart",
+	}),
+	registerScenario({
 		id: "live-history-diagnostics",
 		journey: "J2",
 		tier: "integration",

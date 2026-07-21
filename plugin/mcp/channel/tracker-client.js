@@ -244,7 +244,7 @@ export function updateTicket(id, patch) {
   return request('PATCH', `/api/tickets/${encodeURIComponent(id)}`, { body: patch });
 }
 
-/** POST /api/tickets/:id/transition {phase,reason?,skip_reason?,actor} */
+/** POST /api/tickets/:id/transition {phase,reason?,actor}; skip_reason is rejected without verified authority. */
 export function transitionTicket(id, input) {
   if (!id) throw new Error('transitionTicket: id is required');
   return request('POST', `/api/tickets/${encodeURIComponent(id)}/transition`, {

@@ -173,12 +173,12 @@ async function startApiFixture() {
 				authorization: request.headers.authorization ?? null,
 				body,
 			});
-		if (request.method === "GET" && request.url === "/api/tickets/GOL-29") {
+		if (request.method === "GET" && request.url === "/api/v1/tracker/tickets/GOL-29") {
 			response.writeHead(200, { "content-type": "application/json" });
 			response.end(JSON.stringify({ id: "GOL-29", title: "render closure" }));
 			return;
 		}
-		if (request.method === "POST" && request.url === "/api/tickets") {
+		if (request.method === "POST" && request.url === "/api/v1/tracker/tickets") {
 			response.writeHead(201, { "content-type": "application/json" });
 			response.end(JSON.stringify({ id: "GOL-900", title: body?.title, project_id: body?.project_id }));
 			return;
@@ -256,14 +256,13 @@ async function assertRelocatableArtifact(root) {
 		assert.deepEqual(
 			api.requests.map((request) => ({ method: request.method, path: request.path })),
 			[
-				{ method: "GET", path: "/api/tickets/GOL-29" },
-				{ method: "POST", path: "/api/tickets" },
+				{ method: "GET", path: "/api/v1/tracker/tickets/GOL-29" },
+				{ method: "POST", path: "/api/v1/tracker/tickets" },
 			],
 		);
 		assert.deepEqual(api.requests[1]?.body, {
 			title: "real closure write",
 			project_id: "golem-38ab8a",
-			created_by: "ses-j1",
 		});
 		assert(api.requests.every((request) => request.authorization === "Bearer loopback-bearer-for-j1"), "artifact injects the loopback bearer on every request");
 		assert.equal(JSON.stringify([initialized, listed, read, invalidWrite, write]).includes("loopback-bearer-for-j1"), false, "MCP summaries never serialize bearer credentials");

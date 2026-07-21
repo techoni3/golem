@@ -845,7 +845,9 @@ async function main() {
   await callTool('ticket_comment', { id: skipped.id, body: 'Closing brief: ready for exceptional closure.' });
   await callTool('ticket_transition', { id: skipped.id, phase: 'built' });
   const skippedDone = await callTool('ticket_transition', { id: skipped.id, phase: 'done', skip_reason: 'manager-approved test skip' });
-  check('ticket_transition forwards skip_reason', !skippedDone.result.isError && skippedDone.json?.phase === 'done', skippedDone.text);
+  check('untrusted skip_reason is rejected without durable authority', skippedDone.result.isError === true, skippedDone.text);
+  const skippedAfter = await callTool('ticket_get', { id: skipped.id });
+  check('untrusted skip_reason leaves ticket unchanged', skippedAfter.json?.phase === 'built', skippedAfter.text);
 
   const legacy = await createViaMcp('MCP legacy update compatibility');
   const legacyUpdated = await callTool('ticket_update', { id: legacy.id, state: 'in_progress' });
