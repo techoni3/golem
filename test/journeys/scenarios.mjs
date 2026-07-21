@@ -68,6 +68,18 @@ export const scenarios = [
 		regression: "authenticated runtime projection WebSocket snapshots, deltas, cursors, or restart resync diverge from the HTTP read model",
 	}),
 	registerScenario({
+		id: "dashboard-runtime-lifecycle",
+		journey: "J8",
+		tier: "integration",
+		regression: "the built operator dashboard combines compatibility rows, shows terminal generations live, mutates actor activity on read, leaks diagnostics, or stretches/duplicates passport cards",
+	}),
+	registerScenario({
+		id: "dashboard-disconnect-resync",
+		journey: "J8",
+		tier: "integration",
+		regression: "a dashboard-visible runtime projection reconnects across a control-plane instance restart without a canonical snapshot resync",
+	}),
+	registerScenario({
 		id: "cli-command-parity",
 		journey: "J5",
 		tier: "pr",

@@ -176,19 +176,23 @@
 .typedNavigation {
 	display: flex;
 	flex-wrap: wrap;
-	gap: var(--space-2);
-	padding: var(--space-2) var(--space-4);
-	border-bottom: 1px solid var(--line);
+	gap: var(--g-space-1);
+	padding: var(--g-space-2) var(--g-space-4);
+	border-bottom: 1px solid var(--g-divider);
+	background: var(--g-surface);
 }
 
 .typedNavigation a {
-	color: var(--text-2);
-	font-size: var(--font-size-2);
+	border-radius: var(--g-radius-sm);
+	padding: var(--g-space-1) var(--g-space-2);
+	color: var(--g-text-secondary);
+	font-size: 0.875rem;
 	text-decoration: none;
 }
 
 .typedNavigation a:hover,
 .typedNavigation a:focus-visible {
-	color: var(--text-1);
-	text-decoration: underline;
+	color: var(--g-text);
+	background: var(--g-surface-elevated);
+	text-decoration: none;
 }
