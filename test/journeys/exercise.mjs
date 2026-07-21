@@ -39,6 +39,7 @@ import {
 	exerciseTrackerHttpMcpParity,
 	exerciseDeliveryApiFenceRecheck,
 } from "./tracker-api.mjs";
+import { exerciseBrowserPrincipalScopeAuthority } from "./browser-principal-scope.mjs";
 import { exercisePiNextTurnCrashReplay } from "./pi-next-turn-crash-replay.mjs";
 import { exercisePiHostileDiagnostics } from "./pi-hostile-diagnostics.mjs";
 import { exerciseLauncherResolution } from "./launcher-resolution.mjs";
@@ -977,6 +978,7 @@ export const exercises = Object.freeze({
 	"tracker-core-compatibility": exerciseTrackerCoreCompatibility,
 	"tracker-fresh-db-transition": exerciseTrackerFreshDbTransition,
 	"tracker-http-mcp-parity": exerciseTrackerHttpMcpParity,
+	"browser-principal-scope-authority": exerciseBrowserPrincipalScopeAuthority,
 	"delivery-api-fence-recheck": exerciseDeliveryApiFenceRecheck,
 	"pi-next-turn-crash-replay": exercisePiNextTurnCrashReplay,
 	"pi-hostile-diagnostics": exercisePiHostileDiagnostics,

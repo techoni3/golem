@@ -7,6 +7,7 @@ import {
 	RuntimeEngineScheduler,
 	RuntimeOutboxDrainer,
 } from "@golem/runtime";
+import { createBrowserPrincipalResolver } from "./auth.js";
 import { openControlPlanePersistence } from "./persistence.js";
 import {
 	controlPlanePortFromEnvironment,
@@ -25,6 +26,8 @@ const stateDirectory = golemHome
 	? path.join(golemHome, "control-plane")
 	: undefined;
 const staticDirectory = process.env.GOLEM_CONTROL_PLANE_STATIC_ROOT;
+const browserLocalOperatorBindingId =
+	process.env.GOLEM_BROWSER_LOCAL_OPERATOR_BINDING_ID;
 const replayWindowValue = Number(process.env.GOLEM_CONTROL_PLANE_REPLAY_WINDOW);
 const replayWindowSize =
 	Number.isInteger(replayWindowValue) && replayWindowValue >= 1
@@ -103,6 +106,12 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 		assetRoot: path.join(golemHome, "ticket-assets"),
 		tickets: trackerCore.tickets,
 	});
+	const principalResolver = createBrowserPrincipalResolver({
+		storage: owner.browserPrincipalStorage(),
+		...(browserLocalOperatorBindingId
+			? { localOperatorBindingId: browserLocalOperatorBindingId }
+			: {}),
+	});
 	// Native adapter lifecycle signals are materialized through the same typed
 	// session service as every other runtime producer; the ingress itself never
 	// obtains a SQLite handle.
@@ -179,6 +188,7 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 			management,
 			trackerCore,
 			trackerServices,
+			principalResolver,
 			...(replayWindowSize ? { replayWindowSize } : {}),
 			...testProjection,
 		});

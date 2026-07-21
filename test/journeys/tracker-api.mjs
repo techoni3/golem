@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { invokeMcpTool } from "../../packages/mcp-adapter/dist/index.js";
 import { createFetchApiClient } from "../../packages/api-client/dist/index.js";
 import { composeControlPlaneTrackerCoreServices, composeControlPlaneTrackerServices } from "../../apps/control-plane/dist/tracker.js";
+import { createBrowserPrincipalResolver } from "../../apps/control-plane/dist/auth.js";
 import { openControlPlanePersistence } from "../../apps/control-plane/dist/persistence.js";
 import { startControlPlane } from "../../apps/control-plane/dist/server.js";
 import { createTemporaryHome } from "@golem/testkit";
@@ -34,6 +35,23 @@ async function withControlPlane(run, eligibility = undefined) {
 		lockPath: path.join(home.root, "owner.lock"),
 	}, { clock, ownerId: "gol43-api-journey" });
 	const core = composeControlPlaneTrackerCoreServices({ writer, clock });
+	const principals = writer.browserPrincipalStorage();
+	principals.provision({
+		id: "principal_gol43_bearer",
+		actorId: "ses_gol43",
+		role: "operator",
+		defaultProjectId: "prj_gol43",
+		scopeProjectIds: ["prj_gol43"],
+	});
+	principals.bindCredential({
+		bindingId: "principal_gol43_bearer",
+		adapter: "bearer",
+		credential: token,
+	});
+	const principalResolver = createBrowserPrincipalResolver({
+		storage: principals,
+		clock: { now: () => Date.parse(clock.now()) },
+	});
 	const services = composeControlPlaneTrackerServices({
 		writer,
 		clock,
@@ -41,7 +59,7 @@ async function withControlPlane(run, eligibility = undefined) {
 	});
 	let service;
 	try {
-		service = await startControlPlane({ token, stateDirectory: path.join(home.root, "control-plane"), staticDirectory: staticRoot, trackerCore: core, trackerServices: services });
+		service = await startControlPlane({ token, stateDirectory: path.join(home.root, "control-plane"), staticDirectory: staticRoot, trackerCore: core, trackerServices: services, principalResolver });
 		return await run({ home, token, clock, writer, core, services, service, origin: service.origin });
 	} finally {
 		if (service) await service.close();
@@ -51,13 +69,10 @@ async function withControlPlane(run, eligibility = undefined) {
 	}
 }
 
-function headers(token, caller = { project: "prj_gol43", session: "ses_gol43", actor: "ses_gol43" }) {
+function headers(token) {
 	return {
 		authorization: `Bearer ${token}`,
 		"content-type": "application/json",
-		"x-golem-caller-project": caller.project,
-		"x-golem-caller-session": caller.session,
-		"x-golem-caller-actor": caller.actor,
 	};
 }
 

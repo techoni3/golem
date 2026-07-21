@@ -4,8 +4,8 @@ import { WebSocketFrameV1Schema } from "@golem/contracts";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 
 import {
-	type BrowserSessionAuthority,
-	bearerIsValid,
+	type BrowserPrincipalResolver,
+	hasRequestAuthorityOverride,
 	isExpectedHost,
 } from "./auth.js";
 import type {
@@ -120,11 +120,10 @@ function frame(
 export function registerWsReplay(options: {
 	readonly app: FastifyInstance;
 	readonly instanceId: string;
-	readonly token: string;
+	readonly principal: BrowserPrincipalResolver;
 	readonly replay: ControlPlaneReplayPort;
 	readonly read: (stream: ControlPlaneStream) => Record<string, unknown>;
 	readonly revision: (stream: ControlPlaneStream) => number;
-	readonly sessions: BrowserSessionAuthority;
 	readonly sockets: Set<ControlPlaneSocket>;
 }): () => void {
 	const streams = new Map<ControlPlaneSocket, ControlPlaneStream>();
@@ -157,10 +156,16 @@ export function registerWsReplay(options: {
 		"/api/v1/ws",
 		{ websocket: true },
 		(socket: ControlPlaneSocket, request) => {
+			const context = options.principal.resolve(request, {
+				action: "read",
+				allowBrowser: true,
+				allowBearer: true,
+			});
 			if (
 				!isExpectedHost(request.headers.host) ||
-				(!bearerIsValid(request, options.token) &&
-					!options.sessions.validSocket(request))
+				hasRequestAuthorityOverride(request) ||
+				!context ||
+				!options.principal.policy.allows(context, "read")
 			) {
 				socket.close(1008, "authentication required");
 				return;

@@ -47,7 +47,8 @@ export interface ApiClientBoundary {
 export interface FetchApiClientOptions {
 	/** Loopback bearer injected at process composition; it is never serialized. */
 	readonly bearerToken?: string;
-	/** Harness-provided caller binding; it is never model-supplied MCP input. */
+	/** Compatibility metadata for local composition only. HTTP never serializes it:
+	 * the server derives actor/project scope from its durable bearer binding. */
 	readonly caller?: TrustedCallerContext;
 }
 
@@ -64,12 +65,6 @@ export function createFetchApiClient(
 			const headers: Record<string, string> = {};
 			if (options.bearerToken)
 				headers.authorization = `Bearer ${options.bearerToken}`;
-			if (options.caller?.projectId)
-				headers["x-golem-caller-project"] = options.caller.projectId;
-			if (options.caller?.sessionId)
-				headers["x-golem-caller-session"] = options.caller.sessionId;
-			if (options.caller?.sessionId)
-				headers["x-golem-caller-actor"] = options.caller.sessionId;
 			if (input.body !== undefined) {
 				headers["content-type"] = "application/json";
 				init.body = JSON.stringify(input.body);

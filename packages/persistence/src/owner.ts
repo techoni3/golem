@@ -5,6 +5,7 @@ import Database from "better-sqlite3";
 import { Kysely, SqliteDialect } from "kysely";
 
 import { backupDatabase, health } from "./backup-health.js";
+import { BrowserPrincipalRepository } from "./browser-principal-repository.js";
 import { systemPersistenceClock } from "./clock.js";
 import type {
 	RuntimeTables,
@@ -29,6 +30,7 @@ import {
 import { TrackerCoreRepository } from "./tracker-core-repository.js";
 import { TrackerRepository } from "./tracker-repository.js";
 import {
+	type BrowserPrincipalStorage,
 	type ClaimedOutboxRecord,
 	type DatabaseScope,
 	type MigrationMode,
@@ -86,6 +88,7 @@ class PersistenceOwner implements PersistenceWriteCapability {
 	readonly #trackerRepository: TrackerRepository;
 	readonly #trackerCoreRepository: TrackerCoreRepository;
 	readonly #managementRepository: TrackerManagementRepository;
+	readonly #browserPrincipalRepository: BrowserPrincipalRepository;
 	readonly #paths: Readonly<PersistencePaths>;
 	readonly #ownerId: string;
 	readonly #clock: PersistenceClock;
@@ -157,6 +160,10 @@ class PersistenceOwner implements PersistenceWriteCapability {
 			this.#managementRepository = new TrackerManagementRepository(
 				this.#trackerSql,
 				tracker,
+			);
+			this.#browserPrincipalRepository = new BrowserPrincipalRepository(
+				tracker,
+				this.#clock,
 			);
 		} catch (error) {
 			safeClose(runtime);
@@ -274,6 +281,10 @@ class PersistenceOwner implements PersistenceWriteCapability {
 
 	managementStorage() {
 		return this.#managementRepository;
+	}
+
+	browserPrincipalStorage(): BrowserPrincipalStorage {
+		return this.#browserPrincipalRepository;
 	}
 
 	status(): PersistenceStatus {

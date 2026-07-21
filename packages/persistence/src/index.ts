@@ -7,6 +7,7 @@ export { runtimeMigrations, trackerMigrations } from "./schema.js";
 export type { TrackerCoreCapabilityHandle } from "./tracker-core-capability.js";
 export { openTrackerCoreCapability } from "./tracker-core-capability.js";
 export type {
+	BrowserPrincipalStorage,
 	CapabilityQualification,
 	ClaimedOutboxRecord,
 	ClaimedTrackerDeliveryEnvelope,
@@ -41,6 +42,10 @@ export type {
 	PersistencePaths,
 	PersistenceStatus,
 	PersistenceWriteCapability,
+	PrincipalAdapter,
+	PrincipalBinding,
+	PrincipalBindingProvision,
+	PrincipalRole,
 	ProjectIdentitySource,
 	ProjectLocationRelation,
 	ProjectLocationStatus,

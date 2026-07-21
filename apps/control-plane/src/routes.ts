@@ -3,8 +3,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
 import {
-	type BrowserSessionAuthority,
-	bearerIsValid,
+	type BrowserPrincipalResolver,
+	hasRequestAuthorityOverride,
 	isExpectedOrigin,
 } from "./auth.js";
 import type { LegacyCompatibilityPublisher } from "./compatibility.js";
@@ -44,34 +44,68 @@ function jsonSchema(value: z.ZodType): Record<string, unknown> {
 	}) as Record<string, unknown>;
 }
 
+function requirePrincipal(
+	request: FastifyRequest,
+	reply: FastifyReply,
+	principal: BrowserPrincipalResolver,
+	action: "read" | "mutate",
+	allowBrowser: boolean,
+): boolean {
+	if (hasRequestAuthorityOverride(request)) {
+		fail(
+			request,
+			reply,
+			403,
+			"browser.forbidden",
+			"request authority is server-owned",
+		);
+		return false;
+	}
+	const context = principal.resolve(request, {
+		action,
+		allowBrowser,
+		allowBearer: true,
+	});
+	if (!context) {
+		fail(
+			request,
+			reply,
+			401,
+			"browser.auth.required",
+			"an authenticated principal binding is required",
+		);
+		return false;
+	}
+	if (!principal.policy.allows(context, action)) {
+		fail(
+			request,
+			reply,
+			403,
+			"browser.forbidden",
+			"the authenticated principal is not authorized",
+		);
+		return false;
+	}
+	return true;
+}
+
 function requireBearer(
 	request: FastifyRequest,
 	reply: FastifyReply,
-	token: string,
+	principal: BrowserPrincipalResolver,
 ): boolean {
-	if (bearerIsValid(request, token)) return true;
-	fail(request, reply, 401, "auth.invalid", "a valid bearer token is required");
+	if (requirePrincipal(request, reply, principal, "read", false)) return true;
 	return false;
 }
 
-/** Browser reads carry the bootstrap CSRF proof so a local page cannot borrow
- * a session cookie to observe typed projections without a same-origin origin. */
+/** Browser reads require the durable cookie plus exact same-origin provenance;
+ * CSRF is additionally required for browser mutations. */
 function requireBrowserRead(
 	request: FastifyRequest,
 	reply: FastifyReply,
-	token: string,
-	sessions: BrowserSessionAuthority,
+	principal: BrowserPrincipalResolver,
 ): boolean {
-	if (bearerIsValid(request, token) || sessions.validMutation(request))
-		return true;
-	fail(
-		request,
-		reply,
-		401,
-		"auth.invalid",
-		"a valid bearer token or same-origin browser session is required",
-	);
-	return false;
+	return requirePrincipal(request, reply, principal, "read", true);
 }
 
 export function registerValidatedRoutes(options: {
@@ -82,7 +116,7 @@ export function registerValidatedRoutes(options: {
 	readonly runtimeProjection?: RuntimeProjectionPort;
 	readonly replay: ControlPlaneReplayPort;
 	readonly legacy: LegacyCompatibilityPublisher;
-	readonly sessions: BrowserSessionAuthority;
+	readonly principal: BrowserPrincipalResolver;
 	readonly runtimeIngress?: RuntimeIngressPort;
 	readonly runtimeHealth?: RuntimeHealthPort;
 	readonly invalidResponseForTest?: boolean;
@@ -113,8 +147,7 @@ export function registerValidatedRoutes(options: {
 			},
 		},
 		async (request, reply) => {
-			if (!requireBrowserRead(request, reply, options.token, options.sessions))
-				return;
+			if (!requireBrowserRead(request, reply, options.principal)) return;
 			if (!options.runtimeProjection)
 				return fail(
 					request,
@@ -218,7 +251,7 @@ export function registerValidatedRoutes(options: {
 			},
 		},
 		async (request, reply) => {
-			if (!requireBearer(request, reply, options.token)) return;
+			if (!requireBearer(request, reply, options.principal)) return;
 			return sendValidated(request, reply, HealthResponseSchema, {
 				schema_version: "golem.control-plane-health/v1",
 				status: "ready",
@@ -238,8 +271,7 @@ export function registerValidatedRoutes(options: {
 			},
 		},
 		async (request, reply) => {
-			if (!requireBrowserRead(request, reply, options.token, options.sessions))
-				return;
+			if (!requireBrowserRead(request, reply, options.principal)) return;
 			return sendValidated(request, reply, MetaResponseSchema, {
 				schema_version: "golem.control-plane-meta/v1",
 				instance_id: options.instanceId,
@@ -260,7 +292,7 @@ export function registerValidatedRoutes(options: {
 			},
 		},
 		async (request, reply) => {
-			if (!requireBearer(request, reply, options.token)) return;
+			if (!requireBearer(request, reply, options.principal)) return;
 			return sendValidated(
 				request,
 				reply,
@@ -282,8 +314,7 @@ export function registerValidatedRoutes(options: {
 			},
 		},
 		async (request, reply) => {
-			if (!requireBrowserRead(request, reply, options.token, options.sessions))
-				return;
+			if (!requireBrowserRead(request, reply, options.principal)) return;
 			const parsed = ProjectionParamsSchema.safeParse(request.params);
 			if (!parsed.success)
 				return fail(
@@ -315,7 +346,8 @@ export function registerValidatedRoutes(options: {
 			},
 		},
 		async (request, reply) => {
-			if (!requireBearer(request, reply, options.token)) return;
+			if (!requirePrincipal(request, reply, options.principal, "mutate", false))
+				return;
 			if (!options.runtimeIngress)
 				return fail(
 					request,
@@ -361,18 +393,31 @@ export function registerValidatedRoutes(options: {
 			// The static SPA cannot receive the service bearer. A same-origin POST
 			// is the explicit bootstrap boundary that mints its HttpOnly session;
 			// subsequent browser mutations still require that session plus CSRF.
-			if (
-				!bearerIsValid(request, options.token) &&
-				!isExpectedOrigin(request.headers.origin, request)
-			)
+			if (hasRequestAuthorityOverride(request))
 				return fail(
 					request,
 					reply,
 					403,
-					"origin.invalid",
-					"a same-origin browser bootstrap or bearer token is required",
+					"browser.forbidden",
+					"request authority is server-owned",
 				);
-			const session = options.sessions.create();
+			if (!isExpectedOrigin(request.headers.origin, request))
+				return fail(
+					request,
+					reply,
+					401,
+					"browser.auth.required",
+					"an enabled local browser binding is required",
+				);
+			const session = options.principal.bootstrap(request);
+			if (!session.ok)
+				return fail(
+					request,
+					reply,
+					401,
+					"browser.auth.required",
+					"an enabled local browser binding is required",
+				);
 			reply.header("set-cookie", session.setCookie);
 			return sendValidated(request, reply, BrowserSessionResponseSchema, {
 				schema_version: "golem.control-plane-browser-session/v1",
@@ -393,15 +438,14 @@ export function registerValidatedRoutes(options: {
 			},
 		},
 		async (request, reply) => {
-			const bearer = bearerIsValid(request, options.token);
-			if (!bearer && !options.sessions.validMutation(request))
-				return fail(
-					request,
-					reply,
-					403,
-					"csrf.invalid",
-					"a same-origin browser session and CSRF token are required",
-				);
+			if (!requirePrincipal(request, reply, options.principal, "mutate", true))
+				return;
+			const context = options.principal.resolve(request, {
+				action: "mutate",
+				allowBrowser: true,
+				allowBearer: true,
+			});
+			const bearer = context?.source === "bearer";
 			const parsed = BrowserEchoBodySchema.safeParse(request.body);
 			if (!parsed.success)
 				return fail(

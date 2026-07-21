@@ -2,9 +2,16 @@ import type { RuntimeBoundary } from "@golem/runtime";
 import type { TrackerBoundary } from "@golem/tracker";
 
 export {
+	type ActorContext,
+	type AuthorizationPolicy,
+	type BrowserPrincipalResolver,
 	type BrowserSessionAuthority,
 	type BrowserSessionClock,
+	createAuthorizationPolicy,
+	createBrowserPrincipalResolver,
 	createBrowserSessionAuthority,
+	createFailClosedBrowserPrincipalResolver,
+	hasRequestAuthorityOverride,
 } from "./auth.js";
 export {
 	createLegacyCompatibilitySource,
