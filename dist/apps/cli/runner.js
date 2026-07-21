@@ -1,7 +1,10 @@
+import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
-import { openCodeManagedProviderRegion, openCodeProviderCapabilities, probeOpenCodeProviders, setupOpenCodeConfig, } from "@golem/adapter-opencode";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { openCodeManagedProviderRegion, openCodeProviderCapabilities, openCodeRuntimeProjectId, probeOpenCodeProviders, setupOpenCodeConfig, } from "@golem/adapter-opencode";
 import { executeLaunch, LauncherExecutionError, LauncherResolutionError, launchPlanBridge, parseJsoncConfig, resolveLaunch, } from "@golem/launcher";
 import { CLI_EXIT_CODES, CliResolutionError, CliUsageError } from "./errors.js";
 import { conciseSelection, stableCliJson } from "./format.js";
@@ -14,6 +17,122 @@ const backends = new Set([
     "ollama_cloud",
     "native",
 ]);
+const moduleDirectory = dirname(fileURLToPath(import.meta.url));
+class OpenCodeControlPlaneError extends Error {
+    code;
+    constructor() {
+        super("adapter.opencode.control_plane.unavailable");
+        this.name = "OpenCodeControlPlaneError";
+        this.code = "adapter.opencode.control_plane.unavailable";
+    }
+}
+function controlPlaneArtifact(relative) {
+    const candidate = resolve(moduleDirectory, relative);
+    return existsSync(candidate) ? candidate : undefined;
+}
+function stopChild(child) {
+    if (child.exitCode !== null || child.signalCode !== null)
+        return Promise.resolve();
+    return new Promise((resolveStop) => {
+        let settled = false;
+        const finish = () => {
+            if (settled)
+                return;
+            settled = true;
+            clearTimeout(force);
+            resolveStop();
+        };
+        const force = setTimeout(() => {
+            try {
+                child.kill("SIGKILL");
+            }
+            catch {
+                // The owned control plane is already gone.
+            }
+        }, 1_000);
+        child.once("exit", finish);
+        try {
+            child.kill("SIGTERM");
+        }
+        catch {
+            finish();
+        }
+    });
+}
+/**
+ * Direct OpenCode launch owns its private control-plane process for the exact
+ * lifetime of the native child. This is deliberately not a config mutation or
+ * a global daemon: the only credentials exposed are the short-lived bearer and
+ * the standard, sanitized launcher environment.
+ */
+async function startManagedOpenCodeIngress(projectPath) {
+    const main = controlPlaneArtifact("../../../apps/control-plane/dist/main.js");
+    const staticDirectory = controlPlaneArtifact("../../../dashboard/dist/control-plane");
+    if (!main || !staticDirectory)
+        throw new OpenCodeControlPlaneError();
+    const projectId = openCodeRuntimeProjectId(projectPath);
+    const token = randomBytes(32).toString("base64url");
+    const child = spawn(process.execPath, [main], {
+        cwd: projectPath,
+        env: {
+            ...process.env,
+            GOLEM_CONTROL_PLANE_PORT: "0",
+            GOLEM_CONTROL_PLANE_STATIC_ROOT: staticDirectory,
+            GOLEM_CONTROL_PLANE_TOKEN: token,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+    });
+    return new Promise((resolveIngress, rejectIngress) => {
+        let settled = false;
+        let buffered = "";
+        const fail = () => {
+            if (settled)
+                return;
+            settled = true;
+            clearTimeout(timeout);
+            void stopChild(child);
+            rejectIngress(new OpenCodeControlPlaneError());
+        };
+        const ready = (origin) => {
+            if (settled)
+                return;
+            settled = true;
+            clearTimeout(timeout);
+            resolveIngress({
+                projectId,
+                origin,
+                token,
+                stop: () => stopChild(child),
+            });
+        };
+        const timeout = setTimeout(fail, 3_000);
+        child.once("error", fail);
+        child.once("exit", () => {
+            if (!settled)
+                fail();
+        });
+        child.stdout?.setEncoding("utf8");
+        child.stdout?.on("data", (chunk) => {
+            buffered += chunk;
+            let newline = buffered.indexOf("\n");
+            while (newline !== -1) {
+                const line = buffered.slice(0, newline);
+                buffered = buffered.slice(newline + 1);
+                try {
+                    const message = JSON.parse(line);
+                    if (message.type === "ready" &&
+                        typeof message.origin === "string" &&
+                        message.origin.startsWith("http://127.0.0.1:"))
+                        ready(message.origin);
+                }
+                catch {
+                    // Control-plane warnings are not part of the ready protocol.
+                }
+                newline = buffered.indexOf("\n");
+            }
+        });
+    });
+}
 function output(io, line) {
     (io.stdout ?? ((value) => process.stdout.write(`${value}\n`)))(line);
 }
@@ -169,7 +288,10 @@ async function runOpenCodeOperation(input, io) {
 async function launchOpenCode(result, input, io) {
     if (input.command !== "opencode" || input.dryRun || input.json)
         return undefined;
+    let ingress;
     try {
+        const cwd = resolve(input.cwd ?? process.cwd());
+        ingress = await startManagedOpenCodeIngress(cwd);
         const execution = await executeLaunch({
             plan: result,
             discovery: {
@@ -178,8 +300,19 @@ async function launchOpenCode(result, input, io) {
                 compatibilityShims: [],
             },
             adapter: {
-                cwd: resolve(input.cwd ?? process.cwd()),
+                cwd,
                 ...(input.model ? { argv: ["--model", input.model] } : { argv: [] }),
+                environment: {
+                    values: {
+                        GOLEM_RUNTIME_PROJECT_ID: ingress.projectId,
+                        GOLEM_RUNTIME_PROJECT_PATH: cwd,
+                        GOLEM_CONTROL_PLANE_URL: ingress.origin,
+                        GOLEM_CONTROL_PLANE_TOKEN: ingress.token,
+                        // There is no endpoint claim owner in a direct process. State the
+                        // real transport truth instead of advertising an unfenced push.
+                        GOLEM_OPENCODE_DELIVERY_MODE: "pull_only",
+                    },
+                },
             },
             resolveSecret: (reference) => process.env[reference],
             interactive: io.isTTY ?? Boolean(process.stdin.isTTY),
@@ -197,11 +330,16 @@ async function launchOpenCode(result, input, io) {
         }
     }
     catch (error) {
-        const code = error instanceof LauncherExecutionError
+        const code = error instanceof LauncherExecutionError ||
+            error instanceof OpenCodeControlPlaneError
             ? error.code
             : "launcher.process.failed";
         errorOutput(io, `${code}: OpenCode was not launched`);
         return CLI_EXIT_CODES.runtime;
+    }
+    finally {
+        if (ingress)
+            await ingress.stop();
     }
 }
 function renderFailure(result, input, io) {

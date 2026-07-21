@@ -199,6 +199,9 @@ async function createCanonicalRuntime(client) {
     const typed = await import("@golem/adapter-opencode");
     const runtime = new typed.OpenCodeCompatibilityRuntime({
       projectId,
+      ...(typeof process.env.GOLEM_RUNTIME_PROJECT_PATH === "string" && process.env.GOLEM_RUNTIME_PROJECT_PATH
+        ? { projectPath: process.env.GOLEM_RUNTIME_PROJECT_PATH }
+        : {}),
       producerInstanceId: `prod_${randomUUID()}`,
       producer: "opencode-shim",
       ingress: typed.createOpenCodeControlPlaneIngress({ origin, token }),
@@ -216,6 +219,22 @@ async function createCanonicalRuntime(client) {
     logLine("canonical runtime", "adapter unavailable or runtime ingress not configured");
     return null;
   }
+}
+
+// A native bridge is not an endpoint lease. Until an owner has claimed the
+// current generation and supplied its fence with a delivery, this process can
+// only honestly advertise pull-based consumption. The direct launcher always
+// configures this canonical mode; the legacy shape remains only for older
+// rendered shims that have no typed runtime at all.
+function deliveryTruth() {
+  const canonical = Boolean(
+    process.env.GOLEM_RUNTIME_PROJECT_ID &&
+    process.env.GOLEM_CONTROL_PLANE_URL &&
+    process.env.GOLEM_CONTROL_PLANE_TOKEN,
+  );
+  return canonical
+    ? { delivery_mode: "pull_only", delivery_ready: false, delivery_reason: "endpoint_claim_required" }
+    : { delivery_mode: "legacy_prompt_bridge", delivery_ready: true, delivery_reason: null };
 }
 
 function withFileLock(lockPath, fn) {
@@ -271,6 +290,7 @@ function registerBridge({ sessionID, cwd, status, port, name, model }) {
         name: name || null,
         status: status || null,
         model: model || null,
+        ...deliveryTruth(),
         started_at: now,
         updated_at: now,
       });
@@ -313,7 +333,15 @@ function updateBridge({ sessionID, cwd, status, port, name, model, insert = true
       reg.bridges = reg.bridges.map((b) => {
         if (b.opencode_pid !== process.pid || b.session_id !== sessionID) return b;
         found = true;
-        return { ...b, cwd: cwd || b.cwd || null, name: name || b.name || null, status: status || b.status || null, model: model || b.model || null, updated_at: now };
+        return {
+          ...b,
+          cwd: cwd || b.cwd || null,
+          name: name || b.name || null,
+          status: status || b.status || null,
+          model: model || b.model || null,
+          ...deliveryTruth(),
+          updated_at: now,
+        };
       });
       if (!found) {
         if (!insert) return; // child/unknown session — never create a phantom endpoint
@@ -330,6 +358,7 @@ function updateBridge({ sessionID, cwd, status, port, name, model, insert = true
           name: name || null,
           status: status || null,
           model: model || null,
+          ...deliveryTruth(),
           started_at: now,
           updated_at: now,
         });
@@ -568,7 +597,12 @@ function startBridge({ client, dirFor, logErr, canonical }) {
   const server = createServer(async (req, res) => {
     try {
       if (req.method === "GET" && req.url === "/healthz") {
-        return sendJson(res, 200, { ok: true, harness: "opencode", version: VERSION });
+        return sendJson(res, 200, {
+          ok: true,
+          harness: "opencode",
+          version: VERSION,
+          ...deliveryTruth(),
+        });
       }
       if (req.method !== "POST" || req.url !== "/push") {
         return sendJson(res, 404, { ok: false, error: "not found" });
@@ -582,14 +616,18 @@ function startBridge({ client, dirFor, logErr, canonical }) {
       const sessionID = String(payload.session_id || meta.session_id || currentSessionID || "");
       if (!sessionID) return sendJson(res, 409, { ok: false, error: "no active opencode session" });
 
-      // New durable delivery enters with the canonical generation/fence
-      // snapshot. The adapter rechecks that snapshot immediately before the
-      // SDK boundary; old channel callers without the snapshot retain their
-      // compatibility path below.
+      // Canonical delivery always enters with an id and the generation/fence
+      // snapshot. In particular, do not fall through to promptAsync when a
+      // canonical runtime is configured: that would let an unfenced channel
+      // message bypass eligibility and revive a stale session generation.
       const fence = canonical?.fence(payload.fence || meta.fence);
-      if (canonical && fence) {
+      if (canonical) {
         const deliveryId = String(payload.delivery_id || payload.id || meta.delivery_id || "");
         if (!deliveryId) return sendJson(res, 400, { ok: false, error: "delivery id is required" });
+        if (!fence) return sendJson(res, 409, {
+          ok: false,
+          error: "adapter.opencode.delivery.fence_required",
+        });
         const result = await canonical.deliver({
           sessionID,
           deliveryId,

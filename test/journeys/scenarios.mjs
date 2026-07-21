@@ -242,4 +242,10 @@ export const scenarios = [
 		tier: "integration",
 		regression: "OpenCode bridge retries after a crash, loses its fence, or dispatches child/stale generations",
 	}),
+	registerScenario({
+		id: "opencode-direct-canonical-ingress",
+		journey: "J5",
+		tier: "integration",
+		regression: "normal direct OpenCode launch loses authenticated canonical ingress/project registration or permits an unfenced prompt to bypass generation eligibility",
+	}),
 ];

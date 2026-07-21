@@ -74,7 +74,7 @@ intent.
 | Harness | Tier | Shipped contract |
 | --- | --- | --- |
 | Claude Code | Tier A | Rendered plugin with agents, skills, hooks, MCP tools, lifecycle facts, and addressed push for sessions launched as channel consumers. A plain `claude` session can use tracker tools and pull work but does not consume pushed channel notifications. |
-| OpenCode | Tier A | Rendered agents, skills, and instructions plus a managed MCP entry and runtime shim. While the OpenCode process and shim bridge are live, addressed work is injected with the OpenCode SDK. |
+| OpenCode | Tier A lifecycle; pull-only direct delivery | Rendered agents, skills, and instructions plus a managed MCP entry and runtime shim. A normal `golem opencode` launch establishes canonical lifecycle through a private local control plane; it does not advertise push until a generation-scoped endpoint owner supplies a delivery fence. |
 | Codex CLI | Tier B for an ordinary TUI; Tier A for Golem-managed App Server modes | Rendered skills, documented lifecycle hooks (including observation of native `SubagentStop`), marketplace metadata, and a bundled MCP server. The adapter does not render Golem AGENTS.md or worker/reviewer/researcher definitions. An ordinary `codex` TUI remains explicit pull only and is never reported as pushed. A version-gated headless supervisor and private `golem codex` TUI bridge receive durable ticket/control envelopes only while their bound MCP is active and canonical thread is idle. |
 | Pi | Tier B | Portable rendered extension, lifecycle facts, and durable next-input pickup. Queued work is added to the next real user input and acknowledged when agent processing starts. There is no advertised live-idle push. |
 | Gemini CLI | Unsupported | No adapter or release contract is shipped. |
@@ -285,7 +285,12 @@ checkout. The config merge updates `mcp.golem`, but appends the Golem skill and
 plugin entries rather than pruning old ones. After moving an installation, edit
 `opencode.jsonc`: remove obsolete Golem paths from `skills.paths` and obsolete
 Golem `file://` entries from `plugin`, then re-run sync and restart OpenCode.
-The shim creates the live loopback bridge used for Tier A addressed delivery.
+The shim creates a live loopback bridge. A normal `golem opencode` launch owns
+a private authenticated control plane for its native child and materializes its
+canonical project/session lifecycle without rewriting OpenCode configuration.
+That direct path is deliberately pull-only until a generation-scoped endpoint
+owner supplies a delivery id and fence; an unfenced bridge request is rejected
+before the OpenCode SDK boundary.
 `golemc` launches Claude Code, not OpenCode.
 
 ### Ordinary Codex CLI: Tier B, pull only
@@ -552,9 +557,11 @@ own worktree into main; the coordinating session reconciles it.
 ### Delivery modes
 
 Delivery is a capability, not a generic promise. Claude Code channel consumers
-and live OpenCode bridges support addressed push. Codex requires explicit MCP
-pull. Pi uses a durable next-input inbox. The dashboard records queued,
-delivered, and acknowledged states according to those distinct contracts.
+support addressed push. An OpenCode bridge can do so only when a canonical
+endpoint owner provides the current generation's delivery id and fence; normal
+direct OpenCode launch is pull-only. Codex requires explicit MCP pull. Pi uses
+a durable next-input inbox. The dashboard records queued, delivered, and
+acknowledged states according to those distinct contracts.
 
 ## Architecture and data flow
 

@@ -1,6 +1,8 @@
+import { resolve } from "node:path";
 import type { RuntimeSignalV1 } from "@golem/contracts";
 import { FencedOpenCodeBridge } from "./bridge.js";
 import { OpenCodeEventAdapter } from "./events.js";
+import { opaqueId, stableTimestamp } from "./ids.js";
 import type {
 	OpenCodeAdapterOptions,
 	OpenCodeBridgePort,
@@ -21,6 +23,68 @@ export interface OpenCodeControlPlaneIngressOptions {
 	readonly fetch?: typeof globalThis.fetch;
 	/** Keep a host-side event handler from awaiting an unavailable control plane. */
 	readonly timeoutMs?: number;
+}
+
+/**
+ * The legacy compatibility registries use their own dashboard identifier
+ * format. The typed runtime deliberately does not: its project references are
+ * opaque contract ids and must remain stable for one canonical location.
+ */
+export function openCodeRuntimeProjectId(projectPath: string): string {
+	return opaqueId("prj", `opencode:runtime-project:${resolve(projectPath)}`);
+}
+
+function projectObservedSignal(options: {
+	readonly projectId: string;
+	readonly projectPath: string;
+	readonly producerInstanceId: string;
+	readonly producer?: string;
+	readonly now?: () => string;
+}): RuntimeSignalV1 {
+	const canonicalPath = resolve(options.projectPath);
+	const now = options.now ?? (() => new Date().toISOString());
+	const observedAt = stableTimestamp(undefined, now);
+	const sourceEventId = opaqueId(
+		"evt",
+		`opencode:project-observed:${options.projectId}:${canonicalPath}`,
+	);
+	// The durable inbox claims lexical ids. Reserve the leading group for this
+	// dependency so a freshly spooled project observation is always claimed
+	// before the adapter's normal hashed session signals on a cold launch.
+	const eventId = `evt_00000000-${sourceEventId.slice("evt_".length + 9)}`;
+	return {
+		schema_version: "golem.runtime-signal/v1",
+		event_id: eventId,
+		event_kind: "project.observed",
+		producer: options.producer ?? "opencode-adapter",
+		producer_instance_id: options.producerInstanceId,
+		harness: "opencode",
+		producer_sequence: 0,
+		correlation_id: eventId,
+		deduplication_key: `opencode:project-observed:${options.projectId}:${canonicalPath}`,
+		clocks: {
+			source_observed_at: observedAt,
+			source_event_at: observedAt,
+			received_at: observedAt,
+			materialized_at: observedAt,
+		},
+		provenance: {
+			source: "adapter",
+			evidence_id: `opencode:project:${canonicalPath}`,
+			confidence: "observed",
+		},
+		clear_fields: [],
+		payload: {
+			kind: "project.observed",
+			project: { project_id: options.projectId },
+			location: {
+				project_id: options.projectId,
+				location_id: opaqueId("loc", `opencode:location:${canonicalPath}`),
+				relation: "main",
+				canonical_path: canonicalPath,
+			},
+		},
+	} as unknown as RuntimeSignalV1;
 }
 
 export class OpenCodeRuntimeIngressError extends Error {
@@ -83,6 +147,8 @@ export function createOpenCodeControlPlaneIngress(
 export class OpenCodeCompatibilityRuntime {
 	readonly #events: OpenCodeEventAdapter;
 	readonly #ingress: OpenCodeRuntimeIngress;
+	readonly #projectSignal: RuntimeSignalV1 | undefined;
+	#projectObserved = false;
 	readonly #bridges = new Map<
 		string,
 		{ readonly generationId: string; readonly bridge: FencedOpenCodeBridge }
@@ -95,11 +161,29 @@ export class OpenCodeCompatibilityRuntime {
 	) {
 		this.#events = new OpenCodeEventAdapter(options);
 		this.#ingress = options.ingress;
+		this.#projectSignal = options.projectPath
+			? projectObservedSignal({
+					projectId: options.projectId,
+					projectPath: options.projectPath,
+					producerInstanceId: options.producerInstanceId,
+					...(options.producer ? { producer: options.producer } : {}),
+					...(options.now ? { now: options.now } : {}),
+				})
+			: undefined;
 	}
 
 	async consume(event: OpenCodeEvent): Promise<RuntimeSignalV1 | undefined> {
 		const signal = this.#events.consume(event);
-		if (signal) await this.#ingress.ingest(signal);
+		if (signal) {
+			// Session materialization rejects an unknown project. The launcher gives
+			// a normal direct run a project path, so the first lifecycle signal
+			// establishes that canonical dependency before it is admitted.
+			if (this.#projectSignal && !this.#projectObserved) {
+				await this.#ingress.ingest(this.#projectSignal);
+				this.#projectObserved = true;
+			}
+			await this.#ingress.ingest(signal);
+		}
 		return signal;
 	}
 

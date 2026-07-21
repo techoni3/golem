@@ -1,5 +1,6 @@
 import test from "node:test";
 import { runOpenCodeComposedJourney } from "./opencode-composed-journey.mjs";
+import { runOpenCodeNormalLaunchJourney } from "./opencode-normal-launch-journey.mjs";
 import {
 	runOpenCodeAdapterJourney,
 	runOpenCodeResumeBridgeJourney,
@@ -14,5 +15,9 @@ test("OpenCode adapter retries a fenced bridge and rejects stale delivery", asyn
 });
 
 test("OpenCode composed lifecycle, fenced delivery, and direct launch journey", async () => {
-		await runOpenCodeComposedJourney();
+	await runOpenCodeComposedJourney();
+});
+
+test("OpenCode normal direct launch owns canonical ingress and refuses unfenced delivery", async () => {
+	await runOpenCodeNormalLaunchJourney();
 });

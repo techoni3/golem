@@ -22,6 +22,7 @@
 - Endpoint claims are generation/route scoped: fences gate heartbeat, health, readiness, capability, delivery, and release; eligibility returns stable redacted facts and registration alone never qualifies delivery.
 - Typed management owns roles, gates, ideas, assets, communications, controls, audit, and outbox; routes cannot open SQLite or mutate runtime lifecycle.
 - Typed mutators require caller project/session/actor headers; delivery rechecks generation/fence/readiness/capability before transport.
+- OpenCode setup changes only marked provider config; native lifecycle becomes typed signals. Direct `golem opencode` owns a short-lived authenticated control plane and canonical project observation for its native child; it never writes config or starts Ollama. Until an endpoint owner supplies a generation fence, its bridge is pull-only and must reject `promptAsync` delivery.
 
 ## Checks and gotchas
 

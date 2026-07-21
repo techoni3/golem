@@ -25,6 +25,7 @@ const targetScenarios = {
 		"render-mcp-closure",
 		"opencode-provider-coexistence",
 		"opencode-resume-bridge-recovery",
+		"opencode-direct-canonical-ingress",
 	]),
 };
 if (requestedTarget && !targetScenarios[requestedTarget])

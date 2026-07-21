@@ -18,6 +18,8 @@ export interface OpenCodeEvent {
 
 export interface OpenCodeAdapterOptions {
 	readonly projectId: string;
+	/** Canonical project location supplied by an owning launcher, when present. */
+	readonly projectPath?: string;
 	readonly producerInstanceId: string;
 	readonly producer?: string;
 	readonly now?: () => string;

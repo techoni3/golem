@@ -28,6 +28,7 @@ import { runMigrationPlanReplay } from "../migration/replay.mjs";
 import { runMigrationApplyReplay } from "../migration/apply-replay.mjs";
 import { exerciseRenderMcpClosure } from "../render-mcp-closure.mjs";
 import { runOpenCodeComposedJourney } from "../adapter/opencode-composed-journey.mjs";
+import { runOpenCodeNormalLaunchJourney } from "../adapter/opencode-normal-launch-journey.mjs";
 import { exerciseDomainReplay } from "./domain-replay.mjs";
 import { exerciseCompactLaunchDryRunMatrix } from "./compact-launch-dry-run-matrix.mjs";
 import { exerciseLauncherLaunchabilityDeliverySplit } from "./launcher-launchability-delivery-split.mjs";
@@ -894,6 +895,7 @@ export function diagnosticFor(error, context) {
 export const exercises = Object.freeze({
 	"opencode-provider-coexistence": runOpenCodeComposedJourney,
 	"opencode-resume-bridge-recovery": runOpenCodeComposedJourney,
+	"opencode-direct-canonical-ingress": runOpenCodeNormalLaunchJourney,
 	"cli-command-parity": exerciseCliCommandParity,
 	"compact-launch-dry-run-matrix": exerciseCompactLaunchDryRunMatrix,
 	"domain-replay": exerciseDomainReplay,
