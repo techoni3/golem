@@ -168,12 +168,33 @@ export async function runMigrationApplyReplay() {
 		assert.equal(existsSync(path.join(old, "canonical")), false, "unsupported-store review creates no canonical state");
 
 		const currentPlan = await auditLegacyHome(current);
+		for (const source of ["config", "channels", "journals"]) {
+			assert.equal(
+				currentPlan.actions.some(
+					(action) =>
+						action.reason === `compat.${source}.typed_importer_required` &&
+						action.kind === "review",
+				),
+				true,
+				`present ${source} source with no typed importer is an explicit pre-apply review gate`,
+			);
+		}
+		const unsupportedBefore = {
+			config: bytes(current, "config.json"),
+			channels: bytes(current, "channels.json"),
+			journal: bytes(current, "journals/acme-current/hook.jsonl"),
+		};
 		await assert.rejects(
 			() => applyLegacyMigration({ home: current, expected_plan_hash: currentPlan.plan_hash }),
 			(error) => error?.code === "migration.review_required",
 			"weak/ambiguous evidence refuses before backup or canonical mutation",
 		);
+		assert.deepEqual(bytes(current, "config.json"), unsupportedBefore.config, "config remains byte-identical after review refusal");
+		assert.deepEqual(bytes(current, "channels.json"), unsupportedBefore.channels, "channels remain byte-identical after review refusal");
+		assert.deepEqual(bytes(current, "journals/acme-current/hook.jsonl"), unsupportedBefore.journal, "journals remain byte-identical after review refusal");
 		assert.equal(existsSync(path.join(current, "canonical")), false, "review refusal creates no competing canonical state");
+		assert.equal(existsSync(path.join(current, "migration-backups")), false, "review refusal occurs before backup creation");
+		assert.equal(existsSync(path.join(current, "migration-status.json")), false, "review refusal occurs before status mutation");
 		await assert.rejects(
 			() => applyLegacyMigration({ home: malformed, expected_plan_hash: "0".repeat(64) }),
 			(error) => error?.code === "migration.plan_hash_mismatch",
