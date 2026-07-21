@@ -1500,8 +1500,8 @@ Run:
                        Run a version-gated, headless Codex App Server lifecycle
                        supervisor with typed delivery while idle and MCP-bound.
   codex [--session <canonical-id>] [--cwd <dir>]
-                       Run the managed Codex foreground host. The older TUI
-                       bridge requires explicit: codex --legacy -- [args...].
+                       Launch the interactive Codex TUI through Golem's
+                       private managed supervisor bridge.
   role <role|clear> [--session <id-or-name>]
                          Set or clear a session role (${SESSION_ROLES.join(', ')}).
   sessions dedup [--apply]
@@ -1618,13 +1618,10 @@ async function main() {
     case 'codex':
       {
         const legacyArgs = explicitLegacyCodexArgs(rest);
-        if (legacyArgs) {
-          await cmdCodex(legacyArgs);
-          break;
-        }
-        if (!(await runTypedCli(['codex', ...rest]))) {
-          fatal(1, 'typed CLI build is unavailable; run `npm run build -w apps/cli`');
-        }
+        // `golem codex` is an interactive TUI command. The typed foreground
+        // host consumes JSONL delivery records and cannot attach a terminal to
+        // Codex, so it must never be the default user-facing launch path.
+        await cmdCodex(legacyArgs ?? rest);
       }
       break;
     case 'opencode':

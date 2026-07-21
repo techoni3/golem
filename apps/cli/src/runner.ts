@@ -727,7 +727,7 @@ export async function runCli(
 			io,
 			`${help}\nUsage: golem codex [--session <canonical-id>] [--cwd <dir>]\n` +
 				"With no flags it uses the current directory and creates one canonical tracker session.\n" +
-				"Managed Codex accepts only registry options; use `golem codex --legacy -- …` for the explicit compatibility TUI.\n",
+				"The installed `golem codex` command opens the interactive Codex TUI through Golem's private supervisor bridge.\n",
 		);
 		return CLI_EXIT_CODES.ok;
 	}
