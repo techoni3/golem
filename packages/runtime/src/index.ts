@@ -13,6 +13,11 @@ export interface RuntimeBoundary {
 }
 
 export {
+	createEndpointService,
+	EndpointService,
+	type EndpointServiceOptions,
+} from "./endpoints/index.js";
+export {
 	type InboxReceipt,
 	RuntimeInbox,
 	type RuntimeInboxMetrics,

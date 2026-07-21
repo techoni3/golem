@@ -175,6 +175,10 @@ export interface RuntimeTables {
 		readonly delivery_mode: DeliveryMode;
 		readonly readiness_state: EndpointReadinessState;
 		readonly control_state: string;
+		readonly consumer_ready: number;
+		readonly consumption_observed: number;
+		readonly delivery_observed: number;
+		readonly delivery_failed: number;
 		readonly claimed_at: string;
 		readonly heartbeat_at: string | null;
 		readonly expires_at: string | null;

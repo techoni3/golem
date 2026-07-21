@@ -137,6 +137,141 @@ export interface RuntimeSessionStorage {
 	}): Readonly<{ sessionId?: string; generationId?: string }> | undefined;
 }
 
+export type EndpointRouteKind = "control" | "delivery" | "observation";
+export type EndpointControlState = "enabled" | "held" | "disabled";
+
+export interface RuntimeEndpointCapability {
+	readonly capability: string;
+	readonly adapterId: string;
+	readonly adapterVersion: string;
+	readonly qualification: CapabilityQualification;
+	readonly deliveryMode: DeliveryMode;
+	readonly readiness: EndpointReadinessState;
+	readonly evidenceKind: "probe" | "configured" | "observed" | "operator";
+	readonly observedAt: string;
+	readonly expiresAt?: string;
+}
+
+export interface RuntimeEndpointView {
+	readonly endpointId: string;
+	readonly generationId: string;
+	readonly routeKind: EndpointRouteKind;
+	readonly revision: number;
+	readonly state: EndpointLifecycleState;
+	readonly ownerFence: number;
+	readonly ownerInstanceId: string;
+	readonly deliveryMode: DeliveryMode;
+	readonly readiness: EndpointReadinessState;
+	readonly controlState: EndpointControlState;
+	readonly consumerReady: boolean;
+	readonly consumptionObserved: boolean;
+	readonly deliveryObserved: boolean;
+	readonly deliveryFailed: boolean;
+	readonly claimedAt: string;
+	readonly heartbeatAt?: string;
+	readonly expiresAt?: string;
+	readonly supersededAt?: string;
+	readonly capabilities: readonly RuntimeEndpointCapability[];
+}
+
+export interface RuntimeEndpointMutationResult {
+	readonly disposition: "accepted" | "rejected" | "ignored";
+	readonly code: string;
+	readonly endpointId?: string;
+	readonly revision?: number;
+	readonly ownerFence?: number;
+	readonly details?: Readonly<Record<string, unknown>>;
+}
+
+export interface RuntimeEndpointEligibility {
+	readonly disposition: "eligible" | "ineligible";
+	readonly code: string;
+	readonly remedy: string;
+	readonly endpoint?: RuntimeEndpointView;
+	readonly capability?: RuntimeEndpointCapability;
+	readonly facts: Readonly<Record<string, string | number | boolean>>;
+}
+
+export interface RuntimeEndpointStorage {
+	claim(input: {
+		readonly endpointId?: string;
+		readonly generationId: string;
+		readonly routeKind: EndpointRouteKind;
+		readonly ownerInstanceId: string;
+		readonly deliveryMode: DeliveryMode;
+		readonly readiness?: EndpointReadinessState;
+		readonly controlState?: EndpointControlState;
+		readonly leaseMs: number;
+	}): RuntimeEndpointMutationResult;
+	heartbeat(input: {
+		readonly endpointId: string;
+		readonly generationId: string;
+		readonly ownerInstanceId: string;
+		readonly ownerFence: number;
+		readonly heartbeatAt?: string;
+		readonly leaseMs: number;
+	}): RuntimeEndpointMutationResult;
+	reportHealth(input: {
+		readonly endpointId: string;
+		readonly generationId: string;
+		readonly ownerInstanceId: string;
+		readonly ownerFence: number;
+		readonly state: "healthy" | "degraded";
+	}): RuntimeEndpointMutationResult;
+	reportReadiness(input: {
+		readonly endpointId: string;
+		readonly generationId: string;
+		readonly ownerInstanceId: string;
+		readonly ownerFence: number;
+		readonly deliveryMode: DeliveryMode;
+		readonly readiness: EndpointReadinessState;
+		readonly controlState?: EndpointControlState;
+	}): RuntimeEndpointMutationResult;
+	probe(input: {
+		readonly endpointId: string;
+		readonly generationId: string;
+		readonly ownerInstanceId: string;
+		readonly ownerFence: number;
+		readonly consumerReady: boolean;
+		readonly readiness?: EndpointReadinessState;
+	}): RuntimeEndpointMutationResult;
+	reportDelivery(input: {
+		readonly endpointId: string;
+		readonly generationId: string;
+		readonly ownerInstanceId: string;
+		readonly ownerFence: number;
+		readonly status: "accepted" | "delivered" | "failed";
+		readonly readiness?: EndpointReadinessState;
+	}): RuntimeEndpointMutationResult;
+	reportCapability(input: {
+		readonly endpointId: string;
+		readonly generationId: string;
+		readonly ownerInstanceId: string;
+		readonly ownerFence: number;
+		readonly capability: RuntimeEndpointCapability;
+		readonly evidence: Readonly<Record<string, unknown>>;
+	}): RuntimeEndpointMutationResult;
+	release(input: {
+		readonly endpointId: string;
+		readonly generationId: string;
+		readonly ownerInstanceId: string;
+		readonly ownerFence: number;
+	}): RuntimeEndpointMutationResult;
+	expire(now?: string): readonly RuntimeEndpointMutationResult[];
+	eligibility(input: {
+		readonly generationId: string;
+		readonly routeKind: EndpointRouteKind;
+		readonly requiredCapability?: string;
+		/** Fence captured when work was queued; stale queued delivery fails closed. */
+		readonly expectedOwnerFence?: number;
+		/** Compatibility spelling for callers that persist a queued fence. */
+		readonly expectedFence?: number;
+		readonly now?: string;
+	}): RuntimeEndpointEligibility;
+	get(endpointId: string): RuntimeEndpointView | undefined;
+	list(generationId: string): readonly RuntimeEndpointView[];
+}
+
 /** Closed runtime-v1 recovery/control vocabularies mirrored by SQL CHECKs. */
 export type CommandStatus =
 	| "accepted"
@@ -944,6 +1079,8 @@ export interface PersistenceWriteCapability {
 	runtimeProjectStorage(): RuntimeProjectStorage;
 	/** Typed logical session/generation/alias projection owned by the runtime DB owner. */
 	runtimeSessionStorage(): RuntimeSessionStorage;
+	/** Typed endpoint fencing/readiness capability owned by the runtime DB owner. */
+	runtimeEndpointStorage(): RuntimeEndpointStorage;
 	/** Typed tracker store; no raw connection leaves the single owner. */
 	trackerStorage(): TrackerStorageCapability;
 	/** Typed work-item/phase repository capability for @golem/tracker only. */
