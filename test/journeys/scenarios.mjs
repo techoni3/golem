@@ -26,6 +26,18 @@ export const scenarios = [
 		regression: "delayed, duplicate, reordered, and restarted logical session facts fail to converge byte-for-byte",
 	}),
 	registerScenario({
+		id: "endpoint-fence-concurrency-crash",
+		journey: "J2",
+		tier: "integration",
+		regression: "concurrent endpoint claims, stale owners, expiry, or reconnect can create duplicate live routes or reuse a fence",
+	}),
+	registerScenario({
+		id: "readiness-capability-matrix",
+		journey: "J2",
+		tier: "integration",
+		regression: "health, readiness, capability qualification, or delivery eligibility can drift from canonical endpoint facts",
+	}),
+	registerScenario({
 		id: "cli-command-parity",
 		journey: "J5",
 		tier: "pr",

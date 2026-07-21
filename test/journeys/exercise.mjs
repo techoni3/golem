@@ -741,10 +741,17 @@ export async function exerciseMigrationDryRunAmbiguity() {
 }
 
 const sessionJourney = path.join(repositoryRoot, "test/sessions/session-service.test.mjs");
+const endpointJourney = path.join(repositoryRoot, "test/endpoints/endpoint-service.test.mjs");
 
 function runSessionJourney(name) {
 	const result = spawnSync(process.execPath, ["--test", "--test-concurrency=1", "--test-name-pattern", name, sessionJourney], { cwd: repositoryRoot, encoding: "utf8", env: process.env });
 	if (result.status !== 0) throw new Error(`session journey failed: ${result.stdout}\n${result.stderr}`);
+	return result.stdout.trim().split("\n").filter(Boolean).at(-1) || `${name} passed`;
+}
+
+function runEndpointJourney(name) {
+	const result = spawnSync(process.execPath, ["--test", "--test-concurrency=1", "--test-name-pattern", name, endpointJourney], { cwd: repositoryRoot, encoding: "utf8", env: process.env });
+	if (result.status !== 0) throw new Error(`endpoint journey failed: ${result.stdout}\n${result.stderr}`);
 	return result.stdout.trim().split("\n").filter(Boolean).at(-1) || `${name} passed`;
 }
 
@@ -754,6 +761,14 @@ export async function exerciseCrossHarnessSessionLifecycle() {
 
 export async function exerciseSessionReorderRestartReplay() {
 	return runSessionJourney("GOL-41 reorder/restart/replay");
+}
+
+export async function exerciseEndpointFenceConcurrencyCrash() {
+	return runEndpointJourney("GOL-42 endpoint fence concurrency/crash");
+}
+
+export async function exerciseReadinessCapabilityMatrix() {
+	return runEndpointJourney("GOL-42 readiness/capability matrix");
 }
 
 const typedCliEntry = path.join(repositoryRoot, "dist/apps/cli/golem.js");
@@ -813,6 +828,8 @@ export const exercises = Object.freeze({
 	"project-register-concurrency": exerciseProjectRegisterConcurrency,
 	"cross-harness-session-lifecycle": exerciseCrossHarnessSessionLifecycle,
 	"session-reorder-restart-replay": exerciseSessionReorderRestartReplay,
+	"endpoint-fence-concurrency-crash": exerciseEndpointFenceConcurrencyCrash,
+	"readiness-capability-matrix": exerciseReadinessCapabilityMatrix,
 	"launcher-resolution-matrix": exerciseLauncherResolution,
 	"launcher-launchability-delivery-split": exerciseLauncherLaunchabilityDeliverySplit,
 	"native-spawn-safety": exerciseNativeSpawnSafety,

@@ -38,6 +38,7 @@ import {
 	type PersistencePaths,
 	type PersistenceStatus,
 	type PersistenceWriteCapability,
+	type RuntimeEndpointStorage,
 	type RuntimeMaterializationInput,
 	type RuntimeMaterializationResult,
 	type RuntimeProjectStorage,
@@ -238,6 +239,10 @@ class PersistenceOwner implements PersistenceWriteCapability {
 
 	runtimeSessionStorage(): RuntimeSessionStorage {
 		return this.#runtimeRepository.runtimeSessionStorage();
+	}
+
+	runtimeEndpointStorage(): RuntimeEndpointStorage {
+		return this.#runtimeRepository.runtimeEndpointStorage();
 	}
 
 	trackerStorage(): TrackerStorageCapability {

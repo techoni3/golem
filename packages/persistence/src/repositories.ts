@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-
+import { RuntimeEndpointRepository } from "./endpoint-repository.js";
 import type { SqliteConnection } from "./internals.js";
 import { sha256 } from "./schema.js";
 import { RuntimeSessionRepository } from "./session-repository.js";
@@ -7,6 +7,7 @@ import type {
 	ClaimedOutboxRecord,
 	PersistenceClock,
 	ProjectIdentitySource,
+	RuntimeEndpointStorage,
 	RuntimeMaterializationInput,
 	RuntimeMaterializationResult,
 	RuntimeOutboxFailure,
@@ -643,6 +644,10 @@ export class RuntimeRepository {
 
 	runtimeSessionStorage(): RuntimeSessionStorage {
 		return new RuntimeSessionRepository(this.#database, this.#clock);
+	}
+
+	runtimeEndpointStorage(): RuntimeEndpointStorage {
+		return new RuntimeEndpointRepository(this.#database, this.#clock);
 	}
 
 	record(input: RuntimeTransactionInput): RuntimeTransactionResult {
