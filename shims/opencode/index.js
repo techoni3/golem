@@ -35,6 +35,7 @@
 
 import { spawn, execFileSync } from "node:child_process";
 import { createServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import { appendFileSync, mkdirSync, existsSync, readFileSync, writeFileSync, renameSync, rmdirSync, rmSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -184,6 +185,58 @@ function logErr(context, detail) {
   logLine(context, detail && detail.stack ? detail.stack : String(detail));
 }
 
+// The compatibility shim keeps its old fail-open registry behavior, but when a
+// typed control-plane identity is explicitly configured it also submits the
+// same native event through the canonical runtime ingress. The dynamic import
+// is intentional: an older rendered shim must continue to load if a package
+// update has not yet supplied the typed adapter.
+async function createCanonicalRuntime(client) {
+  const projectId = process.env.GOLEM_RUNTIME_PROJECT_ID;
+  const origin = process.env.GOLEM_CONTROL_PLANE_URL;
+  const token = process.env.GOLEM_CONTROL_PLANE_TOKEN;
+  if (!projectId || !origin || !token) return null;
+  try {
+    const typed = await import("@golem/adapter-opencode");
+    const runtime = new typed.OpenCodeCompatibilityRuntime({
+      projectId,
+      ...(typeof process.env.GOLEM_RUNTIME_PROJECT_PATH === "string" && process.env.GOLEM_RUNTIME_PROJECT_PATH
+        ? { projectPath: process.env.GOLEM_RUNTIME_PROJECT_PATH }
+        : {}),
+      producerInstanceId: `prod_${randomUUID()}`,
+      producer: "opencode-shim",
+      ingress: typed.createOpenCodeControlPlaneIngress({ origin, token }),
+    });
+    return {
+      consume: (event) => runtime.consume(event),
+      deliver: ({ sessionID, deliveryId, text, fence }) => runtime.deliver({
+        rawSessionId: sessionID,
+        request: { deliveryId, text, fence },
+        port: typed.openCodeSdkPromptPort(client),
+      }),
+      fence: typed.openCodeFence,
+    };
+  } catch {
+    logLine("canonical runtime", "adapter unavailable or runtime ingress not configured");
+    return null;
+  }
+}
+
+// A native bridge is not an endpoint lease. Until an owner has claimed the
+// current generation and supplied its fence with a delivery, this process can
+// only honestly advertise pull-based consumption. The direct launcher always
+// configures this canonical mode; the legacy shape remains only for older
+// rendered shims that have no typed runtime at all.
+function deliveryTruth() {
+  const canonical = Boolean(
+    process.env.GOLEM_RUNTIME_PROJECT_ID &&
+    process.env.GOLEM_CONTROL_PLANE_URL &&
+    process.env.GOLEM_CONTROL_PLANE_TOKEN,
+  );
+  return canonical
+    ? { delivery_mode: "pull_only", delivery_ready: false, delivery_reason: "endpoint_claim_required" }
+    : { delivery_mode: "legacy_prompt_bridge", delivery_ready: true, delivery_reason: null };
+}
+
 function withFileLock(lockPath, fn) {
   try { mkdirSync(dirname(lockPath), { recursive: true }); } catch { /* ignore */ }
   for (let i = 0; i < 50; i++) {
@@ -237,6 +290,7 @@ function registerBridge({ sessionID, cwd, status, port, name, model }) {
         name: name || null,
         status: status || null,
         model: model || null,
+        ...deliveryTruth(),
         started_at: now,
         updated_at: now,
       });
@@ -279,7 +333,15 @@ function updateBridge({ sessionID, cwd, status, port, name, model, insert = true
       reg.bridges = reg.bridges.map((b) => {
         if (b.opencode_pid !== process.pid || b.session_id !== sessionID) return b;
         found = true;
-        return { ...b, cwd: cwd || b.cwd || null, name: name || b.name || null, status: status || b.status || null, model: model || b.model || null, updated_at: now };
+        return {
+          ...b,
+          cwd: cwd || b.cwd || null,
+          name: name || b.name || null,
+          status: status || b.status || null,
+          model: model || b.model || null,
+          ...deliveryTruth(),
+          updated_at: now,
+        };
       });
       if (!found) {
         if (!insert) return; // child/unknown session — never create a phantom endpoint
@@ -296,6 +358,7 @@ function updateBridge({ sessionID, cwd, status, port, name, model, insert = true
           name: name || null,
           status: status || null,
           model: model || null,
+          ...deliveryTruth(),
           started_at: now,
           updated_at: now,
         });
@@ -529,12 +592,17 @@ async function appendPassiveDeltaToMessage(sessionID, output) {
   }
 }
 
-function startBridge({ client, dirFor, logErr }) {
+function startBridge({ client, dirFor, logErr, canonical }) {
   let port = null;
   const server = createServer(async (req, res) => {
     try {
       if (req.method === "GET" && req.url === "/healthz") {
-        return sendJson(res, 200, { ok: true, harness: "opencode", version: VERSION });
+        return sendJson(res, 200, {
+          ok: true,
+          harness: "opencode",
+          version: VERSION,
+          ...deliveryTruth(),
+        });
       }
       if (req.method !== "POST" || req.url !== "/push") {
         return sendJson(res, 404, { ok: false, error: "not found" });
@@ -547,6 +615,36 @@ function startBridge({ client, dirFor, logErr }) {
       const meta = payload.meta && typeof payload.meta === "object" ? payload.meta : { kind };
       const sessionID = String(payload.session_id || meta.session_id || currentSessionID || "");
       if (!sessionID) return sendJson(res, 409, { ok: false, error: "no active opencode session" });
+
+      // Canonical delivery always enters with an id and the generation/fence
+      // snapshot. In particular, do not fall through to promptAsync when a
+      // canonical runtime is configured: that would let an unfenced channel
+      // message bypass eligibility and revive a stale session generation.
+      const fence = canonical?.fence(payload.fence || meta.fence);
+      if (canonical) {
+        const deliveryId = String(payload.delivery_id || payload.id || meta.delivery_id || "");
+        if (!deliveryId) return sendJson(res, 400, { ok: false, error: "delivery id is required" });
+        if (!fence) return sendJson(res, 409, {
+          ok: false,
+          error: "adapter.opencode.delivery.fence_required",
+        });
+        const result = await canonical.deliver({
+          sessionID,
+          deliveryId,
+          text: channelTag(kind, content, meta),
+          fence,
+        });
+        if (result.status === "accepted") {
+          const model = readOpencodeModel(sessionID);
+          updateSessionRegistry({ sessionID, cwd: dirFor(sessionID), status: "busy", model });
+          if (port) updateBridge({ sessionID, cwd: dirFor(sessionID), status: "busy", port, model });
+          return sendJson(res, 202, { ok: true, kind, session_id: sessionID });
+        }
+        return sendJson(res, result.status === "retry" ? 503 : 409, {
+          ok: false,
+          error: result.code,
+        });
+      }
 
       const text = channelTag(kind, content, meta);
       // OpenCode SDK v1.17.18 defines promptAsync as POST /prompt_async with a
@@ -579,7 +677,12 @@ function startBridge({ client, dirFor, logErr }) {
     markOwnedSessionRegistryEndedSync();
     unregisterBridges();
   });
-  return { port: () => port };
+  return {
+    port: () => port,
+    close: () => {
+      try { server.close(); } catch { /* cleanup only */ }
+    },
+  };
 }
 
 // Fire-and-forget: spawn a hook script, write CC-shaped stdin, DO NOT await.
@@ -637,6 +740,15 @@ export default async (input) => {
   const trackerContextCache = new Map();
   let disposed = false;
 
+  const canonical = await createCanonicalRuntime(input?.client);
+  const publishCanonicalEvent = (event) => {
+    if (!canonical) return;
+    void canonical.consume(event).catch(() => {
+      // Do not expose transport/token/request diagnostics to the native host.
+      logLine("canonical runtime", "runtime event was not accepted");
+    });
+  };
+
   const trackerContextFor = (sessionID, cwd) => {
     const key = sessionID || "__base__";
     if (!trackerContextCache.has(key)) trackerContextCache.set(key, loadTrackerContext(sessionID || "", cwd || dirFor(sessionID)));
@@ -657,7 +769,7 @@ export default async (input) => {
     return knownSessionIDs.has(current) ? current : null;
   };
   const base = (sessionID, cwd, extra = {}) => ({ session_id: sessionID || "", cwd: cwd || initCwd, harness: "opencode", model: readOpencodeModel(sessionID), ...extra });
-  const bridge = startBridge({ client: input?.client, dirFor, logErr });
+  const bridge = startBridge({ client: input?.client, dirFor, logErr, canonical });
   // Child/subagent ids never enter knownSessionIDs, so recurring events can
   // self-heal owned top-level rows without fabricating phantom endpoints.
   const publishBridge = (sessionID, status = null, name = null, { insert = false, touchLastSeen = true } = {}) => {
@@ -742,6 +854,7 @@ export default async (input) => {
       try {
         const t = event?.type;
         const p = event?.properties || {};
+        publishCanonicalEvent({ type: t || "", properties: p });
         if (t === "session.created") {
           const info = p.info || {};
           if (info.parentID) {
@@ -780,6 +893,10 @@ export default async (input) => {
           currentSessionID = sid || currentSessionID;
           const st = statusString(p.status);
           publishBridge(sid, p.status, null, { touchLastSeen: st === "busy" });
+        } else if (t === "session.resumed") {
+          const sid = p.sessionID || p.info?.id || currentSessionID;
+          currentSessionID = sid || currentSessionID;
+          publishBridge(sid, "idle", p.info?.title || null, { insert: true, touchLastSeen: false });
         } else if (t === "session.updated") {
           // Carries the full Session — the ONLY place the real title shows up
           // (auto-generated after the first message, and on any rename). Keep
@@ -804,6 +921,7 @@ export default async (input) => {
           const ended = [...knownSessionIDs];
           markSessionRegistryEnded(ended);
           unregisterBridges();
+          bridge.close();
           knownSessionIDs.clear();
           currentSessionID = "";
         }
@@ -815,6 +933,7 @@ export default async (input) => {
     "chat.message": async (inp, out) => {
       try {
         currentSessionID = inp?.sessionID || currentSessionID;
+        publishCanonicalEvent({ type: "chat.message", properties: { sessionID: inp?.sessionID } });
         await appendPassiveDeltaToMessage(inp?.sessionID, out);
         runHook("journal-route.sh", ["user-prompt"], base(inp?.sessionID, dirFor(inp?.sessionID)));
       } catch (e) {
@@ -825,6 +944,7 @@ export default async (input) => {
     "tool.execute.before": async (inp, out) => {
       try {
         currentSessionID = inp?.sessionID || currentSessionID;
+        publishCanonicalEvent({ type: "tool.execute.before", properties: { sessionID: inp?.sessionID } });
         publishBridge(inp?.sessionID, "busy");
         if (isGolemToolName(inp?.tool)) {
           const callerSessionID = topLevelOf(inp?.sessionID);
@@ -851,6 +971,7 @@ export default async (input) => {
     "tool.execute.after": async (inp) => {
       try {
         currentSessionID = inp?.sessionID || currentSessionID;
+        publishCanonicalEvent({ type: "tool.execute.after", properties: { sessionID: inp?.sessionID } });
         publishBridge(inp?.sessionID, null);
         const kind = inp?.tool === "task" ? "agent-return" : "tool-post";
         runHook("journal-route.sh", [kind], {

@@ -475,6 +475,33 @@ async function main() {
   });
   check('addressed sibling brief reaches bridge', addressedBrief.status === 202 && bridgePayloads.at(-1)?.body?.session_id === siblingB, JSON.stringify(bridgePayloads));
 
+  // A canonical OpenCode bridge without an owner-supplied delivery fence is
+  // pull-only. The channel must refuse it before it ever posts an unfenced
+  // payload to /push (and therefore before a legacy promptAsync fallback).
+  fs.writeFileSync(bridgesFile, JSON.stringify({
+    bridges: [
+      { session_id: siblingA, opencode_pid: process.pid, pid: process.pid, host: HOST, port: bridgePort, updated_at: now, delivery_mode: 'legacy_prompt_bridge', delivery_ready: true },
+      { session_id: siblingB, opencode_pid: process.pid, pid: process.pid, host: HOST, port: bridgePort, updated_at: new Date(Date.now() + 1000).toISOString(), delivery_mode: 'pull_only', delivery_ready: false, delivery_reason: 'endpoint_claim_required' },
+    ],
+  }));
+  await sleep(100);
+  const beforePullOnly = bridgePayloads.length;
+  const pullOnlyBrief = await fetch(`http://${siblingChannel.host}:${siblingChannel.port}/brief`, {
+    method: 'POST',
+    headers: { 'X-Sender': 'dashboard', 'X-Golem-Target-Session': siblingB, 'Content-Type': 'text/plain' },
+    body: 'Must not bypass canonical fence',
+  });
+  check('pull-only canonical OpenCode bridge rejects unfenced channel delivery',
+    pullOnlyBrief.status === 503 && bridgePayloads.length === beforePullOnly,
+    `status=${pullOnlyBrief.status} payloads=${JSON.stringify(bridgePayloads)}`);
+  fs.writeFileSync(bridgesFile, JSON.stringify({
+    bridges: [
+      { session_id: siblingA, opencode_pid: process.pid, pid: process.pid, host: HOST, port: bridgePort, updated_at: now },
+      { session_id: siblingB, opencode_pid: process.pid, pid: process.pid, host: HOST, port: bridgePort, updated_at: new Date(Date.now() + 1000).toISOString() },
+    ],
+  }));
+  await sleep(100);
+
   const identityTicket = await callToolFrom(identityMcpClient, 'ticket_create', {
     project: PROJECT_ID,
     title: 'Per-call identity journey',

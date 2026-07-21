@@ -36,6 +36,23 @@ const commonOptions = [
     },
     { name: "json", flags: "--json", description: "print stable JSON output" },
 ];
+const openCodeSetupOptions = [
+    {
+        name: "apply",
+        flags: "--apply",
+        description: "apply the reviewed managed provider region",
+    },
+    {
+        name: "config",
+        flags: "--config <path>",
+        description: "OpenCode JSONC config path",
+        takesValue: true,
+    },
+    { name: "json", flags: "--json", description: "print stable JSON output" },
+];
+const openCodeProbeOptions = [
+    { name: "json", flags: "--json", description: "print stable JSON output" },
+];
 /** The only command vocabulary. Help, metadata, and parser construction all consume this table. */
 export const commandRegistry = Object.freeze([
     {
@@ -49,6 +66,21 @@ export const commandRegistry = Object.freeze([
         summary: "launch OpenCode through the qualified adapter",
         options: commonOptions,
         presetArgument: "optional",
+    },
+    {
+        name: "opencode:setup",
+        summary: "review or apply the marked OpenCode provider configuration",
+        options: openCodeSetupOptions,
+    },
+    {
+        name: "opencode:refresh",
+        summary: "record OpenCode provider preflight observations without writing config",
+        options: openCodeProbeOptions,
+    },
+    {
+        name: "opencode:doctor",
+        summary: "report OpenCode binary, provider, and qualification facts",
+        options: openCodeProbeOptions,
     },
     {
         name: "claude",

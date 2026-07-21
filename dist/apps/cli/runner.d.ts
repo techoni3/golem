@@ -13,6 +13,8 @@ export interface ParsedCliInput {
     readonly backend?: string;
     readonly cwd?: string;
     readonly dryRun: boolean;
+    readonly apply: boolean;
+    readonly config?: string;
     readonly explain: boolean;
     readonly json: boolean;
     readonly passthrough: readonly string[];

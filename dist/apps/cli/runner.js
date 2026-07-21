@@ -1,6 +1,11 @@
+import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { LauncherResolutionError, launchPlanBridge, parseJsoncConfig, resolveLaunch, } from "@golem/launcher";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { openCodeManagedProviderRegion, openCodeProviderCapabilities, openCodeRuntimeProjectId, probeOpenCodeProviders, setupOpenCodeConfig, } from "@golem/adapter-opencode";
+import { executeLaunch, LauncherExecutionError, LauncherResolutionError, launchPlanBridge, parseJsoncConfig, resolveLaunch, } from "@golem/launcher";
 import { CLI_EXIT_CODES, CliResolutionError, CliUsageError } from "./errors.js";
 import { conciseSelection, stableCliJson } from "./format.js";
 import { commandDefinition, commandMetadata, createProgram, } from "./registry.js";
@@ -12,6 +17,122 @@ const backends = new Set([
     "ollama_cloud",
     "native",
 ]);
+const moduleDirectory = dirname(fileURLToPath(import.meta.url));
+class OpenCodeControlPlaneError extends Error {
+    code;
+    constructor() {
+        super("adapter.opencode.control_plane.unavailable");
+        this.name = "OpenCodeControlPlaneError";
+        this.code = "adapter.opencode.control_plane.unavailable";
+    }
+}
+function controlPlaneArtifact(relative) {
+    const candidate = resolve(moduleDirectory, relative);
+    return existsSync(candidate) ? candidate : undefined;
+}
+function stopChild(child) {
+    if (child.exitCode !== null || child.signalCode !== null)
+        return Promise.resolve();
+    return new Promise((resolveStop) => {
+        let settled = false;
+        const finish = () => {
+            if (settled)
+                return;
+            settled = true;
+            clearTimeout(force);
+            resolveStop();
+        };
+        const force = setTimeout(() => {
+            try {
+                child.kill("SIGKILL");
+            }
+            catch {
+                // The owned control plane is already gone.
+            }
+        }, 1_000);
+        child.once("exit", finish);
+        try {
+            child.kill("SIGTERM");
+        }
+        catch {
+            finish();
+        }
+    });
+}
+/**
+ * Direct OpenCode launch owns its private control-plane process for the exact
+ * lifetime of the native child. This is deliberately not a config mutation or
+ * a global daemon: the only credentials exposed are the short-lived bearer and
+ * the standard, sanitized launcher environment.
+ */
+async function startManagedOpenCodeIngress(projectPath) {
+    const main = controlPlaneArtifact("../../../apps/control-plane/dist/main.js");
+    const staticDirectory = controlPlaneArtifact("../../../dashboard/dist/control-plane");
+    if (!main || !staticDirectory)
+        throw new OpenCodeControlPlaneError();
+    const projectId = openCodeRuntimeProjectId(projectPath);
+    const token = randomBytes(32).toString("base64url");
+    const child = spawn(process.execPath, [main], {
+        cwd: projectPath,
+        env: {
+            ...process.env,
+            GOLEM_CONTROL_PLANE_PORT: "0",
+            GOLEM_CONTROL_PLANE_STATIC_ROOT: staticDirectory,
+            GOLEM_CONTROL_PLANE_TOKEN: token,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+    });
+    return new Promise((resolveIngress, rejectIngress) => {
+        let settled = false;
+        let buffered = "";
+        const fail = () => {
+            if (settled)
+                return;
+            settled = true;
+            clearTimeout(timeout);
+            void stopChild(child);
+            rejectIngress(new OpenCodeControlPlaneError());
+        };
+        const ready = (origin) => {
+            if (settled)
+                return;
+            settled = true;
+            clearTimeout(timeout);
+            resolveIngress({
+                projectId,
+                origin,
+                token,
+                stop: () => stopChild(child),
+            });
+        };
+        const timeout = setTimeout(fail, 3_000);
+        child.once("error", fail);
+        child.once("exit", () => {
+            if (!settled)
+                fail();
+        });
+        child.stdout?.setEncoding("utf8");
+        child.stdout?.on("data", (chunk) => {
+            buffered += chunk;
+            let newline = buffered.indexOf("\n");
+            while (newline !== -1) {
+                const line = buffered.slice(0, newline);
+                buffered = buffered.slice(newline + 1);
+                try {
+                    const message = JSON.parse(line);
+                    if (message.type === "ready" &&
+                        typeof message.origin === "string" &&
+                        message.origin.startsWith("http://127.0.0.1:"))
+                        ready(message.origin);
+                }
+                catch {
+                    // Control-plane warnings are not part of the ready protocol.
+                }
+                newline = buffered.indexOf("\n");
+            }
+        });
+    });
+}
 function output(io, line) {
     (io.stdout ?? ((value) => process.stdout.write(`${value}\n`)))(line);
 }
@@ -64,6 +185,7 @@ export function parseCliInput(argv) {
         return {
             command: parsed.command,
             dryRun: false,
+            apply: false,
             explain: false,
             json: false,
             passthrough: split.passthrough,
@@ -90,12 +212,135 @@ export function parseCliInput(argv) {
             : {}),
         ...(typeof options.cwd === "string" ? { cwd: options.cwd } : {}),
         dryRun: options.dryRun === true,
+        apply: options.apply === true,
+        ...(typeof options.config === "string" ? { config: options.config } : {}),
         explain: options.explain === true,
         json: options.json === true,
         passthrough: split.passthrough,
         help: false,
     };
     return result;
+}
+function openCodeConfigPath(input) {
+    if (input.config)
+        return resolve(input.config);
+    if (process.env.OPENCODE_CONFIG_PATH)
+        return resolve(process.env.OPENCODE_CONFIG_PATH);
+    return join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "opencode", "opencode.jsonc");
+}
+function publicCapabilities(observations) {
+    return openCodeProviderCapabilities(observations).map((entry) => ({
+        id: entry.capability.capability_id,
+        backend: entry.backend,
+        qualification: entry.capability.qualification,
+        launch: entry.launchContribution?.status,
+        delivery: entry.deliveryFlow,
+    }));
+}
+async function runOpenCodeOperation(input, io) {
+    const probe = probeOpenCodeProviders();
+    if (input.command === "opencode:setup") {
+        try {
+            const setup = await setupOpenCodeConfig({
+                path: openCodeConfigPath(input),
+                observations: probe.observations,
+                apply: input.apply,
+            });
+            const result = {
+                operation: "opencode:setup",
+                setup: {
+                    targetPath: setup.targetPath,
+                    managedPath: setup.managedPath,
+                    sourceBytes: setup.sourceBytes,
+                    nextBytes: setup.nextBytes,
+                    changed: setup.changed,
+                    dryRun: setup.dryRun,
+                },
+                managedRegion: openCodeManagedProviderRegion(probe.observations),
+                probes: probe.records,
+            };
+            if (input.json)
+                output(io, stableCliJson(result));
+            else {
+                output(io, `${setup.dryRun ? "dry-run" : "applied"} OpenCode provider.golem (${setup.changed ? "changed" : "unchanged"})`);
+                output(io, JSON.stringify(result.managedRegion, null, 2));
+            }
+            return CLI_EXIT_CODES.ok;
+        }
+        catch {
+            errorOutput(io, "adapter.opencode.config.atomic_write_failed: OpenCode configuration was not changed safely");
+            return CLI_EXIT_CODES.runtime;
+        }
+    }
+    const result = {
+        operation: input.command,
+        probes: probe.records,
+        capabilities: publicCapabilities(probe.observations),
+    };
+    if (input.json)
+        output(io, stableCliJson(result));
+    else {
+        for (const capability of result.capabilities)
+            output(io, `${capability.id}: launch ${capability.launch ?? "unavailable"}; delivery ${capability.delivery}; ${capability.qualification}`);
+    }
+    return CLI_EXIT_CODES.ok;
+}
+async function launchOpenCode(result, input, io) {
+    if (input.command !== "opencode" || input.dryRun || input.json)
+        return undefined;
+    let ingress;
+    try {
+        const cwd = resolve(input.cwd ?? process.cwd());
+        ingress = await startManagedOpenCodeIngress(cwd);
+        const execution = await executeLaunch({
+            plan: result,
+            discovery: {
+                commandName: "opencode",
+                golemExecutable: process.argv[1] ?? process.execPath,
+                compatibilityShims: [],
+            },
+            adapter: {
+                cwd,
+                ...(input.model ? { argv: ["--model", input.model] } : { argv: [] }),
+                environment: {
+                    values: {
+                        GOLEM_RUNTIME_PROJECT_ID: ingress.projectId,
+                        GOLEM_RUNTIME_PROJECT_PATH: cwd,
+                        GOLEM_CONTROL_PLANE_URL: ingress.origin,
+                        GOLEM_CONTROL_PLANE_TOKEN: ingress.token,
+                        // There is no endpoint claim owner in a direct process. State the
+                        // real transport truth instead of advertising an unfenced push.
+                        GOLEM_OPENCODE_DELIVERY_MODE: "pull_only",
+                    },
+                },
+            },
+            resolveSecret: (reference) => process.env[reference],
+            interactive: io.isTTY ?? Boolean(process.stdin.isTTY),
+            isTTY: io.isTTY ?? Boolean(process.stdin.isTTY),
+        });
+        if (execution.kind === "dry_run")
+            return CLI_EXIT_CODES.ok;
+        const removeSignalForwarding = execution.running.installSignalForwarding();
+        try {
+            const exited = await execution.running.wait();
+            return exited.code ?? CLI_EXIT_CODES.runtime;
+        }
+        finally {
+            removeSignalForwarding();
+        }
+    }
+    catch (error) {
+        const code = error instanceof LauncherExecutionError ||
+            error instanceof OpenCodeControlPlaneError
+            ? error.code
+            : "launcher.process.failed";
+        errorOutput(io, `${code}: OpenCode was not launched`);
+        return CLI_EXIT_CODES.runtime;
+    }
+    finally {
+        if (ingress)
+            await ingress.stop();
+    }
 }
 function renderFailure(result, input, io) {
     if (input.json)
@@ -227,6 +472,10 @@ export async function runCli(argv = process.argv.slice(2), io = {}) {
         return CLI_EXIT_CODES.usage;
     }
     try {
+        if (input.command === "opencode:setup" ||
+            input.command === "opencode:refresh" ||
+            input.command === "opencode:doctor")
+            return await runOpenCodeOperation(input, io);
         const result = resolveForInput(input, io);
         if (!result.ok)
             return renderFailure(result, input, io);
@@ -251,7 +500,8 @@ export async function runCli(argv = process.argv.slice(2), io = {}) {
                 trace: result.trace,
             }, input, io);
         }
-        return renderSuccess(result, input, io);
+        const launched = await launchOpenCode(result, input, io);
+        return launched ?? renderSuccess(result, input, io);
     }
     catch (error) {
         if (error instanceof CliResolutionError) {

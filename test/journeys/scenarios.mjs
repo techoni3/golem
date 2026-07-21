@@ -230,4 +230,22 @@ export const scenarios = [
 		tier: "integration",
 		regression: "a render drifts, clobbers a tampered target, rolls back poorly, or ships an MCP that needs the checkout dependency tree",
 	}),
+	registerScenario({
+		id: "opencode-provider-coexistence",
+		journey: "J5",
+		tier: "integration",
+		regression: "OpenCode provider setup clobbers user providers or reports one provider as qualified for another's model/delivery facts",
+	}),
+	registerScenario({
+		id: "opencode-resume-bridge-recovery",
+		journey: "J5",
+		tier: "integration",
+		regression: "OpenCode bridge retries after a crash, loses its fence, or dispatches child/stale generations",
+	}),
+	registerScenario({
+		id: "opencode-direct-canonical-ingress",
+		journey: "J5",
+		tier: "integration",
+		regression: "normal direct OpenCode launch loses authenticated canonical ingress/project registration or permits an unfenced prompt to bypass generation eligibility",
+	}),
 ];

@@ -3,6 +3,7 @@ import path from "node:path";
 import {
 	createRuntimeMaterializer,
 	createRuntimeProjectionService,
+	createSessionService,
 	RuntimeEngineScheduler,
 	RuntimeOutboxDrainer,
 } from "@golem/runtime";
@@ -102,7 +103,18 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 		assetRoot: path.join(golemHome, "ticket-assets"),
 		tickets: trackerCore.tickets,
 	});
-	const runtime = createRuntimeMaterializer({ home: golemHome, writer: owner });
+	// Native adapter lifecycle signals are materialized through the same typed
+	// session service as every other runtime producer; the ingress itself never
+	// obtains a SQLite handle.
+	const sessions = createSessionService({
+		projects: owner.runtimeProjectStorage(),
+		sessions: owner.runtimeSessionStorage(),
+	});
+	const runtime = createRuntimeMaterializer({
+		home: golemHome,
+		writer: owner,
+		sessions,
+	});
 	const runtimeProjection = createRuntimeProjectionService({
 		storage: owner.runtimeProjectionStorage(),
 		clock,

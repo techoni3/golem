@@ -1621,6 +1621,13 @@ async function main() {
         fatal(1, 'typed CLI build is unavailable; run `npm run build -w apps/cli`');
       }
       break;
+    case 'opencode:setup':
+    case 'opencode:refresh':
+    case 'opencode:doctor':
+      if (!(await runTypedCli([cmd, ...rest]))) {
+        fatal(1, 'typed CLI build is unavailable; run `npm run build -w apps/cli`');
+      }
+      break;
     case 'role':
       await cmdRole(rest);
       break;
