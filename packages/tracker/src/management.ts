@@ -9,6 +9,8 @@ import type {
 	ManagementGateKind,
 	ManagementGateStatus,
 	ManagementRoleScope,
+	RuntimeSessionGenerationView,
+	RuntimeSessionView,
 	TrackerJsonObject,
 	TrackerManagementAsset,
 	TrackerManagementAssignment,
@@ -127,8 +129,28 @@ function sanitizePayload(value: TrackerJsonObject): TrackerJsonObject {
 	return visit(value) as TrackerJsonObject;
 }
 
+function sameJson(left: TrackerJsonObject, right: TrackerJsonObject): boolean {
+	const canonical = (value: unknown): unknown => {
+		if (Array.isArray(value)) return value.map(canonical);
+		if (value && typeof value === "object")
+			return Object.fromEntries(
+				Object.entries(value as Record<string, unknown>)
+					.sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+					.map(([key, child]) => [key, canonical(child)]),
+			);
+		return value;
+	};
+	return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
+}
+
 function actor(value: unknown): string {
-	return text(value, "actor", 256);
+	const candidate = text(value, "actor", 256);
+	return candidate
+		.replace(
+			/(token|credential|password|secret|owner[_-]?token|access[_-]?token|api[_-]?key)\s*[:=]\s*\S+/giu,
+			"$1=[REDACTED]",
+		)
+		.slice(0, 256);
 }
 
 function now(clock: TrackerClock): string {
@@ -196,6 +218,36 @@ function assertWithin(root: string, target: string): void {
 	if (relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
 		throw new TrackerManagementError(
 			"management.asset_invalid",
+			"asset path escapes the configured store",
+		);
+}
+
+function assertTrustedReadPath(root: string, target: string): void {
+	assertWithin(root, target);
+	const rootReal = fs.realpathSync(root);
+	let current = root;
+	const relative = path.relative(root, target);
+	for (const segment of relative.split(path.sep).filter(Boolean)) {
+		current = path.join(current, segment);
+		if (fs.lstatSync(current).isSymbolicLink())
+			throw new TrackerManagementError(
+				"management.not_found",
+				"asset path contains a symbolic link",
+			);
+		if (current !== target && !fs.statSync(current).isDirectory())
+			throw new TrackerManagementError(
+				"management.not_found",
+				"asset parent is not a directory",
+			);
+	}
+	const resolved = fs.realpathSync(target);
+	const resolvedRelative = path.relative(rootReal, resolved);
+	if (
+		resolvedRelative.startsWith(`..${path.sep}`) ||
+		path.isAbsolute(resolvedRelative)
+	)
+		throw new TrackerManagementError(
+			"management.not_found",
 			"asset path escapes the configured store",
 		);
 }
@@ -303,10 +355,66 @@ export interface TrackerManagementServices {
 	audit(projectId: string): readonly TrackerManagementAuditRecord[];
 }
 
+/** Read-only canonical identity facts; runtime lifecycle remains outside management. */
+export interface TrackerManagementIdentityPort {
+	readonly getSession: (
+		projectId: string,
+		sessionId: string,
+	) => RuntimeSessionView | undefined;
+	readonly findGeneration: (
+		projectId: string,
+		generationId: string,
+	) => RuntimeSessionGenerationView | undefined;
+}
+
+function canonicalTarget(
+	identity: TrackerManagementIdentityPort,
+	projectId: string,
+	sessionId: string | undefined,
+	generationId: string | undefined,
+): { readonly sessionId?: string; readonly generationId?: string } {
+	if (sessionId === undefined && generationId === undefined) return {};
+	if (!identity)
+		throw new TrackerManagementError(
+			"management.invalid",
+			"canonical runtime identity is not composed",
+		);
+	const session = sessionId
+		? identity.getSession(projectId, sessionId)
+		: undefined;
+	if (sessionId !== undefined && !session)
+		throw new TrackerManagementError(
+			"management.not_found",
+			"session does not belong to project",
+		);
+	const generation = generationId
+		? identity.findGeneration(projectId, generationId)
+		: undefined;
+	if (generationId !== undefined && !generation)
+		throw new TrackerManagementError(
+			"management.not_found",
+			"generation does not belong to project",
+		);
+	if (
+		generation &&
+		sessionId !== undefined &&
+		generation.sessionId !== sessionId
+	)
+		throw new TrackerManagementError(
+			"management.not_found",
+			"generation does not belong to session",
+		);
+	return {
+		...(sessionId === undefined ? {} : { sessionId }),
+		...(generationId === undefined ? {} : { generationId }),
+	};
+}
+
 export function createTrackerManagementServices(options: {
 	readonly storage: TrackerManagementStorageCapability;
 	readonly clock: TrackerClock;
 	readonly assetRoot: string;
+	readonly identity: TrackerManagementIdentityPort;
 	readonly tickets?: TrackerTicketService;
 }): TrackerManagementServices {
 	const service: TrackerManagementServices = {
@@ -315,15 +423,24 @@ export function createTrackerManagementServices(options: {
 				const projectId = ensureProject(input.projectId);
 				const name = text(input.name, "role name", 128);
 				const definition = payload(input.definition ?? {}, "role definition");
+				const scope = ensureRoleScope(input.scope ?? "project");
+				const mutationActor = actor(input.actor);
 				const existing = options.storage
 					.listRoles(projectId)
 					.find((role) => role.name === name);
+				if (
+					existing &&
+					existing.scope === scope &&
+					sameJson(existing.definition, definition)
+				)
+					return existing;
 				return options.storage.createRole({
 					id: existing?.id ?? `role_${crypto.randomUUID()}`,
 					projectId,
 					name,
-					scope: ensureRoleScope(input.scope ?? "project"),
+					scope,
 					definition,
+					actor: mutationActor,
 					now: now(options.clock),
 				});
 			},
@@ -333,6 +450,20 @@ export function createTrackerManagementServices(options: {
 			assign(input) {
 				const projectId = ensureProject(input.projectId);
 				const roleId = id(input.roleId, "role id");
+				const sessionId =
+					input.sessionId === undefined
+						? undefined
+						: id(input.sessionId, "session id");
+				const generationId =
+					input.generationId === undefined
+						? undefined
+						: id(input.generationId, "generation id");
+				const target = canonicalTarget(
+					options.identity,
+					projectId,
+					sessionId,
+					generationId,
+				);
 				if (
 					!options.storage
 						.listRoles(projectId)
@@ -346,12 +477,7 @@ export function createTrackerManagementServices(options: {
 					id: `rasg_${crypto.randomUUID()}`,
 					projectId,
 					roleId,
-					...(input.sessionId === undefined
-						? {}
-						: { sessionId: id(input.sessionId, "session id") }),
-					...(input.generationId === undefined
-						? {}
-						: { generationId: id(input.generationId, "generation id") }),
+					...target,
 					actor: actor(input.actor),
 					idempotencyKey: id(input.idempotencyKey, "idempotency key"),
 					now: now(options.clock),
@@ -364,12 +490,10 @@ export function createTrackerManagementServices(options: {
 					payload: {
 						role_id: roleId,
 						assignment_id: assignment.id,
-						...(input.sessionId === undefined
+						...(sessionId === undefined ? {} : { session_id: sessionId }),
+						...(generationId === undefined
 							? {}
-							: { session_id: input.sessionId }),
-						...(input.generationId === undefined
-							? {}
-							: { generation_id: input.generationId }),
+							: { generation_id: generationId }),
 					},
 					actor: actor(input.actor),
 					idempotencyKey: `role-assign:${id(input.idempotencyKey, "idempotency key")}`,
@@ -387,17 +511,38 @@ export function createTrackerManagementServices(options: {
 					question: text(input.question, "gate question"),
 					assignee: actor(input.assignee),
 					idempotencyKey: id(input.idempotencyKey, "idempotency key"),
+					actor: actor(input.actor),
 					now: now(options.clock),
 				});
 			},
 			answer(input) {
 				if (!gateStatuses.has(input.status))
 					invalid("gate verdict is unsupported");
+				const projectId = ensureProject(input.projectId);
+				const gateId = id(input.gateId, "gate id");
+				const verdictActor = actor(input.actor);
+				const gate = options.storage
+					.listGates(projectId)
+					.find((candidate) => candidate.id === gateId);
+				if (!gate)
+					throw new TrackerManagementError(
+						"management.not_found",
+						"gate does not belong to project",
+					);
+				const sharedHuman =
+					gate.assignee === "human" &&
+					(verdictActor === "human" || verdictActor.startsWith("human:"));
+				if (gate.assignee !== verdictActor && !sharedHuman)
+					throw new TrackerManagementError(
+						"management.forbidden",
+						"only the gate assignee may answer this gate",
+					);
 				const result = options.storage.answerGate({
-					id: id(input.gateId, "gate id"),
-					projectId: ensureProject(input.projectId),
+					id: gateId,
+					projectId,
 					status: input.status,
 					verdict: payload(input.verdict, "gate verdict"),
+					actor: verdictActor,
 					now: now(options.clock),
 				});
 				if (!result)
@@ -418,6 +563,7 @@ export function createTrackerManagementServices(options: {
 					projectId: ensureProject(input.projectId),
 					body: text(input.body, "idea body", 16_384),
 					idempotencyKey: id(input.idempotencyKey, "idempotency key"),
+					actor: actor(input.actor),
 					now: now(options.clock),
 				});
 			},
@@ -425,6 +571,7 @@ export function createTrackerManagementServices(options: {
 				const result = options.storage.popIdea({
 					id: id(input.ideaId, "idea id"),
 					projectId: ensureProject(input.projectId),
+					actor: actor(input.actor),
 					now: now(options.clock),
 				});
 				if (!result)
@@ -467,6 +614,7 @@ export function createTrackerManagementServices(options: {
 					id: ideaId,
 					projectId,
 					ticketId: ticket.id,
+					actor: actor(input.actor),
 					now: now(options.clock),
 				});
 				if (!promoted)
@@ -529,6 +677,7 @@ export function createTrackerManagementServices(options: {
 					byteSize: input.bytes.byteLength,
 					sha256: crypto.createHash("sha256").update(input.bytes).digest("hex"),
 					storagePath: target,
+					actor: actor(input.actor),
 					now: now(options.clock),
 				});
 				return asset;
@@ -550,8 +699,13 @@ export function createTrackerManagementServices(options: {
 					asset.ticketId,
 				);
 				const target = path.resolve(root, asset.relativePath);
-				assertWithin(root, target);
-				if (!fs.existsSync(target) || fs.lstatSync(target).isSymbolicLink())
+				if (!fs.existsSync(target))
+					throw new TrackerManagementError(
+						"management.not_found",
+						"asset is unavailable",
+					);
+				assertTrustedReadPath(root, target);
+				if (fs.lstatSync(target).isSymbolicLink())
 					throw new TrackerManagementError(
 						"management.not_found",
 						"asset is unavailable",
@@ -571,15 +725,25 @@ export function createTrackerManagementServices(options: {
 		},
 		communications: {
 			create(input) {
+				const projectId = ensureProject(input.projectId);
+				const sessionId =
+					input.sessionId === undefined
+						? undefined
+						: id(input.sessionId, "session id");
+				const generationId =
+					input.generationId === undefined
+						? undefined
+						: id(input.generationId, "generation id");
+				const target = canonicalTarget(
+					options.identity,
+					projectId,
+					sessionId,
+					generationId,
+				);
 				return options.storage.createOperation({
 					id: `op_${crypto.randomUUID()}`,
-					projectId: ensureProject(input.projectId),
-					...(input.sessionId === undefined
-						? {}
-						: { sessionId: id(input.sessionId, "session id") }),
-					...(input.generationId === undefined
-						? {}
-						: { generationId: id(input.generationId, "generation id") }),
+					projectId,
+					...target,
 					kind: ensureOperationKind(input.kind),
 					command: text(input.command, "command", 128),
 					payload: payload(input.payload ?? {}, "communication payload"),

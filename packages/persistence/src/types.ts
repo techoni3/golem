@@ -1083,6 +1083,7 @@ export interface TrackerManagementAuditRecord {
 	readonly projectId: string;
 	readonly kind: string;
 	readonly subjectId: string;
+	readonly actor: string;
 	readonly details: TrackerJsonObject;
 	readonly createdAt: string;
 }
@@ -1093,7 +1094,7 @@ export interface TrackerManagementStorageCapability {
 		input: Omit<
 			TrackerManagementRole,
 			"revision" | "createdAt" | "updatedAt"
-		> & { readonly now: string },
+		> & { readonly actor: string; readonly now: string },
 	): TrackerManagementRole;
 	listRoles(projectId: string): readonly TrackerManagementRole[];
 	assignRole(
@@ -1103,6 +1104,7 @@ export interface TrackerManagementStorageCapability {
 	): TrackerManagementAssignment;
 	createGate(
 		input: Omit<TrackerManagementGate, "createdAt" | "updatedAt" | "status"> & {
+			readonly actor: string;
 			readonly now: string;
 		},
 	): TrackerManagementGate;
@@ -1111,28 +1113,35 @@ export interface TrackerManagementStorageCapability {
 		readonly projectId: string;
 		readonly status: Exclude<ManagementGateStatus, "awaiting">;
 		readonly verdict: TrackerJsonObject;
+		readonly actor: string;
 		readonly now: string;
 	}): TrackerManagementGate | undefined;
 	listGates(projectId: string): readonly TrackerManagementGate[];
 	createIdea(
 		input: Omit<TrackerManagementIdea, "createdAt" | "updatedAt" | "status"> & {
+			readonly actor: string;
 			readonly now: string;
 		},
 	): TrackerManagementIdea;
 	popIdea(input: {
 		readonly id: string;
 		readonly projectId: string;
+		readonly actor: string;
 		readonly now: string;
 	}): TrackerManagementIdea | undefined;
 	promoteIdea(input: {
 		readonly id: string;
 		readonly projectId: string;
 		readonly ticketId: string;
+		readonly actor: string;
 		readonly now: string;
 	}): TrackerManagementIdea | undefined;
 	listIdeas(projectId: string): readonly TrackerManagementIdea[];
 	putAsset(
-		input: Omit<TrackerManagementAsset, "createdAt"> & { readonly now: string },
+		input: Omit<TrackerManagementAsset, "createdAt"> & {
+			readonly actor: string;
+			readonly now: string;
+		},
 	): TrackerManagementAsset;
 	getAsset(input: {
 		readonly id: string;

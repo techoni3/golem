@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { createTemporaryHome } from "@golem/testkit";
+import { createSessionService } from "@golem/runtime";
 import { openControlPlanePersistence } from "../../apps/control-plane/dist/persistence.js";
 import { composeControlPlaneManagementServices, composeControlPlaneTrackerCoreServices } from "../../apps/control-plane/dist/index.js";
 import { startControlPlane } from "../../apps/control-plane/dist/index.js";
@@ -11,6 +12,53 @@ import { TrackerManagementError } from "@golem/tracker";
 
 function clock() {
 	return { now: () => "2026-07-21T00:00:00.000Z", after: (ms) => new Date(Date.parse("2026-07-21T00:00:00.000Z") + ms).toISOString() };
+}
+
+function seedCanonical(owner, projectId, sessionId, generationId, suffix) {
+	owner.runtimeProjectStorage().observe({
+		projectId,
+		name: `management-${suffix}`,
+		location: {
+			locationId: `location-${suffix}`,
+			canonicalPath: `/tmp/${suffix}`,
+			relation: "main",
+			source: "register",
+			evidence: { fixture: true },
+			observedAt: "2026-07-21T00:00:00.000Z",
+		},
+		source: "register",
+		eventId: `event-project-${suffix}`,
+		deduplicationKey: `management-project-${suffix}`,
+		payload: { kind: "project.observed" },
+		provenance: { source: "fixture", confidence: "verified" },
+		occurredAt: "2026-07-21T00:00:00.000Z",
+	});
+	return createSessionService({
+		projects: owner.runtimeProjectStorage(),
+		sessions: owner.runtimeSessionStorage(),
+	}).apply({
+		schema_version: "golem.runtime-signal/v1",
+		event_id: `event-session-${suffix}`,
+		event_kind: "session.started",
+		producer: "management-fixture",
+		producer_instance_id: `producer-${suffix}`,
+		producer_sequence: 1,
+		harness: "claude",
+		correlation_id: `correlation-${suffix}`,
+		deduplication_key: `management-session-${suffix}`,
+		clocks: {
+			source_observed_at: "2026-07-21T00:00:00.000Z",
+			received_at: "2026-07-21T00:00:00.001Z",
+			materialized_at: "2026-07-21T00:00:00.002Z",
+		},
+		provenance: { source: "fixture", confidence: "verified", evidence_id: suffix },
+		clear_fields: [],
+		payload: {
+			kind: "session.started",
+			generation: { project_id: projectId, session_id: sessionId, generation_id: generationId },
+			metadata: { name: `management-${suffix}`, model: "sonnet", role: "manager" },
+		},
+	});
 }
 
 function open(home, suffix = "") {
@@ -26,13 +74,19 @@ test("roles gates ideas and controls are typed, idempotent, audited, and restart
 	try {
 		opened = open(home);
 		const { management } = opened;
+		seedCanonical(opened.writer, "mgmt-project", "session-one", "generation-one", "primary");
+		seedCanonical(opened.writer, "foreign-project", "foreign-session", "foreign-generation", "foreign");
 		const role = management.roles.create({ projectId: "mgmt-project", name: "operator", actor: "human:manager", definition: { token: "do-not-persist", display: "Operator" } });
-		const assignmentA = management.roles.assign({ projectId: "mgmt-project", roleId: role.id, sessionId: "session-one", actor: "human:manager", idempotencyKey: "assign-one" });
-		const assignmentB = management.roles.assign({ projectId: "mgmt-project", roleId: role.id, sessionId: "session-one", actor: "human:manager", idempotencyKey: "assign-one" });
+		const roleRetry = management.roles.create({ projectId: "mgmt-project", name: "operator", actor: "human:manager token=retry-secret", definition: { display: "Operator", token: "do-not-persist" } });
+		assert.equal(roleRetry.id, role.id, "identical role retry returns the canonical role");
+		assert.equal(roleRetry.revision, role.revision, "identical role retry does not advance revision");
+		const assignmentA = management.roles.assign({ projectId: "mgmt-project", roleId: role.id, sessionId: "session-one", generationId: "generation-one", actor: "human:manager", idempotencyKey: "assign-one" });
+		const assignmentB = management.roles.assign({ projectId: "mgmt-project", roleId: role.id, sessionId: "session-one", generationId: "generation-one", actor: "human:manager", idempotencyKey: "assign-one" });
 		assert.equal(assignmentA.id, assignmentB.id, "role assignment retry is idempotent");
-		const gate = management.gates.create({ projectId: "mgmt-project", kind: "approval", question: "Approve deployment?", assignee: "human", actor: "human:manager", idempotencyKey: "gate-one" });
+		const gate = management.gates.create({ projectId: "mgmt-project", kind: "approval", question: "Approve deployment?", assignee: "human:approver", actor: "human:manager token=gate-secret", idempotencyKey: "gate-one" });
 		assert.equal(gate.status, "awaiting", "human gates are never auto-answered");
-		assert.equal(management.gates.answer({ projectId: "mgmt-project", gateId: gate.id, status: "approved", verdict: { approved: true }, actor: "human" }).status, "approved");
+		assert.throws(() => management.gates.answer({ projectId: "mgmt-project", gateId: gate.id, status: "approved", verdict: { approved: true }, actor: "human:attacker" }), (error) => error instanceof TrackerManagementError && error.code === "management.forbidden");
+		assert.equal(management.gates.answer({ projectId: "mgmt-project", gateId: gate.id, status: "approved", verdict: { approved: true }, actor: "human:approver" }).status, "approved");
 		const idea = management.ideas.create({ projectId: "mgmt-project", body: "Promote this idea", actor: "human:manager", idempotencyKey: "idea-one" });
 		management.ideas.pop({ projectId: "mgmt-project", ideaId: idea.id, actor: "human:manager" });
 		const promotedA = management.ideas.promote({ projectId: "mgmt-project", ideaId: idea.id, actor: "human:manager" });
@@ -42,7 +96,10 @@ test("roles gates ideas and controls are typed, idempotent, audited, and restart
 		const operationB = management.controls.request({ projectId: "mgmt-project", command: "brief", payload: { token: "secret-value", message: "hello" }, actor: "human:manager", idempotencyKey: "control-one" });
 		assert.equal(operationA.id, operationB.id, "control request retry is idempotent");
 		assert.equal(JSON.stringify(operationA.payload).includes("secret-value"), false, "persisted operation payload redacts token values");
-		assert.equal(JSON.stringify(management.audit("mgmt-project")).includes("do-not-persist"), false, "audit output remains redacted");
+		const audit = management.audit("mgmt-project");
+		assert.equal(JSON.stringify(audit).includes("do-not-persist"), false, "audit output remains redacted");
+		assert(audit.some((entry) => entry.actor.includes("[REDACTED]")), "audit stores a redacted canonical actor");
+		const revisionBeforeForeign = management.roles.list("mgmt-project")[0].revision;
 		const staticDirectory = path.join(home.root, "static");
 		fs.mkdirSync(staticDirectory, { recursive: true });
 		fs.writeFileSync(path.join(staticDirectory, "index.html"), "management fixture");
@@ -51,9 +108,18 @@ test("roles gates ideas and controls are typed, idempotent, audited, and restart
 			const response = await fetch(`${server.origin}/api/v1/management/roles?project_id=mgmt-project`, { headers: { authorization: "Bearer management-test-token-01234567890123456789" } });
 			assert.equal(response.status, 200);
 			assert.equal((await response.json()).result[0].name, "operator", "the shipped management route delegates to typed storage");
+			const headers = { authorization: "Bearer management-test-token-01234567890123456789", "content-type": "application/json" };
+			const foreignAssignment = await fetch(`${server.origin}/api/v1/management/roles/${role.id}/assign`, { method: "POST", headers, body: JSON.stringify({ project_id: "mgmt-project", session_id: "foreign-session", generation_id: "foreign-generation", actor: "human:manager", idempotency_key: "foreign-assignment" }) });
+			assert.equal(foreignAssignment.status, 404, "foreign canonical assignment target is rejected at the HTTP boundary");
+			const foreignControl = await fetch(`${server.origin}/api/v1/management/control`, { method: "POST", headers, body: JSON.stringify({ project_id: "mgmt-project", session_id: "foreign-session", generation_id: "foreign-generation", command: "brief", payload: {}, actor: "human:manager", idempotency_key: "foreign-control" }) });
+			assert.equal(foreignControl.status, 404, "foreign canonical control target is rejected at the HTTP boundary");
+			const auditResponse = await fetch(`${server.origin}/api/v1/management/audit?project_id=mgmt-project`, { headers });
+			assert.equal(auditResponse.status, 200);
+			assert.equal(JSON.stringify(await auditResponse.json()).includes("retry-secret"), false, "HTTP audit output does not expose actor secrets");
 		} finally {
 			await server.close();
 		}
+		assert.equal(management.roles.list("mgmt-project")[0].revision, revisionBeforeForeign, "rejected foreign targets do not mutate role state");
 		await opened.writer.close();
 		opened = open(home, "-restart");
 		assert.equal(opened.management.controls.list("mgmt-project").length, 2, "control and role-assignment operations survive restart");
@@ -82,6 +148,15 @@ test("ticket assets are bounded, authorized, symlink-safe, and restart durable",
 		fs.mkdirSync(root, { recursive: true });
 		fs.symlinkSync(home.root, path.join(root, "linked"));
 		assert.throws(() => opened.management.assets.put({ projectId: "asset-project", ticketId: ticket.id, relativePath: "linked/escape.png", mimeType: "image/png", bytes, actor: "human:manager" }), (error) => error instanceof TrackerManagementError && error.code === "management.asset_invalid");
+		const proofDirectory = path.join(root, "proofs");
+		const outsideDirectory = path.join(home.root, "asset-outside");
+		fs.renameSync(proofDirectory, path.join(root, "proofs-real"));
+		fs.mkdirSync(outsideDirectory, { recursive: true });
+		fs.writeFileSync(path.join(outsideDirectory, "fixture.txt"), "escaped asset");
+		fs.symlinkSync(outsideDirectory, proofDirectory);
+		assert.throws(() => opened.management.assets.read({ projectId: "asset-project", ticketId: ticket.id, assetId: stored.id }), (error) => error instanceof TrackerManagementError && error.code === "management.not_found", "parent-directory symlink swaps are rejected");
+		fs.unlinkSync(proofDirectory);
+		fs.renameSync(path.join(root, "proofs-real"), proofDirectory);
 		assert.throws(() => opened.management.assets.read({ projectId: "other-project", ticketId: ticket.id, assetId: stored.id }), (error) => error instanceof TrackerManagementError && error.code === "management.not_found");
 		await opened.writer.close();
 		opened = open(home, "-restart");

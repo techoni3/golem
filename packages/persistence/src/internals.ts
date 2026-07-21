@@ -591,6 +591,7 @@ export interface TrackerTables {
 		readonly project_id: string;
 		readonly kind: string;
 		readonly subject_id: string;
+		readonly actor: string;
 		readonly details_json: string;
 		readonly created_at: string;
 	};

@@ -1,4 +1,7 @@
-import type { PersistenceWriteCapability } from "@golem/persistence";
+import type {
+	PersistenceWriteCapability,
+	RuntimeSessionStorage,
+} from "@golem/persistence";
 import {
 	createTrackerCoreServices,
 	createTrackerManagementServices,
@@ -7,6 +10,7 @@ import {
 	type TrackerClock,
 	type TrackerCoreActorContext,
 	type TrackerCoreServices,
+	type TrackerManagementIdentityPort,
 	type TrackerManagementServices,
 	type TrackerServices,
 } from "@golem/tracker";
@@ -57,10 +61,21 @@ export function composeControlPlaneManagementServices(options: {
 	readonly assetRoot: string;
 	readonly tickets?: TrackerCoreServices["tickets"];
 }): TrackerManagementServices {
+	const sessions: RuntimeSessionStorage =
+		options.writer.runtimeSessionStorage();
+	const identity: TrackerManagementIdentityPort = {
+		getSession: (projectId, sessionId) => sessions.get(projectId, sessionId),
+		findGeneration: (projectId, generationId) =>
+			sessions
+				.list(projectId)
+				.flatMap((session) => session.generations)
+				.find((generation) => generation.generationId === generationId),
+	};
 	return createTrackerManagementServices({
 		storage: options.writer.managementStorage(),
 		clock: options.clock,
 		assetRoot: options.assetRoot,
+		identity,
 		...(options.tickets ? { tickets: options.tickets } : {}),
 	});
 }

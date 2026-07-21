@@ -27,6 +27,7 @@ export {
 export {
 	createTrackerManagementServices,
 	TrackerManagementError,
+	type TrackerManagementIdentityPort,
 	type TrackerManagementServices,
 } from "./management.js";
 export {

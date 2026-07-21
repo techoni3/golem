@@ -596,6 +596,7 @@ CREATE TABLE management_audit (
   project_id TEXT NOT NULL,
   kind TEXT NOT NULL,
   subject_id TEXT NOT NULL,
+  actor TEXT NOT NULL CHECK(length(trim(actor)) > 0),
   details_json TEXT NOT NULL,
   created_at TEXT NOT NULL
 );

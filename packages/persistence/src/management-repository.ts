@@ -135,6 +135,7 @@ function rowAudit(row: AuditRow): TrackerManagementAuditRecord {
 		projectId: row.project_id,
 		kind: row.kind,
 		subjectId: row.subject_id,
+		actor: row.actor,
 		details: parseJson(row.details_json),
 		createdAt: row.created_at,
 	});
@@ -155,6 +156,7 @@ export class TrackerManagementRepository
 		kind: string,
 		subjectId: string,
 		idempotencyKey: string,
+		actor: string,
 		details: TrackerJsonObject,
 		now: string,
 	): void {
@@ -164,6 +166,7 @@ export class TrackerManagementRepository
 				project_id: projectId,
 				kind,
 				subject_id: subjectId,
+				actor,
 				details_json: json(details),
 				created_at: now,
 			}),
@@ -217,6 +220,7 @@ export class TrackerManagementRepository
 					"role.updated",
 					input.id,
 					`role:${input.id}:${existing.revision + 1}`,
+					input.actor,
 					{ name: input.name },
 					input.now,
 				);
@@ -246,6 +250,7 @@ export class TrackerManagementRepository
 				"role.created",
 				input.id,
 				`role:${input.id}:1`,
+				input.actor,
 				{ name: input.name },
 				input.now,
 			);
@@ -303,6 +308,7 @@ export class TrackerManagementRepository
 				"role.assigned",
 				input.id,
 				`assignment:${input.idempotencyKey}`,
+				input.actor,
 				{
 					role_id: input.roleId,
 					session_id: input.sessionId ?? null,
@@ -352,6 +358,7 @@ export class TrackerManagementRepository
 				"gate.created",
 				input.id,
 				`gate:${input.idempotencyKey}`,
+				input.actor,
 				{ kind: input.kind, assignee: input.assignee },
 				input.now,
 			);
@@ -395,6 +402,7 @@ export class TrackerManagementRepository
 				`gate.${input.status}`,
 				input.id,
 				`gate:${input.id}:${input.status}`,
+				input.actor,
 				{ verdict: input.verdict },
 				input.now,
 			);
@@ -452,6 +460,7 @@ export class TrackerManagementRepository
 				"idea.created",
 				input.id,
 				`idea:${input.idempotencyKey}`,
+				input.actor,
 				{},
 				input.now,
 			);
@@ -469,6 +478,7 @@ export class TrackerManagementRepository
 	popIdea(input: {
 		readonly id: string;
 		readonly projectId: string;
+		readonly actor: string;
 		readonly now: string;
 	}): TrackerManagementIdea | undefined {
 		return this.#store.transaction(() => {
@@ -493,6 +503,7 @@ export class TrackerManagementRepository
 				"idea.popped",
 				input.id,
 				`idea:${input.id}:popped`,
+				input.actor,
 				{},
 				input.now,
 			);
@@ -511,6 +522,7 @@ export class TrackerManagementRepository
 		readonly id: string;
 		readonly projectId: string;
 		readonly ticketId: string;
+		readonly actor: string;
 		readonly now: string;
 	}): TrackerManagementIdea | undefined {
 		return this.#store.transaction(() => {
@@ -539,6 +551,7 @@ export class TrackerManagementRepository
 				"idea.promoted",
 				input.id,
 				`idea:${input.id}:promoted`,
+				input.actor,
 				{ ticket_id: input.ticketId },
 				input.now,
 			);
@@ -598,6 +611,7 @@ export class TrackerManagementRepository
 				"asset.stored",
 				input.id,
 				`asset:${input.projectId}:${input.ticketId}:${input.relativePath}`,
+				input.actor,
 				{
 					ticket_id: input.ticketId,
 					mime_type: input.mimeType,
@@ -665,6 +679,7 @@ export class TrackerManagementRepository
 				`control.${input.command}`,
 				input.id,
 				`operation:${input.idempotencyKey}`,
+				input.actor,
 				{
 					command: input.command,
 					kind: input.kind,
