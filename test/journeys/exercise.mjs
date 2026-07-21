@@ -29,6 +29,10 @@ import { exerciseRenderMcpClosure } from "../render-mcp-closure.mjs";
 import { exerciseDomainReplay } from "./domain-replay.mjs";
 import { exerciseCompactLaunchDryRunMatrix } from "./compact-launch-dry-run-matrix.mjs";
 import { exerciseLauncherLaunchabilityDeliverySplit } from "./launcher-launchability-delivery-split.mjs";
+import {
+	exerciseTrackerHttpMcpParity,
+	exerciseDeliveryApiFenceRecheck,
+} from "./tracker-api.mjs";
 import { exerciseLauncherResolution } from "./launcher-resolution.mjs";
 import {
 	exerciseLauncherSignalCleanup,
@@ -891,6 +895,8 @@ export const exercises = Object.freeze({
 	"bus-offline-replay": exerciseBusOfflineReplay,
 	"ws-gap-resync": exerciseWsGapResync,
 	"tracker-core-compatibility": exerciseTrackerCoreCompatibility,
+	"tracker-http-mcp-parity": exerciseTrackerHttpMcpParity,
+	"delivery-api-fence-recheck": exerciseDeliveryApiFenceRecheck,
 	"testkit-browser": exerciseBrowser,
 	"legacy-parity-baseline": exerciseLegacyParityBaseline,
 	"render-mcp-closure": exerciseRenderMcpClosure,

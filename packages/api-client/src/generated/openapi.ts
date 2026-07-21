@@ -4,6 +4,326 @@
  */
 
 export interface paths {
+    readonly "/api/v1/tracker/tickets": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["trackerListTickets"];
+        readonly put?: never;
+        readonly post: operations["trackerCreateTicket"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/tracker/tickets/search": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["trackerSearchTickets"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/tracker/tickets/{id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["trackerGetTicket"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch: operations["trackerUpdateTicket"];
+        readonly trace?: never;
+    };
+    readonly "/api/v1/tracker/tickets/{id}/transition": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["trackerTransitionTicket"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/tracker/tickets/{id}/close": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["trackerExceptionalClose"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/tracker/tickets/{id}/comments": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["trackerAddComment"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/tracker/tickets/{id}/comments/{commentId}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch: operations["trackerUpdateComment"];
+        readonly trace?: never;
+    };
+    readonly "/api/v1/tracker/tickets/{id}/comments/{commentId}/reply": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["trackerReplyComment"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/tracker/streams": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["trackerListStreams"];
+        readonly put?: never;
+        readonly post: operations["trackerUpsertStream"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/delivery/envelopes": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["deliveryEnqueue"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/delivery/claims": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["deliveryClaim"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/delivery/claims/{token}/prepare": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["deliveryPrepare"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/delivery/claims/{token}/ack": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["deliveryAcknowledge"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/delivery/claims/{token}/delivered": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["deliveryDelivered"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/delivery/claims/{token}/fail": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["deliveryFail"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/bus/events": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["busList"];
+        readonly put?: never;
+        readonly post: operations["busAppend"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/subscriptions": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["subscriptionsList"];
+        readonly put?: never;
+        readonly post: operations["subscriptionsCreate"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/subscriptions/unsubscribe": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["subscriptionsUnsubscribe"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/subscriptions/{id}/pending": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["subscriptionsPending"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/subscriptions/{id}/commit": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["subscriptionsCommit"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/management/roles": {
         readonly parameters: {
             readonly query?: never;
@@ -352,6 +672,3177 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    readonly trackerListTickets: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description typed result */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description typed command accepted */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description invalid request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description caller rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description optimistic conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    readonly trackerCreateTicket: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": {
+                    readonly [key: string]: unknown;
+                };
+            };
+        };
+        readonly responses: {
+            /** @description typed result */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description typed command accepted */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description invalid request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description caller rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description optimistic conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    readonly trackerSearchTickets: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description typed result */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description typed command accepted */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description invalid request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description caller rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description optimistic conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    readonly trackerGetTicket: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description typed result */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description typed command accepted */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description invalid request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description caller rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description optimistic conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    readonly trackerUpdateTicket: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": {
+                    readonly [key: string]: unknown;
+                };
+            };
+        };
+        readonly responses: {
+            /** @description typed result */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description typed command accepted */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description invalid request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description caller rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description optimistic conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    readonly trackerTransitionTicket: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": {
+                    readonly [key: string]: unknown;
+                };
+            };
+        };
+        readonly responses: {
+            /** @description typed result */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description typed command accepted */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description invalid request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description caller rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description optimistic conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    readonly trackerExceptionalClose: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": {
+                    readonly [key: string]: unknown;
+                };
+            };
+        };
+        readonly responses: {
+            /** @description typed result */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description typed command accepted */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description invalid request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description caller rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description optimistic conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    readonly trackerAddComment: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": {
+                    readonly [key: string]: unknown;
+                };
+            };
+        };
+        readonly responses: {
+            /** @description typed result */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description typed command accepted */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description invalid request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description caller rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description optimistic conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    readonly trackerUpdateComment: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": {
+                    readonly [key: string]: unknown;
+                };
+            };
+        };
+        readonly responses: {
+            /** @description typed result */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description typed command accepted */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description invalid request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description caller rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description optimistic conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    readonly trackerReplyComment: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": {
+                    readonly [key: string]: unknown;
+                };
+            };
+        };
+        readonly responses: {
+            /** @description typed result */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description typed command accepted */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description invalid request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description caller rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description optimistic conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    readonly trackerListStreams: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description typed result */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description typed command accepted */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description invalid request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description caller rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description optimistic conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    readonly trackerUpsertStream: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": {
+                    readonly [key: string]: unknown;
+                };
+            };
+        };
+        readonly responses: {
+            /** @description typed result */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description typed command accepted */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description invalid request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description caller rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description optimistic conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    readonly deliveryEnqueue: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": {
+                    readonly [key: string]: unknown;
+                };
+            };
+        };
+        readonly responses: {
+            /** @description typed result */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description typed command accepted */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description invalid request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description caller rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description optimistic conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    readonly deliveryClaim: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": {
+                    readonly [key: string]: unknown;
+                };
+            };
+        };
+        readonly responses: {
+            /** @description typed result */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description typed command accepted */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description invalid request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description caller rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description optimistic conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    readonly deliveryPrepare: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description typed result */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description typed command accepted */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description invalid request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description caller rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description optimistic conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    readonly deliveryAcknowledge: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": {
+                    readonly [key: string]: unknown;
+                };
+            };
+        };
+        readonly responses: {
+            /** @description typed result */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description typed command accepted */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description invalid request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description caller rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description optimistic conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    readonly deliveryDelivered: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description typed result */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description typed command accepted */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description invalid request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description caller rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description optimistic conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    readonly deliveryFail: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": {
+                    readonly [key: string]: unknown;
+                };
+            };
+        };
+        readonly responses: {
+            /** @description typed result */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description typed command accepted */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description invalid request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description caller rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description optimistic conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    readonly busList: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description typed result */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description typed command accepted */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description invalid request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description caller rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description optimistic conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    readonly busAppend: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": {
+                    readonly [key: string]: unknown;
+                };
+            };
+        };
+        readonly responses: {
+            /** @description typed result */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description typed command accepted */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description invalid request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description caller rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description optimistic conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    readonly subscriptionsList: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description typed result */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description typed command accepted */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description invalid request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description caller rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description optimistic conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    readonly subscriptionsCreate: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": {
+                    readonly [key: string]: unknown;
+                };
+            };
+        };
+        readonly responses: {
+            /** @description typed result */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description typed command accepted */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description invalid request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description caller rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description optimistic conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    readonly subscriptionsUnsubscribe: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": {
+                    readonly [key: string]: unknown;
+                };
+            };
+        };
+        readonly responses: {
+            /** @description typed result */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description typed command accepted */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description invalid request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description caller rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description optimistic conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    readonly subscriptionsPending: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description typed result */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description typed command accepted */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description invalid request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description caller rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description optimistic conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    readonly subscriptionsCommit: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": {
+                    readonly [key: string]: unknown;
+                };
+            };
+        };
+        readonly responses: {
+            /** @description typed result */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description typed command accepted */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        readonly [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description invalid request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description caller rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description optimistic conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
     readonly managementListRoles: {
         readonly parameters: {
             readonly query: {

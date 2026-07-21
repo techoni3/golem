@@ -74,11 +74,142 @@ function managementResponses() {
 	};
 }
 
+function typedApiResponses() {
+	return {
+		"200": {
+			description: "typed result",
+			content: {
+				"application/json": {
+					schema: { type: "object", additionalProperties: true },
+				},
+			},
+		},
+		"201": {
+			description: "typed command accepted",
+			content: {
+				"application/json": {
+					schema: { type: "object", additionalProperties: true },
+				},
+			},
+		},
+		"400": {
+			description: "invalid request",
+			content: { "application/json": { schema: error } },
+		},
+		"401": {
+			description: "unauthorized",
+			content: { "application/json": { schema: error } },
+		},
+		"403": {
+			description: "caller rejected",
+			content: { "application/json": { schema: error } },
+		},
+		"404": {
+			description: "not found",
+			content: { "application/json": { schema: error } },
+		},
+		"409": {
+			description: "optimistic conflict",
+			content: { "application/json": { schema: error } },
+		},
+	};
+}
+
+function typedApiPaths(): JsonRecord {
+	const body = {
+		required: true,
+		content: {
+			"application/json": {
+				schema: { type: "object", additionalProperties: true },
+			},
+		},
+	};
+	const path = (
+		operationId: string,
+		method: "get" | "post" | "patch",
+		requestBody = false,
+	) => ({
+		[method]: {
+			operationId,
+			...(requestBody ? { requestBody: body } : {}),
+			responses: typedApiResponses(),
+		},
+	});
+	return {
+		"/api/v1/tracker/tickets": {
+			get: path("trackerListTickets", "get").get,
+			post: path("trackerCreateTicket", "post", true).post,
+		},
+		"/api/v1/tracker/tickets/search": {
+			get: path("trackerSearchTickets", "get").get,
+		},
+		"/api/v1/tracker/tickets/{id}": {
+			get: path("trackerGetTicket", "get").get,
+			patch: path("trackerUpdateTicket", "patch", true).patch,
+		},
+		"/api/v1/tracker/tickets/{id}/transition": {
+			post: path("trackerTransitionTicket", "post", true).post,
+		},
+		"/api/v1/tracker/tickets/{id}/close": {
+			post: path("trackerExceptionalClose", "post", true).post,
+		},
+		"/api/v1/tracker/tickets/{id}/comments": {
+			post: path("trackerAddComment", "post", true).post,
+		},
+		"/api/v1/tracker/tickets/{id}/comments/{commentId}": {
+			patch: path("trackerUpdateComment", "patch", true).patch,
+		},
+		"/api/v1/tracker/tickets/{id}/comments/{commentId}/reply": {
+			post: path("trackerReplyComment", "post", true).post,
+		},
+		"/api/v1/tracker/streams": {
+			get: path("trackerListStreams", "get").get,
+			post: path("trackerUpsertStream", "post", true).post,
+		},
+		"/api/v1/delivery/envelopes": {
+			post: path("deliveryEnqueue", "post", true).post,
+		},
+		"/api/v1/delivery/claims": {
+			post: path("deliveryClaim", "post", true).post,
+		},
+		"/api/v1/delivery/claims/{token}/prepare": {
+			post: path("deliveryPrepare", "post").post,
+		},
+		"/api/v1/delivery/claims/{token}/ack": {
+			post: path("deliveryAcknowledge", "post", true).post,
+		},
+		"/api/v1/delivery/claims/{token}/delivered": {
+			post: path("deliveryDelivered", "post").post,
+		},
+		"/api/v1/delivery/claims/{token}/fail": {
+			post: path("deliveryFail", "post", true).post,
+		},
+		"/api/v1/bus/events": {
+			get: path("busList", "get").get,
+			post: path("busAppend", "post", true).post,
+		},
+		"/api/v1/subscriptions": {
+			get: path("subscriptionsList", "get").get,
+			post: path("subscriptionsCreate", "post", true).post,
+		},
+		"/api/v1/subscriptions/unsubscribe": {
+			post: path("subscriptionsUnsubscribe", "post", true).post,
+		},
+		"/api/v1/subscriptions/{id}/pending": {
+			get: path("subscriptionsPending", "get").get,
+		},
+		"/api/v1/subscriptions/{id}/commit": {
+			post: path("subscriptionsCommit", "post", true).post,
+		},
+	};
+}
+
 export function controlPlaneOpenApiDocument(): JsonRecord {
 	return {
 		openapi: "3.1.1",
 		info: { title: "Golem control plane", version: "v1" },
 		paths: {
+			...typedApiPaths(),
 			"/api/v1/management/roles": {
 				get: {
 					operationId: "managementListRoles",

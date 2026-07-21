@@ -52,6 +52,7 @@ export {
 export type { ServiceLockStatus } from "./service-lock.js";
 export { serviceLockStatus } from "./service-lock.js";
 export {
+	composeControlPlaneEndpointEligibility,
 	composeControlPlaneManagementServices,
 	composeControlPlaneTrackerCoreServices,
 	composeControlPlaneTrackerServices,

@@ -33,6 +33,22 @@ export async function invokeMcpTool(
 	if (!definition) return error(name, "mcp.tool.unknown");
 	const parsed = definition.schema.safeParse(input);
 	if (!parsed.success) return error(name, "mcp.input.invalid");
+	const caller = client.caller;
+	if (
+		(name.startsWith("ticket_") &&
+			(!caller.projectId ||
+				(((name === "ticket_list" && parsed.data.mine === true) ||
+					name === "ticket_create" ||
+					name === "ticket_update" ||
+					name === "ticket_transition" ||
+					name.startsWith("ticket_comment") ||
+					name === "subscribe" ||
+					name === "unsubscribe") &&
+					!caller.sessionId))) ||
+		((name === "subscribe" || name === "unsubscribe") &&
+			(!caller.sessionId || !caller.projectId))
+	)
+		return error(name, "mcp.caller.required");
 	try {
 		const request = definition.request({
 			...parsed.data,
