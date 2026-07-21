@@ -39,6 +39,19 @@ export interface ControlPlaneProjectionPort {
 	revision(stream: ControlPlaneStream): number;
 }
 
+/** Typed runtime read model port; no persistence handle or tracker mutation. */
+export interface RuntimeProjectionPort {
+	query(
+		stream: "runtime.live" | "runtime.history" | "runtime.diagnostics",
+		query?: Readonly<{
+			projectId?: string;
+			cursor?: number;
+			limit?: number;
+			state?: string;
+		}>,
+	): Record<string, unknown>;
+}
+
 export interface ControlPlaneReplayEntry {
 	readonly sequence: number;
 	readonly resourceRevision: number;

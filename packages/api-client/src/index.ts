@@ -96,6 +96,49 @@ export function createControlPlaneClient(options: ControlPlaneClientOptions) {
 	});
 }
 
+/** Explicit typed runtime read-model client; transport remains OpenAPI-backed. */
+export function createRuntimeProjectionClient(
+	options: ControlPlaneClientOptions,
+) {
+	const client = createControlPlaneClient(options);
+	return Object.freeze({
+		live(query?: {
+			readonly project_id?: string;
+			readonly cursor?: number;
+			readonly limit?: number;
+			readonly state?: string;
+		}) {
+			return client.GET("/api/v1/runtime/{stream}", {
+				params: {
+					path: { stream: "live" },
+					...(query === undefined ? {} : { query }),
+				},
+			});
+		},
+		history(query?: {
+			readonly project_id?: string;
+			readonly cursor?: number;
+			readonly limit?: number;
+			readonly state?: string;
+		}) {
+			return client.GET("/api/v1/runtime/{stream}", {
+				params: {
+					path: { stream: "history" },
+					...(query === undefined ? {} : { query }),
+				},
+			});
+		},
+		diagnostics(query?: { readonly cursor?: number; readonly limit?: number }) {
+			return client.GET("/api/v1/runtime/{stream}", {
+				params: {
+					path: { stream: "diagnostics" },
+					...(query === undefined ? {} : { query }),
+				},
+			});
+		},
+	});
+}
+
 export type ControlPlaneStream = WebSocketFrameV1["stream"];
 export type ControlPlaneProjection = Extract<
 	WebSocketFrameV1["payload"],
@@ -166,6 +209,28 @@ export function createBrowserControlPlaneClient(
 				params: { path: { stream } },
 			});
 			return requireData(result.data, result.response, "projection fetch");
+		},
+		async runtimeProjection(
+			stream: "live" | "history" | "diagnostics",
+			query?: {
+				readonly project_id?: string;
+				readonly cursor?: number;
+				readonly limit?: number;
+				readonly state?: string;
+			},
+		) {
+			const result = await client.GET("/api/v1/runtime/{stream}", {
+				headers: browserHeaders(),
+				params: {
+					path: { stream },
+					...(query === undefined ? {} : { query }),
+				},
+			});
+			return requireData(
+				result.data,
+				result.response,
+				"runtime projection fetch",
+			);
 		},
 		async echo(value: string) {
 			if (!csrfToken)

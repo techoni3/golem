@@ -15,6 +15,7 @@ import type {
 	ControlPlaneReplayPort,
 	RuntimeHealthPort,
 	RuntimeIngressPort,
+	RuntimeProjectionPort,
 } from "./ports.js";
 import {
 	ApiErrorResponseJsonSchema,
@@ -29,6 +30,8 @@ import {
 	ProjectionResponseSchema,
 	RuntimeIngestReceiptSchema,
 	RuntimeIngestRequestSchema,
+	RuntimeProjectionQuerySchema,
+	RuntimeProjectionResponseSchema,
 } from "./schemas.js";
 
 function jsonSchema(value: z.ZodType): Record<string, unknown> {
@@ -76,6 +79,7 @@ export function registerValidatedRoutes(options: {
 	readonly token: string;
 	readonly instanceId: string;
 	readonly projection: ControlPlaneProjectionPort;
+	readonly runtimeProjection?: RuntimeProjectionPort;
 	readonly replay: ControlPlaneReplayPort;
 	readonly legacy: LegacyCompatibilityPublisher;
 	readonly sessions: BrowserSessionAuthority;
@@ -91,6 +95,92 @@ export function registerValidatedRoutes(options: {
 		500: ApiErrorResponseJsonSchema,
 		503: ApiErrorResponseJsonSchema,
 	};
+
+	options.app.get(
+		"/api/v1/runtime/:stream",
+		{
+			schema: {
+				params: jsonSchema(
+					z.object({
+						stream: z.enum(["live", "history", "diagnostics"]),
+					}),
+				),
+				querystring: jsonSchema(RuntimeProjectionQuerySchema),
+				response: {
+					200: jsonSchema(RuntimeProjectionResponseSchema),
+					...responseSchemas,
+				},
+			},
+		},
+		async (request, reply) => {
+			if (!requireBrowserRead(request, reply, options.token, options.sessions))
+				return;
+			if (!options.runtimeProjection)
+				return fail(
+					request,
+					reply,
+					503,
+					"runtime.projection_unavailable",
+					"runtime projections are not composed",
+				);
+			const params = request.params as { readonly stream?: string };
+			const runtimeStream =
+				params.stream === "live"
+					? "runtime.live"
+					: params.stream === "history"
+						? "runtime.history"
+						: params.stream === "diagnostics"
+							? "runtime.diagnostics"
+							: undefined;
+			if (!runtimeStream)
+				return fail(
+					request,
+					reply,
+					400,
+					"request.invalid",
+					"runtime projection stream is invalid",
+				);
+			const queryResult = RuntimeProjectionQuerySchema.safeParse(request.query);
+			if (!queryResult.success)
+				return fail(
+					request,
+					reply,
+					400,
+					"request.invalid",
+					"runtime projection query is invalid",
+				);
+			try {
+				const payload = options.runtimeProjection.query(runtimeStream, {
+					...(queryResult.data.project_id
+						? { projectId: queryResult.data.project_id }
+						: {}),
+					...(queryResult.data.cursor === undefined
+						? {}
+						: { cursor: queryResult.data.cursor }),
+					...(queryResult.data.limit === undefined
+						? {}
+						: { limit: queryResult.data.limit }),
+					...(queryResult.data.state ? { state: queryResult.data.state } : {}),
+				});
+				return sendValidated(
+					request,
+					reply,
+					RuntimeProjectionResponseSchema,
+					payload,
+				);
+			} catch (error) {
+				return fail(
+					request,
+					reply,
+					400,
+					"request.invalid",
+					error instanceof Error
+						? error.message
+						: "runtime projection query is invalid",
+				);
+			}
+		},
+	);
 
 	options.app.get(
 		"/api/v1/health/live",

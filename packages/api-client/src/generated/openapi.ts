@@ -228,6 +228,22 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/runtime/{stream}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["runtimeProjection"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/health/live": {
         readonly parameters: {
             readonly query?: never;
@@ -2751,6 +2767,108 @@ export interface operations {
                 };
             };
             /** @description runtime ingress unavailable */
+            readonly 503: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    readonly runtimeProjection: {
+        readonly parameters: {
+            readonly query?: {
+                readonly project_id?: string;
+                readonly cursor?: number;
+                readonly limit?: number;
+            };
+            readonly header?: never;
+            readonly path: {
+                readonly stream: "live" | "history" | "diagnostics";
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description runtime projection */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.runtime-projection/v1";
+                        /** @enum {string} */
+                        readonly stream: "runtime.live" | "runtime.history" | "runtime.diagnostics";
+                        readonly resource_revision: number;
+                        readonly cursor: number;
+                        readonly next_cursor?: number;
+                        /** Format: date-time */
+                        readonly generated_at: string;
+                        readonly items: readonly {
+                            readonly [key: string]: unknown;
+                        }[];
+                        readonly explain: {
+                            readonly [key: string]: unknown;
+                        };
+                        readonly observation: {
+                            readonly [key: string]: unknown;
+                        };
+                        readonly drift: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description invalid projection query */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description unauthorized */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.api-error/v1";
+                        readonly code: string;
+                        readonly message: string;
+                        readonly correlation_id: string;
+                        readonly details?: {
+                            readonly [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description runtime projection unavailable */
             readonly 503: {
                 headers: {
                     readonly [name: string]: unknown;

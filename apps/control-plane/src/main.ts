@@ -2,6 +2,7 @@ import path from "node:path";
 
 import {
 	createRuntimeMaterializer,
+	createRuntimeProjectionService,
 	RuntimeEngineScheduler,
 	RuntimeOutboxDrainer,
 } from "@golem/runtime";
@@ -92,6 +93,24 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 		tickets: trackerCore.tickets,
 	});
 	const runtime = createRuntimeMaterializer({ home: golemHome, writer: owner });
+	const runtimeProjection = createRuntimeProjectionService({
+		storage: owner.runtimeProjectionStorage(),
+		clock,
+	});
+	const controlProjection = {
+		read: (stream: string) =>
+			stream === "runtime.live" ||
+			stream === "runtime.history" ||
+			stream === "runtime.diagnostics"
+				? runtimeProjection.read(stream)
+				: {},
+		revision: (stream: string) =>
+			stream === "runtime.live" ||
+			stream === "runtime.history" ||
+			stream === "runtime.diagnostics"
+				? runtimeProjection.revision(stream)
+				: 0,
+	};
 	const outbox = new RuntimeOutboxDrainer({
 		writer: owner,
 		workerId: `control-plane-${process.pid}`,
@@ -133,6 +152,8 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 			),
 			runtimeIngress: runtime.inbox,
 			runtimeHealth: scheduler,
+			projection: controlProjection,
+			runtimeProjection,
 			management,
 			...(replayWindowSize ? { replayWindowSize } : {}),
 			...testProjection,

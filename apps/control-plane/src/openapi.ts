@@ -10,6 +10,7 @@ import {
 	ProjectionResponseSchema,
 	RuntimeIngestReceiptSchema,
 	RuntimeIngestRequestSchema,
+	RuntimeProjectionResponseSchema,
 } from "./schemas.js";
 
 type JsonRecord = Record<string, unknown>;
@@ -381,6 +382,58 @@ export function controlPlaneOpenApiDocument(): JsonRecord {
 						},
 						"503": {
 							description: "runtime ingress unavailable",
+							content: { "application/json": { schema: error } },
+						},
+					},
+				},
+			},
+			"/api/v1/runtime/{stream}": {
+				get: {
+					operationId: "runtimeProjection",
+					parameters: [
+						{
+							name: "stream",
+							in: "path",
+							required: true,
+							schema: {
+								type: "string",
+								enum: ["live", "history", "diagnostics"],
+							},
+						},
+						{
+							name: "project_id",
+							in: "query",
+							required: false,
+							schema: { type: "string", maxLength: 256 },
+						},
+						{
+							name: "cursor",
+							in: "query",
+							required: false,
+							schema: { type: "integer", minimum: 0, maximum: 1_000_000 },
+						},
+						{
+							name: "limit",
+							in: "query",
+							required: false,
+							schema: { type: "integer", minimum: 1, maximum: 100 },
+						},
+					],
+					responses: {
+						"200": response(
+							"runtime projection",
+							RuntimeProjectionResponseSchema,
+						),
+						"401": {
+							description: "unauthorized",
+							content: { "application/json": { schema: error } },
+						},
+						"400": {
+							description: "invalid projection query",
+							content: { "application/json": { schema: error } },
+						},
+						"503": {
+							description: "runtime projection unavailable",
 							content: { "application/json": { schema: error } },
 						},
 					},
