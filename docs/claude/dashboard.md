@@ -52,8 +52,10 @@ to `opencode debug config` when the binary is available.
 ## Tracker Comment Dispatch
 
 Tracker schema version 7 adds per-comment dispatch state for spec review loops.
-`dashboard/server/tracker-db.js` owns the migration and exposes the fields through
-the existing ticket payloads; comments now carry `dispatch_state` with the loose
+The canonical managed SQLite baseline creates the relation through
+`packages/persistence` migration `tracker/005-comment-dispatches`; the dashboard
+compatibility opener preserves the same relation and exposes the fields through
+the existing ticket payloads. Comments carry `dispatch_state` with the loose
 convention `undispatched`, `dispatched`, `addressed`, or `n/a`.
 
 Dispatch attempt history lives in `comment_dispatches`, one row per comment and

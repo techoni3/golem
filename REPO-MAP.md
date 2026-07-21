@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-07-21 @ 54030ef — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-21 @ b44227c — maintained via golem:docs-maintenance.
 
 ## Structure
 
@@ -11,14 +11,14 @@
 
 - Canonical flow is contracts → domain/runtime/tracker → control plane → generated client → clients; it excludes compat/storage/UI/harness imports.
 - One npm11 lock; `packages/persistence` is the sole SQLite writer. Producers spool; its owner recovers/quarantines/replays.
-- Tracker owns durable delivery and typed work-item/phase/comment/link/stream services; exceptional close is server-composed.
+- Tracker owns durable delivery and typed work-item/phase/comment/link/stream services; managed migrations own phase-evidence relations such as comment dispatches; exceptional close is server-composed.
 - Launcher owns fail-closed writes and immutable LaunchPlan facts; CLI consumes them for picker/presets.
 - Control plane owns REST/WS; bearer is CLI/MCP-only and browser reads are same-origin/CSRF-protected.
 - Project identity is canonical Git paths; sessions have immutable generations, scoped aliases, provenance, terminal monotonicity, and deterministic effects.
 - The rendered Codex `SessionStart` hook additively upserts `projects.json` (`kind:"auto"`, `registered_by:"hook"`) and a matching `sessions.json` row from the resolved contract root; repeat registration refreshes timestamps only and preserves a manual name/kind. Non-SessionStart Codex events retain `lib/session-facts.js` writes and do not register rows. The hook is fail-open; the generated render is the contract source.
 - Projections read canonical rows only; diagnostics are redacted/bounded.
 - Endpoint claims are generation/route scoped: fences gate heartbeat, readiness, capability, delivery, and release; registration alone never qualifies delivery. Typed mutators require caller project/session/actor headers.
-- Managed Codex is OpenAI/GPT-only and persists ingress through Tracker; delivery is ready only after its serialized consumer loop starts, so duplicate envelopes cannot start duplicate App Server turns. Pi is pull/next-turn only; unbound legacy rows are diagnostic. Migration audits an exact plan hash under a home lock and snapshots source + canonical state before mutating.
+- Managed Codex is OpenAI/GPT-only; serialized consumption gates delivery readiness and prevents duplicate turns. Pi is pull/next-turn only; migrations audit an exact plan hash under a home lock before mutation.
 
 ## Checks and gotchas
 

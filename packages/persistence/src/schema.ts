@@ -5,7 +5,7 @@ import type { DatabaseScope, MigrationDefinition } from "./types.js";
 
 export const busyTimeoutMs = 2_500;
 export const latestRuntimeVersion = 1;
-export const latestTrackerVersion = 4;
+export const latestTrackerVersion = 5;
 
 function migrationChecksum(value: string): string {
 	return crypto.createHash("sha256").update(value).digest("hex");
@@ -615,6 +615,26 @@ CREATE INDEX management_gates_project_status ON management_gates(project_id, sta
 CREATE INDEX management_ideas_project_status ON management_ideas(project_id, status, created_at);
 CREATE INDEX management_operations_project_created ON management_operations(project_id, created_at);
 CREATE INDEX management_audit_project_created ON management_audit(project_id, created_at);
+`,
+		),
+	migration(
+		"tracker/005-comment-dispatches",
+		`
+CREATE TABLE IF NOT EXISTS comment_dispatches (
+  id TEXT PRIMARY KEY,
+  comment_id TEXT NOT NULL REFERENCES comments(id) ON DELETE CASCADE,
+  ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  batch_id TEXT,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'delivered', 'addressed', 'cancelled')),
+  created_at TEXT NOT NULL,
+  delivered_at TEXT,
+  addressed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_comment_dispatches_comment ON comment_dispatches(comment_id);
+CREATE INDEX IF NOT EXISTS idx_comment_dispatches_ticket_session_status ON comment_dispatches(ticket_id, session_id, status);
+CREATE INDEX IF NOT EXISTS idx_comment_dispatches_pending ON comment_dispatches(status) WHERE status IN ('pending', 'delivered');
 `,
 	),
 ];

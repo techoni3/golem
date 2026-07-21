@@ -758,6 +758,11 @@ export async function exerciseTrackerCoreCompatibility() {
 	}
 }
 
+export async function exerciseTrackerFreshDbTransition() {
+	await exerciseTrackerCoreCompatibility();
+	return "fresh managed SQLite migrates comment_dispatches, then canonical tracker create/update/transition and representative existing-schema dry-run/apply/restart/reapply complete through the compiled owner";
+}
+
 function runManagementJourney(name) {
 	const result = spawnSync(process.execPath, ["--test", "--test-concurrency=1", "--test-name-pattern", name, managementJourney], { cwd: repositoryRoot, encoding: "utf8", env: process.env });
 	if (result.status !== 0) throw new Error(`management journey failed: ${result.stdout}\n${result.stderr}`);
@@ -970,6 +975,7 @@ export const exercises = Object.freeze({
 	"bus-offline-replay": exerciseBusOfflineReplay,
 	"ws-gap-resync": exerciseWsGapResync,
 	"tracker-core-compatibility": exerciseTrackerCoreCompatibility,
+	"tracker-fresh-db-transition": exerciseTrackerFreshDbTransition,
 	"tracker-http-mcp-parity": exerciseTrackerHttpMcpParity,
 	"delivery-api-fence-recheck": exerciseDeliveryApiFenceRecheck,
 	"pi-next-turn-crash-replay": exercisePiNextTurnCrashReplay,

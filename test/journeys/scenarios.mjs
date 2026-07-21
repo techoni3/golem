@@ -213,6 +213,12 @@ export const scenarios = [
 			"a tracker core extraction loses display ids, phase artifacts, transactional audit/outbox, or MCP-compatible ticket/comment/link/stream semantics",
 	}),
 	registerScenario({
+		id: "tracker-fresh-db-transition",
+		journey: "J4",
+		tier: "pr",
+		regression: "a managed fresh or upgraded tracker schema omits canonical comment dispatch evidence and makes a normal create/update/transition transaction fail after the service has committed other work",
+	}),
+	registerScenario({
 		id: "tracker-http-mcp-parity",
 		journey: "J4",
 		tier: "integration",
