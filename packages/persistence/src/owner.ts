@@ -19,6 +19,7 @@ import {
 import { TrackerManagementRepository } from "./management-repository.js";
 import { applyPlan, dryRunPlan, planFor } from "./migrations.js";
 import { RuntimeRepository } from "./repositories.js";
+import { RuntimeProjectionRepository } from "./runtime-projection-repository.js";
 import {
 	configure,
 	hasManagedTrackerSchema,
@@ -42,6 +43,7 @@ import {
 	type RuntimeEndpointStorage,
 	type RuntimeMaterializationInput,
 	type RuntimeMaterializationResult,
+	type RuntimeProjectionStorage,
 	type RuntimeProjectStorage,
 	type RuntimeSessionStorage,
 	type RuntimeTransactionInput,
@@ -80,6 +82,7 @@ class PersistenceOwner implements PersistenceWriteCapability {
 	readonly #runtimeSql: Kysely<RuntimeTables>;
 	readonly #trackerSql: Kysely<TrackerTables>;
 	readonly #runtimeRepository: RuntimeRepository;
+	readonly #runtimeProjectionRepository: RuntimeProjectionRepository;
 	readonly #trackerRepository: TrackerRepository;
 	readonly #trackerCoreRepository: TrackerCoreRepository;
 	readonly #managementRepository: TrackerManagementRepository;
@@ -141,6 +144,12 @@ class PersistenceOwner implements PersistenceWriteCapability {
 			}
 			this.#runtimeRepository = new RuntimeRepository(runtime, this.#clock);
 			this.#trackerRepository = new TrackerRepository(tracker);
+			this.#runtimeProjectionRepository = new RuntimeProjectionRepository(
+				runtime,
+				this.#runtimeRepository.runtimeProjectStorage(),
+				this.#runtimeRepository.runtimeSessionStorage(),
+				this.#runtimeRepository.runtimeEndpointStorage(),
+			);
 			this.#trackerCoreRepository = new TrackerCoreRepository(
 				this.#trackerSql,
 				tracker,
@@ -249,6 +258,10 @@ class PersistenceOwner implements PersistenceWriteCapability {
 
 	runtimeEndpointStorage(): RuntimeEndpointStorage {
 		return this.#runtimeRepository.runtimeEndpointStorage();
+	}
+
+	runtimeProjectionStorage(): RuntimeProjectionStorage {
+		return this.#runtimeProjectionRepository;
 	}
 
 	trackerStorage(): TrackerStorageCapability {

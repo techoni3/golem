@@ -272,6 +272,51 @@ export interface RuntimeEndpointStorage {
 	list(generationId: string): readonly RuntimeEndpointView[];
 }
 
+/**
+ * Read-only runtime projection facts.  The owner keeps the SQLite connection
+ * private; runtime/control-plane consumers receive bounded typed rows only.
+ */
+export interface RuntimeEventRecord {
+	readonly eventId: string;
+	readonly eventKind: string;
+	readonly payload: TrackerJsonObject;
+	readonly provenance: TrackerJsonObject;
+	readonly sourceObservedAt: string;
+	readonly receivedAt: string;
+	readonly materializedAt: string;
+	readonly disposition:
+		| "accepted"
+		| "duplicate"
+		| "stale"
+		| "illegal"
+		| "quarantined";
+}
+
+export interface RuntimeDiagnosticRecord {
+	readonly id: string;
+	readonly code: string;
+	readonly details: TrackerJsonObject;
+	readonly createdAt: string;
+}
+
+export interface RuntimeWatermarkRecord {
+	readonly producerId: string;
+	readonly watermark: string;
+	readonly sourceObservedAt: string;
+	readonly receivedAt: string;
+	readonly materializedAt: string;
+}
+
+export interface RuntimeProjectionStorage {
+	projects(): readonly RuntimeProjectView[];
+	sessions(projectId?: string): readonly RuntimeSessionView[];
+	endpoints(generationId?: string): readonly RuntimeEndpointView[];
+	events(): readonly RuntimeEventRecord[];
+	diagnostics(): readonly RuntimeDiagnosticRecord[];
+	watermarks(): readonly RuntimeWatermarkRecord[];
+	revision(): number;
+}
+
 /** Closed runtime-v1 recovery/control vocabularies mirrored by SQL CHECKs. */
 export type CommandStatus =
 	| "accepted"
@@ -1249,6 +1294,8 @@ export interface PersistenceWriteCapability {
 	runtimeSessionStorage(): RuntimeSessionStorage;
 	/** Typed endpoint fencing/readiness capability owned by the runtime DB owner. */
 	runtimeEndpointStorage(): RuntimeEndpointStorage;
+	/** Read-only runtime projection facts; no SQLite handle crosses the owner. */
+	runtimeProjectionStorage(): RuntimeProjectionStorage;
 	/** Typed tracker store; no raw connection leaves the single owner. */
 	trackerStorage(): TrackerStorageCapability;
 	/** Typed work-item/phase repository capability for @golem/tracker only. */

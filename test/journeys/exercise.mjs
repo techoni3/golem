@@ -50,6 +50,7 @@ const projectConcurrencyJourney = path.join(repositoryRoot, "test/projects/proje
 const controlPlaneProgram = path.join(repositoryRoot, "apps/control-plane/dist/main.js");
 const trackerCoreJourney = path.join(repositoryRoot, "test/tracker/tracker-core.test.mjs");
 const managementJourney = path.join(repositoryRoot, "test/management/management-services.test.mjs");
+const runtimeProjectionJourney = path.join(repositoryRoot, "test/runtime/runtime-projections.test.mjs");
 const chromeExecutable = process.env.GOLEM_CHROME_EXECUTABLE || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
 class JourneyDiagnosticError extends Error {
@@ -403,6 +404,35 @@ function runDeliveryBusJourney(testNamePattern) {
 	} finally {
 		cleanupHome(home);
 	}
+}
+
+function runRuntimeProjectionJourney(testNamePattern) {
+	const home = createTemporaryHome("golem-j2-runtime-projection-runner-");
+	try {
+		const result = spawnSync(
+			process.execPath,
+			["--test", "--test-concurrency=1", "--test-name-pattern", testNamePattern, runtimeProjectionJourney],
+			{ cwd: repositoryRoot, encoding: "utf8", env: home.env },
+		);
+		if (result.status !== 0)
+			throw new JourneyDiagnosticError(
+				`runtime projection journey exited ${result.status}; stdout=${result.stdout}; stderr=${result.stderr}`,
+				home.root,
+				[home.token],
+			);
+	} finally {
+		cleanupHome(home);
+	}
+}
+
+export async function exerciseRuntimeProjectionLiveHistoryDiagnostics() {
+	runRuntimeProjectionJourney("GOL-46 live/history/diagnostics");
+	return "real runtime.db live/history/diagnostic read models, endpoint facts, redaction, observation separation, pagination, and restart stability verified";
+}
+
+export async function exerciseRuntimeProjectionWsRestartResync() {
+	runRuntimeProjectionJourney("GOL-46 authenticated WS");
+	return "real authenticated runtime.live WebSocket snapshot/delta, monotonic cursor, and service-restart instance resync verified";
 }
 
 export async function exerciseDashboardDownInboxReplay() {
@@ -867,4 +897,6 @@ export const exercises = Object.freeze({
 	"control-plane-auth-ws-lifecycle": exerciseControlPlaneShell,
 	"roles-gates-ideas-controls": exerciseRolesGatesIdeasControls,
 	"ticket-assets-security": exerciseTicketAssetsSecurity,
+	"live-history-diagnostics": exerciseRuntimeProjectionLiveHistoryDiagnostics,
+	"projection-ws-restart-resync": exerciseRuntimeProjectionWsRestartResync,
 });

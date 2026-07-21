@@ -12,3 +12,10 @@ The selected checks deliberately cross process, SQLite, HTTP, WebSocket, native 
 GOL-36 keeps tracker extraction proof in two distinct J4 SQLite/process selectors without a fixture farm. `delivery-queue-crash-matrix` covers claim authority, semantic idempotency, retry/deadline/dead-letter, crash/reclaim, and redacted audit. `bus-offline-replay` covers immutable event dedupe, offline-to-active ordered cursor replay, passive lease updates, and dependency-aware retention. Neither needs a listener or credentials.
 
 `UNMET` is an explicit environment gate, not a pass. In particular, a sandbox that rejects `127.0.0.1` listeners with `EPERM` is reported separately from a product regression. `PASS` means the boundary actually completed; `FAIL` preserves a redacted diagnostic and a non-zero exit. The runner is serial by design so it owns no shared port, profile, user home, or process cleanup state.
+
+GOL-46 keeps its projection evidence compact: `test/runtime/runtime-projections.test.mjs`
+uses real runtime SQLite rows and two foreground Fastify instances to prove the
+live/history/diagnostic HTTP contract and authenticated WebSocket snapshot,
+delta, cursor, and restart-resync behavior. The two journey selectors are
+`live-history-diagnostics` and `projection-ws-restart-resync`; no projection
+unit or mock fan-out is allowed.

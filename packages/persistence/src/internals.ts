@@ -136,6 +136,30 @@ export interface RuntimeTables {
 		readonly materialized_at: string;
 		readonly ended_at: string | null;
 	};
+	readonly session_projection: {
+		readonly project_id: string;
+		readonly session_id: string;
+		readonly revision: number;
+		readonly metadata_json: string;
+		readonly field_provenance_json: string;
+		readonly role_json: string | null;
+		readonly actor_activity_at: string | null;
+		readonly observed_at: string | null;
+		readonly updated_at: string;
+	};
+	readonly generation_projection: {
+		readonly project_id: string;
+		readonly session_id: string;
+		readonly generation_id: string;
+		readonly revision: number;
+		readonly metadata_json: string;
+		readonly field_provenance_json: string;
+		readonly parent_generation_id: string | null;
+		readonly continuation: string | null;
+		readonly actor_activity_at: string | null;
+		readonly observed_at: string | null;
+		readonly updated_at: string;
+	};
 	readonly session_aliases: {
 		readonly project_id: string;
 		readonly harness: Harness;

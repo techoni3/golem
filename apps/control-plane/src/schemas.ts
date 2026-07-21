@@ -96,6 +96,32 @@ export const ProjectionResponseSchema = z
 	})
 	.strict();
 
+export const RuntimeProjectionQuerySchema = z
+	.object({
+		project_id: z.string().min(1).max(256).optional(),
+		cursor: z.coerce.number().int().nonnegative().max(1_000_000).optional(),
+		limit: z.coerce.number().int().min(1).max(100).optional(),
+		state: z.string().min(1).max(32).optional(),
+	})
+	.strict();
+
+const RuntimeProjectionItemSchema = z.record(z.string(), z.unknown());
+
+export const RuntimeProjectionResponseSchema = z
+	.object({
+		schema_version: z.literal("golem.runtime-projection/v1"),
+		stream: z.enum(["runtime.live", "runtime.history", "runtime.diagnostics"]),
+		resource_revision: z.number().int().nonnegative(),
+		cursor: z.number().int().nonnegative(),
+		next_cursor: z.number().int().nonnegative().optional(),
+		generated_at: z.iso.datetime({ offset: true }),
+		items: z.array(RuntimeProjectionItemSchema).max(100),
+		explain: z.record(z.string(), z.unknown()),
+		observation: z.record(z.string(), z.unknown()),
+		drift: z.record(z.string(), z.unknown()),
+	})
+	.strict();
+
 export const BrowserSessionResponseSchema = z
 	.object({
 		schema_version: z.literal("golem.control-plane-browser-session/v1"),

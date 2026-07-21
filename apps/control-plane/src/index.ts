@@ -37,6 +37,7 @@ export type {
 	ControlPlaneReplayEntry,
 	ControlPlaneReplayPort,
 	ControlPlaneReplayResult,
+	RuntimeProjectionPort,
 } from "./ports.js";
 export { composeControlPlaneProjectService } from "./projects.js";
 export type {

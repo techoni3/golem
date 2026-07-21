@@ -23,6 +23,7 @@ import type {
 	ControlPlaneReplayPort,
 	RuntimeHealthPort,
 	RuntimeIngressPort,
+	RuntimeProjectionPort,
 } from "./ports.js";
 import { registerValidatedRoutes } from "./routes.js";
 import type { ControlPlaneStream } from "./schemas.js";
@@ -40,6 +41,7 @@ export interface ControlPlaneLifecycleOptions {
 	readonly host?: "127.0.0.1";
 	readonly port?: number;
 	readonly projection?: ControlPlaneProjectionPort;
+	readonly runtimeProjection?: RuntimeProjectionPort;
 	readonly replay?: ControlPlaneReplayPort;
 	readonly legacyCompatibility?: LegacyCompatibilityPort;
 	/** Optional until the Wave-5 runtime composition becomes the service main. */
@@ -123,6 +125,9 @@ export async function startControlPlane(
 			token: options.token,
 			instanceId,
 			projection,
+			...(options.runtimeProjection
+				? { runtimeProjection: options.runtimeProjection }
+				: {}),
 			replay,
 			legacy: legacyCompatibility,
 			sessions,

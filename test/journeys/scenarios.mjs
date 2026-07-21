@@ -38,6 +38,18 @@ export const scenarios = [
 		regression: "health, readiness, capability qualification, or delivery eligibility can drift from canonical endpoint facts",
 	}),
 	registerScenario({
+		id: "live-history-diagnostics",
+		journey: "J2",
+		tier: "integration",
+		regression: "canonical runtime live/history/diagnostic projections lose lifecycle, endpoint, observation, redaction, or restart facts",
+	}),
+	registerScenario({
+		id: "projection-ws-restart-resync",
+		journey: "J6",
+		tier: "integration",
+		regression: "authenticated runtime projection WebSocket snapshots, deltas, cursors, or restart resync diverge from the HTTP read model",
+	}),
+	registerScenario({
 		id: "cli-command-parity",
 		journey: "J5",
 		tier: "pr",

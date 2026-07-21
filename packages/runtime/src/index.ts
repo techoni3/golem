@@ -35,6 +35,16 @@ export {
 	RuntimeOutboxDrainer,
 	type RuntimeOutboxDrainResult,
 } from "./outbox.js";
+export {
+	createRuntimeProjectionService,
+	type RuntimeLegacyDriftPort,
+	type RuntimeProjectionClock,
+	type RuntimeProjectionPage,
+	type RuntimeProjectionPort,
+	type RuntimeProjectionQuery,
+	RuntimeProjectionService,
+	type RuntimeProjectionStream,
+} from "./projections.js";
 export type {
 	ProjectDiscoveryEvidence,
 	ProjectRegisterInput,
