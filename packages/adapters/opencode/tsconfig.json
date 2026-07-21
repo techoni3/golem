@@ -1,6 +1,14 @@
 {
 	"extends": "../../../tsconfig.package.json",
-	"compilerOptions": { "outDir": "./dist", "rootDir": "./src" },
-	"references": [{ "path": "../../adapter-sdk" }],
+	"compilerOptions": {
+		"outDir": "./dist",
+		"rootDir": "./src",
+		"types": ["node"]
+	},
+	"references": [
+		{ "path": "../../adapter-sdk" },
+		{ "path": "../../contracts" },
+		{ "path": "../../launcher" }
+	],
 	"include": ["src/**/*.ts"]
 }

@@ -9,7 +9,13 @@
 			"import": "./dist/index.js"
 		}
 	},
+	"scripts": {
+		"build": "npm run build -w @golem/launcher && tsc -b",
+		"test": "node --test test/adapter/opencode.test.mjs"
+	},
 	"dependencies": {
-		"@golem/adapter-sdk": "file:../../adapter-sdk"
+		"@golem/adapter-sdk": "file:../../adapter-sdk",
+		"@golem/contracts": "file:../../contracts",
+		"@golem/launcher": "file:../../launcher"
 	}
 }

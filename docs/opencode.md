@@ -1,5 +1,22 @@
 # opencode harness (P4, TKT-0576)
 
+## Typed adapter boundary (Wave 10)
+
+`packages/adapters/opencode` is the typed integration edge used by the
+provider/coexistence journeys. It normalizes OpenCode lifecycle, activity, and
+model events into the canonical runtime signal contract and keeps child
+sessions out of dispatchability. The SDK bridge accepts an addressed prompt
+only after the canonical generation, endpoint fence, and eligibility facts are
+rechecked; a rejected or stale fence is reported before `promptAsync`.
+
+Provider setup is a separate operation. It computes a redacted dry-run and
+only an explicit apply writes the marked `provider.golem` JSONC region through
+backup → temporary → atomic commit. Unknown providers, keys, and comments are
+not owned by the adapter. OpenAI/GPT, Ollama cloud, and Ollama local are
+independent capability entries: a missing local daemon does not suppress the
+other two, and launchability never follows from delivery readiness. Launch
+does not run `ollama launch opencode` or mutate user configuration.
+
 golem's substrate compiler renders to more than one agentic harness. Alongside
 the Claude Code adapter (`--target cc`), there is an **opencode** adapter
 (`--target opencode`). It is **additive and off by default** — a fresh install
