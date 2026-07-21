@@ -81,30 +81,31 @@ test("GOL-47 Claude hooks produce canonical lifecycle/activity signals", async (
 	assert.equal(JSON.stringify(seen).includes("claude-secret"), false);
 	assert.equal(JSON.stringify(seen).includes("do-not-log"), false);
 	assert.equal(JSON.stringify(seen).includes("prompt"), true, "only the activity kind is retained");
-	const hostileSecret = "ghp-abcdef1234567890";
-	const hostile = parseClaudeHook(
-		{
-			hook_event_name: "SessionStart",
-			session_id: sessionId,
-			model: `Bearer ${hostileSecret}`,
-			source: `Bearer ${hostileSecret}`,
-		},
-		{
-			...context(),
-			canonicalPath: `/tmp/golem-47/${hostileSecret}/canonical`,
-			observedPath: `/private/golem-47/${hostileSecret}/observed`,
-		},
-		clock,
-	);
-	const hostileProject = hostile.signals.find((signal) => signal.event_kind === "project.observed");
-	const hostileSession = hostile.signals.find((signal) => signal.event_kind === "session.started");
-	assert.ok(hostileProject);
-	assert.ok(hostileSession);
-	assert.equal(hostileProject.payload.location.canonical_path.includes(hostileSecret), false);
-	assert.equal(hostileProject.payload.location.observed_path.includes(hostileSecret), false);
-	assert.equal(hostileSession.payload.metadata.model, "$REDACTED");
-	assert.equal(hostileSession.payload.metadata.source, "$REDACTED");
-	assert.equal(JSON.stringify(hostile).includes(hostileSecret), false, "credential-shaped Bearer values and paths never reach canonical events");
+	for (const hostileSecret of ["ghp_abcdef1234567890", "github_pat_11AA22bb33CC44dd55EE"]) {
+		const hostile = parseClaudeHook(
+			{
+				hook_event_name: "SessionStart",
+				session_id: sessionId,
+				model: hostileSecret,
+				source: hostileSecret,
+			},
+			{
+				...context(),
+				canonicalPath: `/tmp/golem-47/${hostileSecret}/canonical`,
+				observedPath: `/private/golem-47/${hostileSecret}/observed`,
+			},
+			clock,
+		);
+		const hostileProject = hostile.signals.find((signal) => signal.event_kind === "project.observed");
+		const hostileSession = hostile.signals.find((signal) => signal.event_kind === "session.started");
+		assert.ok(hostileProject);
+		assert.ok(hostileSession);
+		assert.equal(hostileProject.payload.location.canonical_path.includes(hostileSecret), false);
+		assert.equal(hostileProject.payload.location.observed_path.includes(hostileSecret), false);
+		assert.equal(hostileSession.payload.metadata.model, "$REDACTED");
+		assert.equal(hostileSession.payload.metadata.source, "$REDACTED");
+		assert.equal(JSON.stringify(hostile).includes(hostileSecret), false, "GitHub token values and paths never reach canonical events");
+	}
 	const hostileWaiting = parseClaudeHook(
 		{ hook_event_name: "Notification", session_id: sessionId, notification_type: "api_key=do-not-log" },
 		context(),
