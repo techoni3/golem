@@ -111,7 +111,6 @@ export function registerManagementRoutes(options: {
 	readonly management: TrackerManagementServices;
 }): void {
 	const schema = {
-		body: jsonSchema(requestSchema),
 		response: {
 			200: jsonSchema(responseSchema),
 			201: jsonSchema(responseSchema),
@@ -130,15 +129,23 @@ export function registerManagementRoutes(options: {
 			request: FastifyRequest,
 			reply: FastifyReply,
 		) => Promise<unknown> | unknown,
+		withBody = false,
 	) => {
-		options.app[method](route, { schema }, async (request, reply) => {
-			if (!authorized(request, reply, options.token)) return;
-			try {
-				return await handler(request, reply);
-			} catch (error) {
-				managementFailure(request, reply, error);
-			}
-		});
+		const routeSchema = withBody
+			? { ...schema, body: jsonSchema(requestSchema) }
+			: schema;
+		options.app[method](
+			route,
+			{ schema: routeSchema },
+			async (request, reply) => {
+				if (!authorized(request, reply, options.token)) return;
+				try {
+					return await handler(request, reply);
+				} catch (error) {
+					managementFailure(request, reply, error);
+				}
+			},
+		);
 	};
 
 	register("get", "/api/v1/management/roles", (request, reply) => {
@@ -149,20 +156,25 @@ export function registerManagementRoutes(options: {
 			options.management.roles.list(field(query, "project_id")),
 		);
 	});
-	register("post", "/api/v1/management/roles", (request, reply) => {
-		const input = body(request);
-		return sendResult(
-			request,
-			reply.code(201),
-			options.management.roles.create({
-				projectId: field(input, "project_id"),
-				name: field(input, "name"),
-				scope: input.scope as never,
-				definition: (input.definition ?? {}) as never,
-				actor: field(input, "actor"),
-			}),
-		);
-	});
+	register(
+		"post",
+		"/api/v1/management/roles",
+		(request, reply) => {
+			const input = body(request);
+			return sendResult(
+				request,
+				reply.code(201),
+				options.management.roles.create({
+					projectId: field(input, "project_id"),
+					name: field(input, "name"),
+					scope: input.scope as never,
+					definition: (input.definition ?? {}) as never,
+					actor: field(input, "actor"),
+				}),
+			);
+		},
+		true,
+	);
 	register(
 		"post",
 		"/api/v1/management/roles/:role_id/assign",
@@ -186,6 +198,7 @@ export function registerManagementRoutes(options: {
 				}),
 			);
 		},
+		true,
 	);
 
 	register("get", "/api/v1/management/gates", (request, reply) => {
@@ -196,21 +209,26 @@ export function registerManagementRoutes(options: {
 			options.management.gates.list(field(query, "project_id")),
 		);
 	});
-	register("post", "/api/v1/management/gates", (request, reply) => {
-		const input = body(request);
-		return sendResult(
-			request,
-			reply.code(201),
-			options.management.gates.create({
-				projectId: field(input, "project_id"),
-				kind: input.kind as never,
-				question: field(input, "question"),
-				assignee: field(input, "assignee"),
-				idempotencyKey: field(input, "idempotency_key"),
-				actor: field(input, "actor"),
-			}),
-		);
-	});
+	register(
+		"post",
+		"/api/v1/management/gates",
+		(request, reply) => {
+			const input = body(request);
+			return sendResult(
+				request,
+				reply.code(201),
+				options.management.gates.create({
+					projectId: field(input, "project_id"),
+					kind: input.kind as never,
+					question: field(input, "question"),
+					assignee: field(input, "assignee"),
+					idempotencyKey: field(input, "idempotency_key"),
+					actor: field(input, "actor"),
+				}),
+			);
+		},
+		true,
+	);
 	register(
 		"post",
 		"/api/v1/management/gates/:gate_id/verdict",
@@ -229,6 +247,7 @@ export function registerManagementRoutes(options: {
 				}),
 			);
 		},
+		true,
 	);
 
 	register("get", "/api/v1/management/ideas", (request, reply) => {
@@ -239,19 +258,24 @@ export function registerManagementRoutes(options: {
 			options.management.ideas.list(field(query, "project_id")),
 		);
 	});
-	register("post", "/api/v1/management/ideas", (request, reply) => {
-		const input = body(request);
-		return sendResult(
-			request,
-			reply.code(201),
-			options.management.ideas.create({
-				projectId: field(input, "project_id"),
-				body: field(input, "body"),
-				idempotencyKey: field(input, "idempotency_key"),
-				actor: field(input, "actor"),
-			}),
-		);
-	});
+	register(
+		"post",
+		"/api/v1/management/ideas",
+		(request, reply) => {
+			const input = body(request);
+			return sendResult(
+				request,
+				reply.code(201),
+				options.management.ideas.create({
+					projectId: field(input, "project_id"),
+					body: field(input, "body"),
+					idempotencyKey: field(input, "idempotency_key"),
+					actor: field(input, "actor"),
+				}),
+			);
+		},
+		true,
+	);
 	register(
 		"post",
 		"/api/v1/management/ideas/:idea_id/pop",
@@ -268,6 +292,7 @@ export function registerManagementRoutes(options: {
 				}),
 			);
 		},
+		true,
 	);
 	register(
 		"post",
@@ -288,49 +313,60 @@ export function registerManagementRoutes(options: {
 				}),
 			);
 		},
+		true,
 	);
 
-	register("post", "/api/v1/management/communications", (request, reply) => {
-		const input = body(request);
-		return sendResult(
-			request,
-			reply.code(201),
-			options.management.communications.create({
-				projectId: field(input, "project_id"),
-				kind: input.kind as never,
-				command: field(input, "command"),
-				payload: (input.payload ?? {}) as never,
-				...(input.session_id === undefined
-					? {}
-					: { sessionId: field(input, "session_id") }),
-				...(input.generation_id === undefined
-					? {}
-					: { generationId: field(input, "generation_id") }),
-				actor: field(input, "actor"),
-				idempotencyKey: field(input, "idempotency_key"),
-			}),
-		);
-	});
-	register("post", "/api/v1/management/control", (request, reply) => {
-		const input = body(request);
-		return sendResult(
-			request,
-			reply.code(201),
-			options.management.controls.request({
-				projectId: field(input, "project_id"),
-				command: field(input, "command"),
-				payload: (input.payload ?? {}) as never,
-				...(input.session_id === undefined
-					? {}
-					: { sessionId: field(input, "session_id") }),
-				...(input.generation_id === undefined
-					? {}
-					: { generationId: field(input, "generation_id") }),
-				actor: field(input, "actor"),
-				idempotencyKey: field(input, "idempotency_key"),
-			}),
-		);
-	});
+	register(
+		"post",
+		"/api/v1/management/communications",
+		(request, reply) => {
+			const input = body(request);
+			return sendResult(
+				request,
+				reply.code(201),
+				options.management.communications.create({
+					projectId: field(input, "project_id"),
+					kind: input.kind as never,
+					command: field(input, "command"),
+					payload: (input.payload ?? {}) as never,
+					...(input.session_id === undefined
+						? {}
+						: { sessionId: field(input, "session_id") }),
+					...(input.generation_id === undefined
+						? {}
+						: { generationId: field(input, "generation_id") }),
+					actor: field(input, "actor"),
+					idempotencyKey: field(input, "idempotency_key"),
+				}),
+			);
+		},
+		true,
+	);
+	register(
+		"post",
+		"/api/v1/management/control",
+		(request, reply) => {
+			const input = body(request);
+			return sendResult(
+				request,
+				reply.code(201),
+				options.management.controls.request({
+					projectId: field(input, "project_id"),
+					command: field(input, "command"),
+					payload: (input.payload ?? {}) as never,
+					...(input.session_id === undefined
+						? {}
+						: { sessionId: field(input, "session_id") }),
+					...(input.generation_id === undefined
+						? {}
+						: { generationId: field(input, "generation_id") }),
+					actor: field(input, "actor"),
+					idempotencyKey: field(input, "idempotency_key"),
+				}),
+			);
+		},
+		true,
+	);
 	register(
 		"get",
 		"/api/v1/management/control/:operation_id",
@@ -363,38 +399,43 @@ export function registerManagementRoutes(options: {
 			options.management.audit(field(query, "project_id")),
 		);
 	});
-	register("post", "/api/v1/management/assets", (request, reply) => {
-		const input = body(request);
-		const encoded = field(input, "content_base64");
-		if (encoded.length > 14_000_000)
-			throw new TrackerManagementError(
-				"management.asset_invalid",
-				"asset content is too large",
+	register(
+		"post",
+		"/api/v1/management/assets",
+		(request, reply) => {
+			const input = body(request);
+			const encoded = field(input, "content_base64");
+			if (encoded.length > 14_000_000)
+				throw new TrackerManagementError(
+					"management.asset_invalid",
+					"asset content is too large",
+				);
+			let bytes: Uint8Array;
+			try {
+				bytes = new Uint8Array(Buffer.from(encoded, "base64"));
+			} catch {
+				throw new TrackerManagementError(
+					"management.asset_invalid",
+					"asset content is not valid base64",
+				);
+			}
+			return sendResult(
+				request,
+				reply.code(201),
+				publicAsset(
+					options.management.assets.put({
+						projectId: field(input, "project_id"),
+						ticketId: field(input, "ticket_id"),
+						relativePath: field(input, "relative_path"),
+						mimeType: field(input, "mime_type"),
+						bytes,
+						actor: field(input, "actor"),
+					}),
+				),
 			);
-		let bytes: Uint8Array;
-		try {
-			bytes = new Uint8Array(Buffer.from(encoded, "base64"));
-		} catch {
-			throw new TrackerManagementError(
-				"management.asset_invalid",
-				"asset content is not valid base64",
-			);
-		}
-		return sendResult(
-			request,
-			reply.code(201),
-			publicAsset(
-				options.management.assets.put({
-					projectId: field(input, "project_id"),
-					ticketId: field(input, "ticket_id"),
-					relativePath: field(input, "relative_path"),
-					mimeType: field(input, "mime_type"),
-					bytes,
-					actor: field(input, "actor"),
-				}),
-			),
-		);
-	});
+		},
+		true,
+	);
 	register("get", "/api/v1/management/assets/:asset_id", (request, reply) => {
 		const query = request.query as Record<string, unknown>;
 		const params = request.params as { asset_id: string };

@@ -57,7 +57,7 @@ test("roles gates ideas and controls are typed, idempotent, audited, and restart
 		await opened.writer.close();
 		opened = open(home, "-restart");
 		assert.equal(opened.management.controls.list("mgmt-project").length, 2, "control and role-assignment operations survive restart");
-		assert.equal(opened.management.listGates("mgmt-project")[0].status, "approved");
+		assert.equal(opened.management.gates.list("mgmt-project")[0].status, "approved");
 		assert.equal(opened.management.ideas.list("mgmt-project")[0].promotedTicketId, promotedA.promotedTicketId);
 		assert.equal(opened.management.roles.list("mgmt-project")[0].name, "operator");
 	} finally {
