@@ -24,6 +24,7 @@ import {
 } from "@golem/testkit";
 import { normalizeLegacyObservation } from "../parity/normalization.mjs";
 import { exerciseControlPlaneShell } from "../control-plane/control-plane-shell.mjs";
+import { exerciseRuntimeDashboard } from "../browser/runtime-dashboard.mjs";
 import { runMigrationPlanReplay } from "../migration/replay.mjs";
 import { runMigrationApplyReplay } from "../migration/apply-replay.mjs";
 import { exerciseRenderMcpClosure } from "../render-mcp-closure.mjs";
@@ -447,6 +448,16 @@ export async function exerciseRuntimeProjectionLiveHistoryDiagnostics() {
 export async function exerciseRuntimeProjectionWsRestartResync() {
 	runRuntimeProjectionJourney("GOL-46 authenticated WS");
 	return "real authenticated runtime.live WebSocket snapshot/delta, monotonic cursor, and service-restart instance resync verified";
+}
+
+export async function exerciseDashboardRuntimeLifecycle() {
+	return exerciseRuntimeDashboard();
+}
+
+export async function exerciseDashboardDisconnectResync() {
+	// The browser journey proves the operator-visible resync. Keep this second
+	// named gate focused on the lower transport contract that makes it safe.
+	return exerciseRuntimeProjectionWsRestartResync();
 }
 
 export async function exerciseDashboardDownInboxReplay() {
@@ -973,4 +984,6 @@ export const exercises = Object.freeze({
 	"ticket-assets-security": exerciseTicketAssetsSecurity,
 	"live-history-diagnostics": exerciseRuntimeProjectionLiveHistoryDiagnostics,
 	"projection-ws-restart-resync": exerciseRuntimeProjectionWsRestartResync,
+	"dashboard-runtime-lifecycle": exerciseDashboardRuntimeLifecycle,
+	"dashboard-disconnect-resync": exerciseDashboardDisconnectResync,
 });

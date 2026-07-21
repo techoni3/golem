@@ -1,11 +1,9 @@
 import {
-	applyProjectionDelta,
 	type BrowserControlPlaneClient,
 	type ControlPlaneStream,
 	createBrowserControlPlaneClient,
 	createProjectionSynchronizer,
 	type ProjectionConnectionState,
-	replaceProjectionSnapshot,
 } from "@golem/api-client";
 import { InlineAlert, Select, Skeleton, StatePanel, useTheme } from "@golem/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -19,6 +17,17 @@ import {
 } from "react-router-dom";
 
 import { LegacyCompatibilityIsland } from "./legacy-compatibility.js";
+import { RuntimeDataProvider } from "./routes/runtime/data.js";
+import {
+	DiagnosticsRoute,
+	HistoryRoute,
+	OverviewRoute,
+	ProjectDetailRoute,
+	ProjectsRoute,
+	RuntimeConnectionBanner,
+	RuntimeRouteNotFound,
+	SessionsRoute,
+} from "./routes/runtime/index.js";
 import styles from "./shell.module.css";
 
 const projectionStream: ControlPlaneStream = "runtime.live";
@@ -28,15 +37,9 @@ const projectionKey = [
 	projectionStream,
 ] as const;
 const legacyRoutePaths = [
-	"/",
-	"/dashboard",
 	"/tracker",
 	"/specs",
-	"/projects",
-	"/agents",
-	"/logs",
 	"/settings",
-	"/project/:id",
 	"/tickets/:id",
 ] as const;
 
@@ -74,20 +77,14 @@ function useLiveProjection(
 			stream: projectionStream,
 			onState: setConnection,
 			onSnapshot: (snapshot) => {
-				// A synchronizer snapshot is authoritative for its current epoch. A
-				// restarted control plane can validly restart resource revisions, so
-				// only ordered same-instance deltas are monotonic.
-				queryClient.setQueryData<ProjectionResponse>(projectionKey, (current) =>
-					replaceProjectionSnapshot(current, snapshot),
-				);
+				// The legacy compatibility island needs the whole authoritative
+				// snapshot. Runtime routes never merge these payloads themselves.
+				queryClient.setQueryData<ProjectionResponse>(projectionKey, snapshot);
 			},
-			onDelta: (frame) => {
-				if (frame.payload.kind !== "delta") return;
-				const delta = frame.payload.delta;
-				const resourceRevision = frame.resource_revision;
-				queryClient.setQueryData<ProjectionResponse>(projectionKey, (current) =>
-					applyProjectionDelta(current, resourceRevision, delta),
-				);
+			onDelta: () => {
+				// Compatibility pages receive a fresh snapshot instead of locally
+				// reconciling a typed runtime delta into legacy-shaped objects.
+				void queryClient.invalidateQueries({ queryKey: projectionKey });
 			},
 		});
 		synchronizer.start();
@@ -114,23 +111,64 @@ function ConnectionBanner({
 	return <InlineAlert tone="warning">{copy}</InlineAlert>;
 }
 
-function LegacyRoutes({
+function LegacyPage({
 	projection,
 }: {
 	readonly projection: ProjectionResponse;
 }) {
-	const island = (
+	return (
 		<LegacyCompatibilityIsland
 			payload={projection.payload}
 			resourceRevision={projection.resource_revision}
 		/>
 	);
+}
+
+function RuntimeOverviewOrLegacy({
+	projection,
+}: {
+	readonly projection: ProjectionResponse;
+}) {
+	const location = useLocation();
+	const legacyOverlay = [
+		"ticket",
+		"compose",
+		"chat",
+		"communication",
+		"ideas",
+	].some((key) => new URLSearchParams(location.search).has(key));
+	if (legacyOverlay) return <LegacyPage projection={projection} />;
+	return <OverviewRoute />;
+}
+
+function RuntimeRoutes({
+	projection,
+}: {
+	readonly projection: ProjectionResponse;
+}) {
 	return (
 		<Routes>
+			<Route
+				element={<RuntimeOverviewOrLegacy projection={projection} />}
+				path="/"
+			/>
+			<Route element={<OverviewRoute />} path="/dashboard" />
+			<Route element={<SessionsRoute />} path="/agents" />
+			<Route element={<SessionsRoute />} path="/sessions" />
+			<Route element={<ProjectsRoute />} path="/projects" />
+			<Route element={<ProjectDetailRoute />} path="/projects/:projectId" />
+			<Route element={<ProjectDetailRoute />} path="/project/:projectId" />
+			<Route element={<HistoryRoute />} path="/history" />
+			<Route element={<HistoryRoute />} path="/logs" />
+			<Route element={<DiagnosticsRoute />} path="/diagnostics" />
 			{legacyRoutePaths.map((path) => (
-				<Route element={island} key={path} path={path} />
+				<Route
+					element={<LegacyPage projection={projection} />}
+					key={path}
+					path={path}
+				/>
 			))}
-			<Route element={island} path="*" />
+			<Route element={<RuntimeRouteNotFound />} path="*" />
 		</Routes>
 	);
 }
@@ -160,8 +198,11 @@ function RouteContent({
 		);
 	return (
 		<>
-			<ConnectionBanner state={projection.connection} />
-			<LegacyRoutes projection={projection.data} />
+			<RuntimeDataProvider client={client} enabled={bootstrapped}>
+				<ConnectionBanner state={projection.connection} />
+				<RuntimeConnectionBanner />
+				<RuntimeRoutes projection={projection.data} />
+			</RuntimeDataProvider>
 		</>
 	);
 }
@@ -184,12 +225,13 @@ function Shell() {
 	const { preference, setPreference } = useTheme();
 	const location = useLocation();
 	const navigation = [
-		["Dashboard", "/"],
+		["Overview", "/"],
+		["Sessions", "/sessions"],
+		["Projects", "/projects"],
+		["History", "/history"],
+		["Diagnostics", "/diagnostics"],
 		["Tracker", "/tracker"],
 		["Specs", "/specs"],
-		["Projects", "/projects"],
-		["Agents", "/agents"],
-		["Logs", "/logs"],
 		["Settings", "/settings"],
 	] as const;
 

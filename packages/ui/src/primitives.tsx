@@ -597,51 +597,67 @@ export function StatePanel({
 }
 
 export function PassportCard({
+	children,
+	controls,
 	onOpen,
 	onRoleChange,
+	openLabel = "Open primary session details",
 	role,
 	roleOptions,
 }: {
+	/** The primary canonical facts rendered by a product surface. */
+	children?: React.ReactNode;
+	/** Optional bounded controls. Callers own their mutation boundary. */
+	controls?: React.ReactNode;
 	onOpen: () => void;
-	onRoleChange: (role: string) => void;
-	role: string;
-	roleOptions: readonly Option[];
+	onRoleChange?: (role: string) => void;
+	/** An accessible label for the full-card detail action. */
+	openLabel?: string;
+	role?: string;
+	roleOptions?: readonly Option[];
 }) {
+	const legacyContent = (
+		<div>
+			<StatusBadge
+				detail="Claude · ready"
+				label="Primary session"
+				tone="success"
+			/>
+			<h3>Control-plane steward</h3>
+			<p>Live session · delivery ready</p>
+		</div>
+	);
+	const legacyControls =
+		onRoleChange && role !== undefined && roleOptions !== undefined ? (
+			<fieldset
+				aria-label="Role controls"
+				className={styles.passportRole}
+				data-testid="passport-role"
+				onClick={stopCardActivation}
+				onKeyDown={stopCardActivation}
+				onPointerDown={stopCardActivation}
+			>
+				<Select
+					label="Role"
+					onChange={onRoleChange}
+					options={roleOptions}
+					value={role}
+				/>
+			</fieldset>
+		) : null;
 	return (
 		<article className={styles.passport} data-testid="passport-card">
 			<Button
-				aria-label="Open primary session details"
+				aria-label={openLabel}
 				data-testid="passport-surface"
 				onPress={onOpen}
 				variant="quiet"
 			>
-				<span className={styles.srOnly}>Open primary session details</span>
+				<span className={styles.srOnly}>{openLabel}</span>
 			</Button>
 			<div className={styles.passportContent}>
-				<div>
-					<StatusBadge
-						detail="Claude · ready"
-						label="Primary session"
-						tone="success"
-					/>
-					<h3>Control-plane steward</h3>
-					<p>Live session · delivery ready</p>
-				</div>
-				<fieldset
-					aria-label="Role controls"
-					className={styles.passportRole}
-					data-testid="passport-role"
-					onClick={stopCardActivation}
-					onKeyDown={stopCardActivation}
-					onPointerDown={stopCardActivation}
-				>
-					<Select
-						label="Role"
-						onChange={onRoleChange}
-						options={roleOptions}
-						value={role}
-					/>
-				</fieldset>
+				{children ?? legacyContent}
+				{controls ?? legacyControls}
 			</div>
 		</article>
 	);
