@@ -1,20 +1,110 @@
 import assert from "node:assert/strict";
+import { access, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { extname, join, normalize, resolve } from "node:path";
-import test from "node:test";
+import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { build } from "vite";
 
 import { acquireChrome } from "../dashboard/scripts/_chrome.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const output = join(root, "apps", "dashboard", "dist", "assets");
+// `@golem/dashboard`'s vite config (`apps/dashboard/vite.config.ts`) emits the
+// typed control-plane shell under `dashboard/dist/control-plane` — not under
+// `apps/dashboard/dist/assets`. Serving any other path makes the runner either
+// 404 before the design lab mounts or pass from stale files left by a previous
+// build. Keep this in sync with the vite `build.outDir`.
+const dashboardOutput = join(root, "dashboard", "dist", "control-plane");
+const fixtureRoot = join(root, "test", "fixtures", "ui-primitives");
 const mimeTypes = {
 	".css": "text/css",
 	".html": "text/html",
 	".js": "text/javascript",
 	".map": "application/json",
 };
+
+async function pathExists(candidate) {
+	try {
+		await access(candidate);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+async function assertBuiltArtifact(output, label) {
+	const indexPath = join(output, "index.html");
+	const assetsPath = join(output, "assets");
+	assert.ok(
+		await pathExists(indexPath),
+		`${label} is missing at ${indexPath}; run "npm run build -w @golem/dashboard" and confirm "apps/dashboard/vite.config.ts" still emits to dashboard/dist/control-plane`,
+	);
+	const assetsStat = await stat(assetsPath).catch(() => undefined);
+	assert.ok(
+		assetsStat?.isDirectory(),
+		`built dashboard assets directory is missing at ${assetsPath}; the vite outDir must emit index.html and assets/`,
+	);
+	const indexHtml = await readFile(indexPath, "utf8");
+	// The built index.html references its entry chunk via a hashed module
+	// script. Proving the referenced asset exists on disk proves the runner
+	// is serving the current build, not a stale sibling directory.
+	const entryMatch = indexHtml.match(/<script[^>]*src="([^"]+\.js)"/u);
+	assert.ok(entryMatch, `built index.html must reference a module entry script; got:\n${indexHtml}`);
+	const entryHref = entryMatch[1];
+	assert.ok(
+		entryHref.startsWith("/assets/"),
+		`built entry script must live under /assets/; got ${entryHref}`,
+	);
+	const entryDiskPath = join(output, entryHref.slice(1));
+	assert.ok(
+		await pathExists(entryDiskPath),
+		`built entry script ${entryHref} is referenced by index.html but missing on disk at ${entryDiskPath}`,
+	);
+	return { indexPath, output };
+}
+
+let labArtifactRoot;
+let labOutput;
+
+// The product shell deliberately has no design-lab runtime route. Build the
+// lab from its real source into a disposable test artifact instead of changing
+// dashboard routing or legacy stylesheet behavior merely to reach this test.
+before(async () => {
+	await assertBuiltArtifact(dashboardOutput, "built dashboard artifact");
+	labArtifactRoot = await mkdtemp(join(tmpdir(), "golem-ui-primitives-"));
+	labOutput = join(labArtifactRoot, "dist");
+	await build({
+		configFile: false,
+		publicDir: false,
+		resolve: {
+			alias: {
+				react: join(root, "apps", "dashboard", "node_modules", "react"),
+				"react-dom": join(root, "apps", "dashboard", "node_modules", "react-dom"),
+			},
+			dedupe: ["react", "react-dom"],
+		},
+		root: fixtureRoot,
+		build: {
+			emptyOutDir: true,
+			minify: "esbuild",
+			outDir: labOutput,
+			sourcemap: false,
+		},
+		logLevel: "error",
+	});
+	await assertBuiltArtifact(labOutput, "isolated design-lab test artifact");
+});
+
+after(async () => {
+	if (labArtifactRoot) await rm(labArtifactRoot, { force: true, recursive: true });
+});
+
+test("ui primitive runner validates the current dashboard output and clean lab artifact", async () => {
+	await assertBuiltArtifact(dashboardOutput, "built dashboard artifact");
+	assert.ok(labOutput, "the isolated design-lab artifact must be built before browser assertions");
+	await assertBuiltArtifact(labOutput, "isolated design-lab test artifact");
+});
 
 function relativeLuminance(color) {
 	const channels = color.match(/\d+(?:\.\d+)?/gu)?.slice(0, 3).map(Number);
@@ -58,7 +148,8 @@ async function representativeColors(page) {
 	});
 }
 
-function startStaticOutput() {
+function startStaticOutput(output) {
+	const indexPath = join(output, "index.html");
 	const sockets = new Set();
 	const server = createServer(async (request, response) => {
 		const pathname = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
@@ -70,7 +161,7 @@ function startStaticOutput() {
 			? "index.html"
 			: pathname.slice(1);
 		const target = resolve(output, normalize(localPath));
-		if (!target.startsWith(`${output}/`) && target !== join(output, "index.html")) {
+		if (!target.startsWith(`${output}/`) && target !== indexPath) {
 			response.writeHead(403).end();
 			return;
 		}
@@ -112,7 +203,8 @@ function startStaticOutput() {
 }
 
 test("design lab preserves keyboard, theme, and passport-card containment contracts", async () => {
-	const server = await startStaticOutput();
+	assert.ok(labOutput, "the isolated design-lab artifact must be ready before serving it");
+	const server = await startStaticOutput(labOutput);
 	const chrome = await acquireChrome();
 	const context = chrome.browser.contexts()[0];
 	if (!context) throw new Error("headless Chrome did not expose a browser context");
