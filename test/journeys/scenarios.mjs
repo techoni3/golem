@@ -189,6 +189,12 @@ export const scenarios = [
 		regression: "durable delivery claims skip the canonical endpoint generation/fence/readiness recheck before adapter transport",
 	}),
 	registerScenario({
+		id: "pi-next-turn-crash-replay",
+		journey: "J4",
+		tier: "integration",
+		regression: "Pi next-turn delivery injects without a user turn, loses a crashed claim, double-settles, or renders after its canonical fence changed",
+	}),
+	registerScenario({
 		id: "testkit-browser",
 		journey: "J8",
 		tier: "release",

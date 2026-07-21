@@ -5,6 +5,7 @@
 
 - `apps/` holds private composition (CLI, Fastify control plane); `dashboard/web` is the legacy island.
 - `packages/` holds typed domain layers, clients, testkit, UI, and adapters. OpenCode's boundary is `packages/adapters/opencode/src/`; its shim is the compatibility host.
+- `packages/adapters/pi` is the Pi control boundary. It requires a strong supplied binding before a raw Pi id can become canonical lifecycle or delivery state.
 - `apps/control-plane/src/api-v1.ts` is authenticated tracker/delivery/bus; `tracker-core-routes.ts` is legacy. Generated client and MCP are storage-free.
 - `substrate/` is render source; `plugin/` and `dashboard/dist/` are generated. Legacy dashboard remains authoritative.
 
@@ -22,6 +23,7 @@
 - Endpoint claims are generation/route scoped: fences gate heartbeat, readiness, capability, delivery, and release; registration alone never qualifies delivery.
 - Typed management owns roles, gates, ideas, assets, communications, controls, audit, and outbox; routes cannot open SQLite or mutate runtime lifecycle.
 - Typed mutators require caller project/session/actor headers; delivery rechecks generation/fence/readiness/capability before transport.
+- Pi is pull/next-turn only: it claims only on real Pi input and turns dead-letter/retry/recovery diagnostics into stable redacted categories. Unbound or ambiguous legacy inbox rows remain diagnostic rather than inferred.
 
 ## Checks and gotchas
 

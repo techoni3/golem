@@ -9,7 +9,13 @@
 			"import": "./dist/index.js"
 		}
 	},
+	"scripts": {
+		"build": "tsc -b",
+		"test": "node --test ../../../test/pi-adapter.test.mjs ../../../test/pi-tracker-integration.test.mjs"
+	},
 	"dependencies": {
-		"@golem/adapter-sdk": "file:../../adapter-sdk"
+		"@golem/adapter-sdk": "file:../../adapter-sdk",
+		"@golem/api-client": "file:../../api-client",
+		"@golem/contracts": "file:../../contracts"
 	}
 }

@@ -66,3 +66,29 @@ queue generation through the existing stale-row guard.
 
 The journey test proves rendering is isolated and portable, records the runtime
 probe result, and refuses to infer Tier A from the existence of an in-process API.
+
+## Canonical-control cutover (GOL-51)
+
+`packages/adapters/pi` is now the canonical Pi control boundary. Composition
+must supply a strong binding at
+`$GOLEM_HOME/pi-adapter/bindings/<raw-pi-session-id>.json` containing the
+canonical project, session, generation, endpoint, producer instance, and the
+decimal text form of the control-plane issued owner fence. The extension never
+derives any of these from a transcript filename, PID, display name, or recency.
+Without that binding it keeps the legacy observation and writes a visible
+unqualified diagnostic; it does not make a capability or delivery claim.
+
+With a binding, the portable render spools typed lifecycle, endpoint, and
+next-turn-only capability signals under `pi-adapter/runtime-events/pending`.
+The typed adapter uses `/api/v1/runtime/events` and the delivery
+claim/prepare/ack API. It only claims after the real Pi `input` event,
+rechecks the endpoint fence through `prepare`, and records local
+`pending → processing → ack` evidence before terminal acknowledgement after
+`agent_start`. There is deliberately no timer, push, idle-addressing, or
+unsolicited-prompt path.
+
+Legacy `pi-inbox` files are inventory-only by default. A row may be imported
+only when its metadata carries the exact canonical project/session/generation/
+endpoint/fence binding and claim token; ambiguous rows stay on disk and are
+reported as diagnostics. This is intentionally stricter than the historical
+raw-session-id queue so resume/rename cannot create a canonical ghost.

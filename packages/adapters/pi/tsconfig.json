@@ -1,6 +1,10 @@
 {
 	"extends": "../../../tsconfig.package.json",
 	"compilerOptions": { "outDir": "./dist", "rootDir": "./src" },
-	"references": [{ "path": "../../adapter-sdk" }],
+	"references": [
+		{ "path": "../../adapter-sdk" },
+		{ "path": "../../api-client" },
+		{ "path": "../../contracts" }
+	],
 	"include": ["src/**/*.ts"]
 }
