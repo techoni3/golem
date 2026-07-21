@@ -117,6 +117,19 @@ function createRepresentativeLegacyTracker(file) {
 	}
 }
 
+function removePreRepairCommentDispatchRelation(file) {
+	const database = new Database(file);
+	try {
+		database.exec(`
+DROP INDEX IF EXISTS idx_comment_dispatches_comment;
+DROP INDEX IF EXISTS idx_comment_dispatches_pending;
+DROP TABLE IF EXISTS comment_dispatches;
+`);
+	} finally {
+		database.close();
+	}
+}
+
 function legacyCounts(file) {
 	const database = new Database(file, { readonly: true });
 	try {
@@ -126,6 +139,7 @@ function legacyCounts(file) {
 			streams: database.prepare("SELECT COUNT(*) AS count FROM streams").get().count,
 			links: database.prepare("SELECT COUNT(*) AS count FROM links").get().count,
 			displayIds: database.prepare("SELECT id, display_id FROM tickets ORDER BY id").all(),
+			phaseFacts: database.prepare("SELECT id, state, phase FROM tickets ORDER BY id").all(),
 			journal: database.pragma("journal_mode", { simple: true }),
 		});
 	} finally {
@@ -140,6 +154,17 @@ function sqliteTableNames(file) {
 			.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
 			.all()
 			.map((row) => row.name);
+	} finally {
+		database.close();
+	}
+}
+
+function sqliteSchemaObject(file, type, name) {
+	const database = new Database(file, { readonly: true });
+	try {
+		return database
+			.prepare("SELECT sql FROM sqlite_master WHERE type = ? AND name = ?")
+			.get(type, name)?.sql;
 	} finally {
 		database.close();
 	}
@@ -170,9 +195,9 @@ test("tracker core compatibility journey", async () => {
 		try {
 			const freshStatus = freshOwner.status();
 			assert.equal(freshStatus.tracker.baseline, "managed", "a fresh tracker is managed on first owner open");
-		assert.equal(freshStatus.tracker.userVersion, 4, "a fresh tracker reaches the canonical schema version on first owner open");
+			assert.equal(freshStatus.tracker.userVersion, 5, "a fresh tracker reaches the canonical schema version on first owner open");
 			const freshTables = sqliteTableNames(freshTrackerPath);
-			for (const table of ["golem_migrations", "tickets", "comments", "streams", "links", "events"]) {
+			for (const table of ["golem_migrations", "tickets", "comments", "comment_dispatches", "streams", "links", "events"]) {
 				assert.equal(freshTables.includes(table), true, `fresh managed tracker contains canonical ${table} table`);
 			}
 			const freshPlan = freshOwner.plan("tracker");
@@ -208,11 +233,31 @@ test("tracker core compatibility journey", async () => {
 			"production typed attachment",
 			"production-style tracker-only attachment sees the shipped facade write",
 		);
+		const freshComment = productionAttachment.services.comments.add({
+			ticketId: productionTicket.id,
+			author: "human:dashboard",
+			body: "fresh managed tracker phase evidence",
+		});
+		assert.equal(freshComment.ticketId, productionTicket.id, "fresh managed tracker stores canonical phase evidence before transition");
+		const freshUpdated = productionAttachment.services.tickets.update({
+			id: productionTicket.id,
+			expectedRevision: productionAttachment.services.tickets.get(productionTicket.id).ticket.revision,
+			patch: { title: "production typed attachment updated" },
+			actor: "human:dashboard",
+		});
+		const freshTransitioned = productionAttachment.services.tickets.transition({
+			id: freshUpdated.id,
+			expectedRevision: freshUpdated.revision,
+			phase: "building",
+			actor: "human:dashboard",
+		});
+		assert.equal(freshTransitioned.phase, "building", "fresh managed tracker create/update/transition reaches canonical phase evidence without a browser fallback");
 		await productionAttachment.close();
 		productionAttachment = undefined;
 		productionTracker.close();
 		productionTracker = undefined;
 		const fixture = createRepresentativeLegacyTracker(home.trackerDb);
+		removePreRepairCommentDispatchRelation(home.trackerDb);
 		const before = legacyCounts(home.trackerDb);
 		const beforeBytes = fs.readFileSync(home.trackerDb);
 		writer = openControlPlanePersistence(
@@ -228,9 +273,51 @@ test("tracker core compatibility journey", async () => {
 		assert.equal(fs.readFileSync(home.trackerDb).compare(beforeBytes), 0, "legacy tracker bytes remain unchanged before explicit migration");
 
 		const plan = writer.plan("tracker");
+		assert.equal(plan.pending.some((migration) => migration.id === "tracker/005-comment-dispatches"), true, "dry-run identifies the missing canonical comment-dispatch relation");
+		assert.equal(plan.dryRun?.applied.includes("tracker/005-comment-dispatches"), true, "dry-run applies comment-dispatches only to its transactional clone");
+		assert.equal(fs.readFileSync(home.trackerDb).compare(beforeBytes), 0, "dry-run leaves the representative existing tracker bytes unchanged");
 		const applied = writer.apply("tracker", plan.planHash);
 		assert(applied.applied.includes("tracker/003-live-tracker-core"), "explicit migration creates the canonical live tracker tables");
-		assert.deepEqual(legacyCounts(home.trackerDb).tickets, before.tickets, "the migration preserves live ticket rows instead of importing copies");
+		assert(applied.applied.includes("tracker/005-comment-dispatches"), "explicit migration records the canonical comment-dispatch relation");
+		const afterApply = legacyCounts(home.trackerDb);
+		assert.deepEqual(
+			{
+				tickets: afterApply.tickets,
+				comments: afterApply.comments,
+				streams: afterApply.streams,
+				links: afterApply.links,
+				displayIds: afterApply.displayIds,
+				phaseFacts: afterApply.phaseFacts,
+			},
+			{
+				tickets: before.tickets,
+				comments: before.comments,
+				streams: before.streams,
+				links: before.links,
+				displayIds: before.displayIds,
+				phaseFacts: before.phaseFacts,
+			},
+			"the migration preserves existing ticket/comment/link/phase evidence counts and identifiers without import",
+		);
+		assert.equal(sqliteTableNames(home.trackerDb).includes("comment_dispatches"), true, "apply creates the required canonical comment-dispatch relation");
+		const commentDispatchSchema = sqliteSchemaObject(home.trackerDb, "table", "comment_dispatches");
+		assert.match(commentDispatchSchema, /REFERENCES comments\(id\) ON DELETE CASCADE/u, "the canonical relation cascades from its comment evidence");
+		assert.match(commentDispatchSchema, /REFERENCES tickets\(id\) ON DELETE CASCADE/u, "the canonical relation fences its ticket identity");
+		assert.match(commentDispatchSchema, /status TEXT NOT NULL DEFAULT 'pending'/u, "the canonical relation preserves pending dispatch defaults");
+		assert.match(sqliteSchemaObject(home.trackerDb, "index", "idx_comment_dispatches_pending"), /WHERE status IN \('pending', 'delivered'\)/u, "the canonical relation creates its pending dispatch index");
+		await writer.close();
+		writer = openControlPlanePersistence(
+			{
+				runtimePath: home.runtimeDb,
+				trackerPath: home.trackerDb,
+				lockPath: path.join(home.root, "owner.lock"),
+			},
+			{ clock, ownerId: "tracker-core-migrated-restart" },
+		);
+		assert.equal(writer.status().tracker.baseline, "managed", "the upgraded tracker restarts through the managed canonical migration owner");
+		const reapply = writer.plan("tracker");
+		assert.deepEqual(reapply.pending, [], "a restarted managed schema has no pending tracker mutation");
+		assert.deepEqual(writer.apply("tracker", reapply.planHash).applied, [], "idempotent reapply records no tracker mutation");
 		let services = composeControlPlaneTrackerCoreServices({ writer, clock });
 		assert.equal(services.tickets.get(fixture.parent.display_id)?.ticket.id, fixture.parent.id, "typed lookup resolves the existing display id to its canonical id");
 		assert.equal(services.tickets.get(fixture.parent.id)?.comments.length, 2, "typed service reads existing legacy comments and replies");
