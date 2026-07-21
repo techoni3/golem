@@ -1583,6 +1583,10 @@ async function main() {
   const cmd = args[0] ?? 'help';
   const rest = args.slice(1);
 
+  // The typed CLI owns the no-argument picker. In a non-TTY it prints help
+  // immediately, so this preserves scripting behavior without a prompt/hang.
+  if (args.length === 0 && await runTypedCli([])) return;
+
   if (removed.has(cmd)) {
     cmdRemoved(cmd);
     return;
@@ -1632,6 +1636,13 @@ async function main() {
     case 'opencode:setup':
     case 'opencode:refresh':
     case 'opencode:doctor':
+      if (!(await runTypedCli([cmd, ...rest]))) {
+        fatal(1, 'typed CLI build is unavailable; run `npm run build -w apps/cli`');
+      }
+      break;
+    case 'presets':
+    case 'completions':
+    case 'aliases':
       if (!(await runTypedCli([cmd, ...rest]))) {
         fatal(1, 'typed CLI build is unavailable; run `npm run build -w apps/cli`');
       }

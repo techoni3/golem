@@ -23,7 +23,9 @@
     "tools/*"
   ],
   "bin": {
-    "golem": "./cli/golem.js"
+    "golem": "./cli/golem.js",
+    "golemc": "./apps/cli/src/compat/golemc.mjs",
+    "golemx": "./apps/cli/src/compat/golemx.mjs"
   },
   "exports": {
     ".": "./cli/golem.js",
@@ -85,6 +87,8 @@
   "test:adapter:claude": "npm run build -w @golem/contracts -w @golem/persistence -w @golem/runtime -w @golem/control-plane -w @golem/adapter-claude && node --test --test-concurrency=1 test/adapter/claude-adapter.test.mjs",
   "qualify:claude": "npm run build -w @golem/contracts -w @golem/adapter-claude && node packages/adapters/claude/bin/qualify.mjs",
     "test:cli": "npm run build -w apps/cli && node --test --test-concurrency=1 test/cli/registry.test.mjs",
+		"test:launcher-ux": "npm run build -w apps/cli -w @golem/launcher -w @golem/testkit && node --test --test-concurrency=1 test/cli/launcher-ux.test.mjs",
+		"completions:check": "npm run build -w apps/cli && node test/cli/completions-check.mjs",
     "migration:plan": "npm run build -w @golem/compat && node packages/compat/bin/migration-plan.mjs plan",
     "migration:apply": "npm run build -w @golem/compat && node packages/compat/bin/migration-plan.mjs apply",
     "migration:status": "npm run build -w @golem/compat && node packages/compat/bin/migration-plan.mjs status",
@@ -93,7 +97,7 @@
     "test:migration-apply": "npm run build -w @golem/compat -w @golem/testkit && node --test --test-concurrency=1 test/migration-apply.test.mjs",
     "migration:fixtures:check": "npm run test:migration-plan && npm run test:migration-apply",
     "test:testkit": "npm run build -w @golem/testkit && node --test --test-concurrency=1 test/journeys/testkit.test.mjs",
-    "test:journey": "npm run build -w @golem/compiler -w @golem/mcp-adapter -w @golem/domain -w @golem/launcher -w @golem/compat -w @golem/testkit -w @golem/persistence -w @golem/runtime -w @golem/tracker -w @golem/control-plane -w @golem/api-client -w @golem/adapter-codex -w @golem/adapter-opencode -w @golem/adapter-pi && npm run build -w @golem/adapter-codex -- --force && node test/journeys/run.mjs",
+    "test:journey": "npm run build -w @golem/compiler -w @golem/mcp-adapter -w @golem/domain -w @golem/launcher -w @golem/compat -w @golem/testkit -w @golem/persistence -w @golem/runtime -w @golem/tracker -w @golem/control-plane -w @golem/api-client -w @golem/adapter-codex -w @golem/adapter-opencode -w @golem/adapter-pi -w apps/cli && npm run build -w @golem/adapter-codex -- --force && node test/journeys/run.mjs",
     "test:adapter:codex-direct": "npm run build -w @golem/adapter-codex && node --test --test-concurrency=1 test/codex-direct-adapter.test.mjs",
     "test:adapter:codex-managed": "npm run build -w @golem/control-plane -w apps/cli && npm run build -w @golem/adapter-codex && npm test -w @golem/adapter-codex",
     "test:adapter:opencode": "npm run build -w @golem/adapter-opencode -w @golem/runtime -w @golem/persistence -w @golem/control-plane -w apps/cli && node --test --test-concurrency=1 test/adapter/opencode.test.mjs",

@@ -98,6 +98,18 @@ export const scenarios = [
 		regression: "the built resolver/CLI bridge disagrees with launchability and delivery truth or leaks credential/path state",
 	}),
 	registerScenario({
+		id: "compact-launcher-matrix",
+		journey: "J5",
+		tier: "integration",
+		regression: "daily compact launcher grammar, picker, preset persistence, completions, safe aliases, or compatibility shims drift from qualified resolver truth",
+	}),
+	registerScenario({
+		id: "direct-launch-retains-integration",
+		journey: "J5",
+		tier: "integration",
+		regression: "compact launcher changes replace, bypass, or weaken the installed native direct-Codex lifecycle integration",
+	}),
+	registerScenario({
 		id: "migration-dry-run-ambiguity",
 		journey: "J7",
 		tier: "integration",

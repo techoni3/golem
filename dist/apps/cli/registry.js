@@ -62,6 +62,72 @@ const openCodeSetupOptions = [
 const openCodeProbeOptions = [
     { name: "json", flags: "--json", description: "print stable JSON output" },
 ];
+const presetOptions = [
+    {
+        name: "scope",
+        flags: "--scope <user|project>",
+        description: "configuration scope (default: user)",
+        takesValue: true,
+    },
+    {
+        name: "backend",
+        flags: "--backend <name>",
+        description: "preset backend",
+        takesValue: true,
+    },
+    {
+        name: "model",
+        flags: "--model <selector>",
+        description: "preset model selector",
+        takesValue: true,
+    },
+    {
+        name: "delivery",
+        flags: "--delivery <mode>",
+        description: "delivery mode for a saved preset",
+        takesValue: true,
+    },
+    {
+        name: "apply",
+        flags: "--apply",
+        description: "commit the reviewed change",
+    },
+    { name: "json", flags: "--json", description: "print stable JSON output" },
+];
+const completionOptions = [
+    {
+        name: "shell",
+        flags: "--shell <bash|zsh|fish>",
+        description: "target shell",
+        takesValue: true,
+    },
+    {
+        name: "apply",
+        flags: "--apply",
+        description: "write the generated completion file",
+    },
+    { name: "json", flags: "--json", description: "print stable JSON output" },
+];
+const aliasOptions = [
+    {
+        name: "shell",
+        flags: "--shell <bash|zsh|fish>",
+        description: "target shell",
+        takesValue: true,
+    },
+    {
+        name: "name",
+        flags: "--name <alias>",
+        description: "optional non-native alias name",
+        takesValue: true,
+    },
+    {
+        name: "apply",
+        flags: "--apply",
+        description: "write the dedicated aliases file",
+    },
+    { name: "json", flags: "--json", description: "print stable JSON output" },
+];
 /** The only command vocabulary. Help, metadata, and parser construction all consume this table. */
 export const commandRegistry = Object.freeze([
     {
@@ -96,6 +162,24 @@ export const commandRegistry = Object.freeze([
         summary: "launch Claude Code through the qualified adapter",
         options: commonOptions,
         presetArgument: "optional",
+    },
+    {
+        name: "presets",
+        summary: "list or explicitly save, remove, and favorite launcher presets",
+        options: presetOptions,
+        arguments: "[action] [name] [harness]",
+    },
+    {
+        name: "completions",
+        summary: "generate registry-derived bash, zsh, or fish completions",
+        options: completionOptions,
+        arguments: "[shell]",
+    },
+    {
+        name: "aliases",
+        summary: "preview or install optional non-native launcher aliases",
+        options: aliasOptions,
+        arguments: "[action]",
     },
     {
         name: "dashboard",
@@ -166,6 +250,8 @@ export function createProgram() {
             command.arguments("[preset]");
         if (definition.presetArgument === "required")
             command.arguments("<preset>");
+        if (definition.arguments)
+            command.arguments(definition.arguments);
         for (const option of definition.options ?? []) {
             const commanderOption = new Option(option.flags, option.description);
             command.addOption(commanderOption);

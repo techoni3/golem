@@ -1,9 +1,9 @@
 # REPO-MAP.md
-> Last verified: 2026-07-21 @ a7b6456 — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-21 @ 186d5da — maintained via golem:docs-maintenance.
 
 ## Structure
 
-- `apps/` holds private CLI/control-plane composition; `dashboard/web` is the legacy island. `managed-codex-control.ts` owns durable runtime/tracker ports for the foreground managed-Codex host.
+- `apps/cli/src/` owns typed grammar and UX; writes require `--apply` under `GOLEM_HOME`, while completions/aliases never edit shell RC files. `apps/control-plane/` composes hosts; `dashboard/web` is legacy.
 - `packages/` holds typed domain, client, testkit, UI, and adapter layers. Managed Codex App Server/TUI transport is storage-free under `packages/adapters/codex/src/managed/`; `lib/codex-supervisor.js` is a lazy compatibility delegate. OpenCode, Claude, and Pi each consume injected canonical ports.
 - `apps/control-plane/src/api-v1.ts` is authenticated tracker/delivery/bus; `tracker-core-routes.ts` is legacy. Generated client and MCP are storage-free.
 - `substrate/` is render source; `plugin/` and `dashboard/dist/` are generated. Legacy dashboard remains authoritative.
@@ -13,7 +13,7 @@
 - Canonical flow is contracts → domain/runtime/tracker → control plane → generated client → clients; it excludes compat/storage/UI/harness imports.
 - One npm11 lock; `packages/persistence` is the sole SQLite writer. Producers spool; its owner recovers/quarantines/replays.
 - Tracker owns durable delivery and typed work-item/phase/comment/link/stream services; exceptional close is server-composed.
-- Launcher owns fail-closed writes and immutable LaunchPlan facts; CLI owns grammar. Direct launch stays pull-only until fenced.
+- Launcher owns fail-closed writes and immutable LaunchPlan facts; CLI consumes them for picker/presets. Direct launch stays pull-only until fenced.
 - Control plane owns REST/WS; bearer is CLI/MCP-only and browser reads are same-origin/CSRF-protected. API client owns validation/resync.
 - Project identity is canonical Git paths; sessions have immutable generations, scoped aliases, provenance, terminal monotonicity, and deterministic effects.
 - Projections read canonical rows only; diagnostics are redacted/bounded; HTTP/WS share revision/cursor facts.

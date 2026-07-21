@@ -10,7 +10,7 @@
 		}
 	},
 	"scripts": {
-		"build": "npm run build -w @golem/contracts && npm run build -w @golem/launcher && npm run build -w @golem/api-client && tsc -b"
+		"build": "npm run build -w @golem/contracts && npm run build -w @golem/launcher && npm run build -w @golem/api-client && npm run build -w @golem/adapter-opencode && tsc -b"
 	},
 	"dependencies": {
 		"@golem/adapter-opencode": "file:../../packages/adapters/opencode",

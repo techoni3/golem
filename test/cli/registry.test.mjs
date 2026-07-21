@@ -34,7 +34,7 @@ test("typed registry preserves compact grammar, redaction, and pre-spawn qualifi
 		assert.equal(metadata.status, 0);
 		const schema = JSON.parse(metadata.stdout);
 		assert.equal(schema.schemaVersion, "golem.cli-registry/v1");
-		assert.deepEqual(schema.commands.map((command) => command.name), ["codex", "opencode", "opencode:setup", "opencode:refresh", "opencode:doctor", "claude", "dashboard", "dashboard:restart", "codex-supervisor", "status", "doctor", "sync", "role", "sessions", "migrate-home", "help"]);
+		assert.deepEqual(schema.commands.map((command) => command.name), ["codex", "opencode", "opencode:setup", "opencode:refresh", "opencode:doctor", "claude", "presets", "completions", "aliases", "dashboard", "dashboard:restart", "codex-supervisor", "status", "doctor", "sync", "role", "sessions", "migrate-home", "help"]);
 		const managedPassthrough = invoke(["codex", "--dry-run", "--json", "--", "--profile", "safe"], home);
 		assert.equal(managedPassthrough.status, 2, "native Codex passthrough cannot silently select or be ignored by the managed route");
 		assert.match(managedPassthrough.stderr, /managed codex does not accept native passthrough arguments/);

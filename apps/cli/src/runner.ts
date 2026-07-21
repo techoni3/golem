@@ -22,11 +22,20 @@ import {
 	parseJsoncConfig,
 	resolveLaunch,
 } from "@golem/launcher";
+import { runAliases } from "./commands/aliases.js";
+import { runCompletions } from "./commands/completions.js";
+import { choosePreset } from "./commands/picker.js";
+import {
+	pickerCandidates,
+	recordRecentPreset,
+	runPresets,
+} from "./commands/presets.js";
 import { CLI_EXIT_CODES, CliResolutionError, CliUsageError } from "./errors.js";
 import { conciseSelection, stableCliJson } from "./format.js";
 import {
 	commandDefinition,
 	commandMetadata,
+	commandRegistry,
 	createProgram,
 } from "./registry.js";
 
@@ -35,6 +44,8 @@ export interface CliIo {
 	readonly stderr?: (line: string) => void;
 	readonly isTTY?: boolean;
 	readonly now?: string;
+	/** Injectable only for the TTY picker journey; production reads standard input. */
+	readonly readLine?: (prompt: string) => Promise<string>;
 }
 
 export interface ParsedCliInput {
@@ -48,10 +59,15 @@ export interface ParsedCliInput {
 	readonly dryRun: boolean;
 	readonly apply: boolean;
 	readonly config?: string;
+	readonly delivery?: string;
+	readonly scope?: string;
+	readonly shell?: string;
+	readonly name?: string;
 	readonly explain: boolean;
 	readonly json: boolean;
 	readonly passthrough: readonly string[];
 	readonly help: boolean;
+	readonly positionals: readonly string[];
 }
 
 const harnesses = new Set<Harness>(["codex", "opencode", "claude", "pi"]);
@@ -265,6 +281,31 @@ export function parseCliInput(argv: readonly string[]): ParsedCliInput {
 			json: false,
 			passthrough: split.passthrough,
 			help: true,
+			positionals: [],
+		};
+	}
+	const administrative = new Set(["presets", "completions", "aliases"]);
+	if (administrative.has(parsed.command)) {
+		const options = parsed.options;
+		return {
+			command: parsed.command,
+			...(typeof options.backend === "string"
+				? { backend: options.backend }
+				: {}),
+			...(typeof options.model === "string" ? { model: options.model } : {}),
+			...(typeof options.delivery === "string"
+				? { delivery: options.delivery }
+				: {}),
+			...(typeof options.scope === "string" ? { scope: options.scope } : {}),
+			...(typeof options.shell === "string" ? { shell: options.shell } : {}),
+			...(typeof options.name === "string" ? { name: options.name } : {}),
+			dryRun: false,
+			apply: options.apply === true,
+			explain: false,
+			json: options.json === true,
+			passthrough: split.passthrough,
+			help: false,
+			positionals: commandArgs,
 		};
 	}
 	const globalPreset = normalized.globalPreset;
@@ -299,6 +340,7 @@ export function parseCliInput(argv: readonly string[]): ParsedCliInput {
 		json: options.json === true,
 		passthrough: split.passthrough,
 		help: false,
+		positionals: [],
 	};
 	return result;
 }
@@ -425,7 +467,10 @@ async function launchOpenCode(
 		const removeSignalForwarding = execution.running.installSignalForwarding();
 		try {
 			const exited = await execution.running.wait();
-			return exited.code ?? CLI_EXIT_CODES.runtime;
+			const exitCode = exited.code ?? CLI_EXIT_CODES.runtime;
+			if (exitCode === CLI_EXIT_CODES.ok)
+				recordRecentPreset(result.preset.name);
+			return exitCode;
 		} finally {
 			removeSignalForwarding();
 		}
@@ -448,7 +493,7 @@ async function launchOpenCode(
  * the same durable endpoint and delivery ports as every other producer.
  */
 async function launchManagedCodex(
-	_result: Extract<LaunchResolution, { readonly ok: true }>,
+	result: Extract<LaunchResolution, { readonly ok: true }>,
 	input: ParsedCliInput,
 	io: CliIo,
 ): Promise<number | undefined> {
@@ -485,7 +530,9 @@ async function launchManagedCodex(
 			child.once("exit", (code) => resolveExit({ code }));
 		},
 	);
-	return exited.code ?? CLI_EXIT_CODES.runtime;
+	const exitCode = exited.code ?? CLI_EXIT_CODES.runtime;
+	if (exitCode === CLI_EXIT_CODES.ok) recordRecentPreset(result.preset.name);
+	return exitCode;
 }
 
 function renderFailure(
@@ -524,16 +571,35 @@ function renderSuccess(
 		output(io, stableCliJson(publicPlan));
 		return CLI_EXIT_CODES.ok;
 	}
-	output(io, `selected ${conciseSelection(result)}`);
 	output(
 		io,
-		`launch ${bridge.launch.status}; delivery ${bridge.delivery.mode}/${bridge.delivery.qualification}/${bridge.delivery.readiness}`,
+		`selected ${conciseSelection(result)}; launch ${bridge.launch.status}; delivery ${bridge.delivery.mode}/${bridge.delivery.qualification}/${bridge.delivery.readiness}`,
 	);
+	if (result.warnings[0])
+		output(
+			io,
+			`warning: ${result.warnings[0].message} Remedy: ${result.warnings[0].remediation}`,
+		);
 	if (input.explain) {
 		for (const trace of result.trace)
 			output(io, `${trace.code}: ${trace.detail}`);
 	}
 	return CLI_EXIT_CODES.ok;
+}
+
+async function runPicker(io: CliIo): Promise<number> {
+	const documents = launcherDocuments();
+	const entries = pickerCandidates({
+		now: io.now ?? new Date().toISOString(),
+		...(documents.user ? { user: documents.user } : {}),
+		...(documents.project ? { project: documents.project } : {}),
+	});
+	const chosen = await choosePreset(entries, {
+		stdout: (line) => output(io, line),
+		...(io.readLine ? { readLine: io.readLine } : {}),
+	});
+	if (!chosen) return CLI_EXIT_CODES.ok;
+	return runCli([chosen.harness, chosen.name], io);
 }
 
 function launcherDocuments(): {
@@ -628,9 +694,21 @@ export async function runCli(
 		);
 		return CLI_EXIT_CODES.ok;
 	}
+	if (argv.length === 0) {
+		if (!(io.isTTY ?? Boolean(process.stdin.isTTY))) {
+			return runCli(["help"], io);
+		}
+		try {
+			return await runPicker(io);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : "picker failed";
+			errorOutput(io, `launcher.picker.unavailable: ${message}`);
+			return CLI_EXIT_CODES.runtime;
+		}
+	}
 	let input: ParsedCliInput;
 	try {
-		input = parseCliInput(argv.length === 0 ? ["help"] : argv);
+		input = parseCliInput(argv);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : "invalid command";
 		errorOutput(io, `cli.usage: ${message}`);
@@ -669,6 +747,51 @@ export async function runCli(
 		return CLI_EXIT_CODES.usage;
 	}
 	try {
+		if (input.command === "presets")
+			return await runPresets(
+				{
+					positionals: input.positionals,
+					...(input.scope ? { scope: input.scope } : {}),
+					...(input.backend ? { backend: input.backend } : {}),
+					...(input.model ? { model: input.model } : {}),
+					...(input.delivery ? { delivery: input.delivery } : {}),
+					apply: input.apply,
+					json: input.json,
+					now: io.now ?? new Date().toISOString(),
+				},
+				{
+					stdout: (line) => output(io, line),
+					stderr: (line) => errorOutput(io, line),
+				},
+			);
+		if (input.command === "completions")
+			return await runCompletions(
+				{
+					positionals: input.positionals,
+					...(input.shell ? { shell: input.shell } : {}),
+					apply: input.apply,
+					json: input.json,
+				},
+				{
+					stdout: (line) => output(io, line),
+					stderr: (line) => errorOutput(io, line),
+				},
+				commandRegistry,
+			);
+		if (input.command === "aliases")
+			return await runAliases(
+				{
+					positionals: input.positionals,
+					...(input.shell ? { shell: input.shell } : {}),
+					...(input.name ? { name: input.name } : {}),
+					apply: input.apply,
+					json: input.json,
+				},
+				{
+					stdout: (line) => output(io, line),
+					stderr: (line) => errorOutput(io, line),
+				},
+			);
 		if (
 			input.command === "opencode:setup" ||
 			input.command === "opencode:refresh" ||

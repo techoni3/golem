@@ -472,6 +472,10 @@ metadata table.
 | `golem codex [--session <id>] [--cwd <dir>]` | Run the managed Codex host; native arguments require the explicit `--legacy --` compatibility escape. |
 | `golem opencode [preset]` / `golem claude [preset]` | Resolve canonical harness presets; unqualified adapters fail before spawn. |
 | `golem @preset` | Resolve a globally named preset through the same registry. |
+| `golem` | Open the compact TTY preset picker; non-TTY invocations print help without prompting. |
+| `golem presets list\|set\|remove\|favorite …` | Review or explicitly save launcher presets; mutations require `--apply`. |
+| `golem completions [bash\|zsh\|fish] [--apply]` | Generate registry-derived shell completions in a Golem-owned file. |
+| `golem aliases install\|uninstall [--apply]` | Preview or manage optional non-native aliases without modifying shell RC files. |
 | `golem dashboard [--public]` | Start the dashboard in the foreground. |
 | `golem dashboard:restart [--public]` | Stop the registered dashboard and start a detached replacement. |
 | `golem status [--json]` | Probe dashboard health and print its URL. |
@@ -485,6 +489,10 @@ metadata table.
 `--dry-run`, `--explain`, `--json`, `--model`, `--backend`, `--preset`, and
 `--cwd` are shared harness options. Exact native arguments after `--` are
 preserved. There is intentionally no `golem launch` command.
+
+The historical `golemc` and `golemx` shortcuts are one-hop deprecation shims to
+`golem claude` and `golem opencode`. They cannot recurse and never shadow the
+native harness binaries.
 
 Useful render forms:
 
