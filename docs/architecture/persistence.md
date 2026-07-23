@@ -86,6 +86,12 @@ as the canonical domain write and GOL-79 receipt/outcome: stale, rejected, and
 rolled-back writes leave no row. Its records contain only opaque category,
 resource identity/revision, project revision, policy version, and timestamps;
 they never carry command/audit/prompt/cookie/CSRF/bearer/fence/path payloads.
+`tracker/009-semantic-committed-publication` replaces timestamp-gated update
+triggers with null-safe semantic-column comparisons: a real fixed-clock update
+adds exactly one revision/outbox row, while a no-op adds none. It also assigns
+acknowledgement publication to the acknowledgement insert alone, so its
+companion envelope status change cannot double-publish; other settlement
+states remain envelope-owned exactly once.
 Claims order by project then canonical project revision, so equal timestamps
 cannot make a scoped consumer regress its HTTP revision cursor. Resource CAS and outbox
 evidence derive from canonical `events.id`. The private owner exposes typed

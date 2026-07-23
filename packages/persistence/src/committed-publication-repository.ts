@@ -148,4 +148,13 @@ export class CommittedPublicationRepository
 			.get(projectId);
 		return row?.revision ?? 0;
 	}
+
+	outboxCount(projectId: string): number {
+		const row = this.#database
+			.prepare<{ readonly count: number }>(
+				"SELECT count(*) AS count FROM committed_publication_outbox WHERE project_id = ?",
+			)
+			.get(projectId);
+		return Number(row?.count ?? 0);
+	}
 }

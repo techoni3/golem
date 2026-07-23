@@ -1421,6 +1421,8 @@ export interface CommittedPublicationStorage {
 		readonly publishedAt: string;
 	}): boolean;
 	projectRevision(projectId: string): number;
+	/** Owner-only evidence/read-model count; never exposed to WS subscribers. */
+	outboxCount(projectId: string): number;
 }
 
 /**
