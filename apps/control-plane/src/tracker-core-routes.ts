@@ -146,13 +146,18 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 		readonly commandKind: string;
 		readonly scope: CommandGatewayInput["scope"];
 		readonly payload: Readonly<Record<string, unknown>>;
+		readonly idempotencyKey: string | undefined;
 		readonly expectedRevision?: number;
 		readonly handler: () => unknown;
 	}): unknown {
 		if (!gateway) return undefined;
-		const outcome = gateway.execute({
+		const key =
+			typeof input.idempotencyKey === "string" && input.idempotencyKey
+				? input.idempotencyKey
+				: `auto:legacy:${input.commandKind}:${crypto.randomUUID()}`;
+		return gateway.execute({
 			commandId: `cmd_${crypto.randomUUID()}`,
-			idempotencyKey: `auto:legacy:${input.commandKind}:${crypto.randomUUID()}`,
+			idempotencyKey: key,
 			commandKind: input.commandKind,
 			actorId: input.context.actorId,
 			projectId: input.context.defaultProjectId,
@@ -164,7 +169,6 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 			payload: input.payload,
 			handler: input.handler,
 		});
-		return outcome;
 	}
 
 	options.app.addHook("preHandler", async (request, reply) => {
@@ -274,6 +278,7 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 				commandKind: "legacy.ticket.create",
 				scope: { resourceType: "ticket", resourceId: "*" },
 				payload: input,
+				idempotencyKey: typeof input.idempotency_key === "string" ? input.idempotency_key : undefined,
 				handler,
 			});
 			return outcome ?? handler();
@@ -314,6 +319,7 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 					commandKind: "legacy.ticket.transition",
 					scope: { resourceType: "ticket", resourceId: id },
 					payload: input,
+					idempotencyKey: typeof input.idempotency_key === "string" ? input.idempotency_key : undefined,
 					expectedRevision: revision,
 					handler,
 				});
@@ -345,6 +351,7 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 				commandKind: "legacy.ticket.update",
 				scope: { resourceType: "ticket", resourceId: id },
 				payload: input,
+				idempotencyKey: typeof input.idempotency_key === "string" ? input.idempotency_key : undefined,
 				expectedRevision: revision,
 				handler,
 			});
@@ -374,6 +381,7 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 				commandKind: "legacy.ticket.transition",
 				scope: { resourceType: "ticket", resourceId: id },
 				payload: input,
+				idempotencyKey: typeof input.idempotency_key === "string" ? input.idempotency_key : undefined,
 				expectedRevision: revision,
 				handler,
 			});
@@ -405,6 +413,7 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 				commandKind: "legacy.comment.create",
 				scope: { resourceType: "comment", resourceId: ticketId },
 				payload: input,
+				idempotencyKey: typeof input.idempotency_key === "string" ? input.idempotency_key : undefined,
 				handler,
 			});
 			return outcome ?? handler();
@@ -433,6 +442,7 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 					commandKind: "legacy.comment.reply",
 					scope: { resourceType: "comment", resourceId: commentId },
 					payload: input,
+					idempotencyKey: typeof input.idempotency_key === "string" ? input.idempotency_key : undefined,
 					handler,
 				});
 				return outcome ?? handler();
@@ -468,6 +478,7 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 					commandKind: "legacy.comment.update",
 					scope: { resourceType: "comment", resourceId: commentId },
 					payload: input,
+					idempotencyKey: typeof input.idempotency_key === "string" ? input.idempotency_key : undefined,
 					handler,
 				});
 				return outcome ?? handler();
@@ -499,6 +510,7 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 				commandKind: "legacy.link.create",
 				scope: { resourceType: "link", resourceId: ticketId },
 				payload: input,
+				idempotencyKey: typeof input.idempotency_key === "string" ? input.idempotency_key : undefined,
 				handler,
 			});
 			return outcome ?? handler();
@@ -529,6 +541,7 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 				commandKind: "legacy.link.delete",
 				scope: { resourceType: "link", resourceId: ticketId },
 				payload: input,
+				idempotencyKey: typeof input.idempotency_key === "string" ? input.idempotency_key : undefined,
 				handler,
 			});
 			return outcome ?? handler();
@@ -568,6 +581,7 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 					resourceId: typeof input.id === "string" ? input.id : "*",
 				},
 				payload: input,
+				idempotencyKey: typeof input.idempotency_key === "string" ? input.idempotency_key : undefined,
 				...(typeof input.expected_revision === "number"
 					? { expectedRevision: input.expected_revision }
 					: {}),
@@ -608,6 +622,7 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 				commandKind: "legacy.stream.upsert",
 				scope: { resourceType: "stream", resourceId: streamId },
 				payload: input,
+				idempotencyKey: typeof input.idempotency_key === "string" ? input.idempotency_key : undefined,
 				...(typeof input.expected_revision === "number"
 					? { expectedRevision: input.expected_revision }
 					: {}),

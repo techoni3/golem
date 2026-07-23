@@ -154,6 +154,15 @@ export function registerManagementRoutes(options: {
 }): void {
 	const gateway = options.gateway;
 
+	const GATEWAY_MISMATCH = Symbol("gateway.mismatch");
+
+	/**
+	 * Route a management mutation through the gateway when one is composed,
+	 * preserving the `golem.management/v1` wire shape.  Returns the handler
+	 * result (which may be `undefined`) wrapped in a sentinel so the caller
+	 * can distinguish "gateway handled" from "no gateway present".  Returns
+	 * `GATEWAY_MISMATCH` on a 409 (already sent to the reply).
+	 */
 	function gatewayRoute(input: {
 		readonly request: FastifyRequest;
 		readonly reply: FastifyReply;
@@ -164,7 +173,7 @@ export function registerManagementRoutes(options: {
 		readonly projectId: string;
 		readonly idempotencyKey?: string;
 		readonly handler: () => unknown;
-	}): unknown {
+	}): { readonly handled: true; readonly result: unknown } | typeof GATEWAY_MISMATCH | undefined {
 		if (!gateway) return undefined;
 		const key =
 			typeof input.idempotencyKey === "string" && input.idempotencyKey
@@ -189,15 +198,17 @@ export function registerManagementRoutes(options: {
 				"command.idempotency_mismatch",
 				"idempotency key reused with a differing payload",
 			);
-			return null;
+			return GATEWAY_MISMATCH;
 		}
-		return outcome.result;
+		return { handled: true as const, result: outcome.result };
 	}
 
 	/**
 	 * Route a management mutation through the gateway when one is composed,
 	 * preserving the `golem.management/v1` wire shape.  When no gateway is
-	 * present, fall back to the direct service call.
+	 * present, fall back to the direct service call.  Uses an explicit
+	 * handled sentinel so a gateway-backed handler that legitimately
+	 * returns `undefined` does not trigger a second (un-gated) execution.
 	 */
 	function managementRoute(input: {
 		readonly request: FastifyRequest;
@@ -210,9 +221,10 @@ export function registerManagementRoutes(options: {
 		readonly idempotencyKey?: string;
 		readonly handler: () => unknown;
 	}): unknown {
-		const result = gatewayRoute(input);
-		if (result === null) return undefined;
-		return result ?? input.handler();
+		const routed = gatewayRoute(input);
+		if (routed === GATEWAY_MISMATCH) return undefined;
+		if (routed !== undefined) return routed.result;
+		return input.handler();
 	}
 	const schema = {
 		response: {

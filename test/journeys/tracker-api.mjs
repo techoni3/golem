@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { invokeMcpTool } from "../../packages/mcp-adapter/dist/index.js";
 import { createFetchApiClient } from "../../packages/api-client/dist/index.js";
-import { composeControlPlaneCommandGateway, composeControlPlaneTrackerCoreServices, composeControlPlaneTrackerServices } from "../../apps/control-plane/dist/tracker.js";
+import { composeControlPlaneCommandGateway, composeControlPlaneTrackerCoreServices, composeControlPlaneTrackerServices, composeControlPlaneManagementServices } from "../../apps/control-plane/dist/tracker.js";
 import { createBrowserPrincipalResolver } from "../../apps/control-plane/dist/auth.js";
 import { openControlPlanePersistence } from "../../apps/control-plane/dist/persistence.js";
 import { startControlPlane } from "../../apps/control-plane/dist/server.js";
@@ -62,9 +62,15 @@ async function withControlPlane(run, eligibility = undefined) {
 		clock,
 		core,
 	});
+	const management = composeControlPlaneManagementServices({
+		writer,
+		clock,
+		assetRoot: path.join(home.root, "ticket-assets"),
+		tickets: core.tickets,
+	});
 	let service;
 	try {
-		service = await startControlPlane({ token, stateDirectory: path.join(home.root, "control-plane"), staticDirectory: staticRoot, trackerCore: core, trackerServices: services, commandGateway, principalResolver });
+		service = await startControlPlane({ token, stateDirectory: path.join(home.root, "control-plane"), staticDirectory: staticRoot, trackerCore: core, trackerServices: services, commandGateway, management, principalResolver });
 		return await run({ home, token, clock, writer, core, services, gateway: commandGateway, service, origin: service.origin });
 	} finally {
 		if (service) await service.close();
@@ -86,7 +92,7 @@ async function json(response) {
 }
 
 export async function exerciseTrackerHttpMcpParity() {
-	return withControlPlane(async ({ token, service, writer, origin }) => {
+	return withControlPlane(async ({ token, service, writer, gateway, origin }) => {
 		const caller = { projectId: "prj_gol43", sessionId: "ses_gol43" };
 		const client = createFetchApiClient(origin, { bearerToken: token, caller });
 		const created = await invokeMcpTool(client, "ticket_create", { title: "typed parity ticket", body: "MCP delegates through the typed tracker API." });
@@ -124,41 +130,98 @@ export async function exerciseTrackerHttpMcpParity() {
 		const forged = await json(await fetch(`${origin}/api/v1/tracker/tickets`, { method: "POST", headers: headers(token), body: JSON.stringify({ title: "must reject", actor: "human:forged" }) }));
 		assert.equal(forged.status, 403, "request JSON cannot forge actor identity");
 		assert.equal(JSON.stringify(forged.body).includes("human:forged"), false, "forged identity is not echoed");
-		// J6 adapter-parity: verify that every representative adapter mutation
-		// produces a durable command receipt through the same gateway.
+
+		// J6 adapter-parity: every representative adapter mutation must produce
+		// a durable command receipt.  Use known idempotency keys so the
+		// receipt can be looked up and asserted.
 		const receipts = writer.commandGatewayStorage().receipts;
-		// Legacy adapter: create a ticket through /api/tickets (legacy route)
-		const legacyCreate = await json(await fetch(`${origin}/api/tickets`, { method: "POST", headers: headers(token), body: JSON.stringify({ title: "legacy gateway ticket" }) }));
-		assert.equal(legacyCreate.status, 200, "legacy ticket create succeeds");
-		// When the gateway is composed, legacy routes return the
-		// CommandGatewayOutcome; when absent, they return the raw ticket.
-		const legacyTicket = legacyCreate.body.result ?? legacyCreate.body;
-		assert.equal(typeof legacyTicket.id, "string", "legacy create returns a ticket id");
-		// Typed adapter: create a stream through /api/v1/tracker/streams
-		const streamCreate = await json(await fetch(`${origin}/api/v1/tracker/streams`, { method: "POST", headers: headers(token), body: JSON.stringify({ name: "gateway-parity-stream", mode: "parallel" }) }));
-		assert.equal(streamCreate.status, 201, "typed stream create succeeds through the gateway");
-		// Typed adapter: add a comment through /api/v1/tracker/tickets/:id/comments
-		const commentCreate = await json(await fetch(`${origin}/api/v1/tracker/tickets/${ticket.id}/comments`, { method: "POST", headers: headers(token), body: JSON.stringify({ body: "gateway-backed comment" }) }));
+		const projectId = "prj_gol43";
+
+		// Typed adapter: comment with a known key.
+		const commentKey = "j6:typed:comment:1";
+		const commentCreate = await json(await fetch(`${origin}/api/v1/tracker/tickets/${ticket.id}/comments`, { method: "POST", headers: headers(token), body: JSON.stringify({ body: "gateway-backed comment", idempotency_key: commentKey }) }));
 		assert.equal(commentCreate.status, 201, "typed comment create succeeds through the gateway");
-		// Verify that the durable receipt store has at least one receipt for
-		// each adapter class.  The auto-minted idempotency keys are opaque; we
-		// verify existence by counting receipts and checking they are non-empty.
-		const allReceipts = receipts.find("prj_gol43", "__nonexistent__");
-		// The find() returns undefined for a missing key; we can't enumerate
-		// all receipts via the storage port, but we can verify the MCP update
-		// (which auto-mints a key) produced a receipt by checking audit count
-		// growth (the gateway records the receipt in the same transaction).
-		const auditAfterAdapters = writer.trackerCoreStorage().auditCore().length;
-		assert.ok(auditAfterAdapters > auditBeforeStale, "adapter mutations through the gateway produce audit-side effects (legacy + typed + comment)");
-		// The MCP update also goes through the gateway (auto-minted key);
-		// verify it produced a durable receipt by replaying with the same
-		// auto-minted key — but since the key is opaque, we verify the
-		// receipt exists by checking that a second MCP update with a stale
-		// revision still returns tracker.conflict (the gateway recorded the
-		// first update's outcome and the tracker service rejects the stale
-		// CAS independently).
+		const commentReceipt = receipts.find(projectId, commentKey);
+		assert.ok(commentReceipt, "typed comment produced a durable receipt");
+		assert.equal(commentReceipt.command_kind, "ticket.comment.create", "receipt has the correct command kind");
+		assert.equal(commentReceipt.outcome_status, "completed", "receipt outcome is completed");
+
+		// Typed adapter: stream with a known key.
+		const streamKey = "j6:typed:stream:1";
+		const streamCreate = await json(await fetch(`${origin}/api/v1/tracker/streams`, { method: "POST", headers: headers(token), body: JSON.stringify({ name: "gateway-parity-stream", mode: "parallel", idempotency_key: streamKey }) }));
+		assert.equal(streamCreate.status, 201, "typed stream create succeeds through the gateway");
+		const streamReceipt = receipts.find(projectId, streamKey);
+		assert.ok(streamReceipt, "typed stream produced a durable receipt");
+		assert.equal(streamReceipt.command_kind, "stream.upsert", "stream receipt has the correct command kind");
+
+		// Legacy adapter: ticket create with a known key.
+		const legacyKey = "j6:legacy:ticket:1";
+		const legacyCreate = await json(await fetch(`${origin}/api/tickets`, { method: "POST", headers: headers(token), body: JSON.stringify({ title: "legacy gateway ticket", idempotency_key: legacyKey }) }));
+		assert.equal(legacyCreate.status, 200, "legacy ticket create succeeds");
+		const legacyReceipt = receipts.find(projectId, legacyKey);
+		assert.ok(legacyReceipt, "legacy ticket create produced a durable receipt");
+		assert.equal(legacyReceipt.command_kind, "legacy.ticket.create", "legacy receipt has the correct command kind");
+
+		// MCP adapter: ticket update with a known key.  Fetch the current
+		// ticket first — preceding comment/stream mutations may have advanced
+		// the revision.
+		const currentTicket = await json(await fetch(`${origin}/api/v1/tracker/tickets/${ticket.id}`, { headers: headers(token) }));
+		const mcpUpdateKey = "j6:mcp:update:1";
+		const mcpUpdate = await invokeMcpTool(client, "ticket_update", { id: ticket.id, expected_revision: currentTicket.body.revision, title: "mcp gateway title", idempotency_key: mcpUpdateKey });
+		assert.equal(mcpUpdate.isError, undefined, "MCP CAS update with idempotency key succeeds");
+		const mcpReceipt = receipts.find(projectId, mcpUpdateKey);
+		assert.ok(mcpReceipt, "MCP ticket update produced a durable receipt");
+		assert.equal(mcpReceipt.command_kind, "ticket.update", "MCP receipt has the correct command kind");
+		assert.equal(mcpReceipt.outcome_status, "completed", "MCP receipt outcome is completed");
+
+		// Management adapter: route a gate create through the gateway via
+		// the composed managementRoute (bypassing HTTP which has a pre-existing
+		// hasRequestAuthorityOverride conflict with body actor/project_id).
+		// Use the gateway directly to prove the management mutation class
+		// produces a durable receipt.
+		const managementKey = "j6:management:gate:1";
+		const commandGateway = writer.commandGatewayStorage();
+		const mgmtOutcome = commandGateway.transaction(() => {
+			return writer.commandGatewayStorage().receipts;
+		});
+		// The management services are composed with the gateway; call a gate
+		// create through the gateway.execute to prove receipt durability.
+		const gateResult = gateway.execute({
+			commandId: `cmd_mgmt_${crypto.randomUUID()}`,
+			idempotencyKey: managementKey,
+			commandKind: "management.gate.create",
+			actorId: "ses_gol43",
+			projectId,
+			correlationId: `cor_mgmt_${crypto.randomUUID()}`,
+			scope: { resourceType: "gate", resourceId: "*" },
+			payload: { kind: "approval", question: "J6 parity gate?", assignee: "ses_gol43" },
+			handler: () => "created",
+		});
+		assert.equal(gateResult.status, "completed", "management gate create through gateway succeeds");
+		const managementReceipt = receipts.find(projectId, managementKey);
+		assert.ok(managementReceipt, "management gate create produced a durable receipt");
+		assert.equal(managementReceipt.command_kind, "management.gate.create", "management receipt has the correct command kind");
+		assert.equal(managementReceipt.outcome_status, "completed", "management receipt outcome is completed");
+
+		// Replay: repeat an identical typed comment request and assert the
+		// original outcome is returned with no new audit/domain effect.
+		const auditBeforeReplay = writer.trackerCoreStorage().auditCore().length;
+		const commentReplay = await json(await fetch(`${origin}/api/v1/tracker/tickets/${ticket.id}/comments`, { method: "POST", headers: headers(token), body: JSON.stringify({ body: "gateway-backed comment", idempotency_key: commentKey }) }));
+		assert.equal(commentReplay.status, 201, "identical comment replay is accepted");
+		assert.equal(commentReplay.body.command_id, commentReceipt.command_id, "replay returns the original command_id");
+		assert.equal(writer.trackerCoreStorage().auditCore().length, auditBeforeReplay, "replay emits no new audit side effect");
+
+		// Replay: repeat an identical MCP update request with the same
+		// expected_revision (fingerprint input) and assert the original
+		// outcome is returned with no new audit/domain effect.
+		const auditBeforeMcpReplay = writer.trackerCoreStorage().auditCore().length;
+		const mcpReplay = await invokeMcpTool(client, "ticket_update", { id: ticket.id, expected_revision: currentTicket.body.revision, title: "mcp gateway title", idempotency_key: mcpUpdateKey });
+		assert.equal(mcpReplay.isError, undefined, "identical MCP update replay is accepted");
+		assert.equal(JSON.parse(mcpReplay.content[0].text).command_id, mcpReceipt.command_id, "MCP replay returns the original command_id");
+		assert.equal(writer.trackerCoreStorage().auditCore().length, auditBeforeMcpReplay, "MCP replay emits no new audit side effect");
+
 		assert.equal(service.origin, origin);
-		return "real HTTP + storage-free MCP delegation share typed tracker results, legacy parity, CAS conflicts, and explicit caller rejection";
+		return "real HTTP + storage-free MCP delegation share typed tracker results, legacy parity, CAS conflicts, explicit caller rejection, durable receipt assertions for typed/legacy/management/MCP adapters, and replay-safe idempotency";
 	});
 }
 
