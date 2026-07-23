@@ -256,7 +256,7 @@ export function registerApiV1Routes(options: {
 		readonly commandKind: string;
 		readonly scope: CommandGatewayInput["scope"];
 		readonly payload: Readonly<Record<string, unknown>>;
-		readonly idempotencyKey?: string;
+		readonly idempotencyKey: string | undefined;
 		readonly expectedRevision?: number;
 		readonly handler: () => unknown;
 	}): CommandGatewayOutcome | undefined {
@@ -409,19 +409,11 @@ export function registerApiV1Routes(options: {
 							...(typeof input.wave === "number"
 								? { wave: input.wave }
 								: {}),
-							actor: callerValue.actor,
-						}),
-				});
-				if (outcome.status === "idempotency_mismatch")
-					return fail(
-						request,
-						reply,
-						409,
-						"command.idempotency_mismatch",
-						"idempotency key reused with a differing payload",
-					);
-				return reply.code(201).send(outcome);
-			}
+						actor: callerValue.actor,
+					}),
+			});
+			if (outcome) return sendGatewayOutcome(reply, outcome, true);
+		}
 			const result = command(
 				options.core.compatibility.createTicket({
 					projectId: callerValue.projectId,
@@ -472,17 +464,19 @@ export function registerApiV1Routes(options: {
 				);
 			const revision = expectedRevision(input, request, reply);
 			if (revision === undefined) return;
-			if (gateway && typeof input.idempotency_key === "string") {
-				const outcome = gateway.execute({
-					commandId: `cmd_${crypto.randomUUID()}`,
-					idempotencyKey: input.idempotency_key,
+			if (gateway) {
+				const outcome = gatewayRoute({
+					request,
+					reply,
+					caller: callerValue,
 					commandKind: "ticket.update",
-					actorId: callerValue.actor,
-					projectId: callerValue.projectId,
-					correlationId: `cor_${crypto.randomUUID()}`,
 					scope: { resourceType: "ticket", resourceId: id },
-					expectedRevision: revision,
 					payload: input,
+					idempotencyKey:
+						typeof input.idempotency_key === "string"
+							? input.idempotency_key
+							: undefined,
+					expectedRevision: revision,
 					handler: () =>
 						options.core.compatibility.updateTicket({
 							id,
@@ -513,23 +507,15 @@ export function registerApiV1Routes(options: {
 							...(typeof input.reason === "string"
 								? { reason: input.reason }
 								: {}),
-							actor: callerValue.actor,
-						}),
-				});
-				if (outcome.status === "idempotency_mismatch")
-					return fail(
-						request,
-						reply,
-						409,
-						"command.idempotency_mismatch",
-						"idempotency key reused with a differing payload",
-					);
-				return reply.send(outcome);
-			}
-			const result = command(
-				options.core.compatibility.updateTicket({
-					id,
-					expectedRevision: revision,
+					actor: callerValue.actor,
+				}),
+			});
+			if (outcome) return sendGatewayOutcome(reply, outcome);
+		}
+		const result = command(
+			options.core.compatibility.updateTicket({
+				id,
+				expectedRevision: revision,
 					patch: {
 						...(typeof input.title === "string" ? { title: input.title } : {}),
 						...(typeof input.body === "string" ? { body: input.body } : {}),
@@ -575,17 +561,19 @@ export function registerApiV1Routes(options: {
 					);
 			const revision = expectedRevision(input, request, reply);
 			if (revision === undefined) return;
-			if (gateway && typeof input.idempotency_key === "string") {
-				const outcome = gateway.execute({
-					commandId: `cmd_${crypto.randomUUID()}`,
-					idempotencyKey: input.idempotency_key,
+			if (gateway) {
+				const outcome = gatewayRoute({
+					request,
+					reply,
+					caller: callerValue,
 					commandKind: "ticket.transition",
-					actorId: callerValue.actor,
-					projectId: callerValue.projectId,
-					correlationId: `cor_${crypto.randomUUID()}`,
 					scope: { resourceType: "ticket", resourceId: id },
-					expectedRevision: revision,
 					payload: input,
+					idempotencyKey:
+						typeof input.idempotency_key === "string"
+							? input.idempotency_key
+							: undefined,
+					expectedRevision: revision,
 					handler: () =>
 						options.core.compatibility.transitionTicket({
 							id,
@@ -594,32 +582,24 @@ export function registerApiV1Routes(options: {
 							...(typeof input.reason === "string"
 								? { reason: input.reason }
 								: {}),
-							actor: callerValue.actor,
-						}),
-				});
-				if (outcome.status === "idempotency_mismatch")
-					return fail(
-						request,
-						reply,
-						409,
-						"command.idempotency_mismatch",
-						"idempotency key reused with a differing payload",
-					);
-				return reply.send(outcome);
-			}
-			return reply.send(
-				command(
-					options.core.compatibility.transitionTicket({
-						id,
-						expectedRevision: revision,
-						phase: input.phase as string,
-						...(typeof input.reason === "string"
-							? { reason: input.reason }
-							: {}),
 						actor: callerValue.actor,
 					}),
-				),
-			);
+			});
+			if (outcome) return sendGatewayOutcome(reply, outcome);
+		}
+		return reply.send(
+			command(
+				options.core.compatibility.transitionTicket({
+					id,
+					expectedRevision: revision,
+					phase: input.phase as string,
+					...(typeof input.reason === "string"
+						? { reason: input.reason }
+						: {}),
+					actor: callerValue.actor,
+				}),
+			),
+		);
 		} catch (error) {
 			return publicError(request, reply, error);
 		}
@@ -676,6 +656,43 @@ export function registerApiV1Routes(options: {
 									["sectionId", input.section_id],
 								].filter(([, candidate]) => typeof candidate === "string"),
 							);
+				const commentPayload = {
+					ticket_id: id,
+					body: input.body as string,
+					...(Object.keys(anchor).length > 0 ? { anchor } : {}),
+					...(typeof input.tag === "string" ? { tag: input.tag } : {}),
+					...(typeof input.status === "string"
+						? { status: input.status }
+						: {}),
+				};
+				if (gateway) {
+					const outcome = gatewayRoute({
+						request,
+						reply,
+						caller: callerValue,
+						commandKind: "ticket.comment.create",
+						scope: { resourceType: "comment", resourceId: id },
+						payload: commentPayload,
+						idempotencyKey:
+							typeof input.idempotency_key === "string"
+								? input.idempotency_key
+								: undefined,
+						handler: () =>
+							options.core.compatibility.addComment({
+								ticketId: id,
+								author: callerValue.actor,
+								body: input.body as string,
+								...(Object.keys(anchor).length > 0 ? { anchor } : {}),
+								...(typeof input.tag === "string"
+									? { tag: input.tag }
+									: {}),
+								...(typeof input.status === "string"
+									? { status: input.status }
+									: {}),
+							}),
+					});
+					if (outcome) return sendGatewayOutcome(reply, outcome, true);
+				}
 				return reply.code(201).send(
 					command(
 						options.core.compatibility.addComment({
@@ -707,6 +724,36 @@ export function registerApiV1Routes(options: {
 				const params = request.params as { id: string; commentId: string };
 				if (!ticketInCallerScope(callerValue, params.id))
 					return ticketNotFound(request, reply);
+				const replyPayload = {
+					ticket_id: params.id,
+					parent_id: params.commentId,
+					body: input.body as string,
+				};
+				if (gateway) {
+					const outcome = gatewayRoute({
+						request,
+						reply,
+						caller: callerValue,
+						commandKind: "ticket.comment.reply",
+						scope: {
+							resourceType: "comment",
+							resourceId: params.commentId,
+						},
+						payload: replyPayload,
+						idempotencyKey:
+							typeof input.idempotency_key === "string"
+								? input.idempotency_key
+								: undefined,
+						handler: () =>
+							options.core.compatibility.replyComment({
+								ticketId: params.id,
+								parentId: params.commentId,
+								author: callerValue.actor,
+								body: input.body as string,
+							}),
+					});
+					if (outcome) return sendGatewayOutcome(reply, outcome, true);
+				}
 				return reply.code(201).send(
 					command(
 						options.core.compatibility.replyComment({
@@ -734,6 +781,50 @@ export function registerApiV1Routes(options: {
 				const params = request.params as { id: string; commentId: string };
 				if (!ticketInCallerScope(callerValue, params.id))
 					return ticketNotFound(request, reply);
+				const updatePayload = {
+					ticket_id: params.id,
+					comment_id: params.commentId,
+					...(typeof input.body === "string" ? { body: input.body } : {}),
+					...(typeof input.tag === "string" ? { tag: input.tag } : {}),
+					...(typeof input.status === "string"
+						? { status: input.status }
+						: {}),
+				};
+				if (gateway) {
+					const outcome = gatewayRoute({
+						request,
+						reply,
+						caller: callerValue,
+						commandKind: "ticket.comment.update",
+						scope: {
+							resourceType: "comment",
+							resourceId: params.commentId,
+						},
+						payload: updatePayload,
+						idempotencyKey:
+							typeof input.idempotency_key === "string"
+								? input.idempotency_key
+								: undefined,
+						handler: () =>
+							options.core.compatibility.updateComment({
+								ticketId: params.id,
+								commentId: params.commentId,
+								patch: {
+									...(typeof input.body === "string"
+										? { body: input.body }
+										: {}),
+									...(typeof input.tag === "string"
+										? { tag: input.tag }
+										: {}),
+									...(typeof input.status === "string"
+										? { status: input.status }
+										: {}),
+								},
+								actor: callerValue.actor,
+							}),
+					});
+					if (outcome) return sendGatewayOutcome(reply, outcome);
+				}
 				return reply.send(
 					command(
 						options.core.compatibility.updateComment({
@@ -762,6 +853,55 @@ export function registerApiV1Routes(options: {
 		const input = withIdentity(request, reply, callerValue);
 		if (!input) return;
 		try {
+			const streamId =
+				typeof input.id === "string" ? input.id : `stream_${crypto.randomUUID()}`;
+			const streamPayload = {
+				id: streamId,
+				name: input.name as string,
+				...(input.mode === "sequential" || input.mode === "parallel"
+					? { mode: input.mode }
+					: {}),
+				...(typeof input.description === "string"
+					? { description: input.description }
+					: {}),
+				...(typeof input.expected_revision === "number"
+					? { expected_revision: input.expected_revision }
+					: {}),
+			};
+			if (gateway) {
+				const outcome = gatewayRoute({
+					request,
+					reply,
+					caller: callerValue,
+					commandKind: "stream.upsert",
+					scope: { resourceType: "stream", resourceId: streamId },
+					payload: streamPayload,
+					idempotencyKey:
+						typeof input.idempotency_key === "string"
+							? input.idempotency_key
+							: undefined,
+					...(typeof input.expected_revision === "number"
+						? { expectedRevision: input.expected_revision }
+						: {}),
+					handler: () =>
+						options.core.compatibility.upsertStream({
+							...(typeof input.id === "string" ? { id: input.id } : {}),
+							projectId: callerValue.projectId,
+							name: input.name as string,
+							...(input.mode === "sequential" || input.mode === "parallel"
+								? { mode: input.mode }
+								: {}),
+							...(typeof input.description === "string"
+								? { description: input.description }
+								: {}),
+							...(typeof input.expected_revision === "number"
+								? { expectedRevision: input.expected_revision }
+								: {}),
+							actor: callerValue.actor,
+						}),
+				});
+				if (outcome) return sendGatewayOutcome(reply, outcome, true);
+			}
 			return reply.code(201).send(
 				command(
 					options.core.compatibility.upsertStream({

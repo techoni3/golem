@@ -1,5 +1,9 @@
+import crypto from "node:crypto";
+
 import {
 	type CommandGateway,
+	type CommandGatewayInput,
+	type CommandGatewayOutcome,
 	type TrackerCompatibilityFacade,
 	TrackerCoreError,
 } from "@golem/tracker";
@@ -135,6 +139,34 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 	readonly principal: BrowserPrincipalResolver;
 	readonly gateway?: CommandGateway;
 }): void {
+	const gateway = options.gateway;
+
+	function gatewayRoute(input: {
+		readonly context: ActorContext;
+		readonly commandKind: string;
+		readonly scope: CommandGatewayInput["scope"];
+		readonly payload: Readonly<Record<string, unknown>>;
+		readonly expectedRevision?: number;
+		readonly handler: () => unknown;
+	}): unknown {
+		if (!gateway) return undefined;
+		const outcome = gateway.execute({
+			commandId: `cmd_${crypto.randomUUID()}`,
+			idempotencyKey: `auto:legacy:${input.commandKind}:${crypto.randomUUID()}`,
+			commandKind: input.commandKind,
+			actorId: input.context.actorId,
+			projectId: input.context.defaultProjectId,
+			correlationId: `cor_${crypto.randomUUID()}`,
+			scope: input.scope,
+			...(input.expectedRevision !== undefined
+				? { expectedRevision: input.expectedRevision }
+				: {}),
+			payload: input.payload,
+			handler: input.handler,
+		});
+		return outcome;
+	}
+
 	options.app.addHook("preHandler", async (request, reply) => {
 		if (
 			!request.url.startsWith("/api/tickets") &&
@@ -212,30 +244,39 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 		try {
 			const context = contextFor(options, request, "mutate");
 			const input = body(request.body);
-			return options.tracker.createTicket({
-				projectId: context.defaultProjectId,
-				kind: input.kind as never,
-				title: input.title as string,
-				...(typeof input.body === "string" ? { body: input.body } : {}),
-				...(typeof input.priority === "string"
-					? { priority: input.priority as never }
-					: {}),
-				...(Array.isArray(input.labels)
-					? { labels: input.labels as readonly string[] }
-					: {}),
-				...(typeof input.stream_id === "string"
-					? { streamId: input.stream_id }
-					: {}),
-				...(typeof input.parent_id === "string"
-					? { parentId: input.parent_id }
-					: {}),
-				...(typeof input.assignee === "string"
-					? { assignee: input.assignee }
-					: {}),
-				...(typeof input.rank === "number" ? { rank: input.rank } : {}),
-				...(typeof input.wave === "number" ? { wave: input.wave } : {}),
-				actor: context.actorId,
+			const handler = () =>
+				options.tracker.createTicket({
+					projectId: context.defaultProjectId,
+					kind: input.kind as never,
+					title: input.title as string,
+					...(typeof input.body === "string" ? { body: input.body } : {}),
+					...(typeof input.priority === "string"
+						? { priority: input.priority as never }
+						: {}),
+					...(Array.isArray(input.labels)
+						? { labels: input.labels as readonly string[] }
+						: {}),
+					...(typeof input.stream_id === "string"
+						? { streamId: input.stream_id }
+						: {}),
+					...(typeof input.parent_id === "string"
+						? { parentId: input.parent_id }
+						: {}),
+					...(typeof input.assignee === "string"
+						? { assignee: input.assignee }
+						: {}),
+					...(typeof input.rank === "number" ? { rank: input.rank } : {}),
+					...(typeof input.wave === "number" ? { wave: input.wave } : {}),
+					actor: context.actorId,
+				});
+			const outcome = gatewayRoute({
+				context,
+				commandKind: "legacy.ticket.create",
+				scope: { resourceType: "ticket", resourceId: "*" },
+				payload: input,
+				handler,
 			});
+			return outcome ?? handler();
 		} catch (error) {
 			return fail(reply, error);
 		}
@@ -247,6 +288,7 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 			const input = body(request.body);
 			const current = scopedTicket(options, context, id);
 			if (!current) return notFound(reply);
+			const revision = expectedRevision(input, Number(current.revision));
 			if (input.phase !== undefined || input.state !== undefined) {
 				const phase =
 					typeof input.phase === "string"
@@ -257,34 +299,56 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 						error: "legacy state has no canonical phase",
 						code: "tracker.phase.invalid",
 					});
-				return options.tracker.transitionTicket({
+				const handler = () =>
+					options.tracker.transitionTicket({
+						id,
+						expectedRevision: revision,
+						phase,
+						...(typeof input.reason === "string"
+							? { reason: input.reason }
+							: {}),
+						actor: context.actorId,
+					});
+				const outcome = gatewayRoute({
+					context,
+					commandKind: "legacy.ticket.transition",
+					scope: { resourceType: "ticket", resourceId: id },
+					payload: input,
+					expectedRevision: revision,
+					handler,
+				});
+				return outcome ?? handler();
+			}
+			const handler = () =>
+				options.tracker.updateTicket({
 					id,
-					expectedRevision: expectedRevision(input, Number(current.revision)),
-					phase,
-					...(typeof input.reason === "string" ? { reason: input.reason } : {}),
+					expectedRevision: revision,
+					patch: {
+						...(typeof input.title === "string" ? { title: input.title } : {}),
+						...(typeof input.body === "string" ? { body: input.body } : {}),
+						...(typeof input.priority === "string"
+							? { priority: input.priority as never }
+							: {}),
+						...(Array.isArray(input.labels)
+							? { labels: input.labels as readonly string[] }
+							: {}),
+						...(typeof input.assignee === "string"
+							? { assignee: input.assignee }
+							: {}),
+						...(typeof input.rank === "number" ? { rank: input.rank } : {}),
+						...(typeof input.wave === "number" ? { wave: input.wave } : {}),
+					},
 					actor: context.actorId,
 				});
-			}
-			return options.tracker.updateTicket({
-				id,
-				expectedRevision: expectedRevision(input, Number(current.revision)),
-				patch: {
-					...(typeof input.title === "string" ? { title: input.title } : {}),
-					...(typeof input.body === "string" ? { body: input.body } : {}),
-					...(typeof input.priority === "string"
-						? { priority: input.priority as never }
-						: {}),
-					...(Array.isArray(input.labels)
-						? { labels: input.labels as readonly string[] }
-						: {}),
-					...(typeof input.assignee === "string"
-						? { assignee: input.assignee }
-						: {}),
-					...(typeof input.rank === "number" ? { rank: input.rank } : {}),
-					...(typeof input.wave === "number" ? { wave: input.wave } : {}),
-				},
-				actor: context.actorId,
+			const outcome = gatewayRoute({
+				context,
+				commandKind: "legacy.ticket.update",
+				scope: { resourceType: "ticket", resourceId: id },
+				payload: input,
+				expectedRevision: revision,
+				handler,
 			});
+			return outcome ?? handler();
 		} catch (error) {
 			return fail(reply, error);
 		}
@@ -296,13 +360,24 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 			const id = (request.params as { id: string }).id;
 			const current = scopedTicket(options, context, id);
 			if (!current) return notFound(reply);
-			return options.tracker.transitionTicket({
-				id,
-				expectedRevision: expectedRevision(input, Number(current.revision)),
-				phase: input.phase as string,
-				...(typeof input.reason === "string" ? { reason: input.reason } : {}),
-				actor: context.actorId,
+			const revision = expectedRevision(input, Number(current.revision));
+			const handler = () =>
+				options.tracker.transitionTicket({
+					id,
+					expectedRevision: revision,
+					phase: input.phase as string,
+					...(typeof input.reason === "string" ? { reason: input.reason } : {}),
+					actor: context.actorId,
+				});
+			const outcome = gatewayRoute({
+				context,
+				commandKind: "legacy.ticket.transition",
+				scope: { resourceType: "ticket", resourceId: id },
+				payload: input,
+				expectedRevision: revision,
+				handler,
 			});
+			return outcome ?? handler();
 		} catch (error) {
 			return fail(reply, error);
 		}
@@ -311,21 +386,28 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 		try {
 			const context = contextFor(options, request, "mutate");
 			const input = body(request.body);
-			if (
-				!scopedTicket(options, context, (request.params as { id: string }).id)
-			)
-				return notFound(reply);
+			const ticketId = (request.params as { id: string }).id;
+			if (!scopedTicket(options, context, ticketId)) return notFound(reply);
 			const anchor = input.anchor;
-			return options.tracker.addComment({
-				ticketId: (request.params as { id: string }).id,
-				author: context.actorId,
-				body: input.body as string,
-				...(anchor && typeof anchor === "object" && !Array.isArray(anchor)
-					? { anchor: anchor as Record<string, unknown> }
-					: {}),
-				...(typeof input.tag === "string" ? { tag: input.tag } : {}),
-				...(typeof input.status === "string" ? { status: input.status } : {}),
+			const handler = () =>
+				options.tracker.addComment({
+					ticketId,
+					author: context.actorId,
+					body: input.body as string,
+					...(anchor && typeof anchor === "object" && !Array.isArray(anchor)
+						? { anchor: anchor as Record<string, unknown> }
+						: {}),
+					...(typeof input.tag === "string" ? { tag: input.tag } : {}),
+					...(typeof input.status === "string" ? { status: input.status } : {}),
+				});
+			const outcome = gatewayRoute({
+				context,
+				commandKind: "legacy.comment.create",
+				scope: { resourceType: "comment", resourceId: ticketId },
+				payload: input,
+				handler,
 			});
+			return outcome ?? handler();
 		} catch (error) {
 			return fail(reply, error);
 		}
@@ -336,16 +418,24 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 			try {
 				const context = contextFor(options, request, "mutate");
 				const input = body(request.body);
-				if (
-					!scopedTicket(options, context, (request.params as { id: string }).id)
-				)
-					return notFound(reply);
-				return options.tracker.replyComment({
-					ticketId: (request.params as { id: string }).id,
-					parentId: (request.params as { commentId: string }).commentId,
-					author: context.actorId,
-					body: input.body as string,
+				const ticketId = (request.params as { id: string }).id;
+				const commentId = (request.params as { commentId: string }).commentId;
+				if (!scopedTicket(options, context, ticketId)) return notFound(reply);
+				const handler = () =>
+					options.tracker.replyComment({
+						ticketId,
+						parentId: commentId,
+						author: context.actorId,
+						body: input.body as string,
+					});
+				const outcome = gatewayRoute({
+					context,
+					commandKind: "legacy.comment.reply",
+					scope: { resourceType: "comment", resourceId: commentId },
+					payload: input,
+					handler,
 				});
+				return outcome ?? handler();
 			} catch (error) {
 				return fail(reply, error);
 			}
@@ -357,22 +447,30 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 			try {
 				const context = contextFor(options, request, "mutate");
 				const input = body(request.body);
-				if (
-					!scopedTicket(options, context, (request.params as { id: string }).id)
-				)
-					return notFound(reply);
-				return options.tracker.updateComment({
-					ticketId: (request.params as { id: string }).id,
-					commentId: (request.params as { commentId: string }).commentId,
-					patch: {
-						...(typeof input.body === "string" ? { body: input.body } : {}),
-						...(typeof input.tag === "string" ? { tag: input.tag } : {}),
-						...(typeof input.status === "string"
-							? { status: input.status }
-							: {}),
-					},
-					actor: context.actorId,
+				const ticketId = (request.params as { id: string }).id;
+				const commentId = (request.params as { commentId: string }).commentId;
+				if (!scopedTicket(options, context, ticketId)) return notFound(reply);
+				const handler = () =>
+					options.tracker.updateComment({
+						ticketId,
+						commentId,
+						patch: {
+							...(typeof input.body === "string" ? { body: input.body } : {}),
+							...(typeof input.tag === "string" ? { tag: input.tag } : {}),
+							...(typeof input.status === "string"
+								? { status: input.status }
+								: {}),
+						},
+						actor: context.actorId,
+					});
+				const outcome = gatewayRoute({
+					context,
+					commandKind: "legacy.comment.update",
+					scope: { resourceType: "comment", resourceId: commentId },
+					payload: input,
+					handler,
 				});
+				return outcome ?? handler();
 			} catch (error) {
 				return fail(reply, error);
 			}
@@ -389,12 +487,21 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 				!scopedTicket(options, context, input.target_ticket_id)
 			)
 				return notFound(reply);
-			return options.tracker.linkTicket({
-				ticketId,
-				targetTicketId: input.target_ticket_id as string,
-				relation: input.relation as never,
-				actor: context.actorId,
+			const handler = () =>
+				options.tracker.linkTicket({
+					ticketId,
+					targetTicketId: input.target_ticket_id as string,
+					relation: input.relation as never,
+					actor: context.actorId,
+				});
+			const outcome = gatewayRoute({
+				context,
+				commandKind: "legacy.link.create",
+				scope: { resourceType: "link", resourceId: ticketId },
+				payload: input,
+				handler,
 			});
+			return outcome ?? handler();
 		} catch (error) {
 			return fail(reply, error);
 		}
@@ -410,12 +517,21 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 				!scopedTicket(options, context, input.target_ticket_id)
 			)
 				return notFound(reply);
-			return options.tracker.deleteLink({
-				ticketId,
-				targetTicketId: input.target_ticket_id as string,
-				relation: input.relation as never,
-				actor: context.actorId,
+			const handler = () =>
+				options.tracker.deleteLink({
+					ticketId,
+					targetTicketId: input.target_ticket_id as string,
+					relation: input.relation as never,
+					actor: context.actorId,
+				});
+			const outcome = gatewayRoute({
+				context,
+				commandKind: "legacy.link.delete",
+				scope: { resourceType: "link", resourceId: ticketId },
+				payload: input,
+				handler,
 			});
+			return outcome ?? handler();
 		} catch (error) {
 			return fail(reply, error);
 		}
@@ -428,21 +544,36 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 		try {
 			const context = contextFor(options, request, "mutate");
 			const input = body(request.body);
-			return options.tracker.upsertStream({
-				...(typeof input.id === "string" ? { id: input.id } : {}),
-				projectId: context.defaultProjectId,
-				name: input.name as string,
-				...(input.mode === "sequential" || input.mode === "parallel"
-					? { mode: input.mode }
-					: {}),
-				...(typeof input.description === "string"
-					? { description: input.description }
-					: {}),
+			const handler = () =>
+				options.tracker.upsertStream({
+					...(typeof input.id === "string" ? { id: input.id } : {}),
+					projectId: context.defaultProjectId,
+					name: input.name as string,
+					...(input.mode === "sequential" || input.mode === "parallel"
+						? { mode: input.mode }
+						: {}),
+					...(typeof input.description === "string"
+						? { description: input.description }
+						: {}),
+					...(typeof input.expected_revision === "number"
+						? { expectedRevision: input.expected_revision }
+						: {}),
+					actor: context.actorId,
+				});
+			const outcome = gatewayRoute({
+				context,
+				commandKind: "legacy.stream.upsert",
+				scope: {
+					resourceType: "stream",
+					resourceId: typeof input.id === "string" ? input.id : "*",
+				},
+				payload: input,
 				...(typeof input.expected_revision === "number"
 					? { expectedRevision: input.expected_revision }
 					: {}),
-				actor: context.actorId,
+				handler,
 			});
+			return outcome ?? handler();
 		} catch (error) {
 			return fail(reply, error);
 		}
@@ -458,19 +589,31 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 					.some((stream) => stream.id === streamId)
 			)
 				return notFound(reply);
-			return options.tracker.upsertStream({
-				id: streamId,
-				projectId: context.defaultProjectId,
-				name: input.name as string,
-				mode: input.mode as never,
-				...(typeof input.description === "string"
-					? { description: input.description }
-					: {}),
+			const handler = () =>
+				options.tracker.upsertStream({
+					id: streamId,
+					projectId: context.defaultProjectId,
+					name: input.name as string,
+					mode: input.mode as never,
+					...(typeof input.description === "string"
+						? { description: input.description }
+						: {}),
+					...(typeof input.expected_revision === "number"
+						? { expectedRevision: input.expected_revision }
+						: {}),
+					actor: context.actorId,
+				});
+			const outcome = gatewayRoute({
+				context,
+				commandKind: "legacy.stream.upsert",
+				scope: { resourceType: "stream", resourceId: streamId },
+				payload: input,
 				...(typeof input.expected_revision === "number"
 					? { expectedRevision: input.expected_revision }
 					: {}),
-				actor: context.actorId,
+				handler,
 			});
+			return outcome ?? handler();
 		} catch (error) {
 			return fail(reply, error);
 		}

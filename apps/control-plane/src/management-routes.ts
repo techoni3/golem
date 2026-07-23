@@ -1,6 +1,9 @@
+import crypto from "node:crypto";
+
 import type { TrackerManagementAsset } from "@golem/persistence";
 import {
 	type CommandGateway,
+	type CommandGatewayInput,
 	TrackerManagementError,
 	type TrackerManagementServices,
 } from "@golem/tracker";
@@ -150,6 +153,67 @@ export function registerManagementRoutes(options: {
 	readonly gateway?: CommandGateway;
 }): void {
 	const gateway = options.gateway;
+
+	function gatewayRoute(input: {
+		readonly request: FastifyRequest;
+		readonly reply: FastifyReply;
+		readonly commandKind: string;
+		readonly scope: CommandGatewayInput["scope"];
+		readonly payload: Readonly<Record<string, unknown>>;
+		readonly actorId: string;
+		readonly projectId: string;
+		readonly idempotencyKey?: string;
+		readonly handler: () => unknown;
+	}): unknown {
+		if (!gateway) return undefined;
+		const key =
+			typeof input.idempotencyKey === "string" && input.idempotencyKey
+				? input.idempotencyKey
+				: `auto:management:${input.commandKind}:${crypto.randomUUID()}`;
+		const outcome = gateway.execute({
+			commandId: `cmd_${crypto.randomUUID()}`,
+			idempotencyKey: key,
+			commandKind: input.commandKind,
+			actorId: input.actorId,
+			projectId: input.projectId,
+			correlationId: `cor_${crypto.randomUUID()}`,
+			scope: input.scope,
+			payload: input.payload,
+			handler: input.handler,
+		});
+		if (outcome.status === "idempotency_mismatch") {
+			fail(
+				input.request,
+				input.reply,
+				409,
+				"command.idempotency_mismatch",
+				"idempotency key reused with a differing payload",
+			);
+			return null;
+		}
+		return outcome.result;
+	}
+
+	/**
+	 * Route a management mutation through the gateway when one is composed,
+	 * preserving the `golem.management/v1` wire shape.  When no gateway is
+	 * present, fall back to the direct service call.
+	 */
+	function managementRoute(input: {
+		readonly request: FastifyRequest;
+		readonly reply: FastifyReply;
+		readonly commandKind: string;
+		readonly scope: CommandGatewayInput["scope"];
+		readonly payload: Readonly<Record<string, unknown>>;
+		readonly actorId: string;
+		readonly projectId: string;
+		readonly idempotencyKey?: string;
+		readonly handler: () => unknown;
+	}): unknown {
+		const result = gatewayRoute(input);
+		if (result === null) return undefined;
+		return result ?? input.handler();
+	}
 	const schema = {
 		response: {
 			200: jsonSchema(responseSchema),
@@ -204,12 +268,22 @@ export function registerManagementRoutes(options: {
 			return sendResult(
 				request,
 				reply.code(201),
-				options.management.roles.create({
+				managementRoute({
+					request,
+					reply,
+					commandKind: "management.role.create",
+					scope: { resourceType: "role", resourceId: "*" },
+					payload: input,
+					actorId: field(input, "actor"),
 					projectId: field(input, "project_id"),
-					name: field(input, "name"),
-					scope: input.scope as never,
-					definition: (input.definition ?? {}) as never,
-					actor: field(input, "actor"),
+					handler: () =>
+						options.management.roles.create({
+							projectId: field(input, "project_id"),
+							name: field(input, "name"),
+							scope: input.scope as never,
+							definition: (input.definition ?? {}) as never,
+							actor: field(input, "actor"),
+						}),
 				}),
 			);
 		},
@@ -224,17 +298,28 @@ export function registerManagementRoutes(options: {
 			return sendResult(
 				request,
 				reply,
-				options.management.roles.assign({
+				managementRoute({
+					request,
+					reply,
+					commandKind: "management.role.assign",
+					scope: { resourceType: "role", resourceId: params.role_id },
+					payload: input,
+					actorId: field(input, "actor"),
 					projectId: field(input, "project_id"),
-					roleId: params.role_id,
-					...(input.session_id === undefined
-						? {}
-						: { sessionId: field(input, "session_id") }),
-					...(input.generation_id === undefined
-						? {}
-						: { generationId: field(input, "generation_id") }),
-					actor: field(input, "actor"),
 					idempotencyKey: field(input, "idempotency_key"),
+					handler: () =>
+						options.management.roles.assign({
+							projectId: field(input, "project_id"),
+							roleId: params.role_id,
+							...(input.session_id === undefined
+								? {}
+								: { sessionId: field(input, "session_id") }),
+							...(input.generation_id === undefined
+								? {}
+								: { generationId: field(input, "generation_id") }),
+							actor: field(input, "actor"),
+							idempotencyKey: field(input, "idempotency_key"),
+						}),
 				}),
 			);
 		},
@@ -257,13 +342,24 @@ export function registerManagementRoutes(options: {
 			return sendResult(
 				request,
 				reply.code(201),
-				options.management.gates.create({
+				managementRoute({
+					request,
+					reply,
+					commandKind: "management.gate.create",
+					scope: { resourceType: "gate", resourceId: "*" },
+					payload: input,
+					actorId: field(input, "actor"),
 					projectId: field(input, "project_id"),
-					kind: input.kind as never,
-					question: field(input, "question"),
-					assignee: field(input, "assignee"),
 					idempotencyKey: field(input, "idempotency_key"),
-					actor: field(input, "actor"),
+					handler: () =>
+						options.management.gates.create({
+							projectId: field(input, "project_id"),
+							kind: input.kind as never,
+							question: field(input, "question"),
+							assignee: field(input, "assignee"),
+							idempotencyKey: field(input, "idempotency_key"),
+							actor: field(input, "actor"),
+						}),
 				}),
 			);
 		},
@@ -278,12 +374,22 @@ export function registerManagementRoutes(options: {
 			return sendResult(
 				request,
 				reply,
-				options.management.gates.answer({
+				managementRoute({
+					request,
+					reply,
+					commandKind: "management.gate.answer",
+					scope: { resourceType: "gate", resourceId: params.gate_id },
+					payload: input,
+					actorId: field(input, "actor"),
 					projectId: field(input, "project_id"),
-					gateId: params.gate_id,
-					status: input.status as never,
-					verdict: (input.verdict ?? {}) as never,
-					actor: field(input, "actor"),
+					handler: () =>
+						options.management.gates.answer({
+							projectId: field(input, "project_id"),
+							gateId: params.gate_id,
+							status: input.status as never,
+							verdict: (input.verdict ?? {}) as never,
+							actor: field(input, "actor"),
+						}),
 				}),
 			);
 		},
@@ -306,11 +412,22 @@ export function registerManagementRoutes(options: {
 			return sendResult(
 				request,
 				reply.code(201),
-				options.management.ideas.create({
+				managementRoute({
+					request,
+					reply,
+					commandKind: "management.idea.create",
+					scope: { resourceType: "idea", resourceId: "*" },
+					payload: input,
+					actorId: field(input, "actor"),
 					projectId: field(input, "project_id"),
-					body: field(input, "body"),
 					idempotencyKey: field(input, "idempotency_key"),
-					actor: field(input, "actor"),
+					handler: () =>
+						options.management.ideas.create({
+							projectId: field(input, "project_id"),
+							body: field(input, "body"),
+							idempotencyKey: field(input, "idempotency_key"),
+							actor: field(input, "actor"),
+						}),
 				}),
 			);
 		},
@@ -325,10 +442,20 @@ export function registerManagementRoutes(options: {
 			return sendResult(
 				request,
 				reply,
-				options.management.ideas.pop({
+				managementRoute({
+					request,
+					reply,
+					commandKind: "management.idea.pop",
+					scope: { resourceType: "idea", resourceId: params.idea_id },
+					payload: input,
+					actorId: field(input, "actor"),
 					projectId: field(input, "project_id"),
-					ideaId: params.idea_id,
-					actor: field(input, "actor"),
+					handler: () =>
+						options.management.ideas.pop({
+							projectId: field(input, "project_id"),
+							ideaId: params.idea_id,
+							actor: field(input, "actor"),
+						}),
 				}),
 			);
 		},
@@ -343,13 +470,23 @@ export function registerManagementRoutes(options: {
 			return sendResult(
 				request,
 				reply,
-				options.management.ideas.promote({
+				managementRoute({
+					request,
+					reply,
+					commandKind: "management.idea.promote",
+					scope: { resourceType: "idea", resourceId: params.idea_id },
+					payload: input,
+					actorId: field(input, "actor"),
 					projectId: field(input, "project_id"),
-					ideaId: params.idea_id,
-					actor: field(input, "actor"),
-					...(input.title === undefined
-						? {}
-						: { title: field(input, "title") }),
+					handler: () =>
+						options.management.ideas.promote({
+							projectId: field(input, "project_id"),
+							ideaId: params.idea_id,
+							actor: field(input, "actor"),
+							...(input.title === undefined
+								? {}
+								: { title: field(input, "title") }),
+						}),
 				}),
 			);
 		},
@@ -364,19 +501,30 @@ export function registerManagementRoutes(options: {
 			return sendResult(
 				request,
 				reply.code(201),
-				options.management.communications.create({
+				managementRoute({
+					request,
+					reply,
+					commandKind: "management.communication.create",
+					scope: { resourceType: "communication", resourceId: "*" },
+					payload: input,
+					actorId: field(input, "actor"),
 					projectId: field(input, "project_id"),
-					kind: input.kind as never,
-					command: field(input, "command"),
-					payload: (input.payload ?? {}) as never,
-					...(input.session_id === undefined
-						? {}
-						: { sessionId: field(input, "session_id") }),
-					...(input.generation_id === undefined
-						? {}
-						: { generationId: field(input, "generation_id") }),
-					actor: field(input, "actor"),
 					idempotencyKey: field(input, "idempotency_key"),
+					handler: () =>
+						options.management.communications.create({
+							projectId: field(input, "project_id"),
+							kind: input.kind as never,
+							command: field(input, "command"),
+							payload: (input.payload ?? {}) as never,
+							...(input.session_id === undefined
+								? {}
+								: { sessionId: field(input, "session_id") }),
+							...(input.generation_id === undefined
+								? {}
+								: { generationId: field(input, "generation_id") }),
+							actor: field(input, "actor"),
+							idempotencyKey: field(input, "idempotency_key"),
+						}),
 				}),
 			);
 		},
@@ -390,18 +538,29 @@ export function registerManagementRoutes(options: {
 			return sendResult(
 				request,
 				reply.code(201),
-				options.management.controls.request({
+				managementRoute({
+					request,
+					reply,
+					commandKind: "management.control.request",
+					scope: { resourceType: "control", resourceId: "*" },
+					payload: input,
+					actorId: field(input, "actor"),
 					projectId: field(input, "project_id"),
-					command: field(input, "command"),
-					payload: (input.payload ?? {}) as never,
-					...(input.session_id === undefined
-						? {}
-						: { sessionId: field(input, "session_id") }),
-					...(input.generation_id === undefined
-						? {}
-						: { generationId: field(input, "generation_id") }),
-					actor: field(input, "actor"),
 					idempotencyKey: field(input, "idempotency_key"),
+					handler: () =>
+						options.management.controls.request({
+							projectId: field(input, "project_id"),
+							command: field(input, "command"),
+							payload: (input.payload ?? {}) as never,
+							...(input.session_id === undefined
+								? {}
+								: { sessionId: field(input, "session_id") }),
+							...(input.generation_id === undefined
+								? {}
+								: { generationId: field(input, "generation_id") }),
+							actor: field(input, "actor"),
+							idempotencyKey: field(input, "idempotency_key"),
+						}),
 				}),
 			);
 		},
@@ -463,14 +622,24 @@ export function registerManagementRoutes(options: {
 				request,
 				reply.code(201),
 				publicAsset(
-					options.management.assets.put({
+					managementRoute({
+						request,
+						reply,
+						commandKind: "management.asset.put",
+						scope: { resourceType: "asset", resourceId: field(input, "ticket_id") },
+						payload: input,
+						actorId: field(input, "actor"),
 						projectId: field(input, "project_id"),
-						ticketId: field(input, "ticket_id"),
-						relativePath: field(input, "relative_path"),
-						mimeType: field(input, "mime_type"),
-						bytes,
-						actor: field(input, "actor"),
-					}),
+						handler: () =>
+							options.management.assets.put({
+								projectId: field(input, "project_id"),
+								ticketId: field(input, "ticket_id"),
+								relativePath: field(input, "relative_path"),
+								mimeType: field(input, "mime_type"),
+								bytes,
+								actor: field(input, "actor"),
+							}) as TrackerManagementAsset,
+					}) as TrackerManagementAsset,
 				),
 			);
 		},
