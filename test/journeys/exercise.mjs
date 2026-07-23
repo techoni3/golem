@@ -45,6 +45,7 @@ import {
 } from "./tracker-delivery-parity.mjs";
 import { exerciseBrowserPrincipalScopeAuthority } from "./browser-principal-scope.mjs";
 import {
+	exerciseBrowserControlClientResync,
 	exerciseBrowserWorkCommandAuthority,
 	exerciseBrowserWorkOpaqueProjection,
 } from "./browser-work.mjs";
@@ -527,8 +528,8 @@ export async function exerciseBusOfflineReplay() {
 	return "real SQLite bus dedupe, named cursor replay, passive lease commit/release, manual-interest prune, and audit verified";
 }
 
-function createNodeSocket(url, token, sockets, frames = []) {
-	const socket = new WebSocket(url, { headers: { authorization: `Bearer ${token}` } });
+function createNodeSocket(url, headers, sockets, frames = []) {
+	const socket = new WebSocket(url, { headers });
 	const adapter = {
 		close: () => socket.close(),
 		onclose: null,
@@ -555,17 +556,39 @@ function createNodeSocket(url, token, sockets, frames = []) {
 export async function exerciseWsGapResync() {
 	const home = createTemporaryHome("golem-j6-ws-gap-");
 	const token = "golem-ws-gap-test-token-000000000000";
+	const browserBindingId = "ws_gap_local_operator";
 	const staticRoot = path.join(home.root, "static");
 	let service;
 	let synchronizer;
 	try {
 		fs.mkdirSync(staticRoot, { recursive: true });
 		fs.writeFileSync(path.join(staticRoot, "index.html"), "<!doctype html><title>temporary dashboard</title>\n");
+		const { openControlPlanePersistence } = await import(
+			"../../apps/control-plane/dist/persistence.js"
+		);
+		const seed = openControlPlanePersistence({
+			runtimePath: path.join(home.golemHome, "runtime.db"),
+			trackerPath: path.join(home.golemHome, "tracker.db"),
+			lockPath: path.join(home.root, "seed-owner.lock"),
+		});
+		seed.browserPrincipalStorage().provision({
+			id: browserBindingId,
+			actorId: "actor_ws_gap_local",
+			role: "operator",
+			defaultProjectId: "prj_ws_gap_resync",
+			scopeProjectIds: ["prj_ws_gap_resync"],
+		});
+		seed.browserPrincipalStorage().bindCredential({
+			bindingId: browserBindingId,
+			adapter: "bearer",
+			credential: token,
+		});
+		await seed.close();
 		service = spawnGrouped(process.execPath, [controlPlaneProgram], {
 			cwd: repositoryRoot,
-				env: {
-					...home.env,
-					GOLEM_CONTROL_PLANE_TOKEN: token,
+			env: {
+				...home.env,
+				GOLEM_CONTROL_PLANE_TOKEN: token,
 					GOLEM_CONTROL_PLANE_PORT: "0",
 					GOLEM_CONTROL_PLANE_PROJECTION_REVISION: "9",
 					GOLEM_CONTROL_PLANE_REPLAY_WINDOW: "2",
@@ -582,13 +605,49 @@ export async function exerciseWsGapResync() {
 
 		const {
 			applyProjectionDelta,
-			createBrowserControlPlaneClient,
+			createFetchApiClient,
 			createProjectionSynchronizer,
 			replaceProjectionSnapshot,
 		} = await import("../../packages/api-client/dist/index.js");
-		const client = createBrowserControlPlaneClient(ready.origin, {
-			headers: { authorization: `Bearer ${token}` },
+		const {
+			LegacyControlPlaneProjectionResponseSchema,
+			WebSocketFrameV1Schema,
+		} = await import("@golem/contracts");
+		const boundary = createFetchApiClient(ready.origin, {
+			bearerToken: token,
 		});
+		const client = {
+			async projection(stream) {
+				const response = await boundary.request({
+					method: "GET",
+					path: `/api/v1/projections/${stream}`,
+				});
+				assert.equal(response.status, 200);
+				return LegacyControlPlaneProjectionResponseSchema.parse(response.body);
+			},
+			async echo(value) {
+				const response = await boundary.request({
+					method: "POST",
+					path: "/api/v1/browser/echo",
+					body: { value },
+				});
+				assert.equal(response.status, 200);
+				return response.body;
+			},
+			webSocketUrl(stream, cursor) {
+				const url = new URL("/api/v1/ws", ready.origin);
+				url.protocol = "ws:";
+				url.searchParams.set("stream", stream);
+				if (cursor) {
+					url.searchParams.set("instance_id", cursor.instanceId);
+					url.searchParams.set("cursor", String(cursor.sequence));
+				}
+				return url.toString();
+			},
+			parseWebSocketFrame(raw) {
+				return WebSocketFrameV1Schema.parse(JSON.parse(raw));
+			},
+		};
 		const states = [];
 		const snapshots = [];
 		const deltas = [];
@@ -596,7 +655,6 @@ export async function exerciseWsGapResync() {
 		const frames = [];
 		let captureRestartedHttpSnapshot = false;
 		let restartedHttpSnapshot;
-		await client.bootstrap();
 		let projectionCache = replaceProjectionSnapshot(
 			undefined,
 			await client.projection("runtime.live"),
@@ -604,7 +662,13 @@ export async function exerciseWsGapResync() {
 		synchronizer = createProjectionSynchronizer({
 			client,
 			stream: "runtime.live",
-			socketFactory: (url) => createNodeSocket(url, token, sockets, frames),
+			socketFactory: (url) =>
+				createNodeSocket(
+					url,
+					{ authorization: `Bearer ${token}` },
+					sockets,
+					frames,
+				),
 			onState: (state) => states.push(state),
 			onSnapshot: (snapshot, source) => {
 				projectionCache = replaceProjectionSnapshot(projectionCache, snapshot);
@@ -1020,6 +1084,7 @@ export const exercises = Object.freeze({
 	"durable-command-idempotency-cas": exerciseDurableCommandIdempotencyCas,
 	"committed-outbox-all-write-paths": exerciseCommittedOutboxAllWritePaths,
 	"browser-principal-scope-authority": exerciseBrowserPrincipalScopeAuthority,
+	"browser-control-client-resync": exerciseBrowserControlClientResync,
 	"browser-work-opaque-projection": exerciseBrowserWorkOpaqueProjection,
 	"browser-work-command-authority": exerciseBrowserWorkCommandAuthority,
 	"delivery-api-fence-recheck": exerciseDeliveryApiFenceRecheck,

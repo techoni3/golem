@@ -1,20 +1,33 @@
 import {
+	BrowserOpaqueIdSchema,
+	BrowserWorkAssetResponseSchema,
+	BrowserWorkCommandRequestSchema,
+	BrowserWorkCommandResponseSchema,
+	BrowserWorkDetailResponseSchema,
 	BrowserWorkProjectionResponseSchema,
-	BrowserWorkStreamSchema,
-	BrowserWorkWebSocketFrameSchema,
 	type BrowserWorkStream,
+	BrowserWorkStreamSchema,
 	type BrowserWorkWebSocketFrame,
-	LegacyControlPlaneProjectionResponseSchema,
+	BrowserWorkWebSocketFrameSchema,
 	type LegacyControlPlaneProjectionResponse,
-	LegacyControlPlaneProjectionStreamSchema,
+	LegacyControlPlaneProjectionResponseSchema,
+	type LegacyControlPlaneProjectionStreamSchema,
 	type WebSocketFrameV1,
 	WebSocketFrameV1Schema,
 } from "@golem/contracts";
-import type { z } from "zod";
 import createClient from "openapi-fetch";
+import type { z } from "zod";
 
 import type { paths } from "./generated/openapi.js";
 
+export {
+	type BrowserWorkAuthoritativeSnapshot,
+	type BrowserWorkInvalidationTag,
+	type BrowserWorkResourceKey,
+	type BrowserWorkSynchronizer,
+	type BrowserWorkSyncState,
+	createBrowserWorkSynchronizer,
+} from "./browser-work-sync.js";
 export {
 	applyProjectionDelta,
 	type ProjectionStateLike,
@@ -154,8 +167,27 @@ export type LegacyControlPlaneStream = z.infer<
 >;
 /** Retains the shared HTTP projection route's complete prior stream surface. */
 export type ControlPlaneStream = LegacyControlPlaneStream | BrowserWorkStream;
-export type ControlPlaneProjection = LegacyControlPlaneProjectionResponse["payload"];
-export type ControlPlaneProjectionResponse = LegacyControlPlaneProjectionResponse;
+export type ControlPlaneProjection =
+	LegacyControlPlaneProjectionResponse["payload"];
+export type ControlPlaneProjectionResponse =
+	LegacyControlPlaneProjectionResponse;
+export type {
+	BrowserWorkInvalidation,
+	BrowserWorkProjectionResponse,
+	BrowserWorkStream,
+	BrowserWorkWebSocketFrame,
+} from "@golem/contracts";
+export type BrowserWorkCommandRequest =
+	paths["/api/v1/browser/work/commands"]["post"]["requestBody"]["content"]["application/json"];
+export type BrowserWorkDetailResponse = ReturnType<
+	typeof BrowserWorkDetailResponseSchema.parse
+>;
+export type BrowserWorkAssetResponse = ReturnType<
+	typeof BrowserWorkAssetResponseSchema.parse
+>;
+export type BrowserWorkCommandResponse = ReturnType<
+	typeof BrowserWorkCommandResponseSchema.parse
+>;
 
 export class ControlPlaneClientError extends Error {
 	readonly status: number;
@@ -180,9 +212,16 @@ function requireData<T>(
  * Browser-only typed client. It relies on an HttpOnly same-origin session and
  * is the sole owner of REST paths, CSRF state, and WebSocket frame validation.
  */
+export interface BrowserControlPlaneCookieJar {
+	/** Node-only composition seam. The client can place this value only in Cookie. */
+	getCookie(): string | undefined;
+	/** Receives the server's Set-Cookie value after browser-session bootstrap. */
+	setCookie(setCookie: string): void;
+}
+
 export interface BrowserControlPlaneClientOptions {
-	/** Process-composed test/CLI credentials; browser callers leave this empty. */
-	readonly headers?: HeadersInit;
+	/** Node journey seam; real browsers leave this empty and use their native jar. */
+	readonly cookieJar?: BrowserControlPlaneCookieJar;
 }
 
 export function createBrowserControlPlaneClient(
@@ -192,11 +231,19 @@ export function createBrowserControlPlaneClient(
 	const client = createClient<paths>({
 		baseUrl,
 		credentials: "same-origin",
-		...(options.headers === undefined ? {} : { headers: options.headers }),
 	});
+	const baseOrigin = new URL(baseUrl).origin;
 	let csrfToken: string | undefined;
-	const browserHeaders = () =>
-		csrfToken === undefined ? {} : { "x-golem-csrf": csrfToken };
+	const browserHeaders = () => {
+		const headers: Record<string, string> = {};
+		if (options.cookieJar) {
+			headers.origin = baseOrigin;
+			const cookie = options.cookieJar.getCookie();
+			if (cookie) headers.cookie = cookie;
+		}
+		if (csrfToken !== undefined) headers["x-golem-csrf"] = csrfToken;
+		return headers;
+	};
 	function projection(
 		stream: BrowserWorkStream,
 	): Promise<ReturnType<typeof BrowserWorkProjectionResponseSchema.parse>>;
@@ -216,12 +263,17 @@ export function createBrowserControlPlaneClient(
 
 	return Object.freeze({
 		async bootstrap() {
-			const result = await client.POST("/api/v1/browser/session");
+			const result = await client.POST("/api/v1/browser/session", {
+				headers: browserHeaders(),
+			});
 			const data = requireData(
 				result.data,
 				result.response,
 				"browser bootstrap",
 			);
+			const setCookie = result.response.headers.get("set-cookie");
+			if (options.cookieJar && setCookie)
+				options.cookieJar.setCookie(setCookie);
 			csrfToken = data.csrf_token;
 			return data;
 		},
@@ -234,6 +286,51 @@ export function createBrowserControlPlaneClient(
 		projection,
 		async browserWorkProjection(stream: BrowserWorkStream) {
 			return projection(stream);
+		},
+		async browserWorkDetail(opaqueId: string) {
+			const result = await client.GET(
+				"/api/v1/browser/work/items/{opaque_id}",
+				{
+					headers: browserHeaders(),
+					params: {
+						path: { opaque_id: BrowserOpaqueIdSchema.parse(opaqueId) },
+					},
+				},
+			);
+			return BrowserWorkDetailResponseSchema.parse(
+				requireData(result.data, result.response, "browser work detail fetch"),
+			);
+		},
+		async browserWorkAsset(opaqueId: string, assetId: string) {
+			const result = await client.GET(
+				"/api/v1/browser/work/items/{opaque_id}/assets/{asset_id}",
+				{
+					headers: browserHeaders(),
+					params: {
+						path: {
+							opaque_id: BrowserOpaqueIdSchema.parse(opaqueId),
+							asset_id: BrowserOpaqueIdSchema.parse(assetId),
+						},
+					},
+				},
+			);
+			return BrowserWorkAssetResponseSchema.parse(
+				requireData(result.data, result.response, "browser work asset fetch"),
+			);
+		},
+		async browserWorkCommand(command: BrowserWorkCommandRequest) {
+			if (!csrfToken)
+				throw new Error(
+					"control-plane browser session has not been bootstrapped",
+				);
+			BrowserWorkCommandRequestSchema.parse(command);
+			const result = await client.POST("/api/v1/browser/work/commands", {
+				body: command,
+				headers: browserHeaders(),
+			});
+			return BrowserWorkCommandResponseSchema.parse(
+				requireData(result.data, result.response, "browser work command"),
+			);
 		},
 		async runtimeProjection(
 			stream: "live" | "history" | "diagnostics",

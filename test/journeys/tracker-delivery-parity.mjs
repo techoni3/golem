@@ -5,7 +5,11 @@ import path from "node:path";
 
 import WebSocket from "ws";
 
-import { createFetchApiClient } from "../../packages/api-client/dist/index.js";
+import {
+	createBrowserControlPlaneClient,
+	createBrowserWorkSynchronizer,
+	createFetchApiClient,
+} from "../../packages/api-client/dist/index.js";
 import { invokeMcpTool } from "../../packages/mcp-adapter/dist/index.js";
 import {
 	BrowserWorkWebSocketFrameSchema,
@@ -89,6 +93,18 @@ function browserHeaders(origin, session = browserSession, csrf = browserCsrf) {
 		cookie: `golem_control_plane_session=${session}`,
 		"x-golem-csrf": csrf,
 		"content-type": "application/json",
+	};
+}
+
+function browserCookieJar() {
+	let cookie;
+	return {
+		getCookie: () => cookie,
+		setCookie: (setCookie) => {
+			const pair = setCookie.split(";", 1)[0];
+			assert.ok(pair?.startsWith("golem_control_plane_session="));
+			cookie = pair;
+		},
 	};
 }
 
@@ -369,6 +385,7 @@ async function start(home, writer, fixtureClock) {
 	const composed = compose(writer, fixtureClock, home);
 	const principalResolver = createBrowserPrincipalResolver({
 		storage: writer.browserPrincipalStorage(),
+		localOperatorBindingId: "gol82_browser",
 		clock: { now: () => Date.parse(fixtureClock.now()) },
 	});
 	const service = await startControlPlane({
@@ -410,14 +427,29 @@ export async function exerciseBrowserTrackerDeliveryParity() {
 		seed(writer, fixtureClock);
 		control = await start(home, writer, fixtureClock);
 		const origin = control.service.origin;
+		const jar = browserCookieJar();
+		const browserClient = createBrowserControlPlaneClient(origin, {
+			cookieJar: jar,
+		});
+		await browserClient.bootstrap();
 		const browserTicket = ticket(control.core, "browser canonical dispatch");
 		const bearerTicket = ticket(control.core, "bearer canonical dispatch");
 		const mcpTicket = ticket(control.core, "mcp canonical dispatch");
 		const browserBody = { kind: "dispatch", opaque_id: browserTicket.id, expected_revision: browserTicket.revision, idempotency_key: "gol82:browser" };
-		const browser = await json(origin, "/api/v1/browser/work/commands", { method: "POST", headers: browserHeaders(origin), body: JSON.stringify(browserBody) });
-		assert.equal(browser.status, 200);
-		assert.deepEqual(browser.body.result.disposition, "queued");
-		assert.equal(browser.body.result.operation_id, browser.body.command_id);
+		const browser = await browserClient.browserWorkCommand(browserBody);
+		assert.deepEqual(browser.result.disposition, "queued");
+		assert.equal(browser.result.operation_id, browser.command_id);
+		const pendingCommunication =
+			await browserClient.browserWorkProjection("communication.operations");
+		assert.equal(
+			pendingCommunication.items.some(
+				(item) =>
+					item.opaque_id === browser.command_id &&
+					item.status === "delivered",
+			),
+			false,
+			"command-time queued classification is not synthesized as settlement",
+		);
 		const bearerBody = { expected_revision: bearerTicket.revision, idempotency_key: "gol82:bearer" };
 		const bearer = await json(origin, `/api/v1/tracker/tickets/${bearerTicket.id}/dispatch`, { method: "POST", headers: bearerHeaders(), body: JSON.stringify(bearerBody) });
 		assert.equal(bearer.status, 201);
@@ -528,7 +560,15 @@ export async function exerciseBrowserTrackerDeliveryParity() {
 
 		socket = new WebSocket(`${origin.replace("http", "ws")}/api/v1/ws?stream=communication.operations`, { headers: { origin, cookie: `golem_control_plane_session=${browserSession}` } });
 		foreignSocket = new WebSocket(`${origin.replace("http", "ws")}/api/v1/ws?stream=communication.operations`, { headers: { origin, cookie: `golem_control_plane_session=${foreignSession}` } });
-		BrowserWorkWebSocketFrameSchema.parse(JSON.parse(await nextFrame(socket)));
+		const settlementSnapshots = [];
+		const settlementSync = createBrowserWorkSynchronizer({
+			key: { kind: "stream", stream: "communication.operations" },
+			refetch: () =>
+				browserClient.browserWorkProjection("communication.operations"),
+			onSnapshot: (snapshot, source) =>
+				settlementSnapshots.push({ snapshot, source }),
+		});
+		await settlementSync.consume(await nextFrame(socket));
 		BrowserWorkWebSocketFrameSchema.parse(JSON.parse(await nextFrame(foreignSocket)));
 		const claims = await json(origin, "/api/v1/delivery/claims", { method: "POST", headers: bearerHeaders(), body: JSON.stringify({ limit: 10 }) });
 		const claim = claims.body.items.find((item) => item.payload.ticket_id === browserTicket.id);
@@ -555,8 +595,28 @@ export async function exerciseBrowserTrackerDeliveryParity() {
 			beforeAck + 1,
 			"duplicate settlement publishes +0",
 		);
-		const delta = BrowserWorkWebSocketFrameSchema.parse(JSON.parse(await deltaFrame));
+		const deltaRaw = await deltaFrame;
+		const delta = BrowserWorkWebSocketFrameSchema.parse(JSON.parse(deltaRaw));
 		assert.equal(delta.payload.kind, "delta");
+		await settlementSync.consume(deltaRaw);
+		assert.equal(
+			settlementSnapshots.at(-1)?.source,
+			"http",
+			"canonical acknowledgement invalidation forces authoritative HTTP refetch",
+		);
+		assert.equal(
+			settlementSnapshots.at(-1)?.snapshot.resource_revision,
+			writer.committedPublicationStorage().projectRevision(projectId),
+		);
+		assert.equal(
+			settlementSnapshots.at(-1)?.snapshot.items.some(
+				(item) =>
+					item.opaque_id === browser.command_id &&
+					item.status === "delivered",
+			),
+			false,
+			"the client does not fabricate a settlement item absent from canonical HTTP truth",
+		);
 		await noFrame(foreignSocket);
 
 		await control.service.close();
@@ -566,7 +626,7 @@ export async function exerciseBrowserTrackerDeliveryParity() {
 		const restarted = await start(home, writer, fixtureClock);
 		control = restarted;
 		const replay = await json(restarted.service.origin, "/api/v1/browser/work/commands", { method: "POST", headers: browserHeaders(restarted.service.origin), body: JSON.stringify(browserBody) });
-		assert.deepEqual(replay.body, browser.body, "restart duplicate replays the original durable browser outcome");
+		assert.deepEqual(replay.body, browser, "restart duplicate replays the original durable browser outcome");
 		assert.deepEqual(queueCounts(home), { envelopes: 6, dispatchQueue: 0 });
 		return "real managed SQLite browser cookie/CSRF, bearer HTTP, MCP, current-assignee/runtime-reference parity, restart replay, canonical claim/ack callback, and scoped WebSocket invalidation converge on tracker_envelopes without legacy dispatch_queue";
 	} finally {

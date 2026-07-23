@@ -249,6 +249,12 @@ export const scenarios = [
 		regression: "browser cookies, bearer/MCP callers, or internal adapters can forge principal scope, survive revocation, or disclose a foreign project",
 	}),
 	registerScenario({
+		id: "browser-control-client-resync",
+		journey: "J6",
+		tier: "integration",
+		regression: "browser client callers can supply authority, merge invalidation deltas, publish stale epochs, change command keys, or retain truth across conflict, gap, restart, and disconnect",
+	}),
+	registerScenario({
 		id: "browser-work-opaque-projection",
 		journey: "J4",
 		tier: "integration",
