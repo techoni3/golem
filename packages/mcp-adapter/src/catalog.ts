@@ -336,6 +336,7 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 			parent_id: string(),
 			wave: nullableInteger,
 			assignee: nullableString,
+			idempotency_key: string(),
 		},
 		required: ["id"],
 		request: (input) => ({
@@ -353,6 +354,7 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 				parent_id: input.parent_id,
 				wave: input.wave,
 				assignee: input.assignee,
+				idempotency_key: input.idempotency_key,
 			}),
 		}),
 	}),
@@ -365,6 +367,7 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 			phase,
 			reason: string(),
 			skip_reason: string(),
+			idempotency_key: string(),
 		},
 		required: ["id", "phase"],
 		request: (input) => ({
@@ -375,6 +378,7 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 				phase: input.phase,
 				reason: input.reason,
 				skip_reason: input.skip_reason,
+				idempotency_key: input.idempotency_key,
 			}),
 		}),
 	}),
@@ -392,6 +396,7 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 			tag: string(),
 			status: string(),
 			parent_id: string(),
+			idempotency_key: string(),
 		},
 		required: ["id", "body"],
 		request: (input) => ({
@@ -407,6 +412,7 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 				tag: input.tag,
 				status: input.status,
 				parent_id: input.parent_id,
+				idempotency_key: input.idempotency_key,
 			}),
 		}),
 	}),
@@ -419,12 +425,13 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 			body: string(),
 			tag: string(),
 			status: string(),
+			idempotency_key: string(),
 		},
 		required: ["id", "comment_id"],
 		request: (input) => ({
 			method: "PATCH",
 			path: `/api/v1/tracker/tickets/${encodeURIComponent(String(input.id))}/comments/${encodeURIComponent(String(input.comment_id))}`,
-			body: defined({ body: input.body, tag: input.tag, status: input.status }),
+			body: defined({ body: input.body, tag: input.tag, status: input.status, idempotency_key: input.idempotency_key }),
 		}),
 	}),
 	definition({
@@ -434,6 +441,7 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 			...ticketFields,
 			comment_id: string(),
 			body: string(),
+			idempotency_key: string(),
 		},
 		required: ["id", "comment_id", "body"],
 		request: (input) => ({
@@ -441,6 +449,7 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 			path: `/api/v1/tracker/tickets/${encodeURIComponent(String(input.id))}/comments/${encodeURIComponent(String(input.comment_id))}/reply`,
 			body: defined({
 				body: input.body,
+				idempotency_key: input.idempotency_key,
 			}),
 		}),
 	}),
@@ -475,6 +484,7 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 			name: string(),
 			mode: { type: "enum", values: ["sequential", "parallel"] },
 			description: string(),
+			idempotency_key: string(),
 		},
 		required: ["name"],
 		request: (input) => ({
@@ -485,6 +495,7 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 				name: input.name,
 				mode: input.mode,
 				description: input.description,
+				idempotency_key: input.idempotency_key,
 			}),
 		}),
 	}),

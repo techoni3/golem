@@ -62,7 +62,8 @@
         "completed",
         "rejected",
         "conflict",
-        "pending"
+        "pending",
+        "idempotency_mismatch"
       ],
       "type": "string"
     }

@@ -628,4 +628,20 @@ export interface TrackerTables {
 		readonly status: string;
 		readonly created_at: string;
 	};
+	readonly command_receipts: {
+		readonly command_id: string;
+		readonly project_id: string;
+		readonly idempotency_key: string;
+		readonly command_kind: string;
+		readonly actor_id: string;
+		readonly resource_type: string;
+		readonly resource_id: string;
+		readonly correlation_id: string;
+		readonly fingerprint: string;
+		readonly outcome_status: string;
+		readonly reason_code: string | null;
+		readonly operation_id: string | null;
+		readonly result_json: string;
+		readonly committed_at: string;
+	};
 }

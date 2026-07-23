@@ -283,6 +283,7 @@ test("tracker core compatibility journey", async () => {
 		assert(applied.applied.includes("tracker/003-live-tracker-core"), "explicit migration creates the canonical live tracker tables");
 		assert(applied.applied.includes("tracker/005-comment-dispatches"), "explicit migration records the canonical comment-dispatch relation");
 		assert(applied.applied.includes("tracker/006-browser-principal-policy"), "explicit migration adds durable opaque principal bindings without rewriting legacy tracker rows");
+		assert(applied.applied.includes("tracker/007-command-receipts"), "explicit migration adds durable command receipts without rewriting legacy tracker rows");
 		const afterApply = legacyCounts(home.trackerDb);
 		assert.deepEqual(
 			{

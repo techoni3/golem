@@ -6,6 +6,7 @@ import { Kysely, SqliteDialect } from "kysely";
 
 import { backupDatabase, health } from "./backup-health.js";
 import { BrowserPrincipalRepository } from "./browser-principal-repository.js";
+import { CommandReceiptRepository } from "./command-receipt-repository.js";
 import { systemPersistenceClock } from "./clock.js";
 import type {
 	RuntimeTables,
@@ -32,6 +33,7 @@ import { TrackerRepository } from "./tracker-repository.js";
 import {
 	type BrowserPrincipalStorage,
 	type ClaimedOutboxRecord,
+	type CommandGatewayStorage,
 	type DatabaseScope,
 	type MigrationMode,
 	type MigrationPlan,
@@ -88,6 +90,7 @@ class PersistenceOwner implements PersistenceWriteCapability {
 	readonly #trackerRepository: TrackerRepository;
 	readonly #trackerCoreRepository: TrackerCoreRepository;
 	readonly #managementRepository: TrackerManagementRepository;
+	readonly #commandReceiptRepository: CommandReceiptRepository;
 	readonly #browserPrincipalRepository: BrowserPrincipalRepository;
 	readonly #paths: Readonly<PersistencePaths>;
 	readonly #ownerId: string;
@@ -157,11 +160,15 @@ class PersistenceOwner implements PersistenceWriteCapability {
 				this.#trackerSql,
 				tracker,
 			);
-			this.#managementRepository = new TrackerManagementRepository(
-				this.#trackerSql,
-				tracker,
-			);
-			this.#browserPrincipalRepository = new BrowserPrincipalRepository(
+		this.#managementRepository = new TrackerManagementRepository(
+			this.#trackerSql,
+			tracker,
+		);
+		this.#commandReceiptRepository = new CommandReceiptRepository(
+			this.#trackerSql,
+			tracker,
+		);
+		this.#browserPrincipalRepository = new BrowserPrincipalRepository(
 				tracker,
 				this.#clock,
 			);
@@ -281,6 +288,16 @@ class PersistenceOwner implements PersistenceWriteCapability {
 
 	managementStorage() {
 		return this.#managementRepository;
+	}
+
+	commandGatewayStorage(): CommandGatewayStorage {
+		const receipts = this.#commandReceiptRepository;
+		const storage = this.#commandReceiptRepository;
+		return Object.freeze({
+			receipts,
+			transaction: <Result>(fn: () => Result): Result =>
+				storage.transaction(fn),
+		});
 	}
 
 	browserPrincipalStorage(): BrowserPrincipalStorage {

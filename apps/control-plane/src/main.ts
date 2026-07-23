@@ -14,6 +14,7 @@ import {
 	startControlPlane,
 } from "./server.js";
 import {
+	composeControlPlaneCommandGateway,
 	composeControlPlaneEndpointEligibility,
 	composeControlPlaneManagementServices,
 	composeControlPlaneTrackerCoreServices,
@@ -106,6 +107,11 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 		assetRoot: path.join(golemHome, "ticket-assets"),
 		tickets: trackerCore.tickets,
 	});
+	const commandGateway = composeControlPlaneCommandGateway({
+		writer: owner,
+		clock,
+		core: trackerCore,
+	});
 	const principalResolver = createBrowserPrincipalResolver({
 		storage: owner.browserPrincipalStorage(),
 		...(browserLocalOperatorBindingId
@@ -188,6 +194,7 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 			management,
 			trackerCore,
 			trackerServices,
+			commandGateway,
 			principalResolver,
 			...(replayWindowSize ? { replayWindowSize } : {}),
 			...testProjection,

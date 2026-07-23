@@ -38,7 +38,13 @@ exceptional done skip requires a trusted authenticated manager/human
 or artifact booleans cannot fabricate completion. Envelope settlement carries
 the exact emitted `dispatch_completion_stamped` event id (never a later
 `MAX(id)` lookup). Ticket and stream resource revisions derive from canonical
-event ids; a stale write never falls back to a legacy mutation. Rollback leaves
+event ids; a stale write never falls back to a legacy mutation. A single typed
+`CommandGateway` wraps ticket/stream/management mutations in one canonical
+SQLite transaction and persists a durable receipt/outcome per
+`(project_id, idempotency_key)` (`tracker/007-command-receipts`); a matching
+replay returns the byte-equivalent original typed outcome without re-running
+any audit/outbox/delivery/side effect, and a reused key with a differing
+payload returns `409 command.idempotency_mismatch`. Rollback leaves
 the original legacy tables and rows intact and points routes back to the
 unchanged legacy owner; no migration-neutral production attachment mutates the
 legacy file or creates a shadow authority.

@@ -26,6 +26,12 @@ redeclaring DTOs.
   provenance, explicit clears, and matching event/payload discriminators.
   Commands carry command/idempotency keys, actor, audit metadata, target/fence
   expectations where applicable, and matching command/payload discriminators.
+  A typed command outcome (`api-command-outcome/v1`) carries one of
+  `accepted`, `completed`, `rejected`, `conflict`, `pending`, or
+  `idempotency_mismatch`; the `CommandGateway` persists each terminal outcome
+  as a `command-receipt/v1` row so a restart-safe replay returns the original
+  without re-running any side effect, and a reused idempotency key with a
+  differing payload returns `409 command.idempotency_mismatch`.
 - Session-control commands are discriminated: interrupt, halt, and resume have
   no untyped input; rename requires a name; role changes require a normalized
   role value; and metadata mutations carry separate JSON `patch` and explicit
