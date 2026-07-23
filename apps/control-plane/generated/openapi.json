@@ -12550,7 +12550,7 @@
     },
     "/api/v1/projections/{stream}": {
       "get": {
-        "operationId": "browserWorkProjection",
+        "operationId": "controlPlaneProjection",
         "security": [
           {
             "BrowserSession": []
@@ -12564,6 +12564,10 @@
             "schema": {
               "type": "string",
               "enum": [
+                "runtime.live",
+                "runtime.history",
+                "runtime.diagnostics",
+                "projects",
                 "tracker.board",
                 "tracker.tree",
                 "management.controls",
@@ -12585,420 +12589,454 @@
         ],
         "responses": {
           "200": {
-            "description": "bounded browser projection",
+            "description": "legacy projection or bounded browser-work projection",
             "content": {
               "application/json": {
                 "schema": {
-                  "$schema": "https://json-schema.org/draft/2020-12/schema",
                   "oneOf": [
                     {
                       "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schema_version",
+                        "stream",
+                        "resource_revision",
+                        "payload"
+                      ],
                       "properties": {
                         "schema_version": {
                           "type": "string",
-                          "const": "golem.browser-work-projection/v1"
-                        },
-                        "resource_revision": {
-                          "type": "integer",
-                          "minimum": 0,
-                          "maximum": 9007199254740991
-                        },
-                        "next_cursor": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "maxLength": 12,
-                              "pattern": "^bwp_[0-9]{1,8}$"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
+                          "const": "golem.control-plane-projection/v1"
                         },
                         "stream": {
                           "type": "string",
-                          "const": "tracker.board"
+                          "enum": [
+                            "runtime.live",
+                            "runtime.history",
+                            "runtime.diagnostics",
+                            "projects"
+                          ]
                         },
-                        "items": {
-                          "maxItems": 100,
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "opaque_id": {
-                                "type": "string",
-                                "maxLength": 128,
-                                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
-                              },
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "work-item",
-                                  "spec",
-                                  "question",
-                                  "decision",
-                                  "fix"
-                                ]
-                              },
-                              "state": {
-                                "type": "string",
-                                "enum": [
-                                  "todo",
-                                  "in_progress",
-                                  "blocked",
-                                  "review",
-                                  "done",
-                                  "archived"
-                                ]
-                              },
-                              "phase": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 64
-                              },
-                              "priority": {
-                                "anyOf": [
-                                  {
+                        "resource_revision": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "payload": {}
+                      }
+                    },
+                    {
+                      "$schema": "https://json-schema.org/draft/2020-12/schema",
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "schema_version": {
+                              "type": "string",
+                              "const": "golem.browser-work-projection/v1"
+                            },
+                            "resource_revision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "next_cursor": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "maxLength": 12,
+                                  "pattern": "^bwp_[0-9]{1,8}$"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "stream": {
+                              "type": "string",
+                              "const": "tracker.board"
+                            },
+                            "items": {
+                              "maxItems": 100,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "opaque_id": {
+                                    "type": "string",
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                  },
+                                  "kind": {
                                     "type": "string",
                                     "enum": [
-                                      "P0",
-                                      "P1",
-                                      "P2",
-                                      "P3"
+                                      "work-item",
+                                      "spec",
+                                      "question",
+                                      "decision",
+                                      "fix"
                                     ]
                                   },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "revision": {
-                                "type": "integer",
-                                "exclusiveMinimum": 0,
-                                "maximum": 9007199254740991
-                              },
-                              "updated_at": {
-                                "type": "string",
-                                "format": "date-time",
-                                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
-                              }
-                            },
-                            "required": [
-                              "opaque_id",
-                              "kind",
-                              "state",
-                              "phase",
-                              "priority",
-                              "revision",
-                              "updated_at"
-                            ],
-                            "additionalProperties": false
-                          }
-                        }
-                      },
-                      "required": [
-                        "schema_version",
-                        "resource_revision",
-                        "next_cursor",
-                        "stream",
-                        "items"
-                      ],
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "schema_version": {
-                          "type": "string",
-                          "const": "golem.browser-work-projection/v1"
-                        },
-                        "resource_revision": {
-                          "type": "integer",
-                          "minimum": 0,
-                          "maximum": 9007199254740991
-                        },
-                        "next_cursor": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "maxLength": 12,
-                              "pattern": "^bwp_[0-9]{1,8}$"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "stream": {
-                          "type": "string",
-                          "const": "tracker.tree"
-                        },
-                        "items": {
-                          "maxItems": 100,
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "opaque_id": {
-                                "type": "string",
-                                "maxLength": 128,
-                                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
-                              },
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "work-item",
-                                  "spec",
-                                  "question",
-                                  "decision",
-                                  "fix"
-                                ]
-                              },
-                              "state": {
-                                "type": "string",
-                                "enum": [
-                                  "todo",
-                                  "in_progress",
-                                  "blocked",
-                                  "review",
-                                  "done",
-                                  "archived"
-                                ]
-                              },
-                              "phase": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 64
-                              },
-                              "priority": {
-                                "anyOf": [
-                                  {
+                                  "state": {
                                     "type": "string",
                                     "enum": [
-                                      "P0",
-                                      "P1",
-                                      "P2",
-                                      "P3"
+                                      "todo",
+                                      "in_progress",
+                                      "blocked",
+                                      "review",
+                                      "done",
+                                      "archived"
                                     ]
                                   },
-                                  {
-                                    "type": "null"
+                                  "phase": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64
+                                  },
+                                  "priority": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "enum": [
+                                          "P0",
+                                          "P1",
+                                          "P2",
+                                          "P3"
+                                        ]
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "revision": {
+                                    "type": "integer",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "updated_at": {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
                                   }
-                                ]
-                              },
-                              "revision": {
-                                "type": "integer",
-                                "exclusiveMinimum": 0,
-                                "maximum": 9007199254740991
-                              },
-                              "updated_at": {
-                                "type": "string",
-                                "format": "date-time",
-                                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
-                              },
-                              "parent_opaque_id": {
-                                "type": "string",
-                                "maxLength": 128,
-                                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                },
+                                "required": [
+                                  "opaque_id",
+                                  "kind",
+                                  "state",
+                                  "phase",
+                                  "priority",
+                                  "revision",
+                                  "updated_at"
+                                ],
+                                "additionalProperties": false
                               }
-                            },
-                            "required": [
-                              "opaque_id",
-                              "kind",
-                              "state",
-                              "phase",
-                              "priority",
-                              "revision",
-                              "updated_at"
-                            ],
-                            "additionalProperties": false
-                          }
-                        }
-                      },
-                      "required": [
-                        "schema_version",
-                        "resource_revision",
-                        "next_cursor",
-                        "stream",
-                        "items"
-                      ],
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "schema_version": {
-                          "type": "string",
-                          "const": "golem.browser-work-projection/v1"
-                        },
-                        "resource_revision": {
-                          "type": "integer",
-                          "minimum": 0,
-                          "maximum": 9007199254740991
-                        },
-                        "next_cursor": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "maxLength": 12,
-                              "pattern": "^bwp_[0-9]{1,8}$"
-                            },
-                            {
-                              "type": "null"
                             }
-                          ]
+                          },
+                          "required": [
+                            "schema_version",
+                            "resource_revision",
+                            "next_cursor",
+                            "stream",
+                            "items"
+                          ],
+                          "additionalProperties": false
                         },
-                        "stream": {
-                          "type": "string",
-                          "const": "management.controls"
-                        },
-                        "items": {
-                          "maxItems": 100,
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "opaque_id": {
-                                "type": "string",
-                                "maxLength": 128,
-                                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
-                              },
-                              "operation_kind": {
-                                "type": "string",
-                                "enum": [
-                                  "chat",
-                                  "brief",
-                                  "interrupt",
-                                  "halt",
-                                  "control"
-                                ]
-                              },
-                              "status": {
-                                "type": "string",
-                                "enum": [
-                                  "queued",
-                                  "ineligible",
-                                  "delivered"
-                                ]
-                              },
-                              "created_at": {
-                                "type": "string",
-                                "format": "date-time",
-                                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
-                              },
-                              "updated_at": {
-                                "type": "string",
-                                "format": "date-time",
-                                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
-                              }
-                            },
-                            "required": [
-                              "opaque_id",
-                              "operation_kind",
-                              "status",
-                              "created_at",
-                              "updated_at"
-                            ],
-                            "additionalProperties": false
-                          }
-                        }
-                      },
-                      "required": [
-                        "schema_version",
-                        "resource_revision",
-                        "next_cursor",
-                        "stream",
-                        "items"
-                      ],
-                      "additionalProperties": false
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "schema_version": {
-                          "type": "string",
-                          "const": "golem.browser-work-projection/v1"
-                        },
-                        "resource_revision": {
-                          "type": "integer",
-                          "minimum": 0,
-                          "maximum": 9007199254740991
-                        },
-                        "next_cursor": {
-                          "anyOf": [
-                            {
+                        {
+                          "type": "object",
+                          "properties": {
+                            "schema_version": {
                               "type": "string",
-                              "maxLength": 12,
-                              "pattern": "^bwp_[0-9]{1,8}$"
+                              "const": "golem.browser-work-projection/v1"
                             },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "stream": {
-                          "type": "string",
-                          "const": "communication.operations"
-                        },
-                        "items": {
-                          "maxItems": 100,
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "opaque_id": {
-                                "type": "string",
-                                "maxLength": 128,
-                                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
-                              },
-                              "operation_kind": {
-                                "type": "string",
-                                "enum": [
-                                  "chat",
-                                  "brief",
-                                  "interrupt",
-                                  "halt",
-                                  "control"
-                                ]
-                              },
-                              "status": {
-                                "type": "string",
-                                "enum": [
-                                  "queued",
-                                  "ineligible",
-                                  "delivered"
-                                ]
-                              },
-                              "created_at": {
-                                "type": "string",
-                                "format": "date-time",
-                                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
-                              },
-                              "updated_at": {
-                                "type": "string",
-                                "format": "date-time",
-                                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                            "resource_revision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "next_cursor": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "maxLength": 12,
+                                  "pattern": "^bwp_[0-9]{1,8}$"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "stream": {
+                              "type": "string",
+                              "const": "tracker.tree"
+                            },
+                            "items": {
+                              "maxItems": 100,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "opaque_id": {
+                                    "type": "string",
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                  },
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "work-item",
+                                      "spec",
+                                      "question",
+                                      "decision",
+                                      "fix"
+                                    ]
+                                  },
+                                  "state": {
+                                    "type": "string",
+                                    "enum": [
+                                      "todo",
+                                      "in_progress",
+                                      "blocked",
+                                      "review",
+                                      "done",
+                                      "archived"
+                                    ]
+                                  },
+                                  "phase": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64
+                                  },
+                                  "priority": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "enum": [
+                                          "P0",
+                                          "P1",
+                                          "P2",
+                                          "P3"
+                                        ]
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "revision": {
+                                    "type": "integer",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "updated_at": {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                  },
+                                  "parent_opaque_id": {
+                                    "type": "string",
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                  }
+                                },
+                                "required": [
+                                  "opaque_id",
+                                  "kind",
+                                  "state",
+                                  "phase",
+                                  "priority",
+                                  "revision",
+                                  "updated_at"
+                                ],
+                                "additionalProperties": false
                               }
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "resource_revision",
+                            "next_cursor",
+                            "stream",
+                            "items"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "schema_version": {
+                              "type": "string",
+                              "const": "golem.browser-work-projection/v1"
                             },
-                            "required": [
-                              "opaque_id",
-                              "operation_kind",
-                              "status",
-                              "created_at",
-                              "updated_at"
-                            ],
-                            "additionalProperties": false
-                          }
+                            "resource_revision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "next_cursor": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "maxLength": 12,
+                                  "pattern": "^bwp_[0-9]{1,8}$"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "stream": {
+                              "type": "string",
+                              "const": "management.controls"
+                            },
+                            "items": {
+                              "maxItems": 100,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "opaque_id": {
+                                    "type": "string",
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                  },
+                                  "operation_kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "chat",
+                                      "brief",
+                                      "interrupt",
+                                      "halt",
+                                      "control"
+                                    ]
+                                  },
+                                  "status": {
+                                    "type": "string",
+                                    "enum": [
+                                      "queued",
+                                      "ineligible",
+                                      "delivered"
+                                    ]
+                                  },
+                                  "created_at": {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                  },
+                                  "updated_at": {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                  }
+                                },
+                                "required": [
+                                  "opaque_id",
+                                  "operation_kind",
+                                  "status",
+                                  "created_at",
+                                  "updated_at"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "resource_revision",
+                            "next_cursor",
+                            "stream",
+                            "items"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "schema_version": {
+                              "type": "string",
+                              "const": "golem.browser-work-projection/v1"
+                            },
+                            "resource_revision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "next_cursor": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "maxLength": 12,
+                                  "pattern": "^bwp_[0-9]{1,8}$"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "stream": {
+                              "type": "string",
+                              "const": "communication.operations"
+                            },
+                            "items": {
+                              "maxItems": 100,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "opaque_id": {
+                                    "type": "string",
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                  },
+                                  "operation_kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "chat",
+                                      "brief",
+                                      "interrupt",
+                                      "halt",
+                                      "control"
+                                    ]
+                                  },
+                                  "status": {
+                                    "type": "string",
+                                    "enum": [
+                                      "queued",
+                                      "ineligible",
+                                      "delivered"
+                                    ]
+                                  },
+                                  "created_at": {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                  },
+                                  "updated_at": {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                  }
+                                },
+                                "required": [
+                                  "opaque_id",
+                                  "operation_kind",
+                                  "status",
+                                  "created_at",
+                                  "updated_at"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "resource_revision",
+                            "next_cursor",
+                            "stream",
+                            "items"
+                          ],
+                          "additionalProperties": false
                         }
-                      },
-                      "required": [
-                        "schema_version",
-                        "resource_revision",
-                        "next_cursor",
-                        "stream",
-                        "items"
-                      ],
-                      "additionalProperties": false
+                      ]
                     }
                   ]
                 }

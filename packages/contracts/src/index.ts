@@ -9,6 +9,7 @@ export * from "./fixtures.js";
 export * from "./ids.js";
 export * from "./json.js";
 export * from "./launcher.js";
+export * from "./legacy-projection.js";
 export * from "./migration.js";
 export * from "./references.js";
 export * from "./registry.js";

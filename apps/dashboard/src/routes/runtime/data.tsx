@@ -1,6 +1,6 @@
 import {
 	type BrowserControlPlaneClient,
-	type ControlPlaneStream,
+	type LegacyControlPlaneStream,
 	createProjectionSynchronizer,
 	type ProjectionConnectionState,
 } from "@golem/api-client";
@@ -17,7 +17,7 @@ const runtimeStreams = [
 	["live", "runtime.live"],
 	["history", "runtime.history"],
 	["diagnostics", "runtime.diagnostics"],
-] as const satisfies readonly (readonly [RuntimeStream, ControlPlaneStream])[];
+] as const satisfies readonly (readonly [RuntimeStream, LegacyControlPlaneStream])[];
 
 type ConnectionMap = Readonly<Record<RuntimeStream, ProjectionConnectionState>>;
 

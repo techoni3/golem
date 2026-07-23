@@ -1,6 +1,7 @@
 import type {
 	BrowserControlPlaneClient,
-	ControlPlaneStream,
+	ControlPlaneProjectionResponse,
+	LegacyControlPlaneStream,
 } from "./index.js";
 
 type Frame = ReturnType<BrowserControlPlaneClient["parseWebSocketFrame"]>;
@@ -25,9 +26,9 @@ export interface ProjectionSynchronizer {
 	stop(): void;
 }
 
-export type ProjectionSnapshot = Awaited<
-	ReturnType<BrowserControlPlaneClient["projection"]>
->;
+/** The historical generic synchronizer stays on legacy JSON frames only.
+ * Browser-work consumes its concrete projection and frame schemas separately. */
+export type ProjectionSnapshot = ControlPlaneProjectionResponse;
 
 /**
  * Owns one authoritative socket epoch. A gap discards every outstanding socket
@@ -36,7 +37,7 @@ export type ProjectionSnapshot = Awaited<
  */
 export function createProjectionSynchronizer(options: {
 	readonly client: BrowserControlPlaneClient;
-	readonly stream: ControlPlaneStream;
+	readonly stream: LegacyControlPlaneStream;
 	readonly socketFactory?: (url: string) => ProjectionSocket;
 	readonly onDelta: (frame: Frame) => void;
 	readonly onSnapshot: (

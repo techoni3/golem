@@ -37,6 +37,42 @@ function response(description: string, value: z.ZodType): JsonRecord {
 	};
 }
 
+/** The historical route deliberately admits an opaque recursive JSON payload.
+ * Keep that legacy transport shape in OpenAPI without feeding its recursive
+ * JSON schema into codegen; browser-work response variants remain concrete. */
+const legacyProjectionOpenApiSchema: JsonRecord = {
+	type: "object",
+	additionalProperties: false,
+	required: ["schema_version", "stream", "resource_revision", "payload"],
+	properties: {
+		schema_version: { type: "string", const: "golem.control-plane-projection/v1" },
+		stream: {
+			type: "string",
+			enum: [
+				"runtime.live",
+				"runtime.history",
+				"runtime.diagnostics",
+				"projects",
+			],
+		},
+		resource_revision: { type: "integer", minimum: 0 },
+		payload: {},
+	},
+};
+
+function projectionResponse(): JsonRecord {
+	return {
+		description: "legacy projection or bounded browser-work projection",
+		content: {
+			"application/json": {
+				schema: {
+					oneOf: [legacyProjectionOpenApiSchema, schema(BrowserWorkProjectionResponseSchema)],
+				},
+			},
+		},
+	};
+}
+
 const error = ApiErrorResponseJsonSchema;
 const managementResult = {
 	type: "object",
@@ -639,7 +675,7 @@ export function controlPlaneOpenApiDocument(): JsonRecord {
 			},
 			"/api/v1/projections/{stream}": {
 				get: {
-					operationId: "browserWorkProjection",
+					operationId: "controlPlaneProjection",
 					security: [{ BrowserSession: [] }],
 					parameters: [
 						{
@@ -649,6 +685,10 @@ export function controlPlaneOpenApiDocument(): JsonRecord {
 							schema: {
 								type: "string",
 								enum: [
+									"runtime.live",
+									"runtime.history",
+									"runtime.diagnostics",
+									"projects",
 									"tracker.board",
 									"tracker.tree",
 									"management.controls",
@@ -666,10 +706,7 @@ export function controlPlaneOpenApiDocument(): JsonRecord {
 						},
 					],
 					responses: {
-						"200": response(
-							"bounded browser projection",
-							BrowserWorkProjectionResponseSchema,
-						),
+						"200": projectionResponse(),
 						"401": {
 							description: "unauthorized",
 							content: { "application/json": { schema: error } },

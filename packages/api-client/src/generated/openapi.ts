@@ -619,7 +619,7 @@ export interface paths {
             readonly path?: never;
             readonly cookie?: never;
         };
-        readonly get: operations["browserWorkProjection"];
+        readonly get: operations["controlPlaneProjection"];
         readonly put?: never;
         readonly post?: never;
         readonly delete?: never;
@@ -6594,7 +6594,7 @@ export interface operations {
             };
         };
     };
-    readonly browserWorkProjection: {
+    readonly controlPlaneProjection: {
         readonly parameters: {
             readonly query?: {
                 /** @description Opaque browser-work page cursor; never a publication or project cursor. */
@@ -6602,19 +6602,26 @@ export interface operations {
             };
             readonly header?: never;
             readonly path: {
-                readonly stream: "tracker.board" | "tracker.tree" | "management.controls" | "communication.operations";
+                readonly stream: "runtime.live" | "runtime.history" | "runtime.diagnostics" | "projects" | "tracker.board" | "tracker.tree" | "management.controls" | "communication.operations";
             };
             readonly cookie?: never;
         };
         readonly requestBody?: never;
         readonly responses: {
-            /** @description bounded browser projection */
+            /** @description legacy projection or bounded browser-work projection */
             readonly 200: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
                 content: {
                     readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.control-plane-projection/v1";
+                        /** @enum {string} */
+                        readonly stream: "runtime.live" | "runtime.history" | "runtime.diagnostics" | "projects";
+                        readonly resource_revision: number;
+                        readonly payload: unknown;
+                    } | ({
                         /** @constant */
                         readonly schema_version: "golem.browser-work-projection/v1";
                         readonly resource_revision: number;
@@ -6689,7 +6696,7 @@ export interface operations {
                             /** Format: date-time */
                             readonly updated_at: string;
                         }[];
-                    };
+                    });
                 };
             };
             /** @description unauthorized */

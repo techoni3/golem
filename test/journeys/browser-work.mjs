@@ -4,6 +4,8 @@ import path from "node:path";
 
 import WebSocket from "ws";
 
+import { createBrowserControlPlaneClient } from "../../packages/api-client/dist/index.js";
+
 import { createBrowserPrincipalResolver } from "../../apps/control-plane/dist/auth.js";
 import { createBrowserWorkServices } from "../../apps/control-plane/dist/browser-work-services.js";
 import { openControlPlanePersistence } from "../../apps/control-plane/dist/persistence.js";
@@ -53,7 +55,7 @@ function nextFrame(socket) {
 		}, 4_000);
 		const message = (raw) => {
 			cleanup();
-			resolve(JSON.parse(String(raw)));
+			resolve(String(raw));
 		};
 		const error = (reason) => {
 			cleanup();
@@ -88,6 +90,36 @@ function noFrame(socket, milliseconds = 175) {
 			socket.off("message", message);
 			socket.off("error", error);
 		};
+		socket.on("message", message);
+		socket.on("error", error);
+	});
+}
+
+function closedSocket(socket) {
+	return new Promise((resolve, reject) => {
+		const timeout = setTimeout(() => {
+			cleanup();
+			reject(new Error("browser-only WebSocket was not rejected"));
+		}, 4_000);
+		const close = (code) => {
+			cleanup();
+			resolve(code);
+		};
+		const message = (raw) => {
+			cleanup();
+			reject(new Error(`bearer fallback leaked a frame: ${String(raw)}`));
+		};
+		const error = (reason) => {
+			cleanup();
+			reject(reason);
+		};
+		const cleanup = () => {
+			clearTimeout(timeout);
+			socket.off("close", close);
+			socket.off("message", message);
+			socket.off("error", error);
+		};
+		socket.on("close", close);
 		socket.on("message", message);
 		socket.on("error", error);
 	});
@@ -270,6 +302,29 @@ export async function exerciseBrowserWorkOpaqueProjection() {
 
 		const origin = control.service.origin;
 		const alphaHeaders = headers(origin, control.alpha.session);
+		const betaHeaders = headers(origin, control.beta.session);
+		const browserClient = createBrowserControlPlaneClient(origin, {
+			headers: { cookie: alphaHeaders.cookie, origin },
+		});
+		const legacyRuntime = await browserClient.projection("runtime.live");
+		assert.equal(legacyRuntime.stream, "runtime.live");
+		assert.equal(
+			legacyRuntime.schema_version,
+			"golem.control-plane-projection/v1",
+			"generated client retains the legacy runtime projection path",
+		);
+		const typedBrowserBoard = await browserClient.browserWorkProjection("tracker.board");
+		assert.equal(typedBrowserBoard.stream, "tracker.board");
+		const bearerOnly = {
+			origin,
+			authorization: "Bearer browser-work-openapi-token",
+			cookie: "golem_control_plane_session=invalid_browser_session",
+		};
+		const bearerProjection = await json(origin, "/api/v1/projections/tracker.board", {
+			headers: bearerOnly,
+		});
+		assert.equal(bearerProjection.status, 401, "bearer cannot rescue browser projection");
+		let firstBoard;
 		for (const stream of [
 			"tracker.board",
 			"tracker.tree",
@@ -283,6 +338,7 @@ export async function exerciseBrowserWorkOpaqueProjection() {
 			assert.equal(response.body.stream, stream);
 			assert.doesNotMatch(JSON.stringify(response.body), new RegExp(`${betaTicket.id}|${hostile.join("|")}`, "u"));
 			if (stream === "tracker.board") {
+				firstBoard = response.body;
 				assert.equal(response.body.items.length, 100, "board page is bounded");
 				assert.equal(response.body.next_cursor, "bwp_1");
 				const secondPage = await json(
@@ -313,13 +369,34 @@ export async function exerciseBrowserWorkOpaqueProjection() {
 		);
 		assert.equal(assetResponse.status, 200);
 		assert.equal(assetResponse.body.asset.opaque_id, asset.id);
+		assert.equal(assetResponse.body.asset.byte_size, image.byteLength);
+		assert.equal(
+			Buffer.from(assetResponse.body.content_base64, "base64").byteLength,
+			assetResponse.body.asset.byte_size,
+			"management asset read preserves byte-size integrity",
+		);
 		assert.equal(JSON.stringify(assetResponse.body).includes("preview.png"), false);
 		assert.equal(JSON.stringify(assetResponse.body).includes("storage-path"), false);
+		const foreignAsset = await json(
+			origin,
+			`/api/v1/browser/work/items/${alphaTicket.id}/assets/${asset.id}`,
+			{ headers: betaHeaders },
+		);
+		assert.equal(foreignAsset.status, 404, "foreign asset is indistinguishable from absence");
+		assert.equal(JSON.stringify(foreignAsset.body).includes(alphaTicket.id), false);
+		assert.equal(JSON.stringify(foreignAsset.body).includes(asset.id), false);
+		const bearerSocket = new WebSocket(
+			`${origin.replace("http", "ws")}/api/v1/ws?stream=tracker.tree`,
+			{ headers: { ...bearerOnly, host: new URL(origin).host } },
+		);
+		assert.equal(await closedSocket(bearerSocket), 1008, "bearer cannot rescue browser WS");
 
 		socket = new WebSocket(`${origin.replace("http", "ws")}/api/v1/ws?stream=tracker.tree`, {
 			headers: { cookie: alphaHeaders.cookie, origin },
 		});
-		const snapshot = await nextFrame(socket);
+		const snapshot = browserClient.parseBrowserWorkWebSocketFrame(
+			await nextFrame(socket),
+		);
 		assert.equal(snapshot.payload.kind, "snapshot");
 		assert.doesNotMatch(JSON.stringify(snapshot), new RegExp(hostile.join("|"), "u"));
 		control.core.tickets.update({
@@ -329,13 +406,24 @@ export async function exerciseBrowserWorkOpaqueProjection() {
 			actor: "actor_browser_beta",
 		});
 		await noFrame(socket);
+		const boardAfterForeignMutation = await json(
+			origin,
+			"/api/v1/projections/tracker.board",
+			{ headers: alphaHeaders },
+		);
+		assert.equal(boardAfterForeignMutation.status, 200);
+		assert.deepEqual(
+			boardAfterForeignMutation.body,
+			firstBoard,
+			"foreign mutation leaves the first scoped page, cursor, and revision unchanged",
+		);
 		control.core.tickets.update({
 			id: alphaTicket.id,
 			expectedRevision: alphaTicket.revision,
 			patch: { title: "alpha-only" },
 			actor: "actor_browser_alpha",
 		});
-		const delta = await nextFrame(socket);
+		const delta = browserClient.parseBrowserWorkWebSocketFrame(await nextFrame(socket));
 		assert.equal(delta.payload.kind, "delta");
 		assert.deepEqual(delta.payload.delta, { kind: "invalidation", category: "tracker" });
 		assert.doesNotMatch(JSON.stringify(delta), new RegExp(hostile.join("|"), "u"));
@@ -343,6 +431,22 @@ export async function exerciseBrowserWorkOpaqueProjection() {
 			headers: { authorization: "Bearer browser-work-openapi-token" },
 		});
 		assert.equal(document.status, 200);
+		const projectionRoute = document.body.paths["/api/v1/projections/{stream}"].get;
+		const projectionStream = projectionRoute.parameters.find(
+			(parameter) => parameter.name === "stream",
+		);
+		assert.equal(projectionRoute.security.length, 1);
+		assert.deepEqual(projectionRoute.security[0], { BrowserSession: [] });
+		assert.equal(projectionStream.schema.enum.includes("runtime.live"), true);
+		assert.equal(projectionStream.schema.enum.includes("tracker.board"), true);
+		const commandRoute = document.body.paths["/api/v1/browser/work/commands"].post;
+		assert.equal(commandRoute.security.length, 1);
+		assert.deepEqual(commandRoute.security[0], {
+			BrowserSession: [],
+			BrowserCsrf: [],
+		});
+		assert.equal(JSON.stringify(projectionRoute.security).includes("Bearer"), false);
+		assert.equal(JSON.stringify(commandRoute.security).includes("Bearer"), false);
 		assert.equal(JSON.stringify(document.body).includes(hostile[0]), false, "OpenAPI has no hostile example");
 		return "real managed SQLite browser-session projections, detail, asset, and scoped WS invalidation remain bounded and opaque";
 	} finally {
@@ -396,6 +500,24 @@ export async function exerciseBrowserWorkCommandAuthority() {
 			idempotency_key: "gol81:ticket:create",
 			title: "prompt text must not be reflected",
 		};
+		const beforeBearerCommand = writer
+			.committedPublicationStorage()
+			.projectRevision(projectA);
+		const bearerCommand = await json(origin, "/api/v1/browser/work/commands", {
+			method: "POST",
+			headers: {
+				origin,
+				authorization: "Bearer browser-work-openapi-token",
+				cookie: "golem_control_plane_session=invalid_browser_session",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify(createBody),
+		});
+		assert.equal(bearerCommand.status, 401, "bearer cannot rescue browser command");
+		assert.equal(
+			writer.committedPublicationStorage().projectRevision(projectA),
+			beforeBearerCommand,
+		);
 		const beforeCreate = writer.committedPublicationStorage().projectRevision(projectA);
 		const created = await json(origin, "/api/v1/browser/work/commands", {
 			method: "POST",
@@ -485,6 +607,48 @@ export async function exerciseBrowserWorkCommandAuthority() {
 			body: JSON.stringify(createBody),
 		});
 		assert.equal(missingCsrf.status, 401);
+		const beforeAuthorityForgery = writer
+			.committedPublicationStorage()
+			.projectRevision(projectA);
+		const outboxBeforeAuthorityForgery = writer
+			.committedPublicationStorage()
+			.outboxCount(projectA);
+		for (const [field, value] of [
+			["role", "viewer"],
+			["project_id", projectB],
+			["scope", "foreign-scope"],
+			["approval", "forged-approval"],
+			["fence", "forged-fence"],
+		]) {
+			const authorityForgery = await json(origin, "/api/v1/browser/work/commands", {
+				method: "POST",
+				headers: operatorHeaders,
+				body: JSON.stringify({
+					...createBody,
+					idempotency_key: `gol81:forged:${field}`,
+					[field]: value,
+				}),
+			});
+			assert.equal(authorityForgery.status, 403, `${field} forgery is rejected before mutation`);
+		}
+		const unknownField = await json(origin, "/api/v1/browser/work/commands", {
+			method: "POST",
+			headers: operatorHeaders,
+			body: JSON.stringify({
+				...createBody,
+				idempotency_key: "gol81:unknown-field",
+				unexpected: "not-a-browser-command-field",
+			}),
+		});
+		assert.equal(unknownField.status, 400, "unknown command field is rejected before mutation");
+		assert.equal(
+			writer.committedPublicationStorage().projectRevision(projectA),
+			beforeAuthorityForgery,
+		);
+		assert.equal(
+			writer.committedPublicationStorage().outboxCount(projectA),
+			outboxBeforeAuthorityForgery,
+		);
 		const viewer = await json(origin, "/api/v1/browser/work/commands", {
 			method: "POST",
 			headers: headers(origin, control.viewer.session, control.viewer.csrf),
@@ -497,6 +661,31 @@ export async function exerciseBrowserWorkCommandAuthority() {
 			body: JSON.stringify({ ...createBody, idempotency_key: "gol81:forged" }),
 		});
 		assert.equal(forged.status, 403);
+		const foreignTicket = control.core.tickets.create({
+			projectId: projectB,
+			title: "beta command target",
+			actor: "actor_browser_beta",
+		});
+		const beforeForeignCommand = writer
+			.committedPublicationStorage()
+			.projectRevision(projectA);
+		const foreignCommand = await json(origin, "/api/v1/browser/work/commands", {
+			method: "POST",
+			headers: operatorHeaders,
+			body: JSON.stringify({
+				kind: "ticket.update",
+				idempotency_key: "gol81:foreign-command",
+				opaque_id: foreignTicket.id,
+				expected_revision: foreignTicket.revision,
+				title: "must not disclose foreign target",
+			}),
+		});
+		assert.equal(foreignCommand.status, 404, "foreign command target is indistinguishable from absence");
+		assert.equal(JSON.stringify(foreignCommand.body).includes(foreignTicket.id), false);
+		assert.equal(
+			writer.committedPublicationStorage().projectRevision(projectA),
+			beforeForeignCommand,
+		);
 		const invalidRevision = await json(origin, "/api/v1/browser/work/commands", {
 			method: "POST",
 			headers: operatorHeaders,

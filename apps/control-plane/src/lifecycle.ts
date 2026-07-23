@@ -3,7 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 
 import websocket from "@fastify/websocket";
-import { BrowserWorkStreamSchema } from "@golem/contracts";
+import {
+	BrowserWorkStreamSchema,
+	type BrowserWorkStream,
+} from "@golem/contracts";
 import type { CommittedPublicationStorage } from "@golem/persistence";
 import type {
 	CommandGateway,
@@ -30,6 +33,7 @@ import { registerManagementRoutes } from "./management-routes.js";
 import { registerBrowserWorkRoutes } from "./browser-work-routes.js";
 import type { BrowserWorkServices } from "./browser-work-services.js";
 import type {
+	BrowserWorkReplayPort,
 	ControlPlaneProjectionPort,
 	ControlPlaneReplayPort,
 	RuntimeHealthPort,
@@ -54,7 +58,8 @@ export interface ControlPlaneLifecycleOptions {
 	readonly port?: number;
 	readonly projection?: ControlPlaneProjectionPort;
 	readonly runtimeProjection?: RuntimeProjectionPort;
-	readonly replay?: ControlPlaneReplayPort;
+	/** Generic legacy replay and closed browser-work replay travel together. */
+	readonly replay?: ControlPlaneReplayPort & BrowserWorkReplayPort;
 	readonly legacyCompatibility?: LegacyCompatibilityPort;
 	/** Optional until the Wave-5 runtime composition becomes the service main. */
 	readonly runtimeIngress?: RuntimeIngressPort;
@@ -113,12 +118,13 @@ export async function startControlPlane(
 	const lock = acquireServiceLock(options.stateDirectory);
 	const instanceId = `cpi_${crypto.randomUUID()}`;
 	const projection = options.projection ?? defaultProjection();
-	const replay =
+	const replay: ControlPlaneReplayPort & BrowserWorkReplayPort =
 		options.replay ?? new BoundedReplayWindow(options.replayWindowSize ?? 32);
 	const legacyCompatibility =
 		options.legacyCompatibility ?? createLegacyCompatibilitySource();
 	const principal =
 		options.principalResolver ?? createFailClosedBrowserPrincipalResolver();
+	const browserWork = options.browserWork;
 	const sockets = new Set<ControlPlaneSocket>();
 	const app = Fastify({
 		logger: {
@@ -213,12 +219,15 @@ export async function startControlPlane(
 			instanceId,
 			principal,
 			replay,
-			read: (stream: ControlPlaneStream, projectId?: string) => {
-				const browserStream = BrowserWorkStreamSchema.safeParse(stream);
-				return options.browserWork && browserStream.success && projectId
-					? options.browserWork.projection(browserStream.data, projectId)
-					: projection.read(stream, projectId);
-			},
+			read: (stream: ControlPlaneStream, projectId?: string) =>
+				projection.read(stream, projectId),
+			...(browserWork
+				? {
+						browserProjection: (stream: BrowserWorkStream, projectId: string) =>
+							browserWork.projection(stream, projectId),
+						browserReplay: replay,
+					}
+				: {}),
 			revision: (stream: ControlPlaneStream, projectId?: string) =>
 				projection.revision(stream, projectId),
 			sockets,
@@ -230,6 +239,7 @@ export async function startControlPlane(
 			const dispatcher = new CommittedPublicationDispatcher({
 				storage: options.committedPublications,
 				replay,
+				...(browserWork ? { browserReplay: replay } : {}),
 				workerId: `control-plane-${process.pid}`,
 				now: () => new Date().toISOString(),
 			});

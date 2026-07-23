@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+import { ControlPlaneInstanceIdSchema } from "./ids.js";
+import { wireVersion } from "./version.js";
+
 export const BrowserOpaqueIdSchema = z
 	.string()
 	.regex(/^[A-Za-z][A-Za-z0-9_-]{0,127}$/u)
@@ -78,23 +81,167 @@ const BrowserWorkProjectionBaseSchema = z
 	})
 	.strict();
 
-export const BrowserWorkProjectionResponseSchema = z.discriminatedUnion("stream", [
+export const BrowserWorkBoardProjectionSchema =
 	BrowserWorkProjectionBaseSchema.extend({
 		stream: z.literal("tracker.board"),
 		items: z.array(BrowserWorkTicketSchema).max(100),
-	}).strict(),
+	}).strict();
+
+export const BrowserWorkTreeProjectionSchema =
 	BrowserWorkProjectionBaseSchema.extend({
 		stream: z.literal("tracker.tree"),
 		items: z.array(BrowserWorkTreeTicketSchema).max(100),
-	}).strict(),
+	}).strict();
+
+export const BrowserWorkManagementProjectionSchema =
 	BrowserWorkProjectionBaseSchema.extend({
 		stream: z.literal("management.controls"),
 		items: z.array(BrowserWorkOperationSchema).max(100),
-	}).strict(),
+	}).strict();
+
+export const BrowserWorkCommunicationProjectionSchema =
 	BrowserWorkProjectionBaseSchema.extend({
 		stream: z.literal("communication.operations"),
 		items: z.array(BrowserWorkOperationSchema).max(100),
-	}).strict(),
+	}).strict();
+
+export const BrowserWorkProjectionResponseSchema = z.discriminatedUnion("stream", [
+	BrowserWorkBoardProjectionSchema,
+	BrowserWorkTreeProjectionSchema,
+	BrowserWorkManagementProjectionSchema,
+	BrowserWorkCommunicationProjectionSchema,
+]);
+
+export const BrowserWorkInvalidationSchema = z
+	.object({
+		kind: z.literal("invalidation"),
+		category: z.enum(["tracker", "management", "communication"]),
+	})
+	.strict();
+
+const BrowserWorkCursorSchema = z.string().min(1).max(512);
+const BrowserWorkResyncPayloadSchema = z
+	.object({
+		kind: z.literal("resync_required"),
+		reason: z.enum([
+			"instance_changed",
+			"cursor_gap",
+			"cursor_compacted",
+			"policy_changed",
+			"protocol_mismatch",
+		]),
+		snapshot_url: z.string().url().max(2048),
+	})
+	.strict();
+const BrowserWorkFrameBaseSchema = z
+	.object({
+		schema_version: wireVersion("browser-work-websocket-frame"),
+		instance_id: ControlPlaneInstanceIdSchema,
+		sequence: z.number().int().nonnegative(),
+		resource_revision: z.number().int().nonnegative(),
+		correlation_id: z.string().min(1).max(128),
+	})
+	.strict();
+
+const BrowserWorkBoardWebSocketFrameSchema = BrowserWorkFrameBaseSchema.extend({
+	stream: z.literal("tracker.board"),
+	payload: z.discriminatedUnion("kind", [
+		z
+			.object({
+				kind: z.literal("snapshot"),
+				cursor: BrowserWorkCursorSchema,
+				payload: BrowserWorkBoardProjectionSchema,
+			})
+			.strict(),
+		z
+			.object({
+				kind: z.literal("delta"),
+				cursor: BrowserWorkCursorSchema,
+				delta: BrowserWorkInvalidationSchema.extend({
+					category: z.literal("tracker"),
+				}).strict(),
+			})
+			.strict(),
+		BrowserWorkResyncPayloadSchema,
+	]),
+}).strict();
+
+const BrowserWorkTreeWebSocketFrameSchema = BrowserWorkFrameBaseSchema.extend({
+	stream: z.literal("tracker.tree"),
+	payload: z.discriminatedUnion("kind", [
+		z
+			.object({
+				kind: z.literal("snapshot"),
+				cursor: BrowserWorkCursorSchema,
+				payload: BrowserWorkTreeProjectionSchema,
+			})
+			.strict(),
+		z
+			.object({
+				kind: z.literal("delta"),
+				cursor: BrowserWorkCursorSchema,
+				delta: BrowserWorkInvalidationSchema.extend({
+					category: z.literal("tracker"),
+				}).strict(),
+			})
+			.strict(),
+		BrowserWorkResyncPayloadSchema,
+	]),
+}).strict();
+
+const BrowserWorkManagementWebSocketFrameSchema =
+	BrowserWorkFrameBaseSchema.extend({
+		stream: z.literal("management.controls"),
+		payload: z.discriminatedUnion("kind", [
+			z
+				.object({
+					kind: z.literal("snapshot"),
+					cursor: BrowserWorkCursorSchema,
+					payload: BrowserWorkManagementProjectionSchema,
+				})
+				.strict(),
+			z
+				.object({
+					kind: z.literal("delta"),
+					cursor: BrowserWorkCursorSchema,
+					delta: BrowserWorkInvalidationSchema.extend({
+						category: z.literal("management"),
+					}).strict(),
+				})
+				.strict(),
+			BrowserWorkResyncPayloadSchema,
+		]),
+	}).strict();
+
+const BrowserWorkCommunicationWebSocketFrameSchema =
+	BrowserWorkFrameBaseSchema.extend({
+		stream: z.literal("communication.operations"),
+		payload: z.discriminatedUnion("kind", [
+			z
+				.object({
+					kind: z.literal("snapshot"),
+					cursor: BrowserWorkCursorSchema,
+					payload: BrowserWorkCommunicationProjectionSchema,
+				})
+				.strict(),
+			z
+				.object({
+					kind: z.literal("delta"),
+					cursor: BrowserWorkCursorSchema,
+					delta: BrowserWorkInvalidationSchema.extend({
+						category: z.literal("communication"),
+					}).strict(),
+				})
+				.strict(),
+			BrowserWorkResyncPayloadSchema,
+		]),
+	}).strict();
+
+export const BrowserWorkWebSocketFrameSchema = z.discriminatedUnion("stream", [
+	BrowserWorkBoardWebSocketFrameSchema,
+	BrowserWorkTreeWebSocketFrameSchema,
+	BrowserWorkManagementWebSocketFrameSchema,
+	BrowserWorkCommunicationWebSocketFrameSchema,
 ]);
 
 export const BrowserWorkDetailResponseSchema = z
@@ -235,4 +382,11 @@ export type BrowserWorkCommandRequest = z.infer<
 >;
 export type BrowserWorkProjectionResponse = z.infer<
 	typeof BrowserWorkProjectionResponseSchema
+>;
+export type BrowserWorkInvalidation = z.infer<
+	typeof BrowserWorkInvalidationSchema
+>;
+export type BrowserWorkStream = z.infer<typeof BrowserWorkStreamSchema>;
+export type BrowserWorkWebSocketFrame = z.infer<
+	typeof BrowserWorkWebSocketFrameSchema
 >;

@@ -1,6 +1,14 @@
 import crypto from "node:crypto";
 
-import { WebSocketFrameV1Schema } from "@golem/contracts";
+import {
+	BrowserWorkInvalidationSchema,
+	BrowserWorkStreamSchema,
+	BrowserWorkWebSocketFrameSchema,
+	type BrowserWorkInvalidation,
+	type BrowserWorkProjectionResponse,
+	type BrowserWorkStream,
+	WebSocketFrameV1Schema,
+} from "@golem/contracts";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 
 import {
@@ -10,6 +18,10 @@ import {
 	isExpectedHost,
 } from "./auth.js";
 import type {
+	BrowserWorkReplayEntry,
+	BrowserWorkReplayListener,
+	BrowserWorkReplayPort,
+	BrowserWorkReplayResult,
 	ControlPlaneReplayEntry,
 	ControlPlaneReplayListener,
 	ControlPlaneReplayPort,
@@ -24,11 +36,16 @@ export interface ControlPlaneSocket {
 	send(data: string): void;
 }
 
-export class BoundedReplayWindow implements ControlPlaneReplayPort {
+export class BoundedReplayWindow
+	implements ControlPlaneReplayPort, BrowserWorkReplayPort
+{
 	readonly #capacity: number;
 	readonly #entries = new Map<string, ControlPlaneReplayEntry[]>();
 	readonly #nextSequence = new Map<string, number>();
 	readonly #listeners = new Set<ControlPlaneReplayListener>();
+	readonly #browserEntries = new Map<string, BrowserWorkReplayEntry[]>();
+	readonly #browserNextSequence = new Map<string, number>();
+	readonly #browserListeners = new Set<BrowserWorkReplayListener>();
 
 	constructor(capacity = 32) {
 		if (!Number.isInteger(capacity) || capacity < 1 || capacity > 256)
@@ -101,6 +118,73 @@ export class BoundedReplayWindow implements ControlPlaneReplayPort {
 		this.#listeners.add(listener);
 		return () => this.#listeners.delete(listener);
 	}
+
+	browserSnapshot(
+		stream: BrowserWorkStream,
+		scope: ControlPlaneReplayScope = {},
+	) {
+		const entries = this.#browserEntries.get(scopeKey(stream, scope)) ?? [];
+		const latest = entries.at(-1);
+		return Object.freeze({
+			sequence: latest?.sequence ?? 0,
+			resourceRevision: latest?.resourceRevision ?? 0,
+		});
+	}
+
+	browserReplay(
+		stream: BrowserWorkStream,
+		cursor: number,
+		scope: ControlPlaneReplayScope = {},
+	): BrowserWorkReplayResult {
+		if (!Number.isInteger(cursor) || cursor < 0)
+			return Object.freeze({ kind: "gap", reason: "cursor_gap" });
+		const entries = this.#browserEntries.get(scopeKey(stream, scope)) ?? [];
+		const oldest = entries[0]?.sequence;
+		const latest = entries.at(-1)?.sequence ?? 0;
+		if (cursor > latest)
+			return Object.freeze({ kind: "gap", reason: "cursor_gap" });
+		if (oldest !== undefined && cursor < oldest - 1)
+			return Object.freeze({ kind: "gap", reason: "cursor_compacted" });
+		return Object.freeze({
+			kind: "resume",
+			entries: entries.filter((entry) => entry.sequence > cursor),
+		});
+	}
+
+	publishBrowserWork(
+		stream: BrowserWorkStream,
+		resourceRevision: number,
+		delta: BrowserWorkInvalidation,
+		scope: ControlPlaneReplayScope = {},
+	): BrowserWorkReplayEntry {
+		if (!Number.isInteger(resourceRevision) || resourceRevision < 0)
+			throw new Error(
+				"browser work replay resource revision must be a non-negative integer",
+			);
+		const key = scopeKey(stream, scope);
+		const entries = this.#browserEntries.get(key) ?? [];
+		const prior = entries.at(-1);
+		if (prior && resourceRevision < prior.resourceRevision)
+			throw new Error(
+				"browser work replay resource revision must not regress below the canonical prior revision",
+			);
+		const entry = Object.freeze({
+			sequence: this.#browserNextSequence.get(key) ?? 1,
+			resourceRevision,
+			delta: BrowserWorkInvalidationSchema.parse(delta),
+		});
+		this.#browserNextSequence.set(key, entry.sequence + 1);
+		entries.push(entry);
+		while (entries.length > this.#capacity) entries.shift();
+		this.#browserEntries.set(key, entries);
+		for (const listener of this.#browserListeners) listener(stream, entry, scope);
+		return entry;
+	}
+
+	subscribeBrowserWork(listener: BrowserWorkReplayListener): () => void {
+		this.#browserListeners.add(listener);
+		return () => this.#browserListeners.delete(listener);
+	}
 }
 
 function scopeKey(
@@ -144,6 +228,70 @@ function frame(
 	});
 }
 
+function browserSnapshotFrame(
+	instanceId: string,
+	sequence: number,
+	projection: BrowserWorkProjectionResponse,
+) {
+	return BrowserWorkWebSocketFrameSchema.parse({
+		schema_version: "golem.browser-work-websocket-frame/v1",
+		instance_id: instanceId,
+		stream: projection.stream,
+		sequence,
+		resource_revision: projection.resource_revision,
+		correlation_id: `corr_${crypto.randomUUID()}`,
+		payload: {
+			kind: "snapshot",
+			cursor: String(sequence),
+			payload: projection,
+		},
+	});
+}
+
+function browserDeltaFrame(
+	instanceId: string,
+	stream: BrowserWorkStream,
+	sequence: number,
+	revision: number,
+	delta: BrowserWorkInvalidation,
+) {
+	return BrowserWorkWebSocketFrameSchema.parse({
+		schema_version: "golem.browser-work-websocket-frame/v1",
+		instance_id: instanceId,
+		stream,
+		sequence,
+		resource_revision: revision,
+		correlation_id: `corr_${crypto.randomUUID()}`,
+		payload: {
+			kind: "delta",
+			cursor: String(sequence),
+			delta: BrowserWorkInvalidationSchema.parse(delta),
+		},
+	});
+}
+
+function browserResyncFrame(
+	instanceId: string,
+	stream: BrowserWorkStream,
+	revision: number,
+	reason:
+		| "instance_changed"
+		| "cursor_gap"
+		| "cursor_compacted"
+		| "policy_changed",
+	snapshotUrl: string,
+) {
+	return BrowserWorkWebSocketFrameSchema.parse({
+		schema_version: "golem.browser-work-websocket-frame/v1",
+		instance_id: instanceId,
+		stream,
+		sequence: 0,
+		resource_revision: revision,
+		correlation_id: `corr_${crypto.randomUUID()}`,
+		payload: { kind: "resync_required", reason, snapshot_url: snapshotUrl },
+	});
+}
+
 export function registerWsReplay(options: {
 	readonly app: FastifyInstance;
 	readonly instanceId: string;
@@ -153,6 +301,13 @@ export function registerWsReplay(options: {
 		stream: ControlPlaneStream,
 		projectId?: string,
 	) => Record<string, unknown>;
+	/** Concrete browser-work snapshots never enter the generic projection wire. */
+	readonly browserProjection?: (
+		stream: BrowserWorkStream,
+		projectId: string,
+	) => BrowserWorkProjectionResponse;
+	/** Separate, closed browser-work replay journal; never the generic JSON port. */
+	readonly browserReplay?: BrowserWorkReplayPort;
 	readonly revision: (stream: ControlPlaneStream, projectId?: string) => number;
 	readonly sockets: Set<ControlPlaneSocket>;
 	/** Streams that are deliberately browser-session-only (GOL-81). */
@@ -167,6 +322,11 @@ export function registerWsReplay(options: {
 		}
 	>();
 	const unsubscribe = options.replay.subscribe((stream, entry, scope) => {
+		if (
+			options.browserReplay &&
+			BrowserWorkStreamSchema.safeParse(stream).success
+		)
+			return;
 		for (const socket of options.sockets) {
 			const subscription = streams.get(socket);
 			if (!subscription || subscription.stream !== stream) continue;
@@ -181,27 +341,55 @@ export function registerWsReplay(options: {
 			)
 				continue;
 			try {
-				socket.send(
-					JSON.stringify(
-						frame(
-							options.instanceId,
-							stream,
-							entry.sequence,
-							entry.resourceRevision,
-							{
-								kind: "delta",
-								cursor: String(entry.sequence),
-								delta: entry.delta,
-							},
-						),
-					),
+				const message = frame(
+					options.instanceId,
+					stream,
+					entry.sequence,
+					entry.resourceRevision,
+					{
+						kind: "delta",
+						cursor: String(entry.sequence),
+						delta: entry.delta,
+					},
 				);
+				socket.send(JSON.stringify(message));
 			} catch {
 				options.sockets.delete(socket);
 				streams.delete(socket);
 			}
 		}
 	});
+	const unsubscribeBrowser = options.browserReplay?.subscribeBrowserWork(
+		(stream, entry, scope) => {
+			for (const socket of options.sockets) {
+				const subscription = streams.get(socket);
+				if (!subscription || subscription.stream !== stream) continue;
+				if (scopeKey(stream, subscription.scope) !== scopeKey(stream, scope))
+					continue;
+				if (
+					scope.projectId &&
+					!options.principal.policy.allowsProject(
+						subscription.context,
+						scope.projectId,
+					)
+				)
+					continue;
+				try {
+					const message = browserDeltaFrame(
+						options.instanceId,
+						stream,
+						entry.sequence,
+						entry.resourceRevision,
+						entry.delta,
+					);
+					socket.send(JSON.stringify(message));
+				} catch {
+					options.sockets.delete(socket);
+					streams.delete(socket);
+				}
+			}
+		},
+	);
 	options.app.get(
 		"/api/v1/ws",
 		{ websocket: true },
@@ -235,6 +423,85 @@ export function registerWsReplay(options: {
 			const cursorValue = url.searchParams.get("cursor");
 			const suppliedPolicy = url.searchParams.get("policy_version");
 			const snapshotUrl = `${originFor(request)}/api/v1/projections/${stream}`;
+			const browserStream = BrowserWorkStreamSchema.safeParse(stream);
+			const browserProjection = options.browserProjection;
+			if (browserStream.success && browserProjection) {
+				const browserReplay = options.browserReplay;
+				if (!browserReplay) {
+					socket.close(1011, "browser replay unavailable");
+					return;
+				}
+				const currentProjection = () =>
+					browserProjection(browserStream.data, context.defaultProjectId);
+				let messages: readonly ReturnType<typeof browserSnapshotFrame>[];
+				if (!suppliedInstance || cursorValue === null) {
+					const snapshot = browserReplay.browserSnapshot(browserStream.data, scope);
+					messages = [
+						browserSnapshotFrame(
+							options.instanceId,
+							snapshot.sequence,
+							currentProjection(),
+						),
+					];
+				} else if (suppliedInstance !== options.instanceId) {
+					messages = [
+						browserResyncFrame(
+							options.instanceId,
+							browserStream.data,
+							currentProjection().resource_revision,
+							"instance_changed",
+							snapshotUrl,
+						),
+					];
+				} else if (
+					suppliedPolicy !== null &&
+					suppliedPolicy !== String(scope.policyVersion ?? 1)
+				) {
+					messages = [
+						browserResyncFrame(
+							options.instanceId,
+							browserStream.data,
+							currentProjection().resource_revision,
+							"policy_changed",
+							snapshotUrl,
+						),
+					];
+				} else {
+					const result = browserReplay.browserReplay(
+						browserStream.data,
+						Number(cursorValue),
+						scope,
+					);
+					messages =
+						result.kind === "gap"
+							? [
+									browserResyncFrame(
+										options.instanceId,
+										browserStream.data,
+										currentProjection().resource_revision,
+										result.reason,
+										snapshotUrl,
+									),
+								]
+							: result.entries.map((entry) =>
+									browserDeltaFrame(
+										options.instanceId,
+										browserStream.data,
+										entry.sequence,
+										entry.resourceRevision,
+										entry.delta,
+									),
+								);
+				}
+				options.sockets.add(socket);
+				streams.set(socket, { stream, context, scope });
+				socket.once("close", () => {
+					options.sockets.delete(socket);
+					streams.delete(socket);
+				});
+				for (const message of messages) socket.send(JSON.stringify(message));
+				return;
+			}
 			let messages: readonly ReturnType<typeof frame>[];
 			if (!suppliedInstance || cursorValue === null) {
 				const snapshot = options.replay.snapshot(stream, scope);
@@ -328,6 +595,7 @@ export function registerWsReplay(options: {
 	);
 	return () => {
 		unsubscribe();
+		unsubscribeBrowser?.();
 		streams.clear();
 	};
 }
