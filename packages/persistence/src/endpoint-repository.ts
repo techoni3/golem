@@ -9,6 +9,7 @@ import type {
 	EndpointRouteKind,
 	PersistenceClock,
 	RuntimeEndpointCapability,
+	RuntimeEndpointDeliveryEligibility,
 	RuntimeEndpointEligibility,
 	RuntimeEndpointMutationResult,
 	RuntimeEndpointStorage,
@@ -690,6 +691,45 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 		expectedFence?: number;
 		now?: string;
 	}): RuntimeEndpointEligibility {
+		return this.#classifyEligibility(input, ["ready"], false);
+	}
+
+	deliveryEligibility(input: {
+		generationId: string;
+		routeKind: EndpointRouteKind;
+		requiredCapability?: string;
+		expectedOwnerFence?: number;
+		expectedFence?: number;
+		now?: string;
+	}): RuntimeEndpointDeliveryEligibility {
+		const result = this.#classifyEligibility(
+			input,
+			["ready", "pull_only", "next_turn"],
+			true,
+		);
+		if (result.disposition !== "eligible" || !result.endpoint)
+			return Object.freeze({ ...result, disposition: "ineligible" as const });
+		const disposition =
+			result.endpoint.readiness === "ready"
+				? "ready"
+				: result.endpoint.readiness === "pull_only"
+					? "pull_only"
+					: "next_turn";
+		return Object.freeze({ ...result, disposition });
+	}
+
+	#classifyEligibility(
+		input: {
+			generationId: string;
+			routeKind: EndpointRouteKind;
+			requiredCapability?: string;
+			expectedOwnerFence?: number;
+			expectedFence?: number;
+			now?: string;
+		},
+		acceptedReadiness: readonly EndpointReadinessState[],
+		requireControl: boolean,
+	): RuntimeEndpointEligibility {
 		const now = input.now ?? this.#clock.now();
 		const generation = this.#database
 			.prepare<GenerationRow>(
@@ -761,7 +801,10 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 				endpoint,
 				facts: endpointFacts,
 			};
-		if (row.control_state !== "enabled" && input.routeKind === "control")
+		if (
+			row.control_state !== "enabled" &&
+			(input.routeKind === "control" || requireControl)
+		)
 			return {
 				disposition: "ineligible",
 				code: "runtime.endpoint.control_disabled",
@@ -769,7 +812,7 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 				endpoint,
 				facts: endpointFacts,
 			};
-		if (row.readiness_state !== "ready")
+		if (!acceptedReadiness.includes(row.readiness_state))
 			return {
 				disposition: "ineligible",
 				code: "runtime.endpoint.readiness_unready",
@@ -849,7 +892,7 @@ export class RuntimeEndpointRepository implements RuntimeEndpointStorage {
 				capability,
 				facts: capabilityFacts,
 			};
-		if (capability.readiness !== "ready")
+		if (capability.readiness !== row.readiness_state)
 			return {
 				disposition: "ineligible",
 				code: "runtime.endpoint.capability_unready",

@@ -13,6 +13,12 @@ export interface TicketDispatchInput {
 	readonly operationId: string;
 	/** Trusted legacy compatibility hint. Browser adapters never set this. */
 	readonly assigneeHint?: string;
+	/** Trusted compatibility content; browser and public bearer adapters omit it. */
+	readonly legacy?: {
+		readonly note?: string;
+		readonly workspace?: string;
+		readonly whenIdle?: boolean;
+	};
 }
 
 export type TicketDispatchDisposition =
@@ -58,6 +64,15 @@ function queueDisposition(
 	return "ineligible";
 }
 
+function terminal(ticket: TrackerCoreWorkItem): boolean {
+	return (
+		ticket.state === "done" ||
+		ticket.state === "archived" ||
+		ticket.phase === "done" ||
+		ticket.phase === "closed"
+	);
+}
+
 function outcome(
 	operationId: string,
 	disposition: TicketDispatchDisposition,
@@ -99,7 +114,11 @@ export function createTicketDispatchService(options: {
 	return Object.freeze({
 		dispatch(input: TicketDispatchInput): TicketDispatchOutcome {
 			const ticket = options.tickets.get(input.projectId, input.ticketId);
-			if (!ticket || ticket.projectId !== input.projectId)
+			if (
+				!ticket ||
+				ticket.projectId !== input.projectId ||
+				terminal(ticket)
+			)
 				return outcome(input.operationId, "ineligible");
 
 			// Current assignee alone selects the logical recipient. Historical
@@ -118,8 +137,17 @@ export function createTicketDispatchService(options: {
 			const disposition = queueDisposition(endpoint);
 			if (disposition === "ineligible") return outcome(input.operationId, disposition);
 
-			// Enqueue before the ticket CAS. If the CAS is stale, the enclosing
-			// gateway transaction rolls this envelope and its GOL-80 trigger back.
+			// CAS first so a miss is a durable, replayable GOL-79 stale result.
+			// The later envelope enqueue still runs inside the same outer gateway
+			// transaction, so a changed endpoint rolls this ticket audit back too.
+			const committed = options.tickets.record({
+				id: ticket.id,
+				expectedRevision: input.expectedRevision,
+				dispatchedTo: selected.sessionId,
+				actor: input.actorId,
+				...(ticket.assignee === undefined ? { assignee: selected.sessionId } : {}),
+			});
+			if (!committed) return outcome(input.operationId, "stale");
 			const envelopeId = `env_${globalThis.crypto.randomUUID()}`;
 			options.delivery.enqueue({
 				id: envelopeId,
@@ -129,29 +157,20 @@ export function createTicketDispatchService(options: {
 				recipientId: selected.sessionId,
 				eligibilityRecipientId: selected.generationId,
 				kind: "ticket_dispatch",
-				payload: Object.freeze({ ticket_id: ticket.id }),
+				payload: Object.freeze({
+					ticket_id: ticket.id,
+					...(input.legacy?.note === undefined
+						? {}
+						: { note: input.legacy.note }),
+					...(input.legacy?.workspace === undefined
+						? {}
+						: { workspace: input.legacy.workspace }),
+					...(input.legacy?.whenIdle === undefined
+						? {}
+						: { when_idle: input.legacy.whenIdle }),
+				}),
 			});
-			const committed = options.tickets.record({
-				id: ticket.id,
-				expectedRevision: input.expectedRevision,
-				dispatchedTo: selected.sessionId,
-				actor: input.actorId,
-				...(ticket.assignee === undefined ? { assignee: selected.sessionId } : {}),
-			});
-			if (!committed) {
-				// A stale CAS must not leave the just-created envelope behind. The
-				// gateway transaction is responsible for rollback of this throw.
-				throw new TicketDispatchStaleError();
-			}
 			return outcome(input.operationId, disposition);
 		},
 	});
-}
-
-/** Internal rollback marker; adapters convert it to a non-disclosing stale outcome. */
-export class TicketDispatchStaleError extends Error {
-	constructor() {
-		super("ticket dispatch revision is stale");
-		this.name = "TicketDispatchStaleError";
-	}
 }

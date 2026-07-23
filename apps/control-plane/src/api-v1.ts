@@ -8,7 +8,6 @@ import {
 	TrackerCoreError,
 	type TrackerCoreServices,
 	type TrackerServices,
-	TicketDispatchStaleError,
 	type TicketDispatchService,
 } from "@golem/tracker";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -246,14 +245,16 @@ export function registerApiV1Routes(options: {
 	};
 	const ticketNotFound = (request: FastifyRequest, reply: FastifyReply) =>
 		fail(request, reply, 404, "tracker.not_found", "ticket was not found");
-	const bearerGuard = (
+	const dispatchCaller = (
 		request: FastifyRequest,
 		reply: FastifyReply,
+		source: "bearer" | "mcp",
 	): Caller | undefined => {
-		// This adapter has one legacy compatibility field (`session_id`). The
-		// strict route allowlist below treats it as an untrusted hint; all other
-		// body authority fields still fail before the command gateway can run.
-		if (hasRequestAuthorityHeaderOrQueryOverride(request)) {
+		if (
+			(source === "mcp"
+				? hasRequestAuthorityHeaderOrQueryOverride(request)
+				: hasRequestAuthorityOverride(request))
+		) {
 			fail(request, reply, 403, "browser.forbidden", "request authority is server-owned");
 			return undefined;
 		}
@@ -264,6 +265,10 @@ export function registerApiV1Routes(options: {
 		});
 		if (!context) {
 			fail(request, reply, 401, "browser.auth.required", "bearer principal is required");
+			return undefined;
+		}
+		if (context.source !== source) {
+			fail(request, reply, 403, "browser.forbidden", "adapter credential is not accepted");
 			return undefined;
 		}
 		if (!options.principal.policy.allows(context, "mutate")) {
@@ -341,110 +346,161 @@ export function registerApiV1Routes(options: {
 	 * lower-level GOL-36 primitive; this route is the canonical adapter shared
 	 * with browser and MCP command paths.
 	 */
-	if (ticketDispatch && gateway)
-		options.app.post(
-			"/api/v1/tracker/tickets/:id/dispatch",
-			async (request, reply) => {
-				const callerValue = bearerGuard(request, reply);
-				if (!callerValue) return;
-				const ticketId = (request.params as { id?: unknown }).id;
-				if (typeof ticketId !== "string" || !ticketInCallerScope(callerValue, ticketId))
-					return ticketNotFound(request, reply);
-				const ticket = options.core.tickets.get(ticketId)?.ticket;
-				if (!ticket || ticket.projectId !== callerValue.projectId)
-					return ticketNotFound(request, reply);
-				const input = value(request);
-				const allowed = new Set([
-					"expected_revision",
-					"idempotency_key",
-					"session_id",
-				]);
-				if (Object.keys(input).some((key) => !allowed.has(key)))
+	function ticketDispatchHandler(source: "bearer" | "mcp") {
+		const commandGateway = gateway;
+		const service = ticketDispatch;
+		return async (request: FastifyRequest, reply: FastifyReply) => {
+			if (!commandGateway || !service)
+				return fail(
+					request,
+					reply,
+					503,
+					"tracker.unavailable",
+					"ticket dispatch service is unavailable",
+				);
+			const callerValue = dispatchCaller(request, reply, source);
+			if (!callerValue) return;
+			const ticketId = (request.params as { id?: unknown }).id;
+			if (
+				typeof ticketId !== "string" ||
+				!ticketInCallerScope(callerValue, ticketId)
+			)
+				return ticketNotFound(request, reply);
+			const ticket = options.core.tickets.get(ticketId)?.ticket;
+			if (!ticket || ticket.projectId !== callerValue.projectId)
+				return ticketNotFound(request, reply);
+			const input = value(request);
+			const allowed = new Set(
+				source === "mcp"
+					? [
+							"expected_revision",
+							"idempotency_key",
+							"session_id",
+							"note",
+							"workspace",
+							"when_idle",
+						]
+					: ["expected_revision", "idempotency_key"],
+			);
+			if (Object.keys(input).some((key) => !allowed.has(key)))
+				return fail(
+					request,
+					reply,
+					400,
+					"api.request.invalid",
+					"ticket dispatch input is not allowlisted",
+				);
+			if (source === "mcp") {
+				for (const field of ["session_id", "note", "workspace"] as const)
+					if (
+						input[field] !== undefined &&
+						(typeof input[field] !== "string" ||
+							input[field].length < 1 ||
+							input[field].length > 4_096)
+					)
+						return fail(
+							request,
+							reply,
+							400,
+							"api.request.invalid",
+							"legacy dispatch text is invalid",
+						);
+				if (
+					input.when_idle !== undefined &&
+					typeof input.when_idle !== "boolean"
+				)
 					return fail(
 						request,
 						reply,
 						400,
 						"api.request.invalid",
-						"ticket dispatch input is not allowlisted",
+						"legacy delivery mode is invalid",
 					);
-				if (
-					input.session_id !== undefined &&
-					(typeof input.session_id !== "string" || input.session_id.length < 1)
-				)
-					return fail(request, reply, 400, "api.request.invalid", "session hint is invalid");
-				const strong =
-					input.expected_revision !== undefined || input.idempotency_key !== undefined;
-				if (
-					strong &&
+			}
+			const strong =
+				input.expected_revision !== undefined ||
+				input.idempotency_key !== undefined;
+			if (
+				(!strong && source !== "mcp") ||
+				(strong &&
 					(!Number.isSafeInteger(input.expected_revision) ||
 						(input.expected_revision as number) < 1 ||
 						typeof input.idempotency_key !== "string" ||
-						input.idempotency_key.length < 1)
-				)
-					return fail(
-						request,
-						reply,
-						400,
-						"tracker.revision.required",
-						"expected_revision and idempotency_key are required together",
-					);
-				const expected = strong
-					? (input.expected_revision as number)
-					: ticket.revision;
-				const idempotencyKey = strong
-					? (input.idempotency_key as string)
-					: `legacy:ticket-dispatch:${crypto.randomUUID()}`;
-				const commandId = `cmd_${crypto.randomUUID()}`;
-				try {
-					const outcome = gateway.execute({
-						commandId,
-						idempotencyKey,
-						commandKind: "dispatch",
-						actorId: callerValue.actor,
-						projectId: callerValue.projectId,
-						correlationId: `cor_${crypto.randomUUID()}`,
-						scope: { resourceType: "ticket", resourceId: ticket.id },
-						expectedRevision: expected,
-						payload: Object.freeze({
-							kind: "dispatch",
-							ticket_id: ticket.id,
-							expected_revision: expected,
-							idempotency_key: idempotencyKey,
-							...(typeof input.session_id === "string"
-								? { session_id: input.session_id }
+						input.idempotency_key.length < 1))
+			)
+				return fail(
+					request,
+					reply,
+					400,
+					"tracker.revision.required",
+					"expected_revision and idempotency_key are required together",
+				);
+			const expected = strong
+				? (input.expected_revision as number)
+				: ticket.revision;
+			const idempotencyKey = strong
+				? (input.idempotency_key as string)
+				: `legacy:mcp-ticket-dispatch:${crypto.randomUUID()}`;
+			const commandId = `cmd_${crypto.randomUUID()}`;
+			const legacy =
+				source === "mcp"
+					? {
+							...(typeof input.note === "string" ? { note: input.note } : {}),
+							...(typeof input.workspace === "string"
+								? { workspace: input.workspace }
 								: {}),
-						}),
-						handler: () =>
-							ticketDispatch.dispatch({
-								projectId: callerValue.projectId,
-								ticketId: ticket.id,
-								expectedRevision: expected,
-								idempotencyKey,
-								actorId: callerValue.actor,
-								operationId: commandId,
-								...(typeof input.session_id === "string"
-									? { assigneeHint: input.session_id }
-									: {}),
-							}),
-					});
-					return sendGatewayOutcome(reply, outcome, true);
-				} catch (error) {
-					if (error instanceof TicketDispatchStaleError)
-						return reply.send({
-							schema_version: "golem.api-command-outcome/v1",
-							command_id: commandId,
-							status: "completed",
-							result: {
-								kind: "dispatch",
-								disposition: "stale",
-								operation_id: commandId,
-								remediation: "refresh_ticket",
-							},
-						});
-					return publicError(request, reply, error);
-				}
-			},
+							...(typeof input.when_idle === "boolean"
+								? { whenIdle: input.when_idle }
+								: {}),
+						}
+					: undefined;
+			const outcome = commandGateway.execute({
+				commandId,
+				idempotencyKey,
+				commandKind: "dispatch",
+				actorId: callerValue.actor,
+				projectId: callerValue.projectId,
+				correlationId: `cor_${crypto.randomUUID()}`,
+				scope: { resourceType: "ticket", resourceId: ticket.id },
+				expectedRevision: expected,
+				payload: Object.freeze({
+					kind: "dispatch",
+					ticket_id: ticket.id,
+					expected_revision: expected,
+					idempotency_key: idempotencyKey,
+					...(source === "mcp" && typeof input.session_id === "string"
+						? { session_id: input.session_id }
+						: {}),
+					...(legacy === undefined ? {} : { legacy }),
+				}),
+				handler: () =>
+					service.dispatch({
+						projectId: callerValue.projectId,
+						ticketId: ticket.id,
+						expectedRevision: expected,
+						idempotencyKey,
+						actorId: callerValue.actor,
+						operationId: commandId,
+						...(source === "mcp" && typeof input.session_id === "string"
+							? { assigneeHint: input.session_id }
+							: {}),
+						...(legacy === undefined ? {} : { legacy }),
+					}),
+			});
+			return sendGatewayOutcome(reply, outcome, true);
+		};
+	}
+
+	if (ticketDispatch && gateway) {
+		options.app.post(
+			"/api/v1/tracker/tickets/:id/dispatch",
+			ticketDispatchHandler("bearer"),
 		);
+		options.app.post(
+			"/api/v1/tracker/mcp/tickets/:id/dispatch",
+			ticketDispatchHandler("mcp"),
+		);
+	}
 
 	options.app.get("/api/v1/tracker/tickets", async (request, reply) => {
 		const callerValue = guard(request, reply);

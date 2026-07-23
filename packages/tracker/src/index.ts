@@ -22,7 +22,6 @@ export {
 } from "./delivery.js";
 export {
 	createTicketDispatchService,
-	TicketDispatchStaleError,
 	type TicketDispatchDisposition,
 	type TicketDispatchInput,
 	type TicketDispatchOutcome,

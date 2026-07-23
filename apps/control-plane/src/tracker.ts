@@ -68,24 +68,14 @@ export function composeControlPlaneEndpointEligibility(options: {
 		resolve(recipientId: string) {
 			const direct = options.endpoints.get(recipientId);
 			const generationId = direct?.generationId ?? recipientId;
-			const eligibility = options.endpoints.eligibility({
+			const eligibility = options.endpoints.deliveryEligibility({
 				generationId,
 				routeKind: "delivery",
 				requiredCapability: "delivery",
 				now: options.clock.now(),
 			});
 			const endpoint = eligibility.endpoint;
-			if (!endpoint) return undefined;
-			const pullQueueable =
-				(endpoint.readiness === "pull_only" || endpoint.readiness === "next_turn") &&
-				endpoint.state === "healthy" &&
-				endpoint.capabilities.some(
-					(capability) =>
-						capability.capability === "delivery" &&
-						(capability.qualification === "supported" ||
-							capability.qualification === "experimental"),
-				);
-			if (eligibility.disposition !== "eligible" && !pullQueueable) return undefined;
+			if (eligibility.disposition === "ineligible" || !endpoint) return undefined;
 			return Object.freeze({
 				recipientId,
 				generationId: endpoint.generationId,

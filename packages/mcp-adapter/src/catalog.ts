@@ -469,11 +469,14 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 		required: ["id"],
 		request: (input) => ({
 			method: "POST",
-			path: `/api/v1/tracker/tickets/${encodeURIComponent(String(input.id))}/dispatch`,
+			path: `/api/v1/tracker/mcp/tickets/${encodeURIComponent(String(input.id))}/dispatch`,
 			body: defined({
 				session_id: input.session_id,
 				expected_revision: input.expected_revision,
 				idempotency_key: input.idempotency_key,
+				note: input.note,
+				workspace: input.workspace,
+				when_idle: input.when_idle,
 			}),
 		}),
 	}),

@@ -201,6 +201,17 @@ export interface RuntimeEndpointEligibility {
 	readonly facts: Readonly<Record<string, string | number | boolean>>;
 }
 
+/** Canonical queue classification for durable delivery, after every endpoint
+ * lease/health/control/consumer/capability check has passed. */
+export interface RuntimeEndpointDeliveryEligibility {
+	readonly disposition: "ready" | "pull_only" | "next_turn" | "ineligible";
+	readonly code: string;
+	readonly remedy: string;
+	readonly endpoint?: RuntimeEndpointView;
+	readonly capability?: RuntimeEndpointCapability;
+	readonly facts: Readonly<Record<string, string | number | boolean>>;
+}
+
 export interface RuntimeEndpointStorage {
 	claim(input: {
 		readonly endpointId?: string;
@@ -277,6 +288,14 @@ export interface RuntimeEndpointStorage {
 		readonly expectedFence?: number;
 		readonly now?: string;
 	}): RuntimeEndpointEligibility;
+	deliveryEligibility(input: {
+		readonly generationId: string;
+		readonly routeKind: EndpointRouteKind;
+		readonly requiredCapability?: string;
+		readonly expectedOwnerFence?: number;
+		readonly expectedFence?: number;
+		readonly now?: string;
+	}): RuntimeEndpointDeliveryEligibility;
 	get(endpointId: string): RuntimeEndpointView | undefined;
 	list(generationId: string): readonly RuntimeEndpointView[];
 }
