@@ -14,6 +14,12 @@ export {
 	hasRequestAuthorityOverride,
 } from "./auth.js";
 export {
+	BrowserSettingsServiceError,
+	type BrowserSettingsServices,
+	type BrowserSettingsServicesOptions,
+	createBrowserSettingsServices,
+} from "./browser-settings-services.js";
+export {
 	createLegacyCompatibilitySource,
 	type LegacyCompatibilityFrame,
 	type LegacyCompatibilityPort,
@@ -71,8 +77,8 @@ export type { ServiceLockStatus } from "./service-lock.js";
 export { serviceLockStatus } from "./service-lock.js";
 export {
 	composeControlPlaneEndpointEligibility,
-	composeControlPlaneTicketDispatchService,
 	composeControlPlaneManagementServices,
+	composeControlPlaneTicketDispatchService,
 	composeControlPlaneTrackerCoreServices,
 	composeControlPlaneTrackerServices,
 } from "./tracker.js";

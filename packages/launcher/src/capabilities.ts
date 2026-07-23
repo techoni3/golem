@@ -226,6 +226,22 @@ export const builtInCapabilities: readonly CapabilitySnapshot[] = deepFreeze([
 				"Run the real Claude/Ollama consumption journey; until then use pull-only operation.",
 		},
 	),
+	capability(
+		"pi.next-turn.pull",
+		"pi",
+		"direct",
+		"native",
+		"*",
+		"next_turn",
+		"supported",
+		["pull"],
+		{
+			deliveryReason:
+				"Pi consumes a durable delivery only when a real user turn begins.",
+			deliveryRemediation:
+				"Keep the canonical generation fence and next-turn inbox available.",
+		},
+	),
 ]);
 
 function validTime(value: string | undefined): number | undefined {

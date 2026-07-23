@@ -3,8 +3,11 @@
 	"compilerOptions": { "outDir": "./dist", "rootDir": "./src" },
 	"references": [
 		{ "path": "../../packages/adapters/codex" },
+		{ "path": "../../packages/adapters/opencode" },
 		{ "path": "../../packages/adapter-sdk" },
+		{ "path": "../../packages/compiler" },
 		{ "path": "../../packages/contracts" },
+		{ "path": "../../packages/launcher" },
 		{ "path": "../../packages/persistence" },
 		{ "path": "../../packages/runtime" },
 		{ "path": "../../packages/tracker" }

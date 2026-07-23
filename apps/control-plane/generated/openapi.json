@@ -16178,6 +16178,1481 @@
         }
       }
     },
+    "/api/v1/browser/settings": {
+      "get": {
+        "operationId": "browserSettings",
+        "security": [
+          {
+            "BrowserSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "bounded settings and capability snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-settings/v1"
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "service": {
+                      "type": "object",
+                      "properties": {
+                        "installed": {
+                          "type": "boolean"
+                        },
+                        "process": {
+                          "type": "string",
+                          "enum": [
+                            "running",
+                            "stopped",
+                            "unknown"
+                          ]
+                        },
+                        "api": {
+                          "type": "string",
+                          "enum": [
+                            "ready",
+                            "unavailable"
+                          ]
+                        },
+                        "delivery": {
+                          "type": "string",
+                          "enum": [
+                            "ready",
+                            "held",
+                            "pull_only",
+                            "next_turn",
+                            "unavailable"
+                          ]
+                        },
+                        "actions": {
+                          "maxItems": 6,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "start",
+                              "stop",
+                              "restart",
+                              "install",
+                              "update",
+                              "rollback"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "installed",
+                        "process",
+                        "api",
+                        "delivery",
+                        "actions"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "renders": {
+                      "maxItems": 5,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "target": {
+                            "type": "string",
+                            "enum": [
+                              "cc",
+                              "cc-marketplace",
+                              "codex",
+                              "opencode",
+                              "pi"
+                            ]
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "clean",
+                              "drift",
+                              "tamper",
+                              "missing",
+                              "error"
+                            ]
+                          },
+                          "version": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "managed_files": {
+                            "maxItems": 500,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256
+                            }
+                          },
+                          "rollback_available": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "target",
+                          "status",
+                          "managed_files",
+                          "rollback_available"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "capabilities": {
+                      "maxItems": 100,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "opaque_id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "harness": {
+                            "type": "string",
+                            "enum": [
+                              "claude",
+                              "codex",
+                              "opencode",
+                              "pi"
+                            ]
+                          },
+                          "backend": {
+                            "type": "string",
+                            "enum": [
+                              "openai",
+                              "anthropic",
+                              "ollama_local",
+                              "ollama_cloud",
+                              "native"
+                            ]
+                          },
+                          "model_pattern": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          },
+                          "binary": {
+                            "type": "string",
+                            "enum": [
+                              "available",
+                              "unavailable"
+                            ]
+                          },
+                          "provider": {
+                            "type": "string",
+                            "enum": [
+                              "configured",
+                              "unconfigured",
+                              "not_applicable"
+                            ]
+                          },
+                          "model": {
+                            "type": "string",
+                            "enum": [
+                              "supported",
+                              "experimental",
+                              "unknown",
+                              "unsupported"
+                            ]
+                          },
+                          "qualification": {
+                            "type": "string",
+                            "enum": [
+                              "supported",
+                              "experimental",
+                              "unknown",
+                              "unsupported",
+                              "stale",
+                              "registration_only",
+                              "invalid_evidence"
+                            ]
+                          },
+                          "endpoint": {
+                            "type": "string",
+                            "enum": [
+                              "healthy",
+                              "degraded",
+                              "absent"
+                            ]
+                          },
+                          "delivery": {
+                            "type": "string",
+                            "enum": [
+                              "ready",
+                              "not_ready",
+                              "ineligible",
+                              "pull_only",
+                              "next_turn"
+                            ]
+                          },
+                          "evidence_version": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "evidence_at": {
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          },
+                          "remedy": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 512
+                          }
+                        },
+                        "required": [
+                          "opaque_id",
+                          "harness",
+                          "backend",
+                          "model_pattern",
+                          "binary",
+                          "provider",
+                          "model",
+                          "qualification",
+                          "endpoint",
+                          "delivery",
+                          "remedy"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "providers": {
+                      "maxItems": 3,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string",
+                            "enum": [
+                              "openai",
+                              "ollama_cloud",
+                              "ollama_local"
+                            ]
+                          },
+                          "configured": {
+                            "type": "boolean"
+                          },
+                          "qualification": {
+                            "type": "string",
+                            "enum": [
+                              "supported",
+                              "experimental",
+                              "unknown",
+                              "unsupported"
+                            ]
+                          },
+                          "delivery_ready": {
+                            "type": "boolean"
+                          },
+                          "rollback_available": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "provider",
+                          "configured",
+                          "qualification",
+                          "delivery_ready",
+                          "rollback_available"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "presets": {
+                      "maxItems": 100,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "harness": {
+                            "type": "string",
+                            "enum": [
+                              "claude",
+                              "codex",
+                              "opencode",
+                              "pi"
+                            ]
+                          },
+                          "backend": {
+                            "type": "string",
+                            "enum": [
+                              "openai",
+                              "anthropic",
+                              "ollama_local",
+                              "ollama_cloud",
+                              "native"
+                            ]
+                          },
+                          "model_selector": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "built_in",
+                              "user"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "harness",
+                          "backend",
+                          "model_selector",
+                          "source"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "migration": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "not_planned",
+                            "ready",
+                            "review_required",
+                            "applied",
+                            "rolled_back",
+                            "failed"
+                          ]
+                        },
+                        "plan_hash": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "create": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "attach": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "review": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "quarantine": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "backup_available": {
+                          "type": "boolean"
+                        },
+                        "rollback_available": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "create",
+                        "attach",
+                        "review",
+                        "quarantine",
+                        "backup_available",
+                        "rollback_available"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "unknown_config_keys_preserved": {
+                      "type": "boolean"
+                    },
+                    "unknown_config_key_count": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000
+                    },
+                    "audit": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "command_id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "command_kind": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "completed",
+                              "rejected",
+                              "failed"
+                            ]
+                          },
+                          "created_at": {
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          },
+                          "completed_at": {
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          }
+                        },
+                        "required": [
+                          "command_id",
+                          "command_kind",
+                          "status",
+                          "created_at"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "revision",
+                    "service",
+                    "renders",
+                    "capabilities",
+                    "providers",
+                    "presets",
+                    "migration",
+                    "unknown_config_keys_preserved",
+                    "unknown_config_key_count",
+                    "audit"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid settings request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-settings-error/v1"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "browser.auth.required",
+                        "browser.forbidden",
+                        "browser.settings.invalid",
+                        "browser.settings.conflict",
+                        "browser.settings.unavailable",
+                        "command.idempotency_mismatch"
+                      ]
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "code",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "browser session required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-settings-error/v1"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "browser.auth.required",
+                        "browser.forbidden",
+                        "browser.settings.invalid",
+                        "browser.settings.conflict",
+                        "browser.settings.unavailable",
+                        "command.idempotency_mismatch"
+                      ]
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "code",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "browser authority rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-settings-error/v1"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "browser.auth.required",
+                        "browser.forbidden",
+                        "browser.settings.invalid",
+                        "browser.settings.conflict",
+                        "browser.settings.unavailable",
+                        "command.idempotency_mismatch"
+                      ]
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "code",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "settings authority unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-settings-error/v1"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "browser.auth.required",
+                        "browser.forbidden",
+                        "browser.settings.invalid",
+                        "browser.settings.conflict",
+                        "browser.settings.unavailable",
+                        "command.idempotency_mismatch"
+                      ]
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "code",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/browser/settings/commands": {
+      "post": {
+        "operationId": "browserSettingsCommand",
+        "security": [
+          {
+            "BrowserSession": [],
+            "BrowserCsrf": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "render.preview"
+                      },
+                      "target": {
+                        "type": "string",
+                        "enum": [
+                          "cc",
+                          "cc-marketplace",
+                          "codex",
+                          "opencode",
+                          "pi"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "kind",
+                      "target"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "plan_hash": {
+                        "type": "string",
+                        "pattern": "^sha256:[a-f0-9]{64}$"
+                      },
+                      "confirm": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "render.apply"
+                      },
+                      "target": {
+                        "type": "string",
+                        "enum": [
+                          "cc",
+                          "cc-marketplace",
+                          "codex",
+                          "opencode",
+                          "pi"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "plan_hash",
+                      "confirm",
+                      "kind",
+                      "target"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "render.rollback"
+                      },
+                      "target": {
+                        "type": "string",
+                        "enum": [
+                          "cc",
+                          "cc-marketplace",
+                          "codex",
+                          "opencode",
+                          "pi"
+                        ]
+                      },
+                      "confirm": {
+                        "type": "boolean",
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "kind",
+                      "target",
+                      "confirm"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "service.preview"
+                      },
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "start",
+                          "stop",
+                          "restart",
+                          "install",
+                          "update",
+                          "rollback"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "kind",
+                      "action"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "plan_hash": {
+                        "type": "string",
+                        "pattern": "^sha256:[a-f0-9]{64}$"
+                      },
+                      "confirm": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "service.apply"
+                      },
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "start",
+                          "stop",
+                          "restart",
+                          "install",
+                          "update",
+                          "rollback"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "plan_hash",
+                      "confirm",
+                      "kind",
+                      "action"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "provider.preview"
+                      },
+                      "provider": {
+                        "type": "string",
+                        "enum": [
+                          "openai",
+                          "ollama_cloud",
+                          "ollama_local"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "kind",
+                      "provider"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "plan_hash": {
+                        "type": "string",
+                        "pattern": "^sha256:[a-f0-9]{64}$"
+                      },
+                      "confirm": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "provider.apply"
+                      },
+                      "provider": {
+                        "type": "string",
+                        "enum": [
+                          "openai",
+                          "ollama_cloud",
+                          "ollama_local"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "plan_hash",
+                      "confirm",
+                      "kind",
+                      "provider"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "provider.rollback"
+                      },
+                      "provider": {
+                        "type": "string",
+                        "enum": [
+                          "openai",
+                          "ollama_cloud",
+                          "ollama_local"
+                        ]
+                      },
+                      "confirm": {
+                        "type": "boolean",
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "kind",
+                      "provider",
+                      "confirm"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "preset.preview"
+                      },
+                      "preset": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                          },
+                          "harness": {
+                            "type": "string",
+                            "enum": [
+                              "claude",
+                              "codex",
+                              "opencode",
+                              "pi"
+                            ]
+                          },
+                          "backend": {
+                            "type": "string",
+                            "enum": [
+                              "openai",
+                              "anthropic",
+                              "ollama_local",
+                              "ollama_cloud",
+                              "native"
+                            ]
+                          },
+                          "model_selector": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          },
+                          "delivery_mode": {
+                            "type": "string",
+                            "enum": [
+                              "pull",
+                              "native_channel",
+                              "prompt_bridge",
+                              "managed_app_server",
+                              "next_turn"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "harness",
+                          "backend",
+                          "model_selector",
+                          "delivery_mode"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "kind",
+                      "preset"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "plan_hash": {
+                        "type": "string",
+                        "pattern": "^sha256:[a-f0-9]{64}$"
+                      },
+                      "confirm": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "preset.apply"
+                      },
+                      "preset": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                          },
+                          "harness": {
+                            "type": "string",
+                            "enum": [
+                              "claude",
+                              "codex",
+                              "opencode",
+                              "pi"
+                            ]
+                          },
+                          "backend": {
+                            "type": "string",
+                            "enum": [
+                              "openai",
+                              "anthropic",
+                              "ollama_local",
+                              "ollama_cloud",
+                              "native"
+                            ]
+                          },
+                          "model_selector": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          },
+                          "delivery_mode": {
+                            "type": "string",
+                            "enum": [
+                              "pull",
+                              "native_channel",
+                              "prompt_bridge",
+                              "managed_app_server",
+                              "next_turn"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "harness",
+                          "backend",
+                          "model_selector",
+                          "delivery_mode"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "plan_hash",
+                      "confirm",
+                      "kind",
+                      "preset"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "preset.rollback"
+                      },
+                      "confirm": {
+                        "type": "boolean",
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "kind",
+                      "confirm"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "migration.preview"
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "kind"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "plan_hash": {
+                        "type": "string",
+                        "pattern": "^sha256:[a-f0-9]{64}$"
+                      },
+                      "confirm": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "migration.apply"
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "plan_hash",
+                      "confirm",
+                      "kind"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "migration.rollback"
+                      },
+                      "confirm": {
+                        "type": "boolean",
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "kind",
+                      "confirm"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "durable settings command outcome",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-settings-command/v1"
+                    },
+                    "command_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "completed"
+                      ]
+                    },
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "command_kind": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "outcome": {
+                          "type": "string",
+                          "enum": [
+                            "previewed",
+                            "applied",
+                            "rolled_back"
+                          ]
+                        },
+                        "summary": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        },
+                        "plan_hash": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "changed": {
+                          "type": "boolean"
+                        },
+                        "affected": {
+                          "maxItems": 500,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          }
+                        },
+                        "rollback_available": {
+                          "type": "boolean"
+                        },
+                        "snapshot_revision": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "command_kind",
+                        "outcome",
+                        "summary",
+                        "changed",
+                        "affected",
+                        "rollback_available",
+                        "snapshot_revision"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "command_id",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid settings command",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-settings-error/v1"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "browser.auth.required",
+                        "browser.forbidden",
+                        "browser.settings.invalid",
+                        "browser.settings.conflict",
+                        "browser.settings.unavailable",
+                        "command.idempotency_mismatch"
+                      ]
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "code",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "browser session or CSRF required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-settings-error/v1"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "browser.auth.required",
+                        "browser.forbidden",
+                        "browser.settings.invalid",
+                        "browser.settings.conflict",
+                        "browser.settings.unavailable",
+                        "command.idempotency_mismatch"
+                      ]
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "code",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "browser authority rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-settings-error/v1"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "browser.auth.required",
+                        "browser.forbidden",
+                        "browser.settings.invalid",
+                        "browser.settings.conflict",
+                        "browser.settings.unavailable",
+                        "command.idempotency_mismatch"
+                      ]
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "code",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "settings command conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-settings-error/v1"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "browser.auth.required",
+                        "browser.forbidden",
+                        "browser.settings.invalid",
+                        "browser.settings.conflict",
+                        "browser.settings.unavailable",
+                        "command.idempotency_mismatch"
+                      ]
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "code",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "settings authority unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-settings-error/v1"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "browser.auth.required",
+                        "browser.forbidden",
+                        "browser.settings.invalid",
+                        "browser.settings.conflict",
+                        "browser.settings.unavailable",
+                        "command.idempotency_mismatch"
+                      ]
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "code",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/browser/session": {
       "post": {
         "operationId": "controlPlaneBrowserSession",

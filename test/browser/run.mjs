@@ -4,6 +4,7 @@ import { exerciseRuntimeDashboard } from "./runtime-dashboard.mjs";
 import {
 	exerciseWorkControlPlane,
 	exerciseWorkManagementDashboard,
+	exerciseSettingsControls,
 } from "./work-control-plane.mjs";
 
 const arguments_ = process.argv.slice(2);
@@ -16,11 +17,12 @@ if (
 		"runtime-dashboard",
 		"work-control-plane",
 		"work-management",
+		"settings-controls",
 	].includes(grep) ||
 	arguments_.length !== 2
 )
 	throw new Error(
-		"use --grep control-plane-shell, dashboard-shell, runtime-dashboard, work-control-plane, or work-management",
+		"use --grep control-plane-shell, dashboard-shell, runtime-dashboard, work-control-plane, work-management, or settings-controls",
 	);
 
 try {
@@ -28,6 +30,7 @@ try {
 	else if (grep === "work-control-plane") await exerciseWorkControlPlane();
 	else if (grep === "work-management")
 		await exerciseWorkManagementDashboard();
+	else if (grep === "settings-controls") await exerciseSettingsControls();
 	else await exerciseControlPlaneShell();
 	process.stdout.write(`${grep} PASS\n`);
 } catch (error) {

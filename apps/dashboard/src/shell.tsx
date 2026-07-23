@@ -29,6 +29,8 @@ import {
 	RuntimeRouteNotFound,
 	SessionsRoute,
 } from "./routes/runtime/index.js";
+import { SettingsDataProvider } from "./routes/settings/data.js";
+import { SettingsRoute } from "./routes/settings/index.js";
 import { SpecsRoute } from "./routes/specs/index.js";
 import { WorkDataProvider } from "./routes/tracker/data.js";
 import {
@@ -44,7 +46,6 @@ const projectionKey = [
 	"projection",
 	projectionStream,
 ] as const;
-const legacyRoutePaths = ["/settings"] as const;
 
 type ProjectionResponse = Awaited<
 	ReturnType<BrowserControlPlaneClient["projection"]>
@@ -167,14 +168,8 @@ function RuntimeRoutes({
 			<Route element={<TrackerRoute />} path="/tracker" />
 			<Route element={<SpecsRoute />} path="/specs" />
 			<Route element={<ReviewRoute />} path="/review" />
+			<Route element={<SettingsRoute />} path="/settings" />
 			<Route element={<TicketRoute />} path="/tickets/:id" />
-			{legacyRoutePaths.map((path) => (
-				<Route
-					element={<LegacyPage projection={projection} />}
-					key={path}
-					path={path}
-				/>
-			))}
 			<Route element={<RuntimeRouteNotFound />} path="*" />
 		</Routes>
 	);
@@ -206,10 +201,12 @@ function RouteContent({
 	return (
 		<RuntimeDataProvider client={client} enabled={bootstrapped}>
 			<WorkDataProvider client={client} enabled={bootstrapped}>
-				<ConnectionBanner state={projection.connection} />
-				<RuntimeConnectionBanner />
-				<WorkConnectionBanner />
-				<RuntimeRoutes projection={projection.data} />
+				<SettingsDataProvider client={client} enabled={bootstrapped}>
+					<ConnectionBanner state={projection.connection} />
+					<RuntimeConnectionBanner />
+					<WorkConnectionBanner />
+					<RuntimeRoutes projection={projection.data} />
+				</SettingsDataProvider>
 			</WorkDataProvider>
 		</RuntimeDataProvider>
 	);

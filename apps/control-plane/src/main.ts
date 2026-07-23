@@ -1,4 +1,7 @@
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
 	createRuntimeMaterializer,
@@ -8,6 +11,7 @@ import {
 	RuntimeOutboxDrainer,
 } from "@golem/runtime";
 import { createBrowserPrincipalResolver } from "./auth.js";
+import { createBrowserSettingsServices } from "./browser-settings-services.js";
 import { createBrowserWorkServices } from "./browser-work-services.js";
 import { openControlPlanePersistence } from "./persistence.js";
 import {
@@ -17,13 +21,23 @@ import {
 import {
 	composeControlPlaneCommandGateway,
 	composeControlPlaneEndpointEligibility,
-	composeControlPlaneTicketDispatchService,
 	composeControlPlaneManagementServices,
+	composeControlPlaneTicketDispatchService,
 	composeControlPlaneTrackerCoreServices,
 	composeControlPlaneTrackerServices,
 } from "./tracker.js";
 
-const token = process.env.GOLEM_CONTROL_PLANE_TOKEN;
+const configuredTokenFile = process.env.GOLEM_CONTROL_PLANE_TOKEN_FILE;
+const tokenFromFile = configuredTokenFile
+	? (() => {
+			try {
+				return fs.readFileSync(configuredTokenFile, "utf8").trim();
+			} catch {
+				return undefined;
+			}
+		})()
+	: undefined;
+const token = process.env.GOLEM_CONTROL_PLANE_TOKEN ?? tokenFromFile;
 const golemHome = process.env.GOLEM_HOME;
 const stateDirectory = golemHome
 	? path.join(golemHome, "control-plane")
@@ -130,6 +144,60 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 		projectRevision: (projectId) =>
 			owner.committedPublicationStorage().projectRevision(projectId),
 	});
+	const modulePath = fileURLToPath(import.meta.url);
+	const workspaceRoot = path.resolve(path.dirname(modulePath), "../../..");
+	const cliEntry = path.resolve(
+		process.env.GOLEM_CLI_ENTRY ?? path.join(workspaceRoot, "cli", "golem.js"),
+	);
+	const serviceCredentialPath = path.join(stateDirectory, "service-token");
+	const openCodeConfigPath = path.resolve(
+		process.env.OPENCODE_CONFIG_PATH ??
+			path.join(
+				process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config"),
+				"opencode",
+				"opencode.jsonc",
+			),
+	);
+	const launchAgentDirectory = path.resolve(
+		process.env.GOLEM_CONTROL_PLANE_LAUNCH_AGENT_DIR ??
+			path.join(os.homedir(), "Library", "LaunchAgents"),
+	);
+	const serviceEnvironment = {
+		GOLEM_HOME: golemHome,
+		GOLEM_CONTROL_PLANE_STATIC_ROOT: staticDirectory,
+		GOLEM_CONTROL_PLANE_TOKEN_FILE: serviceCredentialPath,
+		...(process.env.GOLEM_CONTROL_PLANE_PORT
+			? {
+					GOLEM_CONTROL_PLANE_PORT: process.env.GOLEM_CONTROL_PLANE_PORT,
+				}
+			: {}),
+		...(browserLocalOperatorBindingId
+			? {
+					GOLEM_BROWSER_LOCAL_OPERATOR_BINDING_ID:
+						browserLocalOperatorBindingId,
+				}
+			: {}),
+	};
+	const browserSettings = createBrowserSettingsServices({
+		home: golemHome,
+		runtimeProjection: owner.runtimeProjectionStorage(),
+		cliEntry,
+		openCodeConfigPath,
+		environment: process.env,
+		service: {
+			directory: launchAgentDirectory,
+			uid: process.getuid?.() ?? 0,
+			credentialPath: serviceCredentialPath,
+			credential: token,
+			definition: {
+				label: "dev.golem.control-plane",
+				program: process.execPath,
+				arguments: [modulePath],
+				workingDirectory: workspaceRoot,
+				environment: serviceEnvironment,
+			},
+		},
+	});
 	const principalResolver = createBrowserPrincipalResolver({
 		storage: owner.browserPrincipalStorage(),
 		...(browserLocalOperatorBindingId
@@ -217,6 +285,7 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 			ticketDispatch,
 			commandGateway,
 			browserWork,
+			browserSettings,
 			committedPublications: owner.committedPublicationStorage(),
 			principalResolver,
 			...(replayWindowSize ? { replayWindowSize } : {}),

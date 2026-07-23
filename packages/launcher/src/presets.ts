@@ -92,6 +92,15 @@ export const builtInPresets: readonly LaunchPreset[] = deepFreeze([
 		native_args: [],
 		env_key_refs: [],
 	},
+	{
+		name: "default",
+		harness: "pi",
+		backend: "native",
+		model_selector: "*",
+		delivery_mode: "next_turn",
+		native_args: [],
+		env_key_refs: [],
+	},
 ]);
 
 function hasControlCharacter(value: string): boolean {

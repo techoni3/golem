@@ -297,6 +297,18 @@ export const scenarios = [
 		regression: "the typed dashboard can fake unavailable roles or ideas, lose a human gate, hide communication settlement, or flatten spec relationships",
 	}),
 	registerScenario({
+		id: "settings-provider-preset-parity",
+		journey: "J7",
+		tier: "integration",
+		regression: "the settings surface can replace user-owned OpenCode providers, diverge from the canonical LaunchPlan, lose unknown JSONC keys, or retain a credential",
+	}),
+	registerScenario({
+		id: "migration-settings-dry-run-rollback",
+		journey: "J7",
+		tier: "integration",
+		regression: "browser settings can apply an unreviewed or stale migration plan, skip canonical backups, or fail to expose rollback truth",
+	}),
+	registerScenario({
 		id: "delivery-api-fence-recheck",
 		journey: "J4",
 		tier: "integration",

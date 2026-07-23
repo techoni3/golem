@@ -326,7 +326,7 @@ function processFailure(label, group) {
 	);
 }
 
-async function startService(home, staticRoot, port) {
+async function startService(home, staticRoot, port, extraEnvironment = {}) {
 	const group = spawnGrouped(process.execPath, [serviceProgram], {
 		cwd: repositoryRoot,
 		env: {
@@ -336,6 +336,7 @@ async function startService(home, staticRoot, port) {
 			GOLEM_CONTROL_PLANE_REPLAY_WINDOW: "2",
 			GOLEM_CONTROL_PLANE_STATIC_ROOT: staticRoot,
 			GOLEM_BROWSER_LOCAL_OPERATOR_BINDING_ID: operatorBindingId,
+			...extraEnvironment,
 		},
 	});
 	try {
@@ -1753,6 +1754,501 @@ async function runWorkManagementDashboard() {
 	return "compiled dashboard plus the GOL-75 control-plane fixture prove typed ticket body/labels/wave, comments/replies/links/children/streams, conflict retention, legal transition, scoped asset read, project-role assignment, gate/idea actions, canonical dispatch settlement, bounded spec relationships, same-origin authority, and owned-resource cleanup";
 }
 
+async function runSettingsControlsDashboard() {
+	const home = createTemporaryHome("golem-gol56-settings-dashboard-");
+	const artifactRoot = path.join(
+		os.tmpdir(),
+		`golem-settings-controls-artifacts-${process.pid}-${Date.now()}`,
+	);
+	const staticRoot = path.join(
+		repositoryRoot,
+		"dashboard/dist/control-plane",
+	);
+	const settingsSecret = "gol56_BROWSER_SETTINGS_SECRET_000000000000";
+	const settingsPrompt = "IGNORE_PREVIOUS_GOL56_BROWSER_PROMPT";
+	const openCodeConfig = path.join(
+		home.xdgConfigHome,
+		"opencode",
+		"opencode.jsonc",
+	);
+	const launcherConfig = path.join(home.golemHome, "launcher.jsonc");
+	const launchAgentDirectory = path.join(home.root, "launch-agents");
+	const cleanSubstrate = path.join(home.root, "substrate-fixture");
+	const contexts = [];
+	const steps = [];
+	const responseReads = [];
+	let service;
+	let servicePort;
+	let chrome;
+	let page;
+	let failure;
+	let success = false;
+	const sensitiveValues = new Set([
+		controlToken,
+		settingsSecret,
+		settingsPrompt,
+		home.root,
+		sessionId,
+		generationId,
+	]);
+	try {
+		assert.equal(
+			fs.existsSync(path.join(staticRoot, "index.html")),
+			true,
+			"typed dashboard build exists before the settings journey",
+		);
+		const seedData = await seed(home);
+		sensitiveValues.add(seedData.endpointId);
+		fs.mkdirSync(path.dirname(openCodeConfig), { recursive: true });
+		fs.writeFileSync(
+			openCodeConfig,
+			`{
+  "provider": { "custom-owner": { "model": "owner/model" } },
+  "owner_theme": "midnight"
+}
+`,
+			"utf8",
+		);
+		fs.writeFileSync(
+			launcherConfig,
+			`{
+  "schema_version": "golem.launcher-config/v1",
+  "launch": { "harness_defaults": {}, "presets": [] },
+  "owner_ui": { "density": "compact" }
+}
+`,
+			"utf8",
+		);
+		fs.cpSync(path.join(repositoryRoot, "substrate"), cleanSubstrate, {
+			recursive: true,
+		});
+		fs.rmSync(path.join(cleanSubstrate, "roles", "standalone.md"), {
+			force: true,
+		});
+		fs.rmSync(path.join(cleanSubstrate, "skills", "night-shift"), {
+			recursive: true,
+			force: true,
+		});
+
+		service = await startService(home, staticRoot, undefined, {
+			OPENAI_API_KEY: settingsSecret,
+			GOL56_PRIVATE_PROMPT: settingsPrompt,
+			GOLEM_SUBSTRATE_ROOT: cleanSubstrate,
+			GOLEM_CONTROL_PLANE_LAUNCH_AGENT_DIR: launchAgentDirectory,
+		});
+		servicePort = portOf(service.origin);
+		const bearerDenied = await fetch(
+			`${service.origin}/api/v1/browser/settings`,
+			{ headers: { authorization: `Bearer ${controlToken}` } },
+		);
+		assert.equal(
+			bearerDenied.status,
+			401,
+			"browser settings reject bearer authority",
+		);
+
+		chrome = await acquireChrome();
+		const context = await chrome.browser.newContext();
+		contexts.push(context);
+		page = await context.newPage();
+		page.setDefaultTimeout(15_000);
+		const browserErrors = [];
+		const browserRequests = [];
+		const headerReads = [];
+		page.on("request", (request) => {
+			browserRequests.push(request.url());
+			if (
+				new URL(request.url()).pathname.startsWith(
+					"/api/v1/browser/settings",
+				)
+			)
+				headerReads.push(request.allHeaders());
+		});
+		page.on("response", (response) => {
+			if (
+				new URL(response.url()).pathname.startsWith(
+					"/api/v1/browser/settings",
+				)
+			)
+				responseReads.push(
+					response.text().catch(() => ""),
+				);
+		});
+		page.on("pageerror", (error) => browserErrors.push(error.name));
+		page.on("console", (message) => {
+			if (
+				message.type() === "error" &&
+				!/Failed to load resource/iu.test(message.text()) &&
+				!/WebSocket connection to .* failed/iu.test(message.text())
+			)
+				browserErrors.push("console_error");
+		});
+
+		await page.goto(`${service.origin}/settings`, {
+			waitUntil: "domcontentloaded",
+		});
+		await page.getByTestId("settings-controls").waitFor();
+		await page
+			.getByRole("heading", { name: "Settings and capabilities" })
+			.waitFor();
+		await page.getByText("Snapshot revision", { exact: false }).waitFor();
+		const serviceTab = page.getByRole("tab", {
+			name: "Service & renders",
+		});
+		await serviceTab.focus();
+		await page.keyboard.press("ArrowRight");
+		assert.equal(
+			await page
+				.getByRole("tab", { name: "Capabilities & providers" })
+				.getAttribute("aria-selected"),
+			"true",
+			"settings tabs support keyboard selection with named tab semantics",
+		);
+		await page.keyboard.press("ArrowLeft");
+		assert.equal(
+			await serviceTab.getAttribute("aria-selected"),
+			"true",
+			"keyboard navigation returns to the service panel",
+		);
+		const themeControl = page.getByTestId("dashboard-theme");
+		await themeControl.getByRole("button").click();
+		await page.getByRole("option", { name: "Dark" }).click();
+		assert.equal(
+			await page.locator("html").getAttribute("data-theme"),
+			"dark",
+			"settings render with the shared dark theme",
+		);
+		await themeControl.getByRole("button").click();
+		await page.getByRole("option", { name: "Light" }).click();
+		assert.equal(
+			await page.locator("html").getAttribute("data-theme"),
+			"light",
+			"settings render with the shared light theme",
+		);
+
+		const serviceCard = page
+			.locator("section")
+			.filter({ hasText: "Control-plane service" })
+			.first();
+		await serviceCard
+			.getByRole("button", { name: "Preview install" })
+			.click();
+		let dialog = page.getByRole("dialog");
+		try {
+			await dialog
+				.getByRole("heading", { name: "Confirm service install" })
+				.waitFor({ timeout: 4_000 });
+		} catch (error) {
+			throw new Error(
+				`${error instanceof Error ? error.message : String(error)}; settings_responses=${JSON.stringify(await Promise.all(responseReads))}; page=${JSON.stringify(await page.locator("body").innerText())}`,
+			);
+		}
+		await dialog.getByRole("button", { name: "Cancel" }).click();
+		assert.equal(
+			fs.existsSync(
+				path.join(
+					launchAgentDirectory,
+					"dev.golem.control-plane.plist",
+				),
+			),
+			false,
+			"preview alone never installs or starts a service",
+		);
+
+		const piRow = page
+			.getByRole("row")
+			.filter({
+				has: page.getByRole("rowheader", { name: "pi", exact: true }),
+			});
+		await piRow
+			.getByRole("button", { name: "Preview compile" })
+			.click();
+		dialog = page.getByRole("dialog");
+		await dialog.getByRole("heading", { name: "Compile pi" }).waitFor();
+		await dialog
+			.getByRole("button", { name: "Confirm exact plan" })
+			.click();
+		await page.getByText(/Render pi was compiled/u).waitFor();
+		await piRow.getByText("clean", { exact: true }).waitFor();
+		assert.equal(
+			fs.existsSync(path.join(home.golemHome, "renders", "pi", "golem.ts")),
+			true,
+			"confirmed browser render invokes the real compiler",
+		);
+
+		await page
+			.getByRole("tab", { name: "Capabilities & providers" })
+			.click();
+		for (const harness of ["codex", "opencode", "claude", "pi"])
+			await page
+				.getByText(new RegExp(`^${harness} /`, "u"))
+				.first()
+				.waitFor();
+		await page.getByRole("columnheader", { name: "Evidence" }).waitFor();
+		await page.getByRole("columnheader", { name: "Remedy" }).waitFor();
+		const openAiCard = page
+			.locator("article")
+			.filter({
+				has: page.getByRole("heading", { name: "openai", exact: true }),
+			});
+		await openAiCard
+			.getByRole("button", { name: "Preview setup" })
+			.click();
+		dialog = page.getByRole("dialog");
+		await dialog
+			.getByRole("heading", { name: "Apply openai setup" })
+			.waitFor();
+		await dialog
+			.getByRole("button", { name: "Confirm exact plan" })
+			.click();
+		await page
+			.getByText(/managed setup was applied without replacing/u)
+			.waitFor();
+		const configuredOpenCode = fs.readFileSync(openCodeConfig, "utf8");
+		assert.match(configuredOpenCode, /custom-owner/u);
+		assert.match(configuredOpenCode, /owner_theme/u);
+		assert.match(configuredOpenCode, /golem\.opencode\.providers\/v1/u);
+		assert.equal(configuredOpenCode.includes(settingsSecret), false);
+
+		await page.getByRole("tab", { name: "Presets" }).click();
+		await page.getByLabel("Preset name").fill("browser-reviewed");
+		await page.getByLabel("Model selector").fill("gpt-5*");
+		await page
+			.getByRole("button", { name: "Preview preset" })
+			.click();
+		dialog = page.getByRole("dialog");
+		await dialog
+			.getByRole("heading", { name: "Save preset browser-reviewed" })
+			.waitFor();
+		await dialog
+			.getByRole("button", { name: "Confirm exact plan" })
+			.click();
+		await page
+			.getByText(/saved while preserving unknown configuration/u)
+			.waitFor();
+		const configuredLauncher = fs.readFileSync(launcherConfig, "utf8");
+		assert.match(configuredLauncher, /"owner_ui"/u);
+		assert.match(configuredLauncher, /"browser-reviewed"/u);
+		assert.equal(configuredLauncher.includes(settingsSecret), false);
+
+		await page.getByRole("tab", { name: "Migration & audit" }).click();
+		await page
+			.getByRole("button", { name: "Preview dry-run" })
+			.click();
+		dialog = page.getByRole("dialog");
+		await dialog
+			.getByRole("heading", { name: "Apply legacy migration" })
+			.waitFor();
+		await dialog.getByText(/^Plan sha256:/u).waitFor();
+		await dialog.getByRole("button", { name: "Cancel" }).click();
+
+		const headers = await Promise.all(headerReads);
+		const csrf = headers
+			.map((entry) => entry["x-golem-csrf"])
+			.find((value) => typeof value === "string" && value);
+		assert(csrf, "a confirmed settings request carries browser CSRF authority");
+		const idempotency = await page.evaluate(async (csrfToken) => {
+			const request = async (provider) => {
+				const response = await fetch(
+					"/api/v1/browser/settings/commands",
+					{
+						method: "POST",
+						headers: {
+							"content-type": "application/json",
+							"x-golem-csrf": csrfToken,
+						},
+						body: JSON.stringify({
+							kind: "provider.preview",
+							provider,
+							idempotency_key: "gol56-browser-replay-key",
+						}),
+					},
+				);
+				return { status: response.status, body: await response.json() };
+			};
+			return {
+				first: await request("openai"),
+				replay: await request("openai"),
+				mismatch: await request("ollama_local"),
+			};
+		}, csrf);
+		assert.equal(idempotency.first.status, 200);
+		assert.deepEqual(
+			idempotency.replay.body,
+			idempotency.first.body,
+			"browser reload/retry replays the original durable response",
+		);
+		assert.equal(idempotency.mismatch.status, 409);
+		assert.equal(
+			idempotency.mismatch.body.code,
+			"command.idempotency_mismatch",
+		);
+
+		await page.reload({ waitUntil: "domcontentloaded" });
+		await page.getByTestId("settings-controls").waitFor();
+		await page.getByRole("tab", { name: "Presets" }).click();
+		await page.getByText("browser-reviewed", { exact: true }).waitFor();
+		await page.setViewportSize({ width: 390, height: 844 });
+		assert.equal(
+			await page.evaluate(
+				() =>
+					document.documentElement.scrollWidth <=
+					window.innerWidth + 1,
+			),
+			true,
+			"responsive settings tables scroll inside the route, not the page",
+		);
+
+		const publicSnapshot = await page.evaluate(async () =>
+			(await fetch("/api/v1/browser/settings")).json(),
+		);
+		const serializedSnapshot = JSON.stringify(publicSnapshot);
+		for (const sensitive of [settingsSecret, settingsPrompt, home.root])
+			assert.equal(
+				serializedSnapshot.includes(sensitive),
+				false,
+				"settings HTTP snapshot excludes seeded sensitive values",
+			);
+		for (const key of [
+			"token",
+			"secret",
+			"prompt",
+			"cookie",
+			"csrf",
+			"fence",
+			"config_text",
+		])
+			assert.equal(
+				serializedSnapshot.toLowerCase().includes(`"${key}"`),
+				false,
+				`settings HTTP snapshot excludes ${key}`,
+			);
+		const pageText = await page.locator("body").innerText();
+		for (const sensitive of sensitiveValues)
+			assert.equal(
+				pageText.includes(sensitive),
+				false,
+				"settings DOM excludes credentials, prompts, paths, and scoped ids",
+			);
+		const responseTexts = await Promise.all(responseReads);
+		for (const body of responseTexts)
+			for (const sensitive of sensitiveValues)
+				assert.equal(
+					body.includes(sensitive),
+					false,
+					"settings network responses exclude seeded sensitive values",
+				);
+		const serviceUrl = new URL(service.origin);
+		const authorityRequests = browserRequests.filter((request) =>
+			new URL(request).pathname.startsWith("/api/"),
+		);
+		assert.equal(
+			authorityRequests.every((request) => {
+				const url = new URL(request);
+				return (
+					url.hostname === serviceUrl.hostname &&
+					url.port === serviceUrl.port &&
+					["http:", "https:", "ws:", "wss:"].includes(url.protocol)
+				);
+			}),
+			true,
+			"settings UI stays same-origin",
+		);
+		assert.equal(
+			headers.some((entry) => "authorization" in entry),
+			false,
+			"browser settings never send bearer authority",
+		);
+		assert.deepEqual(browserErrors, [], "settings UI emits no console/page error");
+		const receipts = fs.readFileSync(
+			path.join(
+				home.golemHome,
+				"control-plane",
+				"settings-command-receipts.json",
+			),
+			"utf8",
+		);
+		for (const sensitive of [
+			settingsSecret,
+			settingsPrompt,
+			"gol56-browser-replay-key",
+			home.root,
+		])
+			assert.equal(
+				receipts.includes(sensitive),
+				false,
+				"durable browser receipts retain only bounded safe evidence",
+			);
+		success = true;
+	} catch (error) {
+		try {
+			await retainFailureArtifacts({
+				artifactRoot,
+				page,
+				steps,
+				error,
+				temporaryRoot: home.root,
+				sensitiveValues: [...sensitiveValues],
+				childLogs: service
+					? `${service.group.stdout()}\n${service.group.stderr()}`
+					: "",
+			});
+		} catch {
+			// Preserve the original failure when diagnostic capture is unavailable.
+		}
+		failure = new Error(
+			`${redactDiagnostic(
+				error instanceof Error ? error.stack ?? error.message : String(error),
+				home.root,
+				[...sensitiveValues],
+			)}; sanitized_artifacts=${artifactRoot}`,
+		);
+	} finally {
+		for (const context of contexts.reverse()) {
+			try {
+				await context.close();
+			} catch {
+				// Cleanup continues through every owned browser resource.
+			}
+		}
+		if (chrome) {
+			const profile = path.join(
+				os.tmpdir(),
+				`golem-chrome-headless-${chrome.port}-${process.pid}`,
+			);
+			await chrome.cleanup();
+			await waitFor(
+				async () => (!(await isPortListening(chrome.port)) ? true : undefined),
+				"headless Chrome shutdown",
+			).catch(() => undefined);
+			fs.rmSync(profile, {
+				recursive: true,
+				force: true,
+				maxRetries: 10,
+				retryDelay: 100,
+			});
+		}
+		if (service) await stopProcessGroup(service.group);
+		if (servicePort)
+			await waitFor(
+				async () =>
+					!(await isPortListening(servicePort)) ? true : undefined,
+				"control-plane shutdown",
+			).catch(() => undefined);
+		home.cleanup();
+		if (success) fs.rmSync(artifactRoot, { recursive: true, force: true });
+	}
+	if (failure) throw failure;
+	assert.equal(success, true);
+	assert.equal(fs.existsSync(home.root), false, "temporary home is removed");
+	assert.equal(
+		fs.existsSync(artifactRoot),
+		false,
+		"successful settings journey retains no browser artifact",
+	);
+	return "compiled dashboard and control plane prove browser-only settings auth, separate service/API/delivery truth, real render compile, provider coexistence, LaunchPlan-backed JSONC preservation, migration dry-run, durable duplicate/mismatch handling, reload, responsive layout, and credential/prompt/path exclusion";
+}
+
 export async function exerciseWorkControlPlane() {
 	return runWorkControlPlane();
 }
@@ -1775,4 +2271,16 @@ export async function exerciseTrackerDispatchUi() {
 
 export async function exerciseRolesGatesIdeasUi() {
 	return runWorkManagementDashboard();
+}
+
+export async function exerciseSettingsControls() {
+	return runSettingsControlsDashboard();
+}
+
+export async function exerciseSettingsProviderPresetParity() {
+	return runSettingsControlsDashboard();
+}
+
+export async function exerciseMigrationSettingsDryRunRollback() {
+	return runSettingsControlsDashboard();
 }

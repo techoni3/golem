@@ -1,4 +1,8 @@
 import {
+	BrowserSettingsCommandRequestSchema,
+	BrowserSettingsCommandResponseSchema,
+	BrowserSettingsErrorSchema,
+	BrowserSettingsSnapshotSchema,
 	BrowserWorkAssetResponseSchema,
 	BrowserWorkCommandRequestSchema,
 	BrowserWorkCommandResponseSchema,
@@ -45,7 +49,10 @@ const legacyProjectionOpenApiSchema: JsonRecord = {
 	additionalProperties: false,
 	required: ["schema_version", "stream", "resource_revision", "payload"],
 	properties: {
-		schema_version: { type: "string", const: "golem.control-plane-projection/v1" },
+		schema_version: {
+			type: "string",
+			const: "golem.control-plane-projection/v1",
+		},
 		stream: {
 			type: "string",
 			enum: [
@@ -66,7 +73,10 @@ function projectionResponse(): JsonRecord {
 		content: {
 			"application/json": {
 				schema: {
-					oneOf: [legacyProjectionOpenApiSchema, schema(BrowserWorkProjectionResponseSchema)],
+					oneOf: [
+						legacyProjectionOpenApiSchema,
+						schema(BrowserWorkProjectionResponseSchema),
+					],
 				},
 			},
 		},
@@ -270,7 +280,8 @@ export function controlPlaneOpenApiDocument(): JsonRecord {
 					type: "apiKey",
 					in: "cookie",
 					name: "golem_control_plane_session",
-					description: "Same-origin HttpOnly browser session; never a bearer credential.",
+					description:
+						"Same-origin HttpOnly browser session; never a bearer credential.",
 				},
 				BrowserCsrf: {
 					type: "apiKey",
@@ -702,7 +713,11 @@ export function controlPlaneOpenApiDocument(): JsonRecord {
 							required: false,
 							description:
 								"Opaque browser-work page cursor; never a publication or project cursor.",
-							schema: { type: "string", pattern: "^bwp_[0-9]{1,8}$", maxLength: 12 },
+							schema: {
+								type: "string",
+								pattern: "^bwp_[0-9]{1,8}$",
+								maxLength: 12,
+							},
 						},
 					],
 					responses: {
@@ -727,10 +742,16 @@ export function controlPlaneOpenApiDocument(): JsonRecord {
 						},
 					],
 					responses: {
-						"200": response("bounded browser work item", BrowserWorkDetailResponseSchema),
+						"200": response(
+							"bounded browser work item",
+							BrowserWorkDetailResponseSchema,
+						),
 						"400": response("invalid item identifier", BrowserWorkErrorSchema),
 						"401": response("browser session required", BrowserWorkErrorSchema),
-						"403": response("browser authority rejected", BrowserWorkErrorSchema),
+						"403": response(
+							"browser authority rejected",
+							BrowserWorkErrorSchema,
+						),
 						"404": response("item absent", BrowserWorkErrorSchema),
 					},
 				},
@@ -754,10 +775,16 @@ export function controlPlaneOpenApiDocument(): JsonRecord {
 						},
 					],
 					responses: {
-						"200": response("bounded ticket asset", BrowserWorkAssetResponseSchema),
+						"200": response(
+							"bounded ticket asset",
+							BrowserWorkAssetResponseSchema,
+						),
 						"400": response("invalid asset identifier", BrowserWorkErrorSchema),
 						"401": response("browser session required", BrowserWorkErrorSchema),
-						"403": response("browser authority rejected", BrowserWorkErrorSchema),
+						"403": response(
+							"browser authority rejected",
+							BrowserWorkErrorSchema,
+						),
 						"404": response("asset absent", BrowserWorkErrorSchema),
 					},
 				},
@@ -769,18 +796,100 @@ export function controlPlaneOpenApiDocument(): JsonRecord {
 					requestBody: {
 						required: true,
 						content: {
-							"application/json": { schema: schema(BrowserWorkCommandRequestSchema) },
+							"application/json": {
+								schema: schema(BrowserWorkCommandRequestSchema),
+							},
 						},
 					},
 					responses: {
-						"200": response("typed browser command outcome", BrowserWorkCommandResponseSchema),
+						"200": response(
+							"typed browser command outcome",
+							BrowserWorkCommandResponseSchema,
+						),
 						"400": response("invalid command", BrowserWorkErrorSchema),
-						"401": response("browser session or CSRF required", BrowserWorkErrorSchema),
-						"403": response("browser authority rejected", BrowserWorkErrorSchema),
+						"401": response(
+							"browser session or CSRF required",
+							BrowserWorkErrorSchema,
+						),
+						"403": response(
+							"browser authority rejected",
+							BrowserWorkErrorSchema,
+						),
 						"404": response("resource absent", BrowserWorkErrorSchema),
 						"409": response(
 							"canonical command conflict or typed unsupported outcome",
-							z.union([BrowserWorkCommandResponseSchema, BrowserWorkErrorSchema]),
+							z.union([
+								BrowserWorkCommandResponseSchema,
+								BrowserWorkErrorSchema,
+							]),
+						),
+					},
+				},
+			},
+			"/api/v1/browser/settings": {
+				get: {
+					operationId: "browserSettings",
+					security: [{ BrowserSession: [] }],
+					responses: {
+						"200": response(
+							"bounded settings and capability snapshot",
+							BrowserSettingsSnapshotSchema,
+						),
+						"400": response(
+							"invalid settings request",
+							BrowserSettingsErrorSchema,
+						),
+						"401": response(
+							"browser session required",
+							BrowserSettingsErrorSchema,
+						),
+						"403": response(
+							"browser authority rejected",
+							BrowserSettingsErrorSchema,
+						),
+						"503": response(
+							"settings authority unavailable",
+							BrowserSettingsErrorSchema,
+						),
+					},
+				},
+			},
+			"/api/v1/browser/settings/commands": {
+				post: {
+					operationId: "browserSettingsCommand",
+					security: [{ BrowserSession: [], BrowserCsrf: [] }],
+					requestBody: {
+						required: true,
+						content: {
+							"application/json": {
+								schema: schema(BrowserSettingsCommandRequestSchema),
+							},
+						},
+					},
+					responses: {
+						"200": response(
+							"durable settings command outcome",
+							BrowserSettingsCommandResponseSchema,
+						),
+						"400": response(
+							"invalid settings command",
+							BrowserSettingsErrorSchema,
+						),
+						"401": response(
+							"browser session or CSRF required",
+							BrowserSettingsErrorSchema,
+						),
+						"403": response(
+							"browser authority rejected",
+							BrowserSettingsErrorSchema,
+						),
+						"409": response(
+							"settings command conflict",
+							BrowserSettingsErrorSchema,
+						),
+						"503": response(
+							"settings authority unavailable",
+							BrowserSettingsErrorSchema,
 						),
 					},
 				},

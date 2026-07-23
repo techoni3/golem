@@ -676,6 +676,38 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/browser/settings": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["browserSettings"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/browser/settings/commands": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["browserSettingsCommand"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/browser/session": {
         readonly parameters: {
             readonly query?: never;
@@ -7443,6 +7475,406 @@ export interface operations {
                         readonly schema_version: "golem.browser-work-error/v1";
                         /** @enum {string} */
                         readonly code: "browser.auth.required" | "browser.forbidden" | "browser.work.invalid" | "browser.work.not_found" | "browser-work.dispatch.unsupported" | "tracker.revision.required" | "tracker.conflict" | "tracker.not_found" | "tracker.phase.invalid" | "tracker.input.invalid" | "tracker.runtime_reference.invalid" | "management.invalid" | "management.not_found" | "management.forbidden" | "management.conflict" | "management.asset_invalid" | "command.idempotency_mismatch";
+                        readonly correlation_id: string;
+                    };
+                };
+            };
+        };
+    };
+    readonly browserSettings: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description bounded settings and capability snapshot */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-settings/v1";
+                        readonly revision: number;
+                        readonly service: {
+                            readonly installed: boolean;
+                            /** @enum {string} */
+                            readonly process: "running" | "stopped" | "unknown";
+                            /** @enum {string} */
+                            readonly api: "ready" | "unavailable";
+                            /** @enum {string} */
+                            readonly delivery: "ready" | "held" | "pull_only" | "next_turn" | "unavailable";
+                            readonly actions: readonly ("start" | "stop" | "restart" | "install" | "update" | "rollback")[];
+                        };
+                        readonly renders: readonly {
+                            /** @enum {string} */
+                            readonly target: "cc" | "cc-marketplace" | "codex" | "opencode" | "pi";
+                            /** @enum {string} */
+                            readonly status: "clean" | "drift" | "tamper" | "missing" | "error";
+                            readonly version?: string;
+                            readonly managed_files: readonly string[];
+                            readonly rollback_available: boolean;
+                        }[];
+                        readonly capabilities: readonly {
+                            readonly opaque_id: string;
+                            /** @enum {string} */
+                            readonly harness: "claude" | "codex" | "opencode" | "pi";
+                            /** @enum {string} */
+                            readonly backend: "openai" | "anthropic" | "ollama_local" | "ollama_cloud" | "native";
+                            readonly model_pattern: string;
+                            /** @enum {string} */
+                            readonly binary: "available" | "unavailable";
+                            /** @enum {string} */
+                            readonly provider: "configured" | "unconfigured" | "not_applicable";
+                            /** @enum {string} */
+                            readonly model: "supported" | "experimental" | "unknown" | "unsupported";
+                            /** @enum {string} */
+                            readonly qualification: "supported" | "experimental" | "unknown" | "unsupported" | "stale" | "registration_only" | "invalid_evidence";
+                            /** @enum {string} */
+                            readonly endpoint: "healthy" | "degraded" | "absent";
+                            /** @enum {string} */
+                            readonly delivery: "ready" | "not_ready" | "ineligible" | "pull_only" | "next_turn";
+                            readonly evidence_version?: string;
+                            /** Format: date-time */
+                            readonly evidence_at?: string;
+                            readonly remedy: string;
+                        }[];
+                        readonly providers: readonly {
+                            /** @enum {string} */
+                            readonly provider: "openai" | "ollama_cloud" | "ollama_local";
+                            readonly configured: boolean;
+                            /** @enum {string} */
+                            readonly qualification: "supported" | "experimental" | "unknown" | "unsupported";
+                            readonly delivery_ready: boolean;
+                            readonly rollback_available: boolean;
+                        }[];
+                        readonly presets: readonly {
+                            readonly name: string;
+                            /** @enum {string} */
+                            readonly harness: "claude" | "codex" | "opencode" | "pi";
+                            /** @enum {string} */
+                            readonly backend: "openai" | "anthropic" | "ollama_local" | "ollama_cloud" | "native";
+                            readonly model_selector: string;
+                            /** @enum {string} */
+                            readonly source: "built_in" | "user";
+                        }[];
+                        readonly migration: {
+                            /** @enum {string} */
+                            readonly status: "not_planned" | "ready" | "review_required" | "applied" | "rolled_back" | "failed";
+                            readonly plan_hash?: string;
+                            readonly create: number;
+                            readonly attach: number;
+                            readonly review: number;
+                            readonly quarantine: number;
+                            readonly backup_available: boolean;
+                            readonly rollback_available: boolean;
+                        };
+                        readonly unknown_config_keys_preserved: boolean;
+                        readonly unknown_config_key_count: number;
+                        readonly audit: readonly {
+                            readonly command_id: string;
+                            readonly command_kind: string;
+                            /** @enum {string} */
+                            readonly status: "pending" | "completed" | "rejected" | "failed";
+                            /** Format: date-time */
+                            readonly created_at: string;
+                            /** Format: date-time */
+                            readonly completed_at?: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description invalid settings request */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-settings-error/v1";
+                        /** @enum {string} */
+                        readonly code: "browser.auth.required" | "browser.forbidden" | "browser.settings.invalid" | "browser.settings.conflict" | "browser.settings.unavailable" | "command.idempotency_mismatch";
+                        readonly correlation_id: string;
+                    };
+                };
+            };
+            /** @description browser session required */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-settings-error/v1";
+                        /** @enum {string} */
+                        readonly code: "browser.auth.required" | "browser.forbidden" | "browser.settings.invalid" | "browser.settings.conflict" | "browser.settings.unavailable" | "command.idempotency_mismatch";
+                        readonly correlation_id: string;
+                    };
+                };
+            };
+            /** @description browser authority rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-settings-error/v1";
+                        /** @enum {string} */
+                        readonly code: "browser.auth.required" | "browser.forbidden" | "browser.settings.invalid" | "browser.settings.conflict" | "browser.settings.unavailable" | "command.idempotency_mismatch";
+                        readonly correlation_id: string;
+                    };
+                };
+            };
+            /** @description settings authority unavailable */
+            readonly 503: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-settings-error/v1";
+                        /** @enum {string} */
+                        readonly code: "browser.auth.required" | "browser.forbidden" | "browser.settings.invalid" | "browser.settings.conflict" | "browser.settings.unavailable" | "command.idempotency_mismatch";
+                        readonly correlation_id: string;
+                    };
+                };
+            };
+        };
+    };
+    readonly browserSettingsCommand: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": {
+                    readonly idempotency_key: string;
+                    /** @constant */
+                    readonly kind: "render.preview";
+                    /** @enum {string} */
+                    readonly target: "cc" | "cc-marketplace" | "codex" | "opencode" | "pi";
+                } | {
+                    readonly idempotency_key: string;
+                    readonly plan_hash: string;
+                    /** @constant */
+                    readonly confirm: true;
+                    /** @constant */
+                    readonly kind: "render.apply";
+                    /** @enum {string} */
+                    readonly target: "cc" | "cc-marketplace" | "codex" | "opencode" | "pi";
+                } | {
+                    readonly idempotency_key: string;
+                    /** @constant */
+                    readonly kind: "render.rollback";
+                    /** @enum {string} */
+                    readonly target: "cc" | "cc-marketplace" | "codex" | "opencode" | "pi";
+                    /** @constant */
+                    readonly confirm: true;
+                } | {
+                    readonly idempotency_key: string;
+                    /** @constant */
+                    readonly kind: "service.preview";
+                    /** @enum {string} */
+                    readonly action: "start" | "stop" | "restart" | "install" | "update" | "rollback";
+                } | {
+                    readonly idempotency_key: string;
+                    readonly plan_hash: string;
+                    /** @constant */
+                    readonly confirm: true;
+                    /** @constant */
+                    readonly kind: "service.apply";
+                    /** @enum {string} */
+                    readonly action: "start" | "stop" | "restart" | "install" | "update" | "rollback";
+                } | {
+                    readonly idempotency_key: string;
+                    /** @constant */
+                    readonly kind: "provider.preview";
+                    /** @enum {string} */
+                    readonly provider: "openai" | "ollama_cloud" | "ollama_local";
+                } | {
+                    readonly idempotency_key: string;
+                    readonly plan_hash: string;
+                    /** @constant */
+                    readonly confirm: true;
+                    /** @constant */
+                    readonly kind: "provider.apply";
+                    /** @enum {string} */
+                    readonly provider: "openai" | "ollama_cloud" | "ollama_local";
+                } | {
+                    readonly idempotency_key: string;
+                    /** @constant */
+                    readonly kind: "provider.rollback";
+                    /** @enum {string} */
+                    readonly provider: "openai" | "ollama_cloud" | "ollama_local";
+                    /** @constant */
+                    readonly confirm: true;
+                } | {
+                    readonly idempotency_key: string;
+                    /** @constant */
+                    readonly kind: "preset.preview";
+                    readonly preset: {
+                        readonly name: string;
+                        /** @enum {string} */
+                        readonly harness: "claude" | "codex" | "opencode" | "pi";
+                        /** @enum {string} */
+                        readonly backend: "openai" | "anthropic" | "ollama_local" | "ollama_cloud" | "native";
+                        readonly model_selector: string;
+                        /** @enum {string} */
+                        readonly delivery_mode: "pull" | "native_channel" | "prompt_bridge" | "managed_app_server" | "next_turn";
+                    };
+                } | {
+                    readonly idempotency_key: string;
+                    readonly plan_hash: string;
+                    /** @constant */
+                    readonly confirm: true;
+                    /** @constant */
+                    readonly kind: "preset.apply";
+                    readonly preset: {
+                        readonly name: string;
+                        /** @enum {string} */
+                        readonly harness: "claude" | "codex" | "opencode" | "pi";
+                        /** @enum {string} */
+                        readonly backend: "openai" | "anthropic" | "ollama_local" | "ollama_cloud" | "native";
+                        readonly model_selector: string;
+                        /** @enum {string} */
+                        readonly delivery_mode: "pull" | "native_channel" | "prompt_bridge" | "managed_app_server" | "next_turn";
+                    };
+                } | {
+                    readonly idempotency_key: string;
+                    /** @constant */
+                    readonly kind: "preset.rollback";
+                    /** @constant */
+                    readonly confirm: true;
+                } | {
+                    readonly idempotency_key: string;
+                    /** @constant */
+                    readonly kind: "migration.preview";
+                } | {
+                    readonly idempotency_key: string;
+                    readonly plan_hash: string;
+                    /** @constant */
+                    readonly confirm: true;
+                    /** @constant */
+                    readonly kind: "migration.apply";
+                } | {
+                    readonly idempotency_key: string;
+                    /** @constant */
+                    readonly kind: "migration.rollback";
+                    /** @constant */
+                    readonly confirm: true;
+                };
+            };
+        };
+        readonly responses: {
+            /** @description durable settings command outcome */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-settings-command/v1";
+                        readonly command_id: string;
+                        /** @enum {string} */
+                        readonly status: "pending" | "completed";
+                        readonly result?: {
+                            readonly command_kind: string;
+                            /** @enum {string} */
+                            readonly outcome: "previewed" | "applied" | "rolled_back";
+                            readonly summary: string;
+                            readonly plan_hash?: string;
+                            readonly changed: boolean;
+                            readonly affected: readonly string[];
+                            readonly rollback_available: boolean;
+                            readonly snapshot_revision: number;
+                        };
+                    };
+                };
+            };
+            /** @description invalid settings command */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-settings-error/v1";
+                        /** @enum {string} */
+                        readonly code: "browser.auth.required" | "browser.forbidden" | "browser.settings.invalid" | "browser.settings.conflict" | "browser.settings.unavailable" | "command.idempotency_mismatch";
+                        readonly correlation_id: string;
+                    };
+                };
+            };
+            /** @description browser session or CSRF required */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-settings-error/v1";
+                        /** @enum {string} */
+                        readonly code: "browser.auth.required" | "browser.forbidden" | "browser.settings.invalid" | "browser.settings.conflict" | "browser.settings.unavailable" | "command.idempotency_mismatch";
+                        readonly correlation_id: string;
+                    };
+                };
+            };
+            /** @description browser authority rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-settings-error/v1";
+                        /** @enum {string} */
+                        readonly code: "browser.auth.required" | "browser.forbidden" | "browser.settings.invalid" | "browser.settings.conflict" | "browser.settings.unavailable" | "command.idempotency_mismatch";
+                        readonly correlation_id: string;
+                    };
+                };
+            };
+            /** @description settings command conflict */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-settings-error/v1";
+                        /** @enum {string} */
+                        readonly code: "browser.auth.required" | "browser.forbidden" | "browser.settings.invalid" | "browser.settings.conflict" | "browser.settings.unavailable" | "command.idempotency_mismatch";
+                        readonly correlation_id: string;
+                    };
+                };
+            };
+            /** @description settings authority unavailable */
+            readonly 503: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-settings-error/v1";
+                        /** @enum {string} */
+                        readonly code: "browser.auth.required" | "browser.forbidden" | "browser.settings.invalid" | "browser.settings.conflict" | "browser.settings.unavailable" | "command.idempotency_mismatch";
                         readonly correlation_id: string;
                     };
                 };

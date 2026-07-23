@@ -1,4 +1,5 @@
 export * from "./api.js";
+export * from "./browser-settings.js";
 export * from "./browser-work.js";
 export * from "./common.js";
 export * from "./control.js";
