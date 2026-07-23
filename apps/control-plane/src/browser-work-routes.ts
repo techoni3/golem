@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import {
 	BrowserOpaqueIdSchema,
 	BrowserWorkAssetResponseSchema,
+	BrowserWorkCommandResultSchema,
 	BrowserWorkCommandRequestSchema,
 	BrowserWorkCommandResponseSchema,
 	BrowserWorkDetailResponseSchema,
@@ -116,19 +117,45 @@ function outcomeResponse(
 	request: FastifyRequest,
 	reply: FastifyReply,
 	outcome: CommandGatewayOutcome,
-	resourceRevision: number,
 ) {
 	if (outcome.status === "idempotency_mismatch")
 		return browserFail(request, reply, 409, "command.idempotency_mismatch");
-	return reply.send(
-		BrowserWorkCommandResponseSchema.parse({
+	const stored = z
+		.object({
+			resource_revision: z.number().int().nonnegative(),
+			result: BrowserWorkCommandResultSchema,
+		})
+		.strict()
+		.safeParse(outcome.result);
+	if (!stored.success) return browserFail(request, reply, 400, "browser.work.invalid");
+	const response = BrowserWorkCommandResponseSchema.safeParse({
 			schema_version: "golem.browser-work-command/v1",
 			command_id: outcome.command_id,
 			status: outcome.status,
-			resource_revision: resourceRevision,
-			result: outcome.result,
-		}),
-	);
+			resource_revision: stored.data.resource_revision,
+			result: stored.data.result,
+		});
+	return response.success
+		? reply.send(response.data)
+		: browserFail(request, reply, 400, "browser.work.invalid");
+}
+
+function durableBrowserOutcome(
+	browserWork: BrowserWorkServices,
+	projectId: string,
+	result: z.infer<typeof BrowserWorkCommandResultSchema>,
+) {
+	return z
+		.object({
+			resource_revision: z.number().int().nonnegative(),
+			result: BrowserWorkCommandResultSchema,
+		})
+		.strict()
+		.parse({
+			resource_revision: browserWork.projection("tracker.board", projectId)
+				.resource_revision,
+			result,
+		});
 }
 
 /** Browser-only routes over GOL-78/79/80 application seams. */
@@ -287,7 +314,11 @@ export function registerBrowserWorkRoutes(options: {
 							);
 							if (!safe)
 								throw new TrackerCoreError("tracker.not_found", "created ticket is unavailable");
-							return { kind: "ticket", ticket: safe };
+							return durableBrowserOutcome(
+								options.browserWork,
+								context.defaultProjectId,
+								{ kind: "ticket", ticket: safe },
+							);
 						}
 						if (input.kind === "ticket.update") {
 							const ticket = options.core.tickets.update({
@@ -305,7 +336,11 @@ export function registerBrowserWorkRoutes(options: {
 							const safe = options.browserWork.ticket(context.defaultProjectId, ticket.id);
 							if (!safe)
 								throw new TrackerCoreError("tracker.not_found", "updated ticket is unavailable");
-							return { kind: "ticket", ticket: safe };
+							return durableBrowserOutcome(
+								options.browserWork,
+								context.defaultProjectId,
+								{ kind: "ticket", ticket: safe },
+							);
 						}
 						if (input.kind === "ticket.transition") {
 							const ticket = options.core.tickets.transition({
@@ -317,7 +352,11 @@ export function registerBrowserWorkRoutes(options: {
 							const safe = options.browserWork.ticket(context.defaultProjectId, ticket.id);
 							if (!safe)
 								throw new TrackerCoreError("tracker.not_found", "transitioned ticket is unavailable");
-							return { kind: "ticket", ticket: safe };
+							return durableBrowserOutcome(
+								options.browserWork,
+								context.defaultProjectId,
+								{ kind: "ticket", ticket: safe },
+							);
 						}
 						const gate = options.management.gates.create({
 							projectId: context.defaultProjectId,
@@ -327,21 +366,19 @@ export function registerBrowserWorkRoutes(options: {
 							idempotencyKey: input.idempotency_key,
 							actor: context.actorId,
 						});
-						return {
-							kind: "gate",
-							opaque_id: gate.id,
-							status: gate.status,
-							updated_at: gate.updatedAt,
-						};
+						return durableBrowserOutcome(
+							options.browserWork,
+							context.defaultProjectId,
+							{
+								kind: "gate",
+								opaque_id: gate.id,
+								status: gate.status,
+								updated_at: gate.updatedAt,
+							},
+						);
 					},
 				});
-				return outcomeResponse(
-					request,
-					reply,
-					result,
-					options.browserWork.projection("tracker.board", context.defaultProjectId)
-						.resource_revision,
-				);
+				return outcomeResponse(request, reply, result);
 			} catch (error) {
 				return commandFailure(request, reply, error);
 			}

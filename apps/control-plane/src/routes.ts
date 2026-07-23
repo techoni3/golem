@@ -1,5 +1,6 @@
 import {
 	BrowserWorkProjectionResponseSchema,
+	BrowserWorkProjectionQuerySchema,
 	BrowserWorkStreamSchema,
 	RuntimeSignalV1Schema,
 } from "@golem/contracts";
@@ -314,6 +315,7 @@ export function registerValidatedRoutes(options: {
 		{
 			schema: {
 				params: jsonSchema(ProjectionParamsSchema),
+				querystring: jsonSchema(BrowserWorkProjectionQuerySchema),
 				response: {
 					200: jsonSchema(
 						z.union([
@@ -337,6 +339,15 @@ export function registerValidatedRoutes(options: {
 				);
 			const browserStream = BrowserWorkStreamSchema.safeParse(parsed.data.stream);
 			if (browserStream.success && options.browserWork) {
+				const query = BrowserWorkProjectionQuerySchema.safeParse(request.query);
+				if (!query.success)
+					return fail(
+						request,
+						reply,
+						400,
+						"request.invalid",
+						"projection cursor is invalid",
+					);
 				if (hasRequestAuthorityOverride(request))
 					return fail(
 						request,
@@ -370,6 +381,7 @@ export function registerValidatedRoutes(options: {
 					options.browserWork.projection(
 						browserStream.data,
 						context.defaultProjectId,
+						query.data.cursor,
 					),
 				);
 			}

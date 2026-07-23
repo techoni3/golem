@@ -1,6 +1,8 @@
 import {
 	BrowserWorkAssetResponseSchema,
 	BrowserWorkDetailResponseSchema,
+	BrowserWorkOperationSchema,
+	BrowserWorkProjectionCursorSchema,
 	BrowserWorkProjectionResponseSchema,
 	BrowserWorkTicketSchema,
 	type BrowserWorkProjectionResponse,
@@ -14,6 +16,7 @@ import type { z } from "zod";
 
 type BrowserWorkStream = z.infer<typeof BrowserWorkStreamSchema>;
 type BrowserTicket = z.infer<typeof BrowserWorkTicketSchema>;
+const browserPageSize = 100;
 
 function ticketView(ticket: {
 	readonly id: string;
@@ -48,13 +51,29 @@ function operationView(operation: {
 	readonly createdAt: string;
 	readonly updatedAt: string;
 }) {
-	return {
+	return BrowserWorkOperationSchema.parse({
 		opaque_id: operation.id,
 		operation_kind: operation.kind,
 		status: operation.status,
 		created_at: operation.createdAt,
 		updated_at: operation.updatedAt,
-	} as const;
+	});
+}
+
+function pageOf(cursor: string | undefined): number {
+	if (!cursor) return 0;
+	return Number(BrowserWorkProjectionCursorSchema.parse(cursor).slice(4));
+}
+
+function boundedPage<T>(items: readonly T[], cursor: string | undefined) {
+	const page = pageOf(cursor);
+	const start = page * browserPageSize;
+	const end = start + browserPageSize;
+	return Object.freeze({
+		items: items.slice(start, end),
+		nextCursor:
+			end < items.length ? BrowserWorkProjectionCursorSchema.parse(`bwp_${page + 1}`) : null,
+	});
 }
 
 /**
@@ -66,6 +85,7 @@ export interface BrowserWorkServices {
 	projection(
 		stream: BrowserWorkStream,
 		projectId: string,
+		cursor?: string,
 	): BrowserWorkProjectionResponse;
 	detail(projectId: string, ticketId: string): ReturnType<
 		typeof BrowserWorkDetailResponseSchema.parse
@@ -89,29 +109,28 @@ export function createBrowserWorkServices(options: {
 	}
 
 	const service: BrowserWorkServices = {
-		projection(stream: BrowserWorkStream, projectId: string) {
+		projection(stream: BrowserWorkStream, projectId: string, cursor?: string) {
 			const resourceRevision = options.projectRevision(projectId);
 			if (stream === "tracker.board") {
+				const page = boundedPage(options.core.tickets.list({ projectId }), cursor);
 				return BrowserWorkProjectionResponseSchema.parse({
 					schema_version: "golem.browser-work-projection/v1",
 					stream,
 					resource_revision: resourceRevision,
-					next_cursor: null,
-					items: options.core.tickets
-						.list({ projectId })
-						.slice(0, 100)
-						.map(ticketView),
+					next_cursor: page.nextCursor,
+					items: page.items.map(ticketView),
 				});
 			}
 			if (stream === "tracker.tree") {
 				const tickets = options.core.tickets.list({ projectId });
 				const visible = new Set(tickets.map((ticket) => ticket.id));
+				const page = boundedPage(tickets, cursor);
 				return BrowserWorkProjectionResponseSchema.parse({
 					schema_version: "golem.browser-work-projection/v1",
 					stream,
 					resource_revision: resourceRevision,
-					next_cursor: null,
-					items: tickets.slice(0, 100).map((ticket) => ({
+					next_cursor: page.nextCursor,
+					items: page.items.map((ticket) => ({
 						...ticketView(ticket),
 						...(ticket.parentId && visible.has(ticket.parentId)
 							? { parent_opaque_id: ticket.parentId }
@@ -120,19 +139,20 @@ export function createBrowserWorkServices(options: {
 				});
 			}
 			const operations = options.management.controls.list(projectId);
+			const page = boundedPage(
+				operations.filter((operation) =>
+					stream === "management.controls"
+						? operation.kind === "control"
+						: operation.kind !== "control",
+				),
+				cursor,
+			);
 			return BrowserWorkProjectionResponseSchema.parse({
 				schema_version: "golem.browser-work-projection/v1",
 				stream,
 				resource_revision: resourceRevision,
-				next_cursor: null,
-				items: operations
-					.filter((operation) =>
-						stream === "management.controls"
-							? operation.kind === "control"
-							: operation.kind !== "control",
-					)
-					.slice(0, 100)
-					.map(operationView),
+				next_cursor: page.nextCursor,
+				items: page.items.map(operationView),
 			});
 		},
 		detail(projectId: string, ticketId: string) {

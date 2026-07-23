@@ -194,6 +194,7 @@ export function createBrowserPrincipalResolver(options: {
 			if (
 				!options.storage.createBrowserSession({
 					bindingId: localBindingId,
+					requireOperator: true,
 					session: identifier,
 					csrf,
 					expiresAt,

@@ -421,6 +421,8 @@ export interface BrowserPrincipalStorage {
 	}): PrincipalBinding | undefined;
 	createBrowserSession(input: {
 		readonly bindingId: string;
+		/** Bootstrap requests mint only for an operator; admin/test provisioning may mint read-only sessions. */
+		readonly requireOperator?: boolean;
 		/** Raw cookie and CSRF material is hashed before persistence. */
 		readonly session: string;
 		readonly csrf: string;

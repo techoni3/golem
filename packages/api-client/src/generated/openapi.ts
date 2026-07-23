@@ -6596,7 +6596,10 @@ export interface operations {
     };
     readonly browserWorkProjection: {
         readonly parameters: {
-            readonly query?: never;
+            readonly query?: {
+                /** @description Opaque browser-work page cursor; never a publication or project cursor. */
+                readonly cursor?: string;
+            };
             readonly header?: never;
             readonly path: {
                 readonly stream: "tracker.board" | "tracker.tree" | "management.controls" | "communication.operations";
@@ -6615,7 +6618,7 @@ export interface operations {
                         /** @constant */
                         readonly schema_version: "golem.browser-work-projection/v1";
                         readonly resource_revision: number;
-                        readonly next_cursor: null;
+                        readonly next_cursor: string | null;
                         /** @constant */
                         readonly stream: "tracker.board";
                         readonly items: readonly {
@@ -6634,7 +6637,7 @@ export interface operations {
                         /** @constant */
                         readonly schema_version: "golem.browser-work-projection/v1";
                         readonly resource_revision: number;
-                        readonly next_cursor: null;
+                        readonly next_cursor: string | null;
                         /** @constant */
                         readonly stream: "tracker.tree";
                         readonly items: readonly {
@@ -6654,7 +6657,7 @@ export interface operations {
                         /** @constant */
                         readonly schema_version: "golem.browser-work-projection/v1";
                         readonly resource_revision: number;
-                        readonly next_cursor: null;
+                        readonly next_cursor: string | null;
                         /** @constant */
                         readonly stream: "management.controls";
                         readonly items: readonly {
@@ -6672,7 +6675,7 @@ export interface operations {
                         /** @constant */
                         readonly schema_version: "golem.browser-work-projection/v1";
                         readonly resource_revision: number;
-                        readonly next_cursor: null;
+                        readonly next_cursor: string | null;
                         /** @constant */
                         readonly stream: "communication.operations";
                         readonly items: readonly {

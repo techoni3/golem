@@ -34,6 +34,16 @@ export const BrowserWorkStreamSchema = z.enum([
 	"communication.operations",
 ]);
 
+/** Server-composed page cursor, independent of GOL-80 publication cursors. */
+export const BrowserWorkProjectionCursorSchema = z
+	.string()
+	.regex(/^bwp_[0-9]{1,8}$/u)
+	.max(12);
+
+export const BrowserWorkProjectionQuerySchema = z
+	.object({ cursor: BrowserWorkProjectionCursorSchema.optional() })
+	.strict();
+
 export const BrowserWorkTicketSchema = z
 	.object({
 		opaque_id: BrowserOpaqueIdSchema,
@@ -64,7 +74,7 @@ const BrowserWorkProjectionBaseSchema = z
 	.object({
 		schema_version: z.literal("golem.browser-work-projection/v1"),
 		resource_revision: z.number().int().nonnegative(),
-		next_cursor: z.null(),
+		next_cursor: BrowserWorkProjectionCursorSchema.nullable(),
 	})
 	.strict();
 
@@ -161,6 +171,24 @@ export const BrowserWorkCommandRequestSchema = z.discriminatedUnion("kind", [
 	}).strict(),
 ]);
 
+export const BrowserWorkCommandResultSchema = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("ticket"), ticket: BrowserWorkTicketSchema }).strict(),
+	z
+		.object({
+			kind: z.literal("gate"),
+			opaque_id: BrowserOpaqueIdSchema,
+			status: z.enum(["awaiting", "approved", "denied", "cancelled"]),
+			updated_at: BrowserTimestampSchema,
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("unsupported"),
+			code: z.literal("browser-work.dispatch.unsupported"),
+		})
+		.strict(),
+]);
+
 export const BrowserWorkCommandResponseSchema = z
 	.object({
 		schema_version: z.literal("golem.browser-work-command/v1"),
@@ -172,23 +200,7 @@ export const BrowserWorkCommandResponseSchema = z
 			"idempotency_mismatch",
 		]),
 		resource_revision: z.number().int().nonnegative(),
-		result: z.discriminatedUnion("kind", [
-			z.object({ kind: z.literal("ticket"), ticket: BrowserWorkTicketSchema }).strict(),
-			z
-				.object({
-					kind: z.literal("gate"),
-					opaque_id: BrowserOpaqueIdSchema,
-					status: z.enum(["awaiting", "approved", "denied", "cancelled"]),
-					updated_at: BrowserTimestampSchema,
-				})
-				.strict(),
-			z
-				.object({
-					kind: z.literal("unsupported"),
-					code: z.literal("browser-work.dispatch.unsupported"),
-				})
-				.strict(),
-		]),
+		result: BrowserWorkCommandResultSchema,
 	})
 	.strict();
 

@@ -172,6 +172,7 @@ export class BrowserPrincipalRepository implements BrowserPrincipalStorage {
 
 	createBrowserSession(input: {
 		readonly bindingId: string;
+		readonly requireOperator?: boolean;
 		readonly session: string;
 		readonly csrf: string;
 		readonly expiresAt: string;
@@ -190,10 +191,11 @@ export class BrowserPrincipalRepository implements BrowserPrincipalStorage {
 			)
 			.get(input.bindingId);
 		const resolved = binding ? this.#binding(binding, input.now) : undefined;
-		// Browser-session issuance proves a durable, enabled binding. Read-only
-		// viewers may therefore receive a same-origin session; mutation policy
-		// remains resolver-owned and rejects them before a command can run.
-		if (!resolved) return false;
+		// Administrative/test provisioning may create a viewer session for
+		// read-only policy checks. The browser bootstrap boundary separately
+		// requests operator-only issuance.
+		if (!resolved || (input.requireOperator && resolved.role !== "operator"))
+			return false;
 		this.#database
 			.prepare(
 				"INSERT INTO browser_principal_sessions (session_digest, csrf_digest, binding_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?)",

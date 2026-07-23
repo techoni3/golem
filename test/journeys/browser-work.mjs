@@ -237,6 +237,12 @@ export async function exerciseBrowserWorkOpaqueProjection() {
 			body: hostile.join(" "),
 			actor: "actor_browser_beta",
 		});
+		for (let index = 0; index < 100; index += 1)
+			control.core.tickets.create({
+				projectId: projectA,
+				title: `bounded page ${index}`,
+				actor: "actor_browser_alpha",
+			});
 		control.management.controls.request({
 			projectId: projectA,
 			command: hostile[6],
@@ -276,6 +282,18 @@ export async function exerciseBrowserWorkOpaqueProjection() {
 			assert.equal(response.status, 200, `${stream} is a browser-session projection`);
 			assert.equal(response.body.stream, stream);
 			assert.doesNotMatch(JSON.stringify(response.body), new RegExp(`${betaTicket.id}|${hostile.join("|")}`, "u"));
+			if (stream === "tracker.board") {
+				assert.equal(response.body.items.length, 100, "board page is bounded");
+				assert.equal(response.body.next_cursor, "bwp_1");
+				const secondPage = await json(
+					origin,
+					`/api/v1/projections/${stream}?cursor=${response.body.next_cursor}`,
+					{ headers: alphaHeaders },
+				);
+				assert.equal(secondPage.status, 200);
+				assert.equal(secondPage.body.items.length, 1);
+				assert.equal(secondPage.body.next_cursor, null);
+			}
 		}
 		const detail = await json(origin, `/api/v1/browser/work/items/${alphaTicket.id}`, {
 			headers: alphaHeaders,
@@ -348,6 +366,30 @@ export async function exerciseBrowserWorkCommandAuthority() {
 		}, { ownerId: "gol81-command", clock: { now: () => fixtureClock.iso() } });
 		control = await start(home, writer, fixtureClock);
 		const origin = control.service.origin;
+		const bootstrapRequest = {
+			headers: { origin, host: new URL(origin).host },
+			protocol: "http",
+		};
+		const viewerBootstrap = createBrowserPrincipalResolver({
+			storage: control.storage,
+			localOperatorBindingId: "browser_work_viewer",
+			clock: { now: () => fixtureClock.now() },
+		});
+		const operatorBootstrap = createBrowserPrincipalResolver({
+			storage: control.storage,
+			localOperatorBindingId: "browser_work_alpha",
+			clock: { now: () => fixtureClock.now() },
+		});
+		assert.equal(
+			viewerBootstrap.bootstrap(bootstrapRequest).ok,
+			false,
+			"configured viewer cannot bootstrap a browser session",
+		);
+		assert.equal(
+			operatorBootstrap.bootstrap(bootstrapRequest).ok,
+			true,
+			"configured operator can bootstrap a browser session",
+		);
 		const operatorHeaders = headers(origin, control.alpha.session, control.alpha.csrf);
 		const createBody = {
 			kind: "ticket.create",
@@ -365,15 +407,33 @@ export async function exerciseBrowserWorkCommandAuthority() {
 		assert.equal(created.body.result.kind, "ticket");
 		assert.equal(created.body.resource_revision, beforeCreate + 1);
 		assert.equal(JSON.stringify(created.body).includes(createBody.title), false);
-		const afterCreate = writer.committedPublicationStorage().projectRevision(projectA);
+		const interveningGate = await json(origin, "/api/v1/browser/work/commands", {
+			method: "POST",
+			headers: operatorHeaders,
+			body: JSON.stringify({
+				kind: "management.gate.create",
+				idempotency_key: "gol81:gate:create",
+				gate_kind: "approval",
+				question: "private command prose must not be reflected",
+				assignee: "human",
+			}),
+		});
+		assert.equal(interveningGate.status, 200);
+		assert.equal(interveningGate.body.result.kind, "gate");
+		assert.equal(JSON.stringify(interveningGate.body).includes("private command prose"), false);
+		const beforeDuplicate = writer.committedPublicationStorage().projectRevision(projectA);
+		const outboxBeforeDuplicate = writer
+			.committedPublicationStorage()
+			.outboxCount(projectA);
 		const duplicate = await json(origin, "/api/v1/browser/work/commands", {
 			method: "POST",
 			headers: operatorHeaders,
 			body: JSON.stringify(createBody),
 		});
 		assert.equal(duplicate.status, 200, "identical retry returns the original outcome");
-		assert.equal(duplicate.body.command_id, created.body.command_id);
-		assert.equal(writer.committedPublicationStorage().projectRevision(projectA), afterCreate);
+		assert.deepEqual(duplicate.body, created.body, "retry preserves the original safe response");
+		assert.equal(writer.committedPublicationStorage().projectRevision(projectA), beforeDuplicate);
+		assert.equal(writer.committedPublicationStorage().outboxCount(projectA), outboxBeforeDuplicate);
 		const ticket = created.body.result.ticket;
 		const update = await json(origin, "/api/v1/browser/work/commands", {
 			method: "POST",
@@ -399,21 +459,6 @@ export async function exerciseBrowserWorkCommandAuthority() {
 			}),
 		});
 		assert.equal(transition.status, 200);
-		const gate = await json(origin, "/api/v1/browser/work/commands", {
-			method: "POST",
-			headers: operatorHeaders,
-			body: JSON.stringify({
-				kind: "management.gate.create",
-				idempotency_key: "gol81:gate:create",
-				gate_kind: "approval",
-				question: "private command prose must not be reflected",
-				assignee: "human",
-			}),
-		});
-		assert.equal(gate.status, 200);
-		assert.equal(gate.body.result.kind, "gate");
-		assert.equal(JSON.stringify(gate.body).includes("private command prose"), false);
-
 		const staleBefore = writer.committedPublicationStorage().projectRevision(projectA);
 		const stale = await json(origin, "/api/v1/browser/work/commands", {
 			method: "POST",

@@ -12570,6 +12570,17 @@
                 "communication.operations"
               ]
             }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque browser-work page cursor; never a publication or project cursor.",
+            "schema": {
+              "type": "string",
+              "pattern": "^bwp_[0-9]{1,8}$",
+              "maxLength": 12
+            }
           }
         ],
         "responses": {
@@ -12593,7 +12604,16 @@
                           "maximum": 9007199254740991
                         },
                         "next_cursor": {
-                          "type": "null"
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 12,
+                              "pattern": "^bwp_[0-9]{1,8}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "stream": {
                           "type": "string",
@@ -12698,7 +12718,16 @@
                           "maximum": 9007199254740991
                         },
                         "next_cursor": {
-                          "type": "null"
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 12,
+                              "pattern": "^bwp_[0-9]{1,8}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "stream": {
                           "type": "string",
@@ -12808,7 +12837,16 @@
                           "maximum": 9007199254740991
                         },
                         "next_cursor": {
-                          "type": "null"
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 12,
+                              "pattern": "^bwp_[0-9]{1,8}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "stream": {
                           "type": "string",
@@ -12887,7 +12925,16 @@
                           "maximum": 9007199254740991
                         },
                         "next_cursor": {
-                          "type": "null"
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "maxLength": 12,
+                              "pattern": "^bwp_[0-9]{1,8}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "stream": {
                           "type": "string",

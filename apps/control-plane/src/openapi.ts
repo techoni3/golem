@@ -656,6 +656,14 @@ export function controlPlaneOpenApiDocument(): JsonRecord {
 								],
 							},
 						},
+						{
+							name: "cursor",
+							in: "query",
+							required: false,
+							description:
+								"Opaque browser-work page cursor; never a publication or project cursor.",
+							schema: { type: "string", pattern: "^bwp_[0-9]{1,8}$", maxLength: 12 },
+						},
 					],
 					responses: {
 						"200": response(
