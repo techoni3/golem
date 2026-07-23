@@ -1,6 +1,6 @@
 import {
 	type BrowserControlPlaneClient,
-	type ControlPlaneStream,
+	type LegacyControlPlaneStream,
 	createBrowserControlPlaneClient,
 	createProjectionSynchronizer,
 	type ProjectionConnectionState,
@@ -30,7 +30,7 @@ import {
 } from "./routes/runtime/index.js";
 import styles from "./shell.module.css";
 
-const projectionStream: ControlPlaneStream = "runtime.live";
+const projectionStream: LegacyControlPlaneStream = "runtime.live";
 const projectionKey = [
 	"control-plane",
 	"projection",

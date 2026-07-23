@@ -1,4 +1,8 @@
-import type { RuntimeSignalV1 } from "@golem/contracts";
+import type {
+	BrowserWorkInvalidation,
+	BrowserWorkStream,
+	RuntimeSignalV1,
+} from "@golem/contracts";
 import type { ControlPlaneStream } from "./schemas.js";
 
 /** Producers may submit a durable envelope but never obtain persistence. */
@@ -101,4 +105,50 @@ export interface ControlPlaneReplayPort {
 		scope?: ControlPlaneReplayScope,
 	): ControlPlaneReplayEntry;
 	subscribe(listener: ControlPlaneReplayListener): () => void;
+}
+
+/** Browser-work replay is deliberately separate from the legacy JSON replay
+ * port: its persisted hint and every eventual frame are closed allowlists. */
+export interface BrowserWorkReplayEntry {
+	readonly sequence: number;
+	readonly resourceRevision: number;
+	readonly delta: BrowserWorkInvalidation;
+}
+
+export type BrowserWorkReplayListener = (
+	stream: BrowserWorkStream,
+	entry: BrowserWorkReplayEntry,
+	scope: ControlPlaneReplayScope,
+) => void;
+
+export type BrowserWorkReplayResult =
+	| {
+			readonly kind: "resume";
+			readonly entries: readonly BrowserWorkReplayEntry[];
+	  }
+	| {
+			readonly kind: "gap";
+			readonly reason: "cursor_gap" | "cursor_compacted";
+	  };
+
+export interface BrowserWorkReplayPort {
+	browserSnapshot(
+		stream: BrowserWorkStream,
+		scope?: ControlPlaneReplayScope,
+	): {
+		readonly sequence: number;
+		readonly resourceRevision: number;
+	};
+	browserReplay(
+		stream: BrowserWorkStream,
+		cursor: number,
+		scope?: ControlPlaneReplayScope,
+	): BrowserWorkReplayResult;
+	publishBrowserWork(
+		stream: BrowserWorkStream,
+		resourceRevision: number,
+		delta: BrowserWorkInvalidation,
+		scope?: ControlPlaneReplayScope,
+	): BrowserWorkReplayEntry;
+	subscribeBrowserWork(listener: BrowserWorkReplayListener): () => void;
 }

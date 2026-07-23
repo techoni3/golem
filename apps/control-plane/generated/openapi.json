@@ -4,6 +4,26 @@
     "title": "Golem control plane",
     "version": "v1"
   },
+  "components": {
+    "securitySchemes": {
+      "BrowserSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "golem_control_plane_session",
+        "description": "Same-origin HttpOnly browser session; never a bearer credential."
+      },
+      "BrowserCsrf": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-golem-csrf",
+        "description": "Same-origin mutation proof paired with BrowserSession."
+      },
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
   "paths": {
     "/api/v1/tracker/tickets": {
       "get": {
@@ -12531,61 +12551,494 @@
     "/api/v1/projections/{stream}": {
       "get": {
         "operationId": "controlPlaneProjection",
+        "security": [
+          {
+            "BrowserSession": []
+          }
+        ],
         "parameters": [
           {
             "name": "stream",
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "runtime.live",
+                "runtime.history",
+                "runtime.diagnostics",
+                "projects",
+                "tracker.board",
+                "tracker.tree",
+                "management.controls",
+                "communication.operations"
+              ]
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque browser-work page cursor; never a publication or project cursor.",
+            "schema": {
+              "type": "string",
+              "pattern": "^bwp_[0-9]{1,8}$",
+              "maxLength": 12
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "projection",
+            "description": "legacy projection or bounded browser-work projection",
             "content": {
               "application/json": {
                 "schema": {
-                  "$schema": "https://json-schema.org/draft/2020-12/schema",
-                  "type": "object",
-                  "properties": {
-                    "schema_version": {
-                      "type": "string",
-                      "const": "golem.control-plane-projection/v1"
-                    },
-                    "stream": {
-                      "type": "string",
-                      "enum": [
-                        "runtime.live",
-                        "runtime.history",
-                        "runtime.diagnostics",
-                        "projects",
-                        "tracker.tree",
-                        "tracker.board",
-                        "communication.operations"
-                      ]
-                    },
-                    "resource_revision": {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "payload": {
+                  "oneOf": [
+                    {
                       "type": "object",
-                      "propertyNames": {
-                        "type": "string"
-                      },
-                      "additionalProperties": {}
+                      "additionalProperties": false,
+                      "required": [
+                        "schema_version",
+                        "stream",
+                        "resource_revision",
+                        "payload"
+                      ],
+                      "properties": {
+                        "schema_version": {
+                          "type": "string",
+                          "const": "golem.control-plane-projection/v1"
+                        },
+                        "stream": {
+                          "type": "string",
+                          "enum": [
+                            "runtime.live",
+                            "runtime.history",
+                            "runtime.diagnostics",
+                            "projects"
+                          ]
+                        },
+                        "resource_revision": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "payload": {}
+                      }
+                    },
+                    {
+                      "$schema": "https://json-schema.org/draft/2020-12/schema",
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "schema_version": {
+                              "type": "string",
+                              "const": "golem.browser-work-projection/v1"
+                            },
+                            "resource_revision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "next_cursor": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "maxLength": 12,
+                                  "pattern": "^bwp_[0-9]{1,8}$"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "stream": {
+                              "type": "string",
+                              "const": "tracker.board"
+                            },
+                            "items": {
+                              "maxItems": 100,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "opaque_id": {
+                                    "type": "string",
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                  },
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "work-item",
+                                      "spec",
+                                      "question",
+                                      "decision",
+                                      "fix"
+                                    ]
+                                  },
+                                  "state": {
+                                    "type": "string",
+                                    "enum": [
+                                      "todo",
+                                      "in_progress",
+                                      "blocked",
+                                      "review",
+                                      "done",
+                                      "archived"
+                                    ]
+                                  },
+                                  "phase": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64
+                                  },
+                                  "priority": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "enum": [
+                                          "P0",
+                                          "P1",
+                                          "P2",
+                                          "P3"
+                                        ]
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "revision": {
+                                    "type": "integer",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "updated_at": {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                  }
+                                },
+                                "required": [
+                                  "opaque_id",
+                                  "kind",
+                                  "state",
+                                  "phase",
+                                  "priority",
+                                  "revision",
+                                  "updated_at"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "resource_revision",
+                            "next_cursor",
+                            "stream",
+                            "items"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "schema_version": {
+                              "type": "string",
+                              "const": "golem.browser-work-projection/v1"
+                            },
+                            "resource_revision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "next_cursor": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "maxLength": 12,
+                                  "pattern": "^bwp_[0-9]{1,8}$"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "stream": {
+                              "type": "string",
+                              "const": "tracker.tree"
+                            },
+                            "items": {
+                              "maxItems": 100,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "opaque_id": {
+                                    "type": "string",
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                  },
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "work-item",
+                                      "spec",
+                                      "question",
+                                      "decision",
+                                      "fix"
+                                    ]
+                                  },
+                                  "state": {
+                                    "type": "string",
+                                    "enum": [
+                                      "todo",
+                                      "in_progress",
+                                      "blocked",
+                                      "review",
+                                      "done",
+                                      "archived"
+                                    ]
+                                  },
+                                  "phase": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64
+                                  },
+                                  "priority": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "enum": [
+                                          "P0",
+                                          "P1",
+                                          "P2",
+                                          "P3"
+                                        ]
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "revision": {
+                                    "type": "integer",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "updated_at": {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                  },
+                                  "parent_opaque_id": {
+                                    "type": "string",
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                  }
+                                },
+                                "required": [
+                                  "opaque_id",
+                                  "kind",
+                                  "state",
+                                  "phase",
+                                  "priority",
+                                  "revision",
+                                  "updated_at"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "resource_revision",
+                            "next_cursor",
+                            "stream",
+                            "items"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "schema_version": {
+                              "type": "string",
+                              "const": "golem.browser-work-projection/v1"
+                            },
+                            "resource_revision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "next_cursor": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "maxLength": 12,
+                                  "pattern": "^bwp_[0-9]{1,8}$"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "stream": {
+                              "type": "string",
+                              "const": "management.controls"
+                            },
+                            "items": {
+                              "maxItems": 100,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "opaque_id": {
+                                    "type": "string",
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                  },
+                                  "operation_kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "chat",
+                                      "brief",
+                                      "interrupt",
+                                      "halt",
+                                      "control"
+                                    ]
+                                  },
+                                  "status": {
+                                    "type": "string",
+                                    "enum": [
+                                      "queued",
+                                      "ineligible",
+                                      "delivered"
+                                    ]
+                                  },
+                                  "created_at": {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                  },
+                                  "updated_at": {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                  }
+                                },
+                                "required": [
+                                  "opaque_id",
+                                  "operation_kind",
+                                  "status",
+                                  "created_at",
+                                  "updated_at"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "resource_revision",
+                            "next_cursor",
+                            "stream",
+                            "items"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "schema_version": {
+                              "type": "string",
+                              "const": "golem.browser-work-projection/v1"
+                            },
+                            "resource_revision": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "next_cursor": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "maxLength": 12,
+                                  "pattern": "^bwp_[0-9]{1,8}$"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "stream": {
+                              "type": "string",
+                              "const": "communication.operations"
+                            },
+                            "items": {
+                              "maxItems": 100,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "opaque_id": {
+                                    "type": "string",
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                  },
+                                  "operation_kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "chat",
+                                      "brief",
+                                      "interrupt",
+                                      "halt",
+                                      "control"
+                                    ]
+                                  },
+                                  "status": {
+                                    "type": "string",
+                                    "enum": [
+                                      "queued",
+                                      "ineligible",
+                                      "delivered"
+                                    ]
+                                  },
+                                  "created_at": {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                  },
+                                  "updated_at": {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                  }
+                                },
+                                "required": [
+                                  "opaque_id",
+                                  "operation_kind",
+                                  "status",
+                                  "created_at",
+                                  "updated_at"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "schema_version",
+                            "resource_revision",
+                            "next_cursor",
+                            "stream",
+                            "items"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
                     }
-                  },
-                  "required": [
-                    "schema_version",
-                    "stream",
-                    "resource_revision",
-                    "payload"
-                  ],
-                  "additionalProperties": false
+                  ]
                 }
               }
             }
@@ -12631,6 +13084,1474 @@
                       "additionalProperties": true
                     }
                   }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/browser/work/items/{opaque_id}": {
+      "get": {
+        "operationId": "browserWorkItem",
+        "security": [
+          {
+            "BrowserSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "opaque_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "bounded browser work item",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-work-detail/v1"
+                    },
+                    "item": {
+                      "type": "object",
+                      "properties": {
+                        "opaque_id": {
+                          "type": "string",
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "work-item",
+                            "spec",
+                            "question",
+                            "decision",
+                            "fix"
+                          ]
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "todo",
+                            "in_progress",
+                            "blocked",
+                            "review",
+                            "done",
+                            "archived"
+                          ]
+                        },
+                        "phase": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "priority": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "P0",
+                                "P1",
+                                "P2",
+                                "P3"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "updated_at": {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        }
+                      },
+                      "required": [
+                        "opaque_id",
+                        "kind",
+                        "state",
+                        "phase",
+                        "priority",
+                        "revision",
+                        "updated_at"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "item"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid item identifier",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-work-error/v1"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "browser.auth.required",
+                        "browser.forbidden",
+                        "browser.work.invalid",
+                        "browser.work.not_found",
+                        "browser-work.dispatch.unsupported",
+                        "tracker.revision.required",
+                        "tracker.conflict",
+                        "tracker.not_found",
+                        "tracker.phase.invalid",
+                        "tracker.input.invalid",
+                        "tracker.runtime_reference.invalid",
+                        "management.invalid",
+                        "management.not_found",
+                        "management.forbidden",
+                        "management.conflict",
+                        "management.asset_invalid",
+                        "command.idempotency_mismatch"
+                      ]
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "code",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "browser session required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-work-error/v1"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "browser.auth.required",
+                        "browser.forbidden",
+                        "browser.work.invalid",
+                        "browser.work.not_found",
+                        "browser-work.dispatch.unsupported",
+                        "tracker.revision.required",
+                        "tracker.conflict",
+                        "tracker.not_found",
+                        "tracker.phase.invalid",
+                        "tracker.input.invalid",
+                        "tracker.runtime_reference.invalid",
+                        "management.invalid",
+                        "management.not_found",
+                        "management.forbidden",
+                        "management.conflict",
+                        "management.asset_invalid",
+                        "command.idempotency_mismatch"
+                      ]
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "code",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "browser authority rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-work-error/v1"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "browser.auth.required",
+                        "browser.forbidden",
+                        "browser.work.invalid",
+                        "browser.work.not_found",
+                        "browser-work.dispatch.unsupported",
+                        "tracker.revision.required",
+                        "tracker.conflict",
+                        "tracker.not_found",
+                        "tracker.phase.invalid",
+                        "tracker.input.invalid",
+                        "tracker.runtime_reference.invalid",
+                        "management.invalid",
+                        "management.not_found",
+                        "management.forbidden",
+                        "management.conflict",
+                        "management.asset_invalid",
+                        "command.idempotency_mismatch"
+                      ]
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "code",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "item absent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-work-error/v1"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "browser.auth.required",
+                        "browser.forbidden",
+                        "browser.work.invalid",
+                        "browser.work.not_found",
+                        "browser-work.dispatch.unsupported",
+                        "tracker.revision.required",
+                        "tracker.conflict",
+                        "tracker.not_found",
+                        "tracker.phase.invalid",
+                        "tracker.input.invalid",
+                        "tracker.runtime_reference.invalid",
+                        "management.invalid",
+                        "management.not_found",
+                        "management.forbidden",
+                        "management.conflict",
+                        "management.asset_invalid",
+                        "command.idempotency_mismatch"
+                      ]
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "code",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/browser/work/items/{opaque_id}/assets/{asset_id}": {
+      "get": {
+        "operationId": "browserWorkAsset",
+        "security": [
+          {
+            "BrowserSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "opaque_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "asset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "bounded ticket asset",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-work-asset/v1"
+                    },
+                    "asset": {
+                      "type": "object",
+                      "properties": {
+                        "opaque_id": {
+                          "type": "string",
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                        },
+                        "mime_type": {
+                          "type": "string",
+                          "enum": [
+                            "image/png",
+                            "image/jpeg",
+                            "image/gif",
+                            "image/webp"
+                          ]
+                        },
+                        "byte_size": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 10485760
+                        },
+                        "created_at": {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        }
+                      },
+                      "required": [
+                        "opaque_id",
+                        "mime_type",
+                        "byte_size",
+                        "created_at"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "content_base64": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 14000000
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "asset",
+                    "content_base64"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid asset identifier",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-work-error/v1"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "browser.auth.required",
+                        "browser.forbidden",
+                        "browser.work.invalid",
+                        "browser.work.not_found",
+                        "browser-work.dispatch.unsupported",
+                        "tracker.revision.required",
+                        "tracker.conflict",
+                        "tracker.not_found",
+                        "tracker.phase.invalid",
+                        "tracker.input.invalid",
+                        "tracker.runtime_reference.invalid",
+                        "management.invalid",
+                        "management.not_found",
+                        "management.forbidden",
+                        "management.conflict",
+                        "management.asset_invalid",
+                        "command.idempotency_mismatch"
+                      ]
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "code",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "browser session required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-work-error/v1"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "browser.auth.required",
+                        "browser.forbidden",
+                        "browser.work.invalid",
+                        "browser.work.not_found",
+                        "browser-work.dispatch.unsupported",
+                        "tracker.revision.required",
+                        "tracker.conflict",
+                        "tracker.not_found",
+                        "tracker.phase.invalid",
+                        "tracker.input.invalid",
+                        "tracker.runtime_reference.invalid",
+                        "management.invalid",
+                        "management.not_found",
+                        "management.forbidden",
+                        "management.conflict",
+                        "management.asset_invalid",
+                        "command.idempotency_mismatch"
+                      ]
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "code",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "browser authority rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-work-error/v1"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "browser.auth.required",
+                        "browser.forbidden",
+                        "browser.work.invalid",
+                        "browser.work.not_found",
+                        "browser-work.dispatch.unsupported",
+                        "tracker.revision.required",
+                        "tracker.conflict",
+                        "tracker.not_found",
+                        "tracker.phase.invalid",
+                        "tracker.input.invalid",
+                        "tracker.runtime_reference.invalid",
+                        "management.invalid",
+                        "management.not_found",
+                        "management.forbidden",
+                        "management.conflict",
+                        "management.asset_invalid",
+                        "command.idempotency_mismatch"
+                      ]
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "code",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "asset absent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-work-error/v1"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "browser.auth.required",
+                        "browser.forbidden",
+                        "browser.work.invalid",
+                        "browser.work.not_found",
+                        "browser-work.dispatch.unsupported",
+                        "tracker.revision.required",
+                        "tracker.conflict",
+                        "tracker.not_found",
+                        "tracker.phase.invalid",
+                        "tracker.input.invalid",
+                        "tracker.runtime_reference.invalid",
+                        "management.invalid",
+                        "management.not_found",
+                        "management.forbidden",
+                        "management.conflict",
+                        "management.asset_invalid",
+                        "command.idempotency_mismatch"
+                      ]
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "code",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/browser/work/commands": {
+      "post": {
+        "operationId": "browserWorkCommand",
+        "security": [
+          {
+            "BrowserSession": [],
+            "BrowserCsrf": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "ticket.create"
+                      },
+                      "ticket_kind": {
+                        "type": "string",
+                        "enum": [
+                          "work-item",
+                          "spec",
+                          "question",
+                          "decision",
+                          "fix"
+                        ]
+                      },
+                      "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "priority": {
+                        "type": "string",
+                        "enum": [
+                          "P0",
+                          "P1",
+                          "P2",
+                          "P3"
+                        ]
+                      },
+                      "labels": {
+                        "maxItems": 32,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        }
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "kind",
+                      "title"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "ticket.update"
+                      },
+                      "opaque_id": {
+                        "type": "string",
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                      },
+                      "expected_revision": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "priority": {
+                        "type": "string",
+                        "enum": [
+                          "P0",
+                          "P1",
+                          "P2",
+                          "P3"
+                        ]
+                      },
+                      "labels": {
+                        "maxItems": 32,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        }
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "kind",
+                      "opaque_id",
+                      "expected_revision"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "ticket.transition"
+                      },
+                      "opaque_id": {
+                        "type": "string",
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                      },
+                      "expected_revision": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "phase": {
+                        "type": "string",
+                        "enum": [
+                          "queued",
+                          "building",
+                          "blocked",
+                          "built",
+                          "verifying",
+                          "verified",
+                          "rejected",
+                          "done"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "kind",
+                      "opaque_id",
+                      "expected_revision",
+                      "phase"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "management.gate.create"
+                      },
+                      "gate_kind": {
+                        "type": "string",
+                        "enum": [
+                          "approval",
+                          "input"
+                        ]
+                      },
+                      "question": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512
+                      },
+                      "assignee": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "kind",
+                      "gate_kind",
+                      "question",
+                      "assignee"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "dispatch"
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "kind"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "typed browser command outcome",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-work-command/v1"
+                    },
+                    "command_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "completed",
+                        "rejected",
+                        "conflict",
+                        "idempotency_mismatch"
+                      ]
+                    },
+                    "resource_revision": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "result": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "ticket"
+                            },
+                            "ticket": {
+                              "type": "object",
+                              "properties": {
+                                "opaque_id": {
+                                  "type": "string",
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "work-item",
+                                    "spec",
+                                    "question",
+                                    "decision",
+                                    "fix"
+                                  ]
+                                },
+                                "state": {
+                                  "type": "string",
+                                  "enum": [
+                                    "todo",
+                                    "in_progress",
+                                    "blocked",
+                                    "review",
+                                    "done",
+                                    "archived"
+                                  ]
+                                },
+                                "phase": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 64
+                                },
+                                "priority": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "enum": [
+                                        "P0",
+                                        "P1",
+                                        "P2",
+                                        "P3"
+                                      ]
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "revision": {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "updated_at": {
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                }
+                              },
+                              "required": [
+                                "opaque_id",
+                                "kind",
+                                "state",
+                                "phase",
+                                "priority",
+                                "revision",
+                                "updated_at"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "ticket"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "gate"
+                            },
+                            "opaque_id": {
+                              "type": "string",
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "awaiting",
+                                "approved",
+                                "denied",
+                                "cancelled"
+                              ]
+                            },
+                            "updated_at": {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "opaque_id",
+                            "status",
+                            "updated_at"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "unsupported"
+                            },
+                            "code": {
+                              "type": "string",
+                              "const": "browser-work.dispatch.unsupported"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "code"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "command_id",
+                    "status",
+                    "resource_revision",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid command",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-work-error/v1"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "browser.auth.required",
+                        "browser.forbidden",
+                        "browser.work.invalid",
+                        "browser.work.not_found",
+                        "browser-work.dispatch.unsupported",
+                        "tracker.revision.required",
+                        "tracker.conflict",
+                        "tracker.not_found",
+                        "tracker.phase.invalid",
+                        "tracker.input.invalid",
+                        "tracker.runtime_reference.invalid",
+                        "management.invalid",
+                        "management.not_found",
+                        "management.forbidden",
+                        "management.conflict",
+                        "management.asset_invalid",
+                        "command.idempotency_mismatch"
+                      ]
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "code",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "browser session or CSRF required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-work-error/v1"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "browser.auth.required",
+                        "browser.forbidden",
+                        "browser.work.invalid",
+                        "browser.work.not_found",
+                        "browser-work.dispatch.unsupported",
+                        "tracker.revision.required",
+                        "tracker.conflict",
+                        "tracker.not_found",
+                        "tracker.phase.invalid",
+                        "tracker.input.invalid",
+                        "tracker.runtime_reference.invalid",
+                        "management.invalid",
+                        "management.not_found",
+                        "management.forbidden",
+                        "management.conflict",
+                        "management.asset_invalid",
+                        "command.idempotency_mismatch"
+                      ]
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "code",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "browser authority rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-work-error/v1"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "browser.auth.required",
+                        "browser.forbidden",
+                        "browser.work.invalid",
+                        "browser.work.not_found",
+                        "browser-work.dispatch.unsupported",
+                        "tracker.revision.required",
+                        "tracker.conflict",
+                        "tracker.not_found",
+                        "tracker.phase.invalid",
+                        "tracker.input.invalid",
+                        "tracker.runtime_reference.invalid",
+                        "management.invalid",
+                        "management.not_found",
+                        "management.forbidden",
+                        "management.conflict",
+                        "management.asset_invalid",
+                        "command.idempotency_mismatch"
+                      ]
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "code",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "resource absent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "schema_version": {
+                      "type": "string",
+                      "const": "golem.browser-work-error/v1"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "browser.auth.required",
+                        "browser.forbidden",
+                        "browser.work.invalid",
+                        "browser.work.not_found",
+                        "browser-work.dispatch.unsupported",
+                        "tracker.revision.required",
+                        "tracker.conflict",
+                        "tracker.not_found",
+                        "tracker.phase.invalid",
+                        "tracker.input.invalid",
+                        "tracker.runtime_reference.invalid",
+                        "management.invalid",
+                        "management.not_found",
+                        "management.forbidden",
+                        "management.conflict",
+                        "management.asset_invalid",
+                        "command.idempotency_mismatch"
+                      ]
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "schema_version",
+                    "code",
+                    "correlation_id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "canonical command conflict or typed unsupported outcome",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "schema_version": {
+                          "type": "string",
+                          "const": "golem.browser-work-command/v1"
+                        },
+                        "command_id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "completed",
+                            "rejected",
+                            "conflict",
+                            "idempotency_mismatch"
+                          ]
+                        },
+                        "resource_revision": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "result": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "const": "ticket"
+                                },
+                                "ticket": {
+                                  "type": "object",
+                                  "properties": {
+                                    "opaque_id": {
+                                      "type": "string",
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                    },
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "work-item",
+                                        "spec",
+                                        "question",
+                                        "decision",
+                                        "fix"
+                                      ]
+                                    },
+                                    "state": {
+                                      "type": "string",
+                                      "enum": [
+                                        "todo",
+                                        "in_progress",
+                                        "blocked",
+                                        "review",
+                                        "done",
+                                        "archived"
+                                      ]
+                                    },
+                                    "phase": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 64
+                                    },
+                                    "priority": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "enum": [
+                                            "P0",
+                                            "P1",
+                                            "P2",
+                                            "P3"
+                                          ]
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "revision": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "updated_at": {
+                                      "type": "string",
+                                      "format": "date-time",
+                                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                    }
+                                  },
+                                  "required": [
+                                    "opaque_id",
+                                    "kind",
+                                    "state",
+                                    "phase",
+                                    "priority",
+                                    "revision",
+                                    "updated_at"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "ticket"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "const": "gate"
+                                },
+                                "opaque_id": {
+                                  "type": "string",
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                },
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "awaiting",
+                                    "approved",
+                                    "denied",
+                                    "cancelled"
+                                  ]
+                                },
+                                "updated_at": {
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "opaque_id",
+                                "status",
+                                "updated_at"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "const": "unsupported"
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "const": "browser-work.dispatch.unsupported"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "code"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "schema_version",
+                        "command_id",
+                        "status",
+                        "resource_revision",
+                        "result"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "schema_version": {
+                          "type": "string",
+                          "const": "golem.browser-work-error/v1"
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "browser.auth.required",
+                            "browser.forbidden",
+                            "browser.work.invalid",
+                            "browser.work.not_found",
+                            "browser-work.dispatch.unsupported",
+                            "tracker.revision.required",
+                            "tracker.conflict",
+                            "tracker.not_found",
+                            "tracker.phase.invalid",
+                            "tracker.input.invalid",
+                            "tracker.runtime_reference.invalid",
+                            "management.invalid",
+                            "management.not_found",
+                            "management.forbidden",
+                            "management.conflict",
+                            "management.asset_invalid",
+                            "command.idempotency_mismatch"
+                          ]
+                        },
+                        "correlation_id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        }
+                      },
+                      "required": [
+                        "schema_version",
+                        "code",
+                        "correlation_id"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
                 }
               }
             }

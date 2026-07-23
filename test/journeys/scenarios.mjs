@@ -249,6 +249,18 @@ export const scenarios = [
 		regression: "browser cookies, bearer/MCP callers, or internal adapters can forge principal scope, survive revocation, or disclose a foreign project",
 	}),
 	registerScenario({
+		id: "browser-work-opaque-projection",
+		journey: "J4",
+		tier: "integration",
+		regression: "browser work projections, detail, assets, or scoped invalidations expose unbounded prose, cross-scope identifiers, or a bearer-compatible browser surface",
+	}),
+	registerScenario({
+		id: "browser-work-command-authority",
+		journey: "J6",
+		tier: "integration",
+		regression: "browser work commands bypass durable CSRF/policy/CAS/idempotency authority, reflect command prose, or implement dispatch before GOL-82",
+	}),
+	registerScenario({
 		id: "delivery-api-fence-recheck",
 		journey: "J4",
 		tier: "integration",

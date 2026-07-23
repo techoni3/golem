@@ -41,6 +41,10 @@ import {
 	exerciseDurableCommandIdempotencyCas,
 } from "./tracker-api.mjs";
 import { exerciseBrowserPrincipalScopeAuthority } from "./browser-principal-scope.mjs";
+import {
+	exerciseBrowserWorkCommandAuthority,
+	exerciseBrowserWorkOpaqueProjection,
+} from "./browser-work.mjs";
 import { exercisePiNextTurnCrashReplay } from "./pi-next-turn-crash-replay.mjs";
 import { exercisePiHostileDiagnostics } from "./pi-hostile-diagnostics.mjs";
 import { exerciseLauncherResolution } from "./launcher-resolution.mjs";
@@ -1012,6 +1016,8 @@ export const exercises = Object.freeze({
 	"durable-command-idempotency-cas": exerciseDurableCommandIdempotencyCas,
 	"committed-outbox-all-write-paths": exerciseCommittedOutboxAllWritePaths,
 	"browser-principal-scope-authority": exerciseBrowserPrincipalScopeAuthority,
+	"browser-work-opaque-projection": exerciseBrowserWorkOpaqueProjection,
+	"browser-work-command-authority": exerciseBrowserWorkCommandAuthority,
 	"delivery-api-fence-recheck": exerciseDeliveryApiFenceRecheck,
 	"pi-next-turn-crash-replay": exercisePiNextTurnCrashReplay,
 	"pi-hostile-diagnostics": exercisePiHostileDiagnostics,

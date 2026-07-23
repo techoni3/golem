@@ -6,6 +6,7 @@ import type {
 } from "@golem/persistence";
 
 import type { TrackerCoreServices } from "./core.js";
+import { TrackerManagementError } from "./management.js";
 import { TrackerCoreError } from "./tickets/service.js";
 import type { TrackerClock } from "./types.js";
 
@@ -42,8 +43,13 @@ export class CommandGatewayError extends Error {
 		| "command.idempotency_mismatch"
 		| "tracker.not_found"
 		| "tracker.phase.invalid"
-		| "tracker.input.invalid";
-	readonly httpStatus: 400 | 404 | 409;
+		| "tracker.input.invalid"
+		| "management.invalid"
+		| "management.not_found"
+		| "management.forbidden"
+		| "management.conflict"
+		| "management.asset_invalid";
+	readonly httpStatus: 400 | 403 | 404 | 409;
 
 	constructor(
 		code: CommandGatewayError["status"],
@@ -318,6 +324,24 @@ export function createCommandGateway(options: {
 							error.message,
 							httpStatus,
 						);
+					}
+					if (error instanceof TrackerManagementError) {
+						const httpStatus: 400 | 403 | 404 | 409 =
+							error.code === "management.not_found"
+								? 404
+								: error.code === "management.forbidden"
+									? 403
+									: error.code === "management.conflict"
+									? 409
+									: 400;
+						recordTerminal(input, {
+							command_id: input.commandId,
+							status:
+								error.code === "management.conflict" ? "conflict" : "rejected",
+							reason_code: error.code,
+							result: {},
+						});
+						throw new CommandGatewayError(error.code, error.message, httpStatus);
 					}
 					throw error;
 				}

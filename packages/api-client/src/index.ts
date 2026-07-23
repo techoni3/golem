@@ -1,7 +1,16 @@
 import {
+	BrowserWorkProjectionResponseSchema,
+	BrowserWorkStreamSchema,
+	BrowserWorkWebSocketFrameSchema,
+	type BrowserWorkStream,
+	type BrowserWorkWebSocketFrame,
+	LegacyControlPlaneProjectionResponseSchema,
+	type LegacyControlPlaneProjectionResponse,
+	LegacyControlPlaneProjectionStreamSchema,
 	type WebSocketFrameV1,
 	WebSocketFrameV1Schema,
 } from "@golem/contracts";
+import type { z } from "zod";
 import createClient from "openapi-fetch";
 
 import type { paths } from "./generated/openapi.js";
@@ -140,11 +149,13 @@ export function createRuntimeProjectionClient(
 	});
 }
 
-export type ControlPlaneStream = WebSocketFrameV1["stream"];
-export type ControlPlaneProjection = Extract<
-	WebSocketFrameV1["payload"],
-	{ readonly kind: "snapshot" }
->["payload"];
+export type LegacyControlPlaneStream = z.infer<
+	typeof LegacyControlPlaneProjectionStreamSchema
+>;
+/** Retains the shared HTTP projection route's complete prior stream surface. */
+export type ControlPlaneStream = LegacyControlPlaneStream | BrowserWorkStream;
+export type ControlPlaneProjection = LegacyControlPlaneProjectionResponse["payload"];
+export type ControlPlaneProjectionResponse = LegacyControlPlaneProjectionResponse;
 
 export class ControlPlaneClientError extends Error {
 	readonly status: number;
@@ -186,6 +197,22 @@ export function createBrowserControlPlaneClient(
 	let csrfToken: string | undefined;
 	const browserHeaders = () =>
 		csrfToken === undefined ? {} : { "x-golem-csrf": csrfToken };
+	function projection(
+		stream: BrowserWorkStream,
+	): Promise<ReturnType<typeof BrowserWorkProjectionResponseSchema.parse>>;
+	function projection(
+		stream: LegacyControlPlaneStream,
+	): Promise<LegacyControlPlaneProjectionResponse>;
+	async function projection(stream: ControlPlaneStream) {
+		const result = await client.GET("/api/v1/projections/{stream}", {
+			headers: browserHeaders(),
+			params: { path: { stream } },
+		});
+		const data = requireData(result.data, result.response, "projection fetch");
+		return BrowserWorkStreamSchema.safeParse(stream).success
+			? BrowserWorkProjectionResponseSchema.parse(data)
+			: LegacyControlPlaneProjectionResponseSchema.parse(data);
+	}
 
 	return Object.freeze({
 		async bootstrap() {
@@ -204,12 +231,9 @@ export function createBrowserControlPlaneClient(
 			});
 			return requireData(result.data, result.response, "metadata fetch");
 		},
-		async projection(stream: ControlPlaneStream) {
-			const result = await client.GET("/api/v1/projections/{stream}", {
-				headers: browserHeaders(),
-				params: { path: { stream } },
-			});
-			return requireData(result.data, result.response, "projection fetch");
+		projection,
+		async browserWorkProjection(stream: BrowserWorkStream) {
+			return projection(stream);
 		},
 		async runtimeProjection(
 			stream: "live" | "history" | "diagnostics",
@@ -245,7 +269,7 @@ export function createBrowserControlPlaneClient(
 			return requireData(result.data, result.response, "browser mutation");
 		},
 		webSocketUrl(
-			stream: ControlPlaneStream,
+			stream: LegacyControlPlaneStream,
 			cursor?: {
 				readonly instanceId: string;
 				readonly sequence: number;
@@ -261,7 +285,26 @@ export function createBrowserControlPlaneClient(
 			return url.toString();
 		},
 		parseWebSocketFrame(raw: string): WebSocketFrameV1 {
-			return WebSocketFrameV1Schema.parse(JSON.parse(raw) as unknown);
+			return WebSocketFrameV1Schema.parse(JSON.parse(raw));
+		},
+		browserWorkWebSocketUrl(
+			stream: BrowserWorkStream,
+			cursor?: {
+				readonly instanceId: string;
+				readonly sequence: number;
+			},
+		) {
+			const url = new URL("/api/v1/ws", baseUrl);
+			url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+			url.searchParams.set("stream", stream);
+			if (cursor) {
+				url.searchParams.set("instance_id", cursor.instanceId);
+				url.searchParams.set("cursor", String(cursor.sequence));
+			}
+			return url.toString();
+		},
+		parseBrowserWorkWebSocketFrame(raw: string): BrowserWorkWebSocketFrame {
+			return BrowserWorkWebSocketFrameSchema.parse(JSON.parse(raw));
 		},
 	});
 }

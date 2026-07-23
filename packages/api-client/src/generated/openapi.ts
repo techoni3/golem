@@ -628,6 +628,54 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/browser/work/items/{opaque_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["browserWorkItem"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/browser/work/items/{opaque_id}/assets/{asset_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["browserWorkAsset"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/browser/work/commands": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["browserWorkCommand"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/browser/session": {
         readonly parameters: {
             readonly query?: never;
@@ -6548,16 +6596,19 @@ export interface operations {
     };
     readonly controlPlaneProjection: {
         readonly parameters: {
-            readonly query?: never;
+            readonly query?: {
+                /** @description Opaque browser-work page cursor; never a publication or project cursor. */
+                readonly cursor?: string;
+            };
             readonly header?: never;
             readonly path: {
-                readonly stream: string;
+                readonly stream: "runtime.live" | "runtime.history" | "runtime.diagnostics" | "projects" | "tracker.board" | "tracker.tree" | "management.controls" | "communication.operations";
             };
             readonly cookie?: never;
         };
         readonly requestBody?: never;
         readonly responses: {
-            /** @description projection */
+            /** @description legacy projection or bounded browser-work projection */
             readonly 200: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -6567,12 +6618,85 @@ export interface operations {
                         /** @constant */
                         readonly schema_version: "golem.control-plane-projection/v1";
                         /** @enum {string} */
-                        readonly stream: "runtime.live" | "runtime.history" | "runtime.diagnostics" | "projects" | "tracker.tree" | "tracker.board" | "communication.operations";
+                        readonly stream: "runtime.live" | "runtime.history" | "runtime.diagnostics" | "projects";
                         readonly resource_revision: number;
-                        readonly payload: {
-                            readonly [key: string]: unknown;
-                        };
-                    };
+                        readonly payload: unknown;
+                    } | ({
+                        /** @constant */
+                        readonly schema_version: "golem.browser-work-projection/v1";
+                        readonly resource_revision: number;
+                        readonly next_cursor: string | null;
+                        /** @constant */
+                        readonly stream: "tracker.board";
+                        readonly items: readonly {
+                            readonly opaque_id: string;
+                            /** @enum {string} */
+                            readonly kind: "work-item" | "spec" | "question" | "decision" | "fix";
+                            /** @enum {string} */
+                            readonly state: "todo" | "in_progress" | "blocked" | "review" | "done" | "archived";
+                            readonly phase: string;
+                            readonly priority: ("P0" | "P1" | "P2" | "P3") | null;
+                            readonly revision: number;
+                            /** Format: date-time */
+                            readonly updated_at: string;
+                        }[];
+                    } | {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-work-projection/v1";
+                        readonly resource_revision: number;
+                        readonly next_cursor: string | null;
+                        /** @constant */
+                        readonly stream: "tracker.tree";
+                        readonly items: readonly {
+                            readonly opaque_id: string;
+                            /** @enum {string} */
+                            readonly kind: "work-item" | "spec" | "question" | "decision" | "fix";
+                            /** @enum {string} */
+                            readonly state: "todo" | "in_progress" | "blocked" | "review" | "done" | "archived";
+                            readonly phase: string;
+                            readonly priority: ("P0" | "P1" | "P2" | "P3") | null;
+                            readonly revision: number;
+                            /** Format: date-time */
+                            readonly updated_at: string;
+                            readonly parent_opaque_id?: string;
+                        }[];
+                    } | {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-work-projection/v1";
+                        readonly resource_revision: number;
+                        readonly next_cursor: string | null;
+                        /** @constant */
+                        readonly stream: "management.controls";
+                        readonly items: readonly {
+                            readonly opaque_id: string;
+                            /** @enum {string} */
+                            readonly operation_kind: "chat" | "brief" | "interrupt" | "halt" | "control";
+                            /** @enum {string} */
+                            readonly status: "queued" | "ineligible" | "delivered";
+                            /** Format: date-time */
+                            readonly created_at: string;
+                            /** Format: date-time */
+                            readonly updated_at: string;
+                        }[];
+                    } | {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-work-projection/v1";
+                        readonly resource_revision: number;
+                        readonly next_cursor: string | null;
+                        /** @constant */
+                        readonly stream: "communication.operations";
+                        readonly items: readonly {
+                            readonly opaque_id: string;
+                            /** @enum {string} */
+                            readonly operation_kind: "chat" | "brief" | "interrupt" | "halt" | "control";
+                            /** @enum {string} */
+                            readonly status: "queued" | "ineligible" | "delivered";
+                            /** Format: date-time */
+                            readonly created_at: string;
+                            /** Format: date-time */
+                            readonly updated_at: string;
+                        }[];
+                    });
                 };
             };
             /** @description unauthorized */
@@ -6590,6 +6714,409 @@ export interface operations {
                         readonly details?: {
                             readonly [key: string]: unknown;
                         };
+                    };
+                };
+            };
+        };
+    };
+    readonly browserWorkItem: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly opaque_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description bounded browser work item */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-work-detail/v1";
+                        readonly item: {
+                            readonly opaque_id: string;
+                            /** @enum {string} */
+                            readonly kind: "work-item" | "spec" | "question" | "decision" | "fix";
+                            /** @enum {string} */
+                            readonly state: "todo" | "in_progress" | "blocked" | "review" | "done" | "archived";
+                            readonly phase: string;
+                            readonly priority: ("P0" | "P1" | "P2" | "P3") | null;
+                            readonly revision: number;
+                            /** Format: date-time */
+                            readonly updated_at: string;
+                        };
+                    };
+                };
+            };
+            /** @description invalid item identifier */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-work-error/v1";
+                        /** @enum {string} */
+                        readonly code: "browser.auth.required" | "browser.forbidden" | "browser.work.invalid" | "browser.work.not_found" | "browser-work.dispatch.unsupported" | "tracker.revision.required" | "tracker.conflict" | "tracker.not_found" | "tracker.phase.invalid" | "tracker.input.invalid" | "tracker.runtime_reference.invalid" | "management.invalid" | "management.not_found" | "management.forbidden" | "management.conflict" | "management.asset_invalid" | "command.idempotency_mismatch";
+                        readonly correlation_id: string;
+                    };
+                };
+            };
+            /** @description browser session required */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-work-error/v1";
+                        /** @enum {string} */
+                        readonly code: "browser.auth.required" | "browser.forbidden" | "browser.work.invalid" | "browser.work.not_found" | "browser-work.dispatch.unsupported" | "tracker.revision.required" | "tracker.conflict" | "tracker.not_found" | "tracker.phase.invalid" | "tracker.input.invalid" | "tracker.runtime_reference.invalid" | "management.invalid" | "management.not_found" | "management.forbidden" | "management.conflict" | "management.asset_invalid" | "command.idempotency_mismatch";
+                        readonly correlation_id: string;
+                    };
+                };
+            };
+            /** @description browser authority rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-work-error/v1";
+                        /** @enum {string} */
+                        readonly code: "browser.auth.required" | "browser.forbidden" | "browser.work.invalid" | "browser.work.not_found" | "browser-work.dispatch.unsupported" | "tracker.revision.required" | "tracker.conflict" | "tracker.not_found" | "tracker.phase.invalid" | "tracker.input.invalid" | "tracker.runtime_reference.invalid" | "management.invalid" | "management.not_found" | "management.forbidden" | "management.conflict" | "management.asset_invalid" | "command.idempotency_mismatch";
+                        readonly correlation_id: string;
+                    };
+                };
+            };
+            /** @description item absent */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-work-error/v1";
+                        /** @enum {string} */
+                        readonly code: "browser.auth.required" | "browser.forbidden" | "browser.work.invalid" | "browser.work.not_found" | "browser-work.dispatch.unsupported" | "tracker.revision.required" | "tracker.conflict" | "tracker.not_found" | "tracker.phase.invalid" | "tracker.input.invalid" | "tracker.runtime_reference.invalid" | "management.invalid" | "management.not_found" | "management.forbidden" | "management.conflict" | "management.asset_invalid" | "command.idempotency_mismatch";
+                        readonly correlation_id: string;
+                    };
+                };
+            };
+        };
+    };
+    readonly browserWorkAsset: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly opaque_id: string;
+                readonly asset_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description bounded ticket asset */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-work-asset/v1";
+                        readonly asset: {
+                            readonly opaque_id: string;
+                            /** @enum {string} */
+                            readonly mime_type: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+                            readonly byte_size: number;
+                            /** Format: date-time */
+                            readonly created_at: string;
+                        };
+                        readonly content_base64: string;
+                    };
+                };
+            };
+            /** @description invalid asset identifier */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-work-error/v1";
+                        /** @enum {string} */
+                        readonly code: "browser.auth.required" | "browser.forbidden" | "browser.work.invalid" | "browser.work.not_found" | "browser-work.dispatch.unsupported" | "tracker.revision.required" | "tracker.conflict" | "tracker.not_found" | "tracker.phase.invalid" | "tracker.input.invalid" | "tracker.runtime_reference.invalid" | "management.invalid" | "management.not_found" | "management.forbidden" | "management.conflict" | "management.asset_invalid" | "command.idempotency_mismatch";
+                        readonly correlation_id: string;
+                    };
+                };
+            };
+            /** @description browser session required */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-work-error/v1";
+                        /** @enum {string} */
+                        readonly code: "browser.auth.required" | "browser.forbidden" | "browser.work.invalid" | "browser.work.not_found" | "browser-work.dispatch.unsupported" | "tracker.revision.required" | "tracker.conflict" | "tracker.not_found" | "tracker.phase.invalid" | "tracker.input.invalid" | "tracker.runtime_reference.invalid" | "management.invalid" | "management.not_found" | "management.forbidden" | "management.conflict" | "management.asset_invalid" | "command.idempotency_mismatch";
+                        readonly correlation_id: string;
+                    };
+                };
+            };
+            /** @description browser authority rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-work-error/v1";
+                        /** @enum {string} */
+                        readonly code: "browser.auth.required" | "browser.forbidden" | "browser.work.invalid" | "browser.work.not_found" | "browser-work.dispatch.unsupported" | "tracker.revision.required" | "tracker.conflict" | "tracker.not_found" | "tracker.phase.invalid" | "tracker.input.invalid" | "tracker.runtime_reference.invalid" | "management.invalid" | "management.not_found" | "management.forbidden" | "management.conflict" | "management.asset_invalid" | "command.idempotency_mismatch";
+                        readonly correlation_id: string;
+                    };
+                };
+            };
+            /** @description asset absent */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-work-error/v1";
+                        /** @enum {string} */
+                        readonly code: "browser.auth.required" | "browser.forbidden" | "browser.work.invalid" | "browser.work.not_found" | "browser-work.dispatch.unsupported" | "tracker.revision.required" | "tracker.conflict" | "tracker.not_found" | "tracker.phase.invalid" | "tracker.input.invalid" | "tracker.runtime_reference.invalid" | "management.invalid" | "management.not_found" | "management.forbidden" | "management.conflict" | "management.asset_invalid" | "command.idempotency_mismatch";
+                        readonly correlation_id: string;
+                    };
+                };
+            };
+        };
+    };
+    readonly browserWorkCommand: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": {
+                    readonly idempotency_key: string;
+                    /** @constant */
+                    readonly kind: "ticket.create";
+                    /** @enum {string} */
+                    readonly ticket_kind?: "work-item" | "spec" | "question" | "decision" | "fix";
+                    readonly title: string;
+                    /** @enum {string} */
+                    readonly priority?: "P0" | "P1" | "P2" | "P3";
+                    readonly labels?: readonly string[];
+                } | {
+                    readonly idempotency_key: string;
+                    /** @constant */
+                    readonly kind: "ticket.update";
+                    readonly opaque_id: string;
+                    readonly expected_revision: number;
+                    readonly title?: string;
+                    /** @enum {string} */
+                    readonly priority?: "P0" | "P1" | "P2" | "P3";
+                    readonly labels?: readonly string[];
+                } | {
+                    readonly idempotency_key: string;
+                    /** @constant */
+                    readonly kind: "ticket.transition";
+                    readonly opaque_id: string;
+                    readonly expected_revision: number;
+                    /** @enum {string} */
+                    readonly phase: "queued" | "building" | "blocked" | "built" | "verifying" | "verified" | "rejected" | "done";
+                } | {
+                    readonly idempotency_key: string;
+                    /** @constant */
+                    readonly kind: "management.gate.create";
+                    /** @enum {string} */
+                    readonly gate_kind: "approval" | "input";
+                    readonly question: string;
+                    readonly assignee: string;
+                } | {
+                    readonly idempotency_key: string;
+                    /** @constant */
+                    readonly kind: "dispatch";
+                };
+            };
+        };
+        readonly responses: {
+            /** @description typed browser command outcome */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-work-command/v1";
+                        readonly command_id: string;
+                        /** @enum {string} */
+                        readonly status: "completed" | "rejected" | "conflict" | "idempotency_mismatch";
+                        readonly resource_revision: number;
+                        readonly result: {
+                            /** @constant */
+                            readonly kind: "ticket";
+                            readonly ticket: {
+                                readonly opaque_id: string;
+                                /** @enum {string} */
+                                readonly kind: "work-item" | "spec" | "question" | "decision" | "fix";
+                                /** @enum {string} */
+                                readonly state: "todo" | "in_progress" | "blocked" | "review" | "done" | "archived";
+                                readonly phase: string;
+                                readonly priority: ("P0" | "P1" | "P2" | "P3") | null;
+                                readonly revision: number;
+                                /** Format: date-time */
+                                readonly updated_at: string;
+                            };
+                        } | {
+                            /** @constant */
+                            readonly kind: "gate";
+                            readonly opaque_id: string;
+                            /** @enum {string} */
+                            readonly status: "awaiting" | "approved" | "denied" | "cancelled";
+                            /** Format: date-time */
+                            readonly updated_at: string;
+                        } | {
+                            /** @constant */
+                            readonly kind: "unsupported";
+                            /** @constant */
+                            readonly code: "browser-work.dispatch.unsupported";
+                        };
+                    };
+                };
+            };
+            /** @description invalid command */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-work-error/v1";
+                        /** @enum {string} */
+                        readonly code: "browser.auth.required" | "browser.forbidden" | "browser.work.invalid" | "browser.work.not_found" | "browser-work.dispatch.unsupported" | "tracker.revision.required" | "tracker.conflict" | "tracker.not_found" | "tracker.phase.invalid" | "tracker.input.invalid" | "tracker.runtime_reference.invalid" | "management.invalid" | "management.not_found" | "management.forbidden" | "management.conflict" | "management.asset_invalid" | "command.idempotency_mismatch";
+                        readonly correlation_id: string;
+                    };
+                };
+            };
+            /** @description browser session or CSRF required */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-work-error/v1";
+                        /** @enum {string} */
+                        readonly code: "browser.auth.required" | "browser.forbidden" | "browser.work.invalid" | "browser.work.not_found" | "browser-work.dispatch.unsupported" | "tracker.revision.required" | "tracker.conflict" | "tracker.not_found" | "tracker.phase.invalid" | "tracker.input.invalid" | "tracker.runtime_reference.invalid" | "management.invalid" | "management.not_found" | "management.forbidden" | "management.conflict" | "management.asset_invalid" | "command.idempotency_mismatch";
+                        readonly correlation_id: string;
+                    };
+                };
+            };
+            /** @description browser authority rejected */
+            readonly 403: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-work-error/v1";
+                        /** @enum {string} */
+                        readonly code: "browser.auth.required" | "browser.forbidden" | "browser.work.invalid" | "browser.work.not_found" | "browser-work.dispatch.unsupported" | "tracker.revision.required" | "tracker.conflict" | "tracker.not_found" | "tracker.phase.invalid" | "tracker.input.invalid" | "tracker.runtime_reference.invalid" | "management.invalid" | "management.not_found" | "management.forbidden" | "management.conflict" | "management.asset_invalid" | "command.idempotency_mismatch";
+                        readonly correlation_id: string;
+                    };
+                };
+            };
+            /** @description resource absent */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-work-error/v1";
+                        /** @enum {string} */
+                        readonly code: "browser.auth.required" | "browser.forbidden" | "browser.work.invalid" | "browser.work.not_found" | "browser-work.dispatch.unsupported" | "tracker.revision.required" | "tracker.conflict" | "tracker.not_found" | "tracker.phase.invalid" | "tracker.input.invalid" | "tracker.runtime_reference.invalid" | "management.invalid" | "management.not_found" | "management.forbidden" | "management.conflict" | "management.asset_invalid" | "command.idempotency_mismatch";
+                        readonly correlation_id: string;
+                    };
+                };
+            };
+            /** @description canonical command conflict or typed unsupported outcome */
+            readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-work-command/v1";
+                        readonly command_id: string;
+                        /** @enum {string} */
+                        readonly status: "completed" | "rejected" | "conflict" | "idempotency_mismatch";
+                        readonly resource_revision: number;
+                        readonly result: {
+                            /** @constant */
+                            readonly kind: "ticket";
+                            readonly ticket: {
+                                readonly opaque_id: string;
+                                /** @enum {string} */
+                                readonly kind: "work-item" | "spec" | "question" | "decision" | "fix";
+                                /** @enum {string} */
+                                readonly state: "todo" | "in_progress" | "blocked" | "review" | "done" | "archived";
+                                readonly phase: string;
+                                readonly priority: ("P0" | "P1" | "P2" | "P3") | null;
+                                readonly revision: number;
+                                /** Format: date-time */
+                                readonly updated_at: string;
+                            };
+                        } | {
+                            /** @constant */
+                            readonly kind: "gate";
+                            readonly opaque_id: string;
+                            /** @enum {string} */
+                            readonly status: "awaiting" | "approved" | "denied" | "cancelled";
+                            /** Format: date-time */
+                            readonly updated_at: string;
+                        } | {
+                            /** @constant */
+                            readonly kind: "unsupported";
+                            /** @constant */
+                            readonly code: "browser-work.dispatch.unsupported";
+                        };
+                    } | {
+                        /** @constant */
+                        readonly schema_version: "golem.browser-work-error/v1";
+                        /** @enum {string} */
+                        readonly code: "browser.auth.required" | "browser.forbidden" | "browser.work.invalid" | "browser.work.not_found" | "browser-work.dispatch.unsupported" | "tracker.revision.required" | "tracker.conflict" | "tracker.not_found" | "tracker.phase.invalid" | "tracker.input.invalid" | "tracker.runtime_reference.invalid" | "management.invalid" | "management.not_found" | "management.forbidden" | "management.conflict" | "management.asset_invalid" | "command.idempotency_mismatch";
+                        readonly correlation_id: string;
                     };
                 };
             };

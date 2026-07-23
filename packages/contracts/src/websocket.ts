@@ -45,6 +45,7 @@ export const WebSocketFrameV1Schema = z
 			"projects",
 			"tracker.tree",
 			"tracker.board",
+			"management.controls",
 			"communication.operations",
 		]),
 		sequence: z.number().int().nonnegative(),

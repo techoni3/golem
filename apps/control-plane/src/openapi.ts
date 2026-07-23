@@ -1,3 +1,11 @@
+import {
+	BrowserWorkAssetResponseSchema,
+	BrowserWorkCommandRequestSchema,
+	BrowserWorkCommandResponseSchema,
+	BrowserWorkDetailResponseSchema,
+	BrowserWorkErrorSchema,
+	BrowserWorkProjectionResponseSchema,
+} from "@golem/contracts";
 import { z } from "zod";
 
 import {
@@ -7,7 +15,6 @@ import {
 	BrowserSessionResponseSchema,
 	HealthResponseSchema,
 	MetaResponseSchema,
-	ProjectionResponseSchema,
 	RuntimeIngestReceiptSchema,
 	RuntimeIngestRequestSchema,
 	RuntimeProjectionResponseSchema,
@@ -27,6 +34,42 @@ function response(description: string, value: z.ZodType): JsonRecord {
 	return {
 		description,
 		content: { "application/json": { schema: schema(value) } },
+	};
+}
+
+/** The historical route deliberately admits an opaque recursive JSON payload.
+ * Keep that legacy transport shape in OpenAPI without feeding its recursive
+ * JSON schema into codegen; browser-work response variants remain concrete. */
+const legacyProjectionOpenApiSchema: JsonRecord = {
+	type: "object",
+	additionalProperties: false,
+	required: ["schema_version", "stream", "resource_revision", "payload"],
+	properties: {
+		schema_version: { type: "string", const: "golem.control-plane-projection/v1" },
+		stream: {
+			type: "string",
+			enum: [
+				"runtime.live",
+				"runtime.history",
+				"runtime.diagnostics",
+				"projects",
+			],
+		},
+		resource_revision: { type: "integer", minimum: 0 },
+		payload: {},
+	},
+};
+
+function projectionResponse(): JsonRecord {
+	return {
+		description: "legacy projection or bounded browser-work projection",
+		content: {
+			"application/json": {
+				schema: {
+					oneOf: [legacyProjectionOpenApiSchema, schema(BrowserWorkProjectionResponseSchema)],
+				},
+			},
+		},
 	};
 }
 
@@ -221,6 +264,23 @@ export function controlPlaneOpenApiDocument(): JsonRecord {
 	return {
 		openapi: "3.1.1",
 		info: { title: "Golem control plane", version: "v1" },
+		components: {
+			securitySchemes: {
+				BrowserSession: {
+					type: "apiKey",
+					in: "cookie",
+					name: "golem_control_plane_session",
+					description: "Same-origin HttpOnly browser session; never a bearer credential.",
+				},
+				BrowserCsrf: {
+					type: "apiKey",
+					in: "header",
+					name: "x-golem-csrf",
+					description: "Same-origin mutation proof paired with BrowserSession.",
+				},
+				BearerAuth: { type: "http", scheme: "bearer" },
+			},
+		},
 		paths: {
 			...typedApiPaths(),
 			"/api/v1/management/roles": {
@@ -616,20 +676,112 @@ export function controlPlaneOpenApiDocument(): JsonRecord {
 			"/api/v1/projections/{stream}": {
 				get: {
 					operationId: "controlPlaneProjection",
+					security: [{ BrowserSession: [] }],
 					parameters: [
 						{
 							name: "stream",
 							in: "path",
 							required: true,
-							schema: { type: "string" },
+							schema: {
+								type: "string",
+								enum: [
+									"runtime.live",
+									"runtime.history",
+									"runtime.diagnostics",
+									"projects",
+									"tracker.board",
+									"tracker.tree",
+									"management.controls",
+									"communication.operations",
+								],
+							},
+						},
+						{
+							name: "cursor",
+							in: "query",
+							required: false,
+							description:
+								"Opaque browser-work page cursor; never a publication or project cursor.",
+							schema: { type: "string", pattern: "^bwp_[0-9]{1,8}$", maxLength: 12 },
 						},
 					],
 					responses: {
-						"200": response("projection", ProjectionResponseSchema),
+						"200": projectionResponse(),
 						"401": {
 							description: "unauthorized",
 							content: { "application/json": { schema: error } },
 						},
+					},
+				},
+			},
+			"/api/v1/browser/work/items/{opaque_id}": {
+				get: {
+					operationId: "browserWorkItem",
+					security: [{ BrowserSession: [] }],
+					parameters: [
+						{
+							name: "opaque_id",
+							in: "path",
+							required: true,
+							schema: { type: "string", maxLength: 128 },
+						},
+					],
+					responses: {
+						"200": response("bounded browser work item", BrowserWorkDetailResponseSchema),
+						"400": response("invalid item identifier", BrowserWorkErrorSchema),
+						"401": response("browser session required", BrowserWorkErrorSchema),
+						"403": response("browser authority rejected", BrowserWorkErrorSchema),
+						"404": response("item absent", BrowserWorkErrorSchema),
+					},
+				},
+			},
+			"/api/v1/browser/work/items/{opaque_id}/assets/{asset_id}": {
+				get: {
+					operationId: "browserWorkAsset",
+					security: [{ BrowserSession: [] }],
+					parameters: [
+						{
+							name: "opaque_id",
+							in: "path",
+							required: true,
+							schema: { type: "string", maxLength: 128 },
+						},
+						{
+							name: "asset_id",
+							in: "path",
+							required: true,
+							schema: { type: "string", maxLength: 128 },
+						},
+					],
+					responses: {
+						"200": response("bounded ticket asset", BrowserWorkAssetResponseSchema),
+						"400": response("invalid asset identifier", BrowserWorkErrorSchema),
+						"401": response("browser session required", BrowserWorkErrorSchema),
+						"403": response("browser authority rejected", BrowserWorkErrorSchema),
+						"404": response("asset absent", BrowserWorkErrorSchema),
+					},
+				},
+			},
+			"/api/v1/browser/work/commands": {
+				post: {
+					operationId: "browserWorkCommand",
+					security: [{ BrowserSession: [], BrowserCsrf: [] }],
+					requestBody: {
+						required: true,
+						content: {
+							"application/json": { schema: schema(BrowserWorkCommandRequestSchema) },
+						},
+					},
+					responses: {
+						"200": response("typed browser command outcome", BrowserWorkCommandResponseSchema),
+						"400": response("invalid command", BrowserWorkErrorSchema),
+						"401": response("browser session or CSRF required", BrowserWorkErrorSchema),
+						"403": response("browser authority rejected", BrowserWorkErrorSchema),
+						"404": response("resource absent", BrowserWorkErrorSchema),
+						"409": response(
+							"canonical command conflict or typed unsupported outcome",
+							z.union([BrowserWorkCommandResponseSchema, BrowserWorkErrorSchema]),
+						),
 					},
 				},
 			},
