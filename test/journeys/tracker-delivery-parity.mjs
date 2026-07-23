@@ -536,10 +536,26 @@ export async function exerciseBrowserTrackerDeliveryParity() {
 		const prepared = await json(origin, `/api/v1/delivery/claims/${encodeURIComponent(claim.claimToken)}/prepare`, { method: "POST", headers: bearerHeaders(), body: "{}" });
 		assert.equal(prepared.status, 200);
 		const beforeAck = writer.committedPublicationStorage().projectRevision(projectId);
+		const deltaFrame = nextFrame(socket);
 		const acknowledged = await json(origin, `/api/v1/delivery/claims/${encodeURIComponent(claim.claimToken)}/ack`, { method: "POST", headers: bearerHeaders(), body: JSON.stringify({ acknowledgement_id: "ack_gol82_browser", payload: {} }) });
 		assert.equal(acknowledged.status, 200, "settlement remains the later canonical callback");
 		assert.equal(writer.committedPublicationStorage().projectRevision(projectId), beforeAck + 1);
-		const delta = BrowserWorkWebSocketFrameSchema.parse(JSON.parse(await nextFrame(socket)));
+		const duplicateAcknowledgement = await json(
+			origin,
+			`/api/v1/delivery/claims/${encodeURIComponent(claim.claimToken)}/ack`,
+			{
+				method: "POST",
+				headers: bearerHeaders(),
+				body: JSON.stringify({ acknowledgement_id: "ack_gol82_browser", payload: {} }),
+			},
+		);
+		assert.equal(duplicateAcknowledgement.status, 200, "duplicate acknowledgement is a canonical replay");
+		assert.equal(
+			writer.committedPublicationStorage().projectRevision(projectId),
+			beforeAck + 1,
+			"duplicate settlement publishes +0",
+		);
+		const delta = BrowserWorkWebSocketFrameSchema.parse(JSON.parse(await deltaFrame));
 		assert.equal(delta.payload.kind, "delta");
 		await noFrame(foreignSocket);
 
@@ -572,7 +588,7 @@ export async function exerciseTicketDispatchHttpMcpParity() {
 		writer = openControlPlanePersistence({ runtimePath: home.runtimeDb, trackerPath: home.trackerDb, lockPath: path.join(home.root, "owner.lock") }, { ownerId: "gol82-http-mcp", clock: fixtureClock });
 		seed(writer, fixtureClock);
 		control = await start(home, writer, fixtureClock);
-		const origin = control.service.origin;
+		let origin = control.service.origin;
 		const pullTicket = ticket(control.core, "pull-only ticket");
 		const endpoint = writer.runtimeEndpointStorage().list(generationId)[0];
 		assert(endpoint, "fixture endpoint exists");
@@ -621,6 +637,28 @@ export async function exerciseTicketDispatchHttpMcpParity() {
 			},
 			"trusted MCP-only legacy content is retained in the canonical envelope",
 		);
+		const invalidHintTicket = ticket(control.core, "invalid trusted MCP hint");
+		const beforeInvalidHint = queueCounts(home);
+		const invalidHint = await invokeMcpTool(
+			createFetchApiClient(origin, {
+				bearerToken: mcpToken,
+				caller: { projectId, sessionId },
+			}),
+			"ticket_dispatch",
+			{
+				id: invalidHintTicket.id,
+				session_id: "ses_00000000-0000-4000-8000-000000000089",
+				expected_revision: invalidHintTicket.revision,
+				idempotency_key: "gol82:invalid-mcp-hint",
+			},
+		);
+		assert.equal(invalidHint.isError, undefined);
+		assert.equal(
+			JSON.parse(invalidHint.content[0].text).result.disposition,
+			"ineligible",
+			"an unresolved trusted hint fails closed instead of falling back to the ticket assignee",
+		);
+		assert.deepEqual(queueCounts(home), beforeInvalidHint);
 
 		const ineligible = control.core.tickets.create({ projectId, kind: "work-item", title: "human assignee", assignee: "human", actor: "act_gol82_browser" });
 		const beforeIneligible = queueCounts(home);
@@ -675,7 +713,7 @@ export async function exerciseTicketDispatchHttpMcpParity() {
 				method: "POST",
 				headers: bearerHeaders(),
 				body: JSON.stringify({
-						expected_revision: closed.revision,
+					expected_revision: closed.revision,
 					idempotency_key: "gol82:terminal",
 				}),
 			},
@@ -684,12 +722,37 @@ export async function exerciseTicketDispatchHttpMcpParity() {
 		assert.equal(terminalRefusal.body.result.disposition, "ineligible", "terminal tickets refuse before recipient resolution or enqueue");
 		assert.deepEqual(queueCounts(home), beforeIneligible);
 
-		const stale = await json(origin, `/api/v1/tracker/tickets/${pullTicket.id}/dispatch`, { method: "POST", headers: bearerHeaders(), body: JSON.stringify({ expected_revision: pullTicket.revision, idempotency_key: "gol82:stale" }) });
+		const staleInput = {
+			expected_revision: pullTicket.revision,
+			idempotency_key: "gol82:stale",
+		};
+		const stale = await json(origin, `/api/v1/tracker/tickets/${pullTicket.id}/dispatch`, { method: "POST", headers: bearerHeaders(), body: JSON.stringify(staleInput) });
 		assert.equal(stale.status, 201);
 		assert.equal(stale.body.result.disposition, "stale");
 		assert.deepEqual(queueCounts(home), beforeIneligible);
-		const staleReplay = await json(origin, `/api/v1/tracker/tickets/${pullTicket.id}/dispatch`, { method: "POST", headers: bearerHeaders(), body: JSON.stringify({ expected_revision: pullTicket.revision, idempotency_key: "gol82:stale" }) });
+		await control.service.close();
+		control = undefined;
+		await writer.close();
+		writer = openControlPlanePersistence({ runtimePath: home.runtimeDb, trackerPath: home.trackerDb, lockPath: path.join(home.root, "owner.lock") }, { ownerId: "gol82-http-mcp-restart", clock: fixtureClock });
+		control = await start(home, writer, fixtureClock);
+		origin = control.service.origin;
+		const staleReplay = await json(origin, `/api/v1/tracker/tickets/${pullTicket.id}/dispatch`, { method: "POST", headers: bearerHeaders(), body: JSON.stringify(staleInput) });
 		assert.deepEqual(staleReplay.body, stale.body, "stale is a durable GOL-79 outcome, not route-local synthesis");
+		const staleConflict = await json(
+			origin,
+			`/api/v1/tracker/tickets/${pullTicket.id}/dispatch`,
+			{
+				method: "POST",
+				headers: bearerHeaders(),
+				body: JSON.stringify({
+					expected_revision: pullTicket.revision + 1,
+					idempotency_key: staleInput.idempotency_key,
+				}),
+			},
+		);
+		assert.equal(staleConflict.status, 409, "changed stale replay fingerprint conflicts without dispatching");
+		assert.equal(staleConflict.body.code, "command.idempotency_mismatch");
+		assert.deepEqual(queueCounts(home), beforeIneligible);
 
 		const claims = await json(origin, "/api/v1/delivery/claims", { method: "POST", headers: bearerHeaders(), body: JSON.stringify({ limit: 10 }) });
 		const pullClaim = claims.body.items.find((item) => item.payload.ticket_id === pullTicket.id);

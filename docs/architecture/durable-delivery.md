@@ -34,11 +34,15 @@ also leaves no envelope. The enclosing receipt/CAS transaction rolls a later
 enqueue failure and its committed GOL-80 invalidation back. Acceptance is not
 settlement, which remains the later claim/prepare/ack/reply/fail/recovery path.
 
-The public bearer adapter is target-free. The dedicated MCP adapter path uses a
-separate MCP credential and may provide only a scoped legacy session alias plus
-`note`, `workspace`, and `when_idle`; the service carries those approved hints
-in the canonical envelope while current endpoint classification remains
-server-owned. Browser callers never receive that compatibility surface.
+The public bearer adapter is target-free. The dedicated MCP adapter path may
+use `GOLEM_CONTROL_PLANE_MCP_CREDENTIAL`, or the retained
+`GOLEM_CONTROL_PLANE_BEARER` compatibility credential when the former is
+absent; its server-side durable `mcp` adapter binding, not the environment
+variable spelling, establishes MCP provenance. It may provide only a scoped
+legacy session alias plus `note`, `workspace`, and `when_idle`; the service
+carries those approved hints in the canonical envelope while current endpoint
+classification remains server-owned. Browser callers never receive that
+compatibility surface.
 
 `tracker/002-durable-delivery-bus` adds namespaced tables alongside an existing
 legacy tracker schema. `tracker/003-live-tracker-core` creates the canonical

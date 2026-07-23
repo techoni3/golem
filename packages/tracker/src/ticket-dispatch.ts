@@ -126,6 +126,8 @@ export function createTicketDispatchService(options: {
 			const hinted = input.assigneeHint
 				? options.sessions.resolve(input.projectId, input.assigneeHint)
 				: undefined;
+			if (input.assigneeHint && !hinted)
+				return outcome(input.operationId, "ineligible");
 			const selected = ticket.assignee
 				? options.sessions.resolve(input.projectId, ticket.assignee)
 				: hinted;
@@ -149,7 +151,7 @@ export function createTicketDispatchService(options: {
 			});
 			if (!committed) return outcome(input.operationId, "stale");
 			const envelopeId = `env_${globalThis.crypto.randomUUID()}`;
-			options.delivery.enqueue({
+			const envelope = options.delivery.enqueue({
 				id: envelopeId,
 				projectId: input.projectId,
 				idempotencyKey: input.idempotencyKey,
@@ -170,7 +172,7 @@ export function createTicketDispatchService(options: {
 						: { when_idle: input.legacy.whenIdle }),
 				}),
 			});
-			return outcome(input.operationId, disposition);
+			return outcome(input.operationId, queueDisposition(envelope.endpoint));
 		},
 	});
 }

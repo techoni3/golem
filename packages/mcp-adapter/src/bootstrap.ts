@@ -14,7 +14,11 @@ const callerSessionId =
 	process.env.CLAUDE_CODE_SESSION_ID;
 const callerProjectId =
 	process.env.GOLEM_MCP_CALLER_PROJECT_ID || process.env.GOLEM_PROJECT_ID;
-const mcpCredential = process.env.GOLEM_CONTROL_PLANE_MCP_CREDENTIAL;
+// Provenance is established by the server's durable `adapter: "mcp"` binding,
+// not by which compatible environment spelling supplied the credential.
+const mcpCredential =
+	process.env.GOLEM_CONTROL_PLANE_MCP_CREDENTIAL ||
+	process.env.GOLEM_CONTROL_PLANE_BEARER;
 const caller: TrustedCallerContext = callerSessionId
 	? callerProjectId
 		? { sessionId: callerSessionId, projectId: callerProjectId }

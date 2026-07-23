@@ -178,6 +178,16 @@ async function startApiFixture() {
 			response.end(JSON.stringify({ id: "GOL-29", title: "render closure" }));
 			return;
 		}
+		if (request.method === "POST" && request.url === "/api/v1/tracker/mcp/tickets/GOL-29/dispatch") {
+			response.writeHead(201, { "content-type": "application/json" });
+			response.end(JSON.stringify({
+				schema_version: "golem.api-command-outcome/v1",
+				command_id: "cmd-render-dispatch",
+				status: "completed",
+				result: { kind: "dispatch", disposition: "pull_only", operation_id: "cmd-render-dispatch" },
+			}));
+			return;
+		}
 		if (request.method === "POST" && request.url === "/api/v1/tracker/tickets") {
 			response.writeHead(201, { "content-type": "application/json" });
 			response.end(JSON.stringify({ id: "GOL-900", title: body?.title, project_id: body?.project_id }));
@@ -247,6 +257,20 @@ async function assertRelocatableArtifact(root) {
 		const invalidWrite = await client.request("tools/call", { name: "ticket_dispatch", arguments: {} });
 		assert.equal(invalidWrite.result?.isError, true, JSON.stringify(invalidWrite));
 		assert.equal(api.requests.some((request) => request.path === "/api/tickets/GOL-29/dispatch"), false, "invalid writes stop at the MCP schema boundary");
+		const dispatch = await client.request("tools/call", {
+			name: "ticket_dispatch",
+			arguments: {
+				id: "GOL-29",
+				session_id: "ses-target",
+				expected_revision: 7,
+				idempotency_key: "render-mcp-dispatch",
+				note: "render closure delivery",
+				workspace: "worktree",
+				when_idle: true,
+			},
+		});
+		assert.equal(dispatch.result?.isError, undefined, JSON.stringify(dispatch));
+		assert.match(dispatch.result?.content?.[0]?.text ?? "", /pull_only/);
 		const write = await client.request("tools/call", {
 			name: "ticket_create",
 			arguments: { title: "real closure write", project: "golem-38ab8a" },
@@ -257,15 +281,24 @@ async function assertRelocatableArtifact(root) {
 			api.requests.map((request) => ({ method: request.method, path: request.path })),
 			[
 				{ method: "GET", path: "/api/v1/tracker/tickets/GOL-29" },
+				{ method: "POST", path: "/api/v1/tracker/mcp/tickets/GOL-29/dispatch" },
 				{ method: "POST", path: "/api/v1/tracker/tickets" },
 			],
 		);
 		assert.deepEqual(api.requests[1]?.body, {
+			session_id: "ses-target",
+			expected_revision: 7,
+			idempotency_key: "render-mcp-dispatch",
+			note: "render closure delivery",
+			workspace: "worktree",
+			when_idle: true,
+		});
+		assert.deepEqual(api.requests[2]?.body, {
 			title: "real closure write",
 			project_id: "golem-38ab8a",
 		});
 		assert(api.requests.every((request) => request.authorization === "Bearer loopback-bearer-for-j1"), "artifact injects the loopback bearer on every request");
-		assert.equal(JSON.stringify([initialized, listed, read, invalidWrite, write]).includes("loopback-bearer-for-j1"), false, "MCP summaries never serialize bearer credentials");
+		assert.equal(JSON.stringify([initialized, listed, read, invalidWrite, dispatch, write]).includes("loopback-bearer-for-j1"), false, "MCP summaries never serialize bearer credentials");
 		child.kill("SIGTERM");
 		await waitForExit(child);
 	} finally {
