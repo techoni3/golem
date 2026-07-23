@@ -52,6 +52,8 @@ import {
 import {
 	exerciseBrowserControlAuthorityDispatch,
 	exerciseBrowserControlRestartResync,
+	exerciseRolesGatesIdeasUi,
+	exerciseTrackerDispatchUi,
 } from "../browser/work-control-plane.mjs";
 import { exercisePiNextTurnCrashReplay } from "./pi-next-turn-crash-replay.mjs";
 import { exercisePiHostileDiagnostics } from "./pi-hostile-diagnostics.mjs";
@@ -1091,6 +1093,8 @@ export const exercises = Object.freeze({
 	"browser-control-client-resync": exerciseBrowserControlClientResync,
 	"browser-control-authority-dispatch": exerciseBrowserControlAuthorityDispatch,
 	"browser-control-restart-resync": exerciseBrowserControlRestartResync,
+	"tracker-dispatch-ui": exerciseTrackerDispatchUi,
+	"roles-gates-ideas-ui": exerciseRolesGatesIdeasUi,
 	"browser-work-opaque-projection": exerciseBrowserWorkOpaqueProjection,
 	"browser-work-command-authority": exerciseBrowserWorkCommandAuthority,
 	"delivery-api-fence-recheck": exerciseDeliveryApiFenceRecheck,

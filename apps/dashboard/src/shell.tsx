@@ -1,8 +1,8 @@
 import {
 	type BrowserControlPlaneClient,
-	type LegacyControlPlaneStream,
 	createBrowserControlPlaneClient,
 	createProjectionSynchronizer,
+	type LegacyControlPlaneStream,
 	type ProjectionConnectionState,
 } from "@golem/api-client";
 import { InlineAlert, Select, Skeleton, StatePanel, useTheme } from "@golem/ui";
@@ -17,6 +17,7 @@ import {
 } from "react-router-dom";
 
 import { LegacyCompatibilityIsland } from "./legacy-compatibility.js";
+import { ReviewRoute } from "./routes/review/index.js";
 import { RuntimeDataProvider } from "./routes/runtime/data.js";
 import {
 	DiagnosticsRoute,
@@ -28,6 +29,13 @@ import {
 	RuntimeRouteNotFound,
 	SessionsRoute,
 } from "./routes/runtime/index.js";
+import { SpecsRoute } from "./routes/specs/index.js";
+import { WorkDataProvider } from "./routes/tracker/data.js";
+import {
+	TicketRoute,
+	TrackerRoute,
+	WorkConnectionBanner,
+} from "./routes/tracker/index.js";
 import styles from "./shell.module.css";
 
 const projectionStream: LegacyControlPlaneStream = "runtime.live";
@@ -36,12 +44,7 @@ const projectionKey = [
 	"projection",
 	projectionStream,
 ] as const;
-const legacyRoutePaths = [
-	"/tracker",
-	"/specs",
-	"/settings",
-	"/tickets/:id",
-] as const;
+const legacyRoutePaths = ["/settings"] as const;
 
 type ProjectionResponse = Awaited<
 	ReturnType<BrowserControlPlaneClient["projection"]>
@@ -161,6 +164,10 @@ function RuntimeRoutes({
 			<Route element={<HistoryRoute />} path="/history" />
 			<Route element={<HistoryRoute />} path="/logs" />
 			<Route element={<DiagnosticsRoute />} path="/diagnostics" />
+			<Route element={<TrackerRoute />} path="/tracker" />
+			<Route element={<SpecsRoute />} path="/specs" />
+			<Route element={<ReviewRoute />} path="/review" />
+			<Route element={<TicketRoute />} path="/tickets/:id" />
 			{legacyRoutePaths.map((path) => (
 				<Route
 					element={<LegacyPage projection={projection} />}
@@ -197,13 +204,14 @@ function RouteContent({
 			/>
 		);
 	return (
-		<>
-			<RuntimeDataProvider client={client} enabled={bootstrapped}>
+		<RuntimeDataProvider client={client} enabled={bootstrapped}>
+			<WorkDataProvider client={client} enabled={bootstrapped}>
 				<ConnectionBanner state={projection.connection} />
 				<RuntimeConnectionBanner />
+				<WorkConnectionBanner />
 				<RuntimeRoutes projection={projection.data} />
-			</RuntimeDataProvider>
-		</>
+			</WorkDataProvider>
+		</RuntimeDataProvider>
 	);
 }
 
@@ -232,6 +240,7 @@ function Shell() {
 		["Diagnostics", "/diagnostics"],
 		["Tracker", "/tracker"],
 		["Specs", "/specs"],
+		["Review", "/review"],
 		["Settings", "/settings"],
 	] as const;
 
