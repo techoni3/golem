@@ -12,7 +12,9 @@ import { openControlPlanePersistence } from "../../apps/control-plane/dist/persi
 import { startControlPlane } from "../../apps/control-plane/dist/server.js";
 import {
 	composeControlPlaneCommandGateway,
+	composeControlPlaneEndpointEligibility,
 	composeControlPlaneManagementServices,
+	composeControlPlaneTicketDispatchService,
 	composeControlPlaneTrackerCoreServices,
 	composeControlPlaneTrackerServices,
 } from "../../apps/control-plane/dist/tracker.js";
@@ -155,18 +157,29 @@ function compose(writer, fixtureClock, home) {
 		assetRoot: path.join(home.root, "assets"),
 		tickets: core.tickets,
 	});
+	const eligibility = composeControlPlaneEndpointEligibility({
+		endpoints: writer.runtimeEndpointStorage(),
+		clock: appClock,
+	});
+	const services = composeControlPlaneTrackerServices({
+		writer,
+		clock: appClock,
+		eligibility,
+	});
 	return {
 		core,
 		management,
-		services: composeControlPlaneTrackerServices({
-			writer,
-			clock: appClock,
-			eligibility: { resolve: () => undefined },
-		}),
+		services,
 		gateway: composeControlPlaneCommandGateway({
 			writer,
 			clock: appClock,
 			core,
+		}),
+		ticketDispatch: composeControlPlaneTicketDispatchService({
+			writer,
+			core,
+			services,
+			eligibility,
 		}),
 		browserWork: createBrowserWorkServices({
 			core,
@@ -223,6 +236,7 @@ async function start(home, writer, fixtureClock) {
 		trackerServices: composed.services,
 		management: composed.management,
 		commandGateway: composed.gateway,
+		ticketDispatch: composed.ticketDispatch,
 		browserWork: composed.browserWork,
 		committedPublications: writer.committedPublicationStorage(),
 		principalResolver: identity.resolver,
@@ -708,10 +722,16 @@ export async function exerciseBrowserWorkCommandAuthority() {
 		const dispatch = await json(origin, "/api/v1/browser/work/commands", {
 			method: "POST",
 			headers: operatorHeaders,
-			body: JSON.stringify({ kind: "dispatch", idempotency_key: "gol81:dispatch" }),
+			body: JSON.stringify({
+				kind: "dispatch",
+				opaque_id: ticket.opaque_id,
+				expected_revision: transition.body.result.ticket.revision,
+				idempotency_key: "gol81:dispatch",
+			}),
 		});
-		assert.equal(dispatch.status, 409);
-		assert.equal(dispatch.body.result.kind, "unsupported");
+		assert.equal(dispatch.status, 200);
+		assert.equal(dispatch.body.result.kind, "dispatch");
+		assert.equal(dispatch.body.result.disposition, "ineligible");
 		assert.equal(writer.committedPublicationStorage().projectRevision(projectA), beforeDispatch);
 		fixtureClock.advance(61_000);
 		const expired = await json(origin, "/api/v1/browser/work/commands", {
@@ -720,7 +740,7 @@ export async function exerciseBrowserWorkCommandAuthority() {
 			body: JSON.stringify({ ...createBody, idempotency_key: "gol81:expired" }),
 		});
 		assert.equal(expired.status, 401);
-		return "real cookie+CSRF browser commands invoke the durable gateway once, preserve CAS/idempotency classification, and leave dispatch unimplemented";
+		return "real cookie+CSRF browser commands invoke the durable gateway once, preserve CAS/idempotency classification, and return a non-disclosing canonical ineligible dispatch outcome when no assigned runtime recipient exists";
 	} finally {
 		if (control) await control.service.close();
 		if (writer) await writer.close();

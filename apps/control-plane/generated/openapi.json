@@ -13922,11 +13922,23 @@
                       "kind": {
                         "type": "string",
                         "const": "dispatch"
+                      },
+                      "opaque_id": {
+                        "type": "string",
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                      },
+                      "expected_revision": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
                       }
                     },
                     "required": [
                       "idempotency_key",
-                      "kind"
+                      "kind",
+                      "opaque_id",
+                      "expected_revision"
                     ],
                     "additionalProperties": false
                   }
@@ -14095,16 +14107,42 @@
                           "properties": {
                             "kind": {
                               "type": "string",
-                              "const": "unsupported"
+                              "const": "dispatch"
                             },
-                            "code": {
+                            "disposition": {
                               "type": "string",
-                              "const": "browser-work.dispatch.unsupported"
+                              "enum": [
+                                "queued",
+                                "pull_only",
+                                "next_turn",
+                                "ineligible",
+                                "stale"
+                              ]
+                            },
+                            "operation_id": {
+                              "type": "string",
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                            },
+                            "capability": {
+                              "type": "string",
+                              "enum": [
+                                "delivery"
+                              ]
+                            },
+                            "remediation": {
+                              "type": "string",
+                              "enum": [
+                                "await_delivery",
+                                "await_next_turn",
+                                "refresh_ticket"
+                              ]
                             }
                           },
                           "required": [
                             "kind",
-                            "code"
+                            "disposition",
+                            "operation_id"
                           ],
                           "additionalProperties": false
                         }
@@ -14484,16 +14522,42 @@
                               "properties": {
                                 "kind": {
                                   "type": "string",
-                                  "const": "unsupported"
+                                  "const": "dispatch"
                                 },
-                                "code": {
+                                "disposition": {
                                   "type": "string",
-                                  "const": "browser-work.dispatch.unsupported"
+                                  "enum": [
+                                    "queued",
+                                    "pull_only",
+                                    "next_turn",
+                                    "ineligible",
+                                    "stale"
+                                  ]
+                                },
+                                "operation_id": {
+                                  "type": "string",
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                },
+                                "capability": {
+                                  "type": "string",
+                                  "enum": [
+                                    "delivery"
+                                  ]
+                                },
+                                "remediation": {
+                                  "type": "string",
+                                  "enum": [
+                                    "await_delivery",
+                                    "await_next_turn",
+                                    "refresh_ticket"
+                                  ]
                                 }
                               },
                               "required": [
                                 "kind",
-                                "code"
+                                "disposition",
+                                "operation_id"
                               ],
                               "additionalProperties": false
                             }

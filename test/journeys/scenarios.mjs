@@ -220,9 +220,9 @@ export const scenarios = [
 	}),
 	registerScenario({
 		id: "tracker-http-mcp-parity",
-		journey: "J4",
+		journey: "J6",
 		tier: "integration",
-		regression: "typed tracker HTTP and storage-free MCP delegation diverge, lose CAS conflicts, or accept forged caller identity",
+		regression: "bearer and MCP ticket dispatch can select a caller target, disagree with browser disposition, write legacy dispatch_queue, or report failure as command-time settlement",
 	}),
 	registerScenario({
 		id: "durable-command-idempotency-cas",
@@ -259,6 +259,12 @@ export const scenarios = [
 		journey: "J6",
 		tier: "integration",
 		regression: "browser work commands bypass durable CSRF/policy/CAS/idempotency authority, reflect command prose, or implement dispatch before GOL-82",
+	}),
+	registerScenario({
+		id: "browser-tracker-delivery-parity",
+		journey: "J4",
+		tier: "integration",
+		regression: "browser dispatch can bypass canonical ticket recipient/generation/fence truth, create a shadow queue, duplicate after restart, or claim settlement before a real callback",
 	}),
 	registerScenario({
 		id: "delivery-api-fence-recheck",

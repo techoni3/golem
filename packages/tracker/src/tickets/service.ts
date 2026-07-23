@@ -338,6 +338,14 @@ export interface TrackerTicketService {
 		readonly exceptionalClose?: TrackerCoreExceptionalClose;
 		readonly actor: string;
 	}): TrackerCoreWorkItem;
+	/** Internal delivery seam; not exposed as a caller-controlled ticket patch. */
+	recordDispatch(input: {
+		readonly id: string;
+		readonly expectedRevision: number;
+		readonly dispatchedTo: string;
+		readonly assignee?: string;
+		readonly actor: string;
+	}): TrackerCoreWorkItem;
 	transition(input: {
 		readonly id: string;
 		readonly expectedRevision: number;
@@ -554,6 +562,26 @@ export function createTrackerTicketService(options: {
 				mutation: createTrackerMutation(options.clock, actor),
 				...(exceptionalClose ? { exceptionalClose } : {}),
 			});
+			if (!updated)
+				throw new TrackerCoreError(
+					"tracker.conflict",
+					"ticket revision is stale or ticket does not exist",
+				);
+			return updated;
+		},
+		recordDispatch(input: Parameters<TrackerTicketService["recordDispatch"]>[0]) {
+				const updated = options.storage.recordWorkItemDispatch({
+					id: requireTrackerText(input.id, "ticket id"),
+					expectedRevision: requireRevision(input.expectedRevision),
+					dispatchedTo: requireTrackerText(input.dispatchedTo, "dispatch recipient"),
+					...(input.assignee === undefined
+						? {}
+						: { assignee: requireTrackerText(input.assignee, "assignee") }),
+					mutation: createTrackerMutation(
+						options.clock,
+						requireTrackerActor(input.actor),
+					),
+				});
 			if (!updated)
 				throw new TrackerCoreError(
 					"tracker.conflict",

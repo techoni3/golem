@@ -36,10 +36,13 @@ import { exerciseCompactLauncherMatrix } from "./compact-launcher-matrix.mjs";
 import { exerciseDirectLaunchRetainsIntegration } from "./direct-launch-retains-integration.mjs";
 import { exerciseLauncherLaunchabilityDeliverySplit } from "./launcher-launchability-delivery-split.mjs";
 import {
-	exerciseTrackerHttpMcpParity,
 	exerciseDeliveryApiFenceRecheck,
 	exerciseDurableCommandIdempotencyCas,
 } from "./tracker-api.mjs";
+import {
+	exerciseBrowserTrackerDeliveryParity,
+	exerciseTicketDispatchHttpMcpParity,
+} from "./tracker-delivery-parity.mjs";
 import { exerciseBrowserPrincipalScopeAuthority } from "./browser-principal-scope.mjs";
 import {
 	exerciseBrowserWorkCommandAuthority,
@@ -1012,7 +1015,8 @@ export const exercises = Object.freeze({
 	"ws-gap-resync": exerciseWsGapResync,
 	"tracker-core-compatibility": exerciseTrackerCoreCompatibility,
 	"tracker-fresh-db-transition": exerciseTrackerFreshDbTransition,
-	"tracker-http-mcp-parity": exerciseTrackerHttpMcpParity,
+	"tracker-http-mcp-parity": exerciseTicketDispatchHttpMcpParity,
+	"browser-tracker-delivery-parity": exerciseBrowserTrackerDeliveryParity,
 	"durable-command-idempotency-cas": exerciseDurableCommandIdempotencyCas,
 	"committed-outbox-all-write-paths": exerciseCommittedOutboxAllWritePaths,
 	"browser-principal-scope-authority": exerciseBrowserPrincipalScopeAuthority,

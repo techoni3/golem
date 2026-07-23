@@ -949,6 +949,48 @@ export class TrackerCoreRepository implements TrackerCoreStorageCapability {
 		});
 	}
 
+	/**
+	 * The canonical companion of a durable ticket envelope. It deliberately
+	 * updates only historical dispatch output (and, for trusted legacy bridge
+	 * calls, an otherwise absent current assignee) under the ticket CAS.
+	 */
+	recordWorkItemDispatch(input: {
+		readonly id: string;
+		readonly expectedRevision: number;
+		readonly dispatchedTo: string;
+		readonly assignee?: string;
+		readonly mutation: TrackerCoreMutationMetadata;
+	}): TrackerCoreWorkItem | undefined {
+		return this.#store.transaction(() => {
+			const current = this.getWorkItem(input.id);
+			if (!current || current.revision !== input.expectedRevision) return undefined;
+			const changed = this.#store.run(
+				this.#store.queries
+					.updateTable("tickets")
+					.set({
+						...(input.assignee === undefined ? {} : { assignee: input.assignee }),
+						dispatched_to: input.dispatchedTo,
+						dispatched_at: input.mutation.now,
+						updated_at: input.mutation.now,
+					})
+					.where("tickets.id", "=", current.id),
+			);
+			if (changed.changes !== 1) return undefined;
+			const stored = this.getWorkItem(current.id);
+			if (!stored) throw new Error("dispatched ticket cannot be read");
+			this.#emit({
+				mutation: input.mutation,
+				ticket: stored,
+				projectId: stored.projectId,
+				type: "dispatch_queued",
+				resourceType: "ticket",
+				resourceId: stored.id,
+				details: {},
+			});
+			return this.getWorkItem(current.id) ?? stored;
+		});
+	}
+
 	transitionWorkItem(input: {
 		readonly id: string;
 		readonly expectedRevision: number;

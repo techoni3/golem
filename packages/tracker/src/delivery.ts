@@ -43,10 +43,15 @@ function cloneEndpoint(endpoint: DeliveryEligibility): DeliveryEligibility {
 	});
 }
 
-function eligible(
+function queueable(
 	endpoint: DeliveryEligibility | undefined,
 ): endpoint is DeliveryEligibility {
-	if (endpoint?.readiness !== "ready") return false;
+	if (
+		endpoint?.readiness !== "ready" &&
+		endpoint?.readiness !== "pull_only" &&
+		endpoint?.readiness !== "next_turn"
+	)
+		return false;
 	return endpoint.capabilities.some(
 		(capability) =>
 			capability.capability === "delivery" &&
@@ -64,7 +69,9 @@ function endpointMatches(
 			current.endpointId === stored.endpointId &&
 			current.generationId === stored.generationId &&
 			current.ownerFence === stored.ownerFence &&
-			eligible(current),
+			current.readiness === stored.readiness &&
+			current.mode === stored.mode &&
+			queueable(current),
 	);
 }
 
@@ -96,8 +103,10 @@ export function createDurableDeliveryService(options: {
 		if (input.replyToRecipientId !== undefined)
 			requireIdentifier(input.replyToRecipientId, "delivery reply recipient");
 		requireJsonObject(input.payload, "delivery payload");
-		const endpoint = options.eligibility.resolve(input.recipientId);
-		if (!eligible(endpoint))
+		const endpoint = options.eligibility.resolve(
+			input.eligibilityRecipientId ?? input.recipientId,
+		);
+		if (!queueable(endpoint))
 			throw new Error("delivery endpoint is not eligible for a new envelope");
 		const maxAttempts = input.maxAttempts ?? defaultMaxAttempts;
 		requireMaxAttempts(maxAttempts);
@@ -168,7 +177,7 @@ export function createDurableDeliveryService(options: {
 		return Object.freeze({
 			envelope,
 			prepare() {
-				const current = options.eligibility.resolve(envelope.recipientId);
+				const current = options.eligibility.resolve(envelope.endpoint.generationId);
 				if (endpointMatches(envelope.endpoint, current)) {
 					prepared = true;
 					return Object.freeze({ kind: "deliver" as const, envelope });
@@ -213,7 +222,7 @@ export function createDurableDeliveryService(options: {
 				const endpoint = options.eligibility.resolve(
 					envelope.replyToRecipientId,
 				);
-				if (!eligible(endpoint))
+				if (!queueable(endpoint))
 					throw new Error("reply endpoint is not eligible");
 				const child: DeliveryEnvelope = Object.freeze({
 					id: input.id,

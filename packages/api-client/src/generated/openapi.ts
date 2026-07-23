@@ -6960,6 +6960,8 @@ export interface operations {
                     readonly idempotency_key: string;
                     /** @constant */
                     readonly kind: "dispatch";
+                    readonly opaque_id: string;
+                    readonly expected_revision: number;
                 };
             };
         };
@@ -7002,9 +7004,14 @@ export interface operations {
                             readonly updated_at: string;
                         } | {
                             /** @constant */
-                            readonly kind: "unsupported";
-                            /** @constant */
-                            readonly code: "browser-work.dispatch.unsupported";
+                            readonly kind: "dispatch";
+                            /** @enum {string} */
+                            readonly disposition: "queued" | "pull_only" | "next_turn" | "ineligible" | "stale";
+                            readonly operation_id: string;
+                            /** @enum {string} */
+                            readonly capability?: "delivery";
+                            /** @enum {string} */
+                            readonly remediation?: "await_delivery" | "await_next_turn" | "refresh_ticket";
                         };
                     };
                 };
@@ -7107,9 +7114,14 @@ export interface operations {
                             readonly updated_at: string;
                         } | {
                             /** @constant */
-                            readonly kind: "unsupported";
-                            /** @constant */
-                            readonly code: "browser-work.dispatch.unsupported";
+                            readonly kind: "dispatch";
+                            /** @enum {string} */
+                            readonly disposition: "queued" | "pull_only" | "next_turn" | "ineligible" | "stale";
+                            readonly operation_id: string;
+                            /** @enum {string} */
+                            readonly capability?: "delivery";
+                            /** @enum {string} */
+                            readonly remediation?: "await_delivery" | "await_next_turn" | "refresh_ticket";
                         };
                     } | {
                         /** @constant */

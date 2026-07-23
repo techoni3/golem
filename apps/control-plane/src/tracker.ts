@@ -5,6 +5,7 @@ import type {
 } from "@golem/persistence";
 import {
 	createCommandGateway,
+	createTicketDispatchService,
 	createTrackerCoreServices,
 	createTrackerManagementServices,
 	createTrackerServices,
@@ -16,6 +17,8 @@ import {
 	type TrackerManagementIdentityPort,
 	type TrackerManagementServices,
 	type TrackerServices,
+	type TicketDispatchService,
+	TrackerCoreError,
 } from "@golem/tracker";
 
 /**
@@ -71,9 +74,18 @@ export function composeControlPlaneEndpointEligibility(options: {
 				requiredCapability: "delivery",
 				now: options.clock.now(),
 			});
-			if (eligibility.disposition !== "eligible" || !eligibility.endpoint)
-				return undefined;
 			const endpoint = eligibility.endpoint;
+			if (!endpoint) return undefined;
+			const pullQueueable =
+				(endpoint.readiness === "pull_only" || endpoint.readiness === "next_turn") &&
+				endpoint.state === "healthy" &&
+				endpoint.capabilities.some(
+					(capability) =>
+						capability.capability === "delivery" &&
+						(capability.qualification === "supported" ||
+							capability.qualification === "experimental"),
+				);
+			if (eligibility.disposition !== "eligible" && !pullQueueable) return undefined;
 			return Object.freeze({
 				recipientId,
 				generationId: endpoint.generationId,
@@ -88,6 +100,43 @@ export function composeControlPlaneEndpointEligibility(options: {
 				})),
 			});
 		},
+	});
+}
+
+/**
+ * The narrow GOL-82 bridge.  It composes canonical tracker/runtime facts only;
+ * browser, bearer, and MCP adapters receive this service rather than storage,
+ * endpoint, or delivery handles.
+ */
+export function composeControlPlaneTicketDispatchService(options: {
+	readonly writer: PersistenceWriteCapability;
+	readonly core: TrackerCoreServices;
+	readonly services: TrackerServices;
+	readonly eligibility: DeliveryEligibilityPort;
+}): TicketDispatchService {
+	const sessions = options.writer.runtimeSessionStorage();
+	return createTicketDispatchService({
+		tickets: {
+			get(projectId, ticketId) {
+				const ticket = options.core.tickets.get(ticketId)?.ticket;
+				return ticket?.projectId === projectId ? ticket : undefined;
+			},
+			record(input) {
+				try {
+					return options.core.tickets.recordDispatch(input);
+				} catch (error) {
+					if (error instanceof TrackerCoreError && error.code === "tracker.conflict")
+						return undefined;
+					throw error;
+				}
+			},
+		},
+		sessions: {
+			resolve: (projectId, reference) =>
+				sessions.resolveLogicalSession(projectId, reference),
+		},
+		eligibility: options.eligibility,
+		delivery: options.services.delivery,
 	});
 }
 

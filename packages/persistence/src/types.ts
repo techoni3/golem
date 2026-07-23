@@ -135,6 +135,15 @@ export interface RuntimeSessionStorage {
 		readonly producerId?: string;
 		readonly alias: string;
 	}): Readonly<{ sessionId?: string; generationId?: string }> | undefined;
+	/**
+	 * Fail-closed project-scoped alias lookup for service composition. A raw
+	 * legacy alias is usable only when it resolves to exactly one logical
+	 * session with one active generation.
+	 */
+	resolveLogicalSession(
+		projectId: string,
+		reference: string,
+	): Readonly<{ sessionId: string; generationId: string }> | undefined;
 }
 
 export type EndpointRouteKind = "control" | "delivery" | "observation";
@@ -1060,6 +1069,19 @@ export interface TrackerCoreStorageCapability {
 		>;
 		readonly mutation: TrackerCoreMutationMetadata;
 		readonly exceptionalClose?: TrackerCoreExceptionalClose;
+	}): TrackerCoreWorkItem | undefined;
+	/**
+	 * Delivery acceptance is the sole writer of historical dispatch facts. The
+	 * caller supplies the selected logical recipient after canonical runtime
+	 * resolution; neither a route nor the browser can write these columns.
+	 */
+	recordWorkItemDispatch(input: {
+		readonly id: string;
+		readonly expectedRevision: number;
+		readonly dispatchedTo: string;
+		/** Trusted compatibility may fill an absent current assignee atomically. */
+		readonly assignee?: string;
+		readonly mutation: TrackerCoreMutationMetadata;
 	}): TrackerCoreWorkItem | undefined;
 	transitionWorkItem(input: {
 		readonly id: string;

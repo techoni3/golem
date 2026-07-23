@@ -455,24 +455,25 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 	}),
 	definition({
 		name: "ticket_dispatch",
-		description: "Dispatch a ticket to one session.",
+		description:
+			"Queue canonical tracker delivery for the ticket's current assignee. session_id is a legacy hint only.",
 		fields: {
 			...ticketFields,
 			session_id: string(),
+			expected_revision: integer,
+			idempotency_key: string(),
 			note: string(),
 			when_idle: boolean,
 			workspace: string(),
 		},
-		required: ["id", "session_id"],
+		required: ["id"],
 		request: (input) => ({
 			method: "POST",
-			path: `/api/tickets/${encodeURIComponent(String(input.id))}/dispatch`,
+			path: `/api/v1/tracker/tickets/${encodeURIComponent(String(input.id))}/dispatch`,
 			body: defined({
 				session_id: input.session_id,
-				note: input.note,
-				workspace: input.workspace,
-				mode: input.when_idle ? "when_idle" : "now",
-				sender_id: trustedCaller(input).sessionId,
+				expected_revision: input.expected_revision,
+				idempotency_key: input.idempotency_key,
 			}),
 		}),
 	}),
