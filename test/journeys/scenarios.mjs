@@ -273,6 +273,18 @@ export const scenarios = [
 		regression: "browser dispatch can bypass canonical ticket recipient/generation/fence truth, create a shadow queue, duplicate after restart, claim settlement before a real callback, or leave scoped HTTP refetch without safe receipt/envelope truth",
 	}),
 	registerScenario({
+		id: "browser-control-authority-dispatch",
+		journey: "J4",
+		tier: "integration",
+		regression: "the real browser control surface can bypass same-origin cookie/CSRF authority, target delivery directly, duplicate a replayed dispatch, or claim settlement before canonical delivery callbacks",
+	}),
+	registerScenario({
+		id: "browser-control-restart-resync",
+		journey: "J6",
+		tier: "integration",
+		regression: "the real browser control surface can retain stale truth after a compacted cursor or control-plane restart, disclose scoped authority facts, or retain success artifacts",
+	}),
+	registerScenario({
 		id: "delivery-api-fence-recheck",
 		journey: "J4",
 		tier: "integration",

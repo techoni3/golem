@@ -49,6 +49,10 @@ import {
 	exerciseBrowserWorkCommandAuthority,
 	exerciseBrowserWorkOpaqueProjection,
 } from "./browser-work.mjs";
+import {
+	exerciseBrowserControlAuthorityDispatch,
+	exerciseBrowserControlRestartResync,
+} from "../browser/work-control-plane.mjs";
 import { exercisePiNextTurnCrashReplay } from "./pi-next-turn-crash-replay.mjs";
 import { exercisePiHostileDiagnostics } from "./pi-hostile-diagnostics.mjs";
 import { exerciseLauncherResolution } from "./launcher-resolution.mjs";
@@ -1085,6 +1089,8 @@ export const exercises = Object.freeze({
 	"committed-outbox-all-write-paths": exerciseCommittedOutboxAllWritePaths,
 	"browser-principal-scope-authority": exerciseBrowserPrincipalScopeAuthority,
 	"browser-control-client-resync": exerciseBrowserControlClientResync,
+	"browser-control-authority-dispatch": exerciseBrowserControlAuthorityDispatch,
+	"browser-control-restart-resync": exerciseBrowserControlRestartResync,
 	"browser-work-opaque-projection": exerciseBrowserWorkOpaqueProjection,
 	"browser-work-command-authority": exerciseBrowserWorkCommandAuthority,
 	"delivery-api-fence-recheck": exerciseDeliveryApiFenceRecheck,

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Work control plane</title>
+		<style>
+			:root {
+				color-scheme: dark;
+				font-family: ui-sans-serif, system-ui, sans-serif;
+				background: #0b1020;
+				color: #e7edf8;
+			}
+			body {
+				margin: 0 auto;
+				max-width: 68rem;
+				padding: 2rem;
+			}
+			header,
+			section {
+				border: 1px solid #334155;
+				border-radius: 0.75rem;
+				margin-block: 1rem;
+				padding: 1rem;
+			}
+			[data-connection="connected"] {
+				color: #86efac;
+			}
+			[data-connection="connecting"],
+			[data-connection="reconnecting"] {
+				color: #fde68a;
+			}
+			ul {
+				display: grid;
+				gap: 0.5rem;
+				list-style: none;
+				padding: 0;
+			}
+			li {
+				background: #111827;
+				border-radius: 0.5rem;
+				padding: 0.75rem;
+			}
+			code {
+				overflow-wrap: anywhere;
+			}
+		</style>
+	</head>
+	<body>
+		<header>
+			<h1>Work control plane</h1>
+			<p id="work-status" role="status" data-ready="false">
+				Bootstrapping authoritative browser session…
+			</p>
+			<p>
+				Board:
+				<strong id="board-connection" data-connection="connecting"
+					>connecting</strong
+				>
+				· Operations:
+				<strong id="operations-connection" data-connection="connecting"
+					>connecting</strong
+				>
+			</p>
+		</header>
+		<main>
+			<section aria-labelledby="board-heading">
+				<h2 id="board-heading">Typed board</h2>
+				<ul id="board-items"></ul>
+			</section>
+			<section aria-labelledby="detail-heading">
+				<h2 id="detail-heading">Typed detail</h2>
+				<p id="detail-item">No detail selected.</p>
+			</section>
+			<section aria-labelledby="operations-heading">
+				<h2 id="operations-heading">Communication operations</h2>
+				<ul id="operation-items"></ul>
+			</section>
+		</main>
+		<script type="module" src="/app.js"></script>
+	</body>
+</html>

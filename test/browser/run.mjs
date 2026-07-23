@@ -1,15 +1,27 @@
 #!/usr/bin/env node
 import { exerciseControlPlaneShell } from "../control-plane/control-plane-shell.mjs";
 import { exerciseRuntimeDashboard } from "./runtime-dashboard.mjs";
+import { exerciseWorkControlPlane } from "./work-control-plane.mjs";
 
 const arguments_ = process.argv.slice(2);
 const grepIndex = arguments_.indexOf("--grep");
 const grep = grepIndex === -1 ? undefined : arguments_[grepIndex + 1];
-if (!["control-plane-shell", "dashboard-shell", "runtime-dashboard"].includes(grep) || arguments_.length !== 2)
-	throw new Error("use --grep control-plane-shell, dashboard-shell, or runtime-dashboard");
+if (
+	![
+		"control-plane-shell",
+		"dashboard-shell",
+		"runtime-dashboard",
+		"work-control-plane",
+	].includes(grep) ||
+	arguments_.length !== 2
+)
+	throw new Error(
+		"use --grep control-plane-shell, dashboard-shell, runtime-dashboard, or work-control-plane",
+	);
 
 try {
 	if (grep === "runtime-dashboard") await exerciseRuntimeDashboard();
+	else if (grep === "work-control-plane") await exerciseWorkControlPlane();
 	else await exerciseControlPlaneShell();
 	process.stdout.write(`${grep} PASS\n`);
 } catch (error) {
