@@ -315,6 +315,8 @@ export const BrowserWorkCommandRequestSchema = z.discriminatedUnion("kind", [
 	}).strict(),
 	BrowserWorkCommandBaseSchema.extend({
 		kind: z.literal("dispatch"),
+		opaque_id: BrowserOpaqueIdSchema,
+		expected_revision: z.number().int().positive(),
 	}).strict(),
 ]);
 
@@ -330,8 +332,20 @@ export const BrowserWorkCommandResultSchema = z.discriminatedUnion("kind", [
 		.strict(),
 	z
 		.object({
-			kind: z.literal("unsupported"),
-			code: z.literal("browser-work.dispatch.unsupported"),
+			kind: z.literal("dispatch"),
+			disposition: z.enum([
+				"queued",
+				"pull_only",
+				"next_turn",
+				"ineligible",
+				"stale",
+			]),
+			/** The durable GOL-79 command id, never an endpoint or target id. */
+			operation_id: BrowserOpaqueIdSchema,
+			capability: z.enum(["delivery"]).optional(),
+			remediation: z
+				.enum(["await_delivery", "await_next_turn", "refresh_ticket"])
+				.optional(),
 		})
 		.strict(),
 ]);

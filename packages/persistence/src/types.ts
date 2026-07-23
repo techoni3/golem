@@ -135,6 +135,15 @@ export interface RuntimeSessionStorage {
 		readonly producerId?: string;
 		readonly alias: string;
 	}): Readonly<{ sessionId?: string; generationId?: string }> | undefined;
+	/**
+	 * Fail-closed project-scoped alias lookup for service composition. A raw
+	 * legacy alias is usable only when it resolves to exactly one logical
+	 * session with one active generation.
+	 */
+	resolveLogicalSession(
+		projectId: string,
+		reference: string,
+	): Readonly<{ sessionId: string; generationId: string }> | undefined;
 }
 
 export type EndpointRouteKind = "control" | "delivery" | "observation";
@@ -185,6 +194,17 @@ export interface RuntimeEndpointMutationResult {
 
 export interface RuntimeEndpointEligibility {
 	readonly disposition: "eligible" | "ineligible";
+	readonly code: string;
+	readonly remedy: string;
+	readonly endpoint?: RuntimeEndpointView;
+	readonly capability?: RuntimeEndpointCapability;
+	readonly facts: Readonly<Record<string, string | number | boolean>>;
+}
+
+/** Canonical queue classification for durable delivery, after every endpoint
+ * lease/health/control/consumer/capability check has passed. */
+export interface RuntimeEndpointDeliveryEligibility {
+	readonly disposition: "ready" | "pull_only" | "next_turn" | "ineligible";
 	readonly code: string;
 	readonly remedy: string;
 	readonly endpoint?: RuntimeEndpointView;
@@ -268,6 +288,14 @@ export interface RuntimeEndpointStorage {
 		readonly expectedFence?: number;
 		readonly now?: string;
 	}): RuntimeEndpointEligibility;
+	deliveryEligibility(input: {
+		readonly generationId: string;
+		readonly routeKind: EndpointRouteKind;
+		readonly requiredCapability?: string;
+		readonly expectedOwnerFence?: number;
+		readonly expectedFence?: number;
+		readonly now?: string;
+	}): RuntimeEndpointDeliveryEligibility;
 	get(endpointId: string): RuntimeEndpointView | undefined;
 	list(generationId: string): readonly RuntimeEndpointView[];
 }
@@ -1060,6 +1088,19 @@ export interface TrackerCoreStorageCapability {
 		>;
 		readonly mutation: TrackerCoreMutationMetadata;
 		readonly exceptionalClose?: TrackerCoreExceptionalClose;
+	}): TrackerCoreWorkItem | undefined;
+	/**
+	 * Delivery acceptance is the sole writer of historical dispatch facts. The
+	 * caller supplies the selected logical recipient after canonical runtime
+	 * resolution; neither a route nor the browser can write these columns.
+	 */
+	recordWorkItemDispatch(input: {
+		readonly id: string;
+		readonly expectedRevision: number;
+		readonly dispatchedTo: string;
+		/** Trusted compatibility may fill an absent current assignee atomically. */
+		readonly assignee?: string;
+		readonly mutation: TrackerCoreMutationMetadata;
 	}): TrackerCoreWorkItem | undefined;
 	transitionWorkItem(input: {
 		readonly id: string;

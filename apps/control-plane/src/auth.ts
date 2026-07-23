@@ -247,7 +247,9 @@ export function createBrowserPrincipalResolver(options: {
 /** Request authority must be composed before routing. These names are rejected
  * even if their value happens to match a real binding, so no client can turn a
  * transport detail into an actor/scope/fence/approval/storage override. */
-export function hasRequestAuthorityOverride(request: FastifyRequest): boolean {
+export function hasRequestAuthorityHeaderOverride(
+	request: FastifyRequest,
+): boolean {
 	for (const name of Object.keys(request.headers)) {
 		if (
 			/^x-golem-(?:caller|actor|role|project|session|principal|scope|bearer|authorization|token|fence|approval|storage)/iu.test(
@@ -256,6 +258,10 @@ export function hasRequestAuthorityOverride(request: FastifyRequest): boolean {
 		)
 			return true;
 	}
+	return false;
+}
+
+function hasAuthorityOverride(value: unknown): boolean {
 	const forbidden =
 		/^(?:actor|created_?by|role|project(?:_?id)?|session(?:_?id)?|bearer|authorization|token|credential|api_?key|owner(?:_?fence|_?id)?|fence|approval|storage|principal|scope|sender_?id|worker_?id)$/iu;
 	const visit = (value: unknown): boolean => {
@@ -268,7 +274,24 @@ export function hasRequestAuthorityOverride(request: FastifyRequest): boolean {
 		}
 		return false;
 	};
-	return visit(request.body) || visit(request.query);
+	return visit(value);
+}
+
+/** Use for adapters with one strictly allowlisted body compatibility hint. */
+export function hasRequestAuthorityHeaderOrQueryOverride(
+	request: FastifyRequest,
+): boolean {
+	return (
+		hasRequestAuthorityHeaderOverride(request) ||
+		hasAuthorityOverride(request.query)
+	);
+}
+
+export function hasRequestAuthorityOverride(request: FastifyRequest): boolean {
+	return (
+		hasRequestAuthorityHeaderOrQueryOverride(request) ||
+		hasAuthorityOverride(request.body)
+	);
 }
 
 export function isExpectedHost(host: string | undefined): boolean {

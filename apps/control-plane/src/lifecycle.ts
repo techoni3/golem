@@ -13,6 +13,7 @@ import type {
 	TrackerCoreServices,
 	TrackerManagementServices,
 	TrackerServices,
+	TicketDispatchService,
 } from "@golem/tracker";
 import Fastify from "fastify";
 import { registerApiV1Routes } from "./api-v1.js";
@@ -74,6 +75,8 @@ export interface ControlPlaneLifecycleOptions {
 	readonly trackerCore?: TrackerCoreServices;
 	/** Durable delivery, bus, and subscription capabilities. */
 	readonly trackerServices?: TrackerServices;
+	/** Canonical GOL-82 ticket delivery composition for all external adapters. */
+	readonly ticketDispatch?: TicketDispatchService;
 	/**
 	 * One typed command gateway.  When present, every tracker/management
 	 * mutation routes through it so a durable receipt/outcome/idempotency
@@ -181,7 +184,8 @@ export async function startControlPlane(
 			options.browserWork &&
 			options.trackerCore &&
 			options.management &&
-			options.commandGateway
+			options.commandGateway &&
+			options.ticketDispatch
 		)
 			registerBrowserWorkRoutes({
 				app,
@@ -190,6 +194,7 @@ export async function startControlPlane(
 				core: options.trackerCore,
 				management: options.management,
 				gateway: options.commandGateway,
+				ticketDispatch: options.ticketDispatch,
 			});
 		if (options.trackerCore) {
 			registerTrackerCoreCompatibilityRoutes({
@@ -205,6 +210,7 @@ export async function startControlPlane(
 				principal,
 				core: options.trackerCore,
 				services: options.trackerServices,
+				...(options.ticketDispatch ? { ticketDispatch: options.ticketDispatch } : {}),
 				...(options.commandGateway ? { gateway: options.commandGateway } : {}),
 			});
 		if (options.management)

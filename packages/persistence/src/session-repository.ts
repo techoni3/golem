@@ -1170,6 +1170,32 @@ export class RuntimeSessionRepository implements RuntimeSessionStorage {
 		};
 	}
 
+	resolveLogicalSession(
+		projectId: string,
+		reference: string,
+	): Readonly<{ sessionId: string; generationId: string }> | undefined {
+		const candidates = new Set<string>();
+		const direct = this.#database
+			.prepare<{ readonly session_id: string }>(
+				"SELECT session_id FROM logical_sessions WHERE project_id = ? AND session_id = ?",
+			)
+			.get(projectId, reference);
+		if (direct) candidates.add(direct.session_id);
+		for (const row of this.#database
+			.prepare<{ readonly session_id: string }>(
+				"SELECT DISTINCT session_id FROM session_aliases WHERE project_id = ? AND alias = ? AND session_id IS NOT NULL",
+			)
+			.all(projectId, reference))
+			candidates.add(row.session_id);
+		if (candidates.size !== 1) return undefined;
+		const sessionId = [...candidates][0];
+		if (!sessionId) return undefined;
+		const session = this.get(projectId, sessionId);
+		return session?.activeGenerationId
+			? Object.freeze({ sessionId, generationId: session.activeGenerationId })
+			: undefined;
+	}
+
 	get(projectId: string, sessionId: string): RuntimeSessionView | undefined {
 		const session = this.#database
 			.prepare<SessionProjectionRow>(

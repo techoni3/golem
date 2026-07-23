@@ -1,5 +1,6 @@
 import type {
 	EndpointRouteKind,
+	RuntimeEndpointDeliveryEligibility,
 	RuntimeEndpointEligibility,
 	RuntimeEndpointMutationResult,
 	RuntimeEndpointStorage,
@@ -74,6 +75,12 @@ export class EndpointService {
 		input: Parameters<RuntimeEndpointStorage["eligibility"]>[0],
 	): RuntimeEndpointEligibility {
 		return this.#storage.eligibility(input);
+	}
+
+	deliveryEligibility(
+		input: Parameters<RuntimeEndpointStorage["deliveryEligibility"]>[0],
+	): RuntimeEndpointDeliveryEligibility {
+		return this.#storage.deliveryEligibility(input);
 	}
 
 	get(endpointId: string): RuntimeEndpointView | undefined {

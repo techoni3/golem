@@ -21,6 +21,15 @@ export {
 	type DurableDeliveryService,
 } from "./delivery.js";
 export {
+	createTicketDispatchService,
+	type TicketDispatchDisposition,
+	type TicketDispatchInput,
+	type TicketDispatchOutcome,
+	type TicketDispatchService,
+	type TicketDispatchSessionPort,
+	type TicketDispatchTicketPort,
+} from "./ticket-dispatch.js";
+export {
 	type CommandGateway,
 	CommandGatewayError,
 	type CommandGatewayInput,

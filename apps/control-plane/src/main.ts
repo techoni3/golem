@@ -17,6 +17,7 @@ import {
 import {
 	composeControlPlaneCommandGateway,
 	composeControlPlaneEndpointEligibility,
+	composeControlPlaneTicketDispatchService,
 	composeControlPlaneManagementServices,
 	composeControlPlaneTrackerCoreServices,
 	composeControlPlaneTrackerServices,
@@ -97,6 +98,15 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 	const trackerServices = composeControlPlaneTrackerServices({
 		writer: owner,
 		clock,
+		eligibility: composeControlPlaneEndpointEligibility({
+			endpoints: owner.runtimeEndpointStorage(),
+			clock,
+		}),
+	});
+	const ticketDispatch = composeControlPlaneTicketDispatchService({
+		writer: owner,
+		core: trackerCore,
+		services: trackerServices,
 		eligibility: composeControlPlaneEndpointEligibility({
 			endpoints: owner.runtimeEndpointStorage(),
 			clock,
@@ -203,6 +213,7 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 			management,
 			trackerCore,
 			trackerServices,
+			ticketDispatch,
 			commandGateway,
 			browserWork,
 			committedPublications: owner.committedPublicationStorage(),

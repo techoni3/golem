@@ -1,18 +1,19 @@
 # REPO-MAP.md
-> Last verified: 2026-07-23 @ f23d5d5 — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-23 @ e5e88b3 — maintained via golem:docs-maintenance.
 
 ## Structure
 
 - `apps/cli/src/` owns typed grammar and UX; writes require `--apply` under `GOLEM_HOME`; completions/aliases never edit shell RC files.
-- `packages/` contains typed domain/client/testkit/UI/adapters. Managed Codex transport is storage-free; OpenCode, Claude, and Pi consume canonical ports.
-- `apps/control-plane/` composes hosts; `dashboard/web` is legacy. Typed API, generated client, and MCP are storage-free. `substrate/` is render source; `plugin/` and `dashboard/dist/` are generated.
+- `packages/` contains typed domain, client, testkit, UI, and adapters; agent transports consume canonical ports without storage.
+- `apps/control-plane/` composes hosts; `dashboard/web` is legacy. API/client/MCP are storage-free; `substrate/` renders `plugin/` and `dashboard/dist/`.
 
 ## Invariants and flow
 
-- Canonical flow is contracts → domain/runtime/tracker → control plane → generated client → clients; it excludes compat/storage/UI/harness imports.
-- One npm11 lock; `packages/persistence` is the sole SQLite writer. Producers spool; its owner recovers/quarantines/replays and owns managed migrations.
-- Tracker owns durable delivery and typed work-item/phase/comment/link/stream services; managed migrations own phase-evidence relations such as comment dispatches; exceptional close is server-composed.
-- One typed `CommandGateway` routes tracker/management mutations through one SQLite transaction and persists a durable receipt/outcome per `(project_id, idempotency_key)` (`tracker/007`); replay has no side effect and changed reuse is `409 command.idempotency_mismatch`. `tracker/008`/`009` trigger-owned opaque invalidations share that commit, delivery settlement, and direct-core writes; semantic comparisons guarantee exact-once, scope filtering precedes WS frames, and HTTP revisions remain truth.
+- Canonical flow is contracts → domain/runtime/tracker → control plane → generated client; compat/storage/UI/harness do not import inward.
+- One npm11 lock; `packages/persistence` is the sole SQLite writer, recovery owner, and migration owner.
+- Tracker owns durable delivery and typed work-item/phase/comment/link/stream services; exceptional close is server-composed.
+- `CommandGateway` makes tracker/management mutations and durable GOL-79 receipts one SQLite transaction: replays are inert, changed keys return `409 command.idempotency_mismatch`, and trigger invalidations/settlement/direct-core writes share that commit. Semantic changes publish once; scope filtering precedes WS frames; HTTP revisions are truth.
+- `TicketDispatchService` is the sole browser/bearer/MCP delivery seam: only the current assignee resolves fail-closed to an eligible active generation; `tracker_envelopes` queues in the GOL-79 transaction as `ready`/`pull_only`/`next_turn`. Terminal/ineligible writes create none; stale CAS is replayable. Historical fields/runtime references never select a target; only the server-authenticated MCP route carries its scoped legacy alias/content, and durable `mcp` binding—not environment credential spelling—defines provenance.
 - Launcher owns fail-closed writes and immutable LaunchPlan facts; CLI consumes them for picker/presets.
 - Control plane owns REST/WS. Browser work is cookie-only for reads/WS and CSRF+gateway-only for commands; GOL-80 scopes opaque frames before construction. Resolver-owned bindings reject request authority fields; foreign detail is absent.
 - Project identity is canonical Git paths; sessions have immutable generations, scoped aliases, provenance, terminal monotonicity, and deterministic effects.

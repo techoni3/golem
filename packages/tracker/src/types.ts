@@ -65,6 +65,12 @@ export interface CreateEnvelopeInput {
 	readonly idempotencyKey: string;
 	readonly senderId: string;
 	readonly recipientId: string;
+	/**
+	 * Canonical generation used for endpoint classification.  The durable row
+	 * retains `recipientId` as the logical recipient; this one-shot lookup key
+	 * is deliberately never caller-controlled or persisted as a second target.
+	 */
+	readonly eligibilityRecipientId?: string;
 	readonly kind: string;
 	readonly payload: JsonObject;
 	readonly deadlineAt?: string;

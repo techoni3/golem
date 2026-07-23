@@ -16,6 +16,7 @@ import {
 	type CommandGatewayOutcome,
 	TrackerCoreError,
 	TrackerManagementError,
+	type TicketDispatchService,
 	type TrackerCoreServices,
 	type TrackerManagementServices,
 } from "@golem/tracker";
@@ -166,6 +167,7 @@ export function registerBrowserWorkRoutes(options: {
 	readonly core: TrackerCoreServices;
 	readonly management: TrackerManagementServices;
 	readonly gateway: CommandGateway;
+	readonly ticketDispatch: TicketDispatchService;
 }): void {
 	const errorResponses = {
 		400: jsonSchema(BrowserWorkErrorSchema),
@@ -249,23 +251,37 @@ export function registerBrowserWorkRoutes(options: {
 				return browserFail(request, reply, 400, "browser.work.invalid");
 			}
 			const input = parsed.data;
-			if (input.kind === "dispatch")
-				return reply.code(409).send(
-					BrowserWorkCommandResponseSchema.parse({
-						schema_version: "golem.browser-work-command/v1",
-						command_id: `cmd_${crypto.randomUUID()}`,
-						status: "rejected",
-						resource_revision: options.browserWork.projection(
-							"tracker.board",
-							context.defaultProjectId,
-						).resource_revision,
-						result: {
-							kind: "unsupported",
-							code: "browser-work.dispatch.unsupported",
-						},
-					}),
-				);
 			try {
+				if (input.kind === "dispatch") {
+					if (!options.browserWork.ticket(context.defaultProjectId, input.opaque_id))
+						return browserFail(request, reply, 404, "browser.work.not_found");
+					const commandId = `cmd_${crypto.randomUUID()}`;
+					const result = options.gateway.execute({
+							commandId,
+							idempotencyKey: input.idempotency_key,
+							commandKind: input.kind,
+							actorId: context.actorId,
+							projectId: context.defaultProjectId,
+							correlationId: `cor_${crypto.randomUUID()}`,
+							scope: { resourceType: "ticket", resourceId: input.opaque_id },
+							expectedRevision: input.expected_revision,
+							payload: input,
+							handler: () =>
+								durableBrowserOutcome(
+									options.browserWork,
+									context.defaultProjectId,
+									options.ticketDispatch.dispatch({
+										projectId: context.defaultProjectId,
+										ticketId: input.opaque_id,
+										expectedRevision: input.expected_revision,
+										idempotencyKey: input.idempotency_key,
+										actorId: context.actorId,
+										operationId: commandId,
+									}),
+								),
+					});
+					return outcomeResponse(request, reply, result);
+				}
 				if (input.kind === "ticket.update" || input.kind === "ticket.transition") {
 					if (!options.browserWork.ticket(context.defaultProjectId, input.opaque_id))
 						return browserFail(request, reply, 404, "browser.work.not_found");

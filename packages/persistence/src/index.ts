@@ -59,6 +59,7 @@ export type {
 	RuntimeCanonicalMutation,
 	RuntimeDiagnosticRecord,
 	RuntimeEndpointCapability,
+	RuntimeEndpointDeliveryEligibility,
 	RuntimeEndpointEligibility,
 	RuntimeEndpointMutationResult,
 	RuntimeEndpointStorage,
