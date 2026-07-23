@@ -4,6 +4,7 @@ import {
 	ApiCommandOutcomeV1Schema,
 	ApiErrorV1Schema,
 	ApiPageV1Schema,
+	CommandReceiptV1Schema,
 } from "./api.js";
 import { ControlCommandV1Schema } from "./control.js";
 import {
@@ -81,6 +82,7 @@ export const ContractSchemaRegistry = [
 	entry("compatibility-ingress", CompatibilityIngressV1Schema),
 	entry("api-error", ApiErrorV1Schema),
 	entry("api-command-outcome", ApiCommandOutcomeV1Schema),
+	entry("command-receipt", CommandReceiptV1Schema),
 	entry("api-page", ApiPageV1Schema),
 	entry("websocket-frame", WebSocketFrameV1Schema),
 	entry("migration-plan", MigrationPlanV1Schema),

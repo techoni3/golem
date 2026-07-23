@@ -225,6 +225,18 @@ export const scenarios = [
 		regression: "typed tracker HTTP and storage-free MCP delegation diverge, lose CAS conflicts, or accept forged caller identity",
 	}),
 	registerScenario({
+		id: "durable-command-idempotency-cas",
+		journey: "J4",
+		tier: "integration",
+		regression: "a durable command receipt loses an original typed outcome across a full restart, re-runs a side effect on replay, accepts a stale CAS, or fails to detect an idempotency-key reuse with a differing payload",
+	}),
+	registerScenario({
+		id: "durable-command-idempotency-cas",
+		journey: "J4",
+		tier: "integration",
+		regression: "a restarted control plane replays a durable command receipt with the byte-equivalent original outcome, a stale CAS leaves tracker/audit/outbox unchanged, and a reused idempotency key with a differing payload returns 409 command.idempotency_mismatch",
+	}),
+	registerScenario({
 		id: "browser-principal-scope-authority",
 		journey: "J6",
 		tier: "integration",

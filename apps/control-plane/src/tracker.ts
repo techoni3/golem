@@ -4,9 +4,11 @@ import type {
 	RuntimeSessionStorage,
 } from "@golem/persistence";
 import {
+	createCommandGateway,
 	createTrackerCoreServices,
 	createTrackerManagementServices,
 	createTrackerServices,
+	type CommandGateway,
 	type DeliveryEligibilityPort,
 	type TrackerClock,
 	type TrackerCoreActorContext,
@@ -29,6 +31,26 @@ export function composeControlPlaneTrackerServices(options: {
 		storage: options.writer.trackerStorage(),
 		eligibility: options.eligibility,
 		clock: options.clock,
+	});
+}
+
+/**
+ * Compose the single typed command gateway.  All tracker, management,
+ * communications, and browser-originated mutations execute through this
+ * service inside one canonical tracker transaction.  Adapters (browser,
+ * bearer, MCP, legacy compat, internal/core) only translate transport into
+ * the gateway envelope; they cannot forge authority or bypass the durable
+ * receipt/outcome/idempotency primitive.
+ */
+export function composeControlPlaneCommandGateway(options: {
+	readonly writer: PersistenceWriteCapability;
+	readonly clock: TrackerClock;
+	readonly core: TrackerCoreServices;
+}): CommandGateway {
+	return createCommandGateway({
+		storage: options.writer.commandGatewayStorage(),
+		clock: options.clock,
+		core: options.core,
 	});
 }
 

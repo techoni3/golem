@@ -129,6 +129,12 @@
       "wire_version": "golem.api-command-outcome/v1"
     },
     {
+      "file": "command-receipt.schema.json",
+      "name": "command-receipt",
+      "schema_id": "urn:golem:contracts:command-receipt:v1",
+      "wire_version": "golem.command-receipt/v1"
+    },
+    {
       "file": "api-page.schema.json",
       "name": "api-page",
       "schema_id": "urn:golem:contracts:api-page:v1",

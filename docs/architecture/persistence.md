@@ -68,14 +68,20 @@ the clone and its temporary backup without writing the source database.
 The existing tracker file is inspected without mutation when it has legacy
 tables. An explicit `tracker/001-baseline` application adds Golem
 migration/audit metadata, `tracker/002-durable-delivery-bus` adds namespaced
-delivery/bus tables, and `tracker/003-live-tracker-core` creates the canonical
-live tracker rows on a fresh managed database. Typed core services use the
-legacy `tickets`, `comments`, `links`, `streams`, and `events` tables directly;
-no import or second work-item store exists. Fresh tracker files receive all
-three tracker migrations automatically. Resource CAS and outbox evidence derive
-from canonical `events.id`. The private owner exposes typed delivery and
-tracker-core storage capabilities to control-plane composition, never a raw
-tracker connection. Persistence receives an injected clock. Outbox consumers claim a bounded batch with a lease, replay only expired
+delivery/bus tables, `tracker/003-live-tracker-core` creates the canonical
+live tracker rows on a fresh managed database, `tracker/005-comment-dispatches`
+adds the canonical comment-dispatch relation, `tracker/006-browser-principal-policy`
+adds durable opaque principal bindings/scopes/credentials/sessions, and
+`tracker/007-command-receipts` adds the durable command receipt/outcome store
+that backs the `CommandGateway` (one terminal typed outcome per
+`(project_id, idempotency_key)`, restart-safe replay, 409
+`command.idempotency_mismatch` on reuse with a differing payload). Typed core
+services use the legacy `tickets`, `comments`, `links`, `streams`, and `events`
+tables directly; no import or second work-item store exists. Fresh tracker
+files receive all tracker migrations automatically. Resource CAS and outbox
+evidence derive from canonical `events.id`. The private owner exposes typed
+delivery and tracker-core storage capabilities to control-plane composition,
+never a raw tracker connection. Persistence receives an injected clock. Outbox consumers claim a bounded batch with a lease, replay only expired
 claims, acknowledge with the active claim token, and record exponential
 `next_attempt_at` backoff through a bounded observable permanent failure; this
 preserves at-least-once cross-store delivery without claiming one cross-file

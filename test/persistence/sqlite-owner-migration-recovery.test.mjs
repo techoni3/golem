@@ -279,15 +279,15 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 					busy: freshStatus.runtime.busyTimeoutMs,
 					integrity: freshStatus.tracker.integrity,
 				},
-				{
-					runtimeVersion: 1,
-					trackerVersion: 5,
-					foreignKeys: true,
-					journal: "wal",
-					busy: 2500,
-					integrity: "ok",
-				},
-				"a fresh temporary home creates separate configured runtime and tracker databases",
+			{
+				runtimeVersion: 1,
+				trackerVersion: 7,
+				foreignKeys: true,
+				journal: "wal",
+				busy: 2500,
+				integrity: "ok",
+			},
+			"a fresh temporary home creates separate configured runtime and tracker databases",
 			);
 		} finally {
 			await freshOwner.close();
@@ -1008,6 +1008,8 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 				"tracker/003-live-tracker-core",
 				"tracker/004-management-services",
 				"tracker/005-comment-dispatches",
+				"tracker/006-browser-principal-policy",
+				"tracker/007-command-receipts",
 			],
 		);
 		assert.deepEqual(
@@ -1021,6 +1023,8 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 					"tracker/003-live-tracker-core",
 					"tracker/004-management-services",
 					"tracker/005-comment-dispatches",
+					"tracker/006-browser-principal-policy",
+					"tracker/007-command-receipts",
 				],
 			},
 			"dry-run clones, applies, and verifies the tracker migration before source apply",
@@ -1056,6 +1060,8 @@ test("J3 SQLite owner, checksum migration, crash, backup, and restart recovery",
 			"tracker/003-live-tracker-core",
 			"tracker/004-management-services",
 			"tracker/005-comment-dispatches",
+			"tracker/006-browser-principal-policy",
+			"tracker/007-command-receipts",
 		]);
 		assert.equal(fs.existsSync(trackerApply.backupPath), true, "apply verifies a pre-migration backup");
 		assert.deepEqual(

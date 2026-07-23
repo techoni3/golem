@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-07-21 @ GOL-78 worktree (b78518c) — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-23 @ GOL-79 worktree (b55dff8) — maintained via golem:docs-maintenance.
 
 ## Structure
 
@@ -12,6 +12,7 @@
 - Canonical flow is contracts → domain/runtime/tracker → control plane → generated client → clients; it excludes compat/storage/UI/harness imports.
 - One npm11 lock; `packages/persistence` is the sole SQLite writer. Producers spool; its owner recovers/quarantines/replays and owns managed migrations.
 - Tracker owns durable delivery and typed work-item/phase/comment/link/stream services; managed migrations own phase-evidence relations such as comment dispatches; exceptional close is server-composed.
+- One typed `CommandGateway` (`packages/tracker/src/gateway.ts`) routes tracker/management mutations through one canonical SQLite transaction and persists a durable receipt/outcome per `(project_id, idempotency_key)` (`tracker/007-command-receipts`); restart-safe replay returns the original typed outcome with no side effect; a reused key with a differing payload returns `409 command.idempotency_mismatch`. Adapters only translate transport; receipt rows carry only a SHA-256 fingerprint — never bearer/cookie/CSRF/prompt/fence/path.
 - Launcher owns fail-closed writes and immutable LaunchPlan facts; CLI consumes them for picker/presets.
 - Control plane owns REST/WS. Its BrowserPrincipalResolver resolves durable opaque browser/bearer/MCP/internal bindings, scopes, expiry, and revocation into generic ActorContext; no request actor/role/project/fence/approval/storage field is authority. Missing binding is 401; policy denial is 403; foreign detail/commands are non-disclosing.
 - Project identity is canonical Git paths; sessions have immutable generations, scoped aliases, provenance, terminal monotonicity, and deterministic effects.

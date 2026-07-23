@@ -1,5 +1,6 @@
 import type { TrackerManagementAsset } from "@golem/persistence";
 import {
+	type CommandGateway,
 	TrackerManagementError,
 	type TrackerManagementServices,
 } from "@golem/tracker";
@@ -146,7 +147,9 @@ export function registerManagementRoutes(options: {
 	readonly app: FastifyInstance;
 	readonly principal: BrowserPrincipalResolver;
 	readonly management: TrackerManagementServices;
+	readonly gateway?: CommandGateway;
 }): void {
+	const gateway = options.gateway;
 	const schema = {
 		response: {
 			200: jsonSchema(responseSchema),

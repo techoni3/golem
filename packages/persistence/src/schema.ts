@@ -5,7 +5,7 @@ import type { DatabaseScope, MigrationDefinition } from "./types.js";
 
 export const busyTimeoutMs = 2_500;
 export const latestRuntimeVersion = 1;
-export const latestTrackerVersion = 6;
+export const latestTrackerVersion = 7;
 
 function migrationChecksum(value: string): string {
 	return crypto.createHash("sha256").update(value).digest("hex");
@@ -676,6 +676,30 @@ CREATE TABLE browser_principal_sessions (
 );
 CREATE INDEX browser_principal_scope_project ON browser_principal_scopes(project_id, binding_id);
 CREATE INDEX browser_principal_sessions_binding ON browser_principal_sessions(binding_id, expires_at);
+`,
+	),
+	migration(
+		"tracker/007-command-receipts",
+		`
+CREATE TABLE command_receipts (
+  command_id TEXT PRIMARY KEY CHECK(length(command_id) > 0),
+  project_id TEXT NOT NULL CHECK(length(trim(project_id)) > 0),
+  idempotency_key TEXT NOT NULL CHECK(length(trim(idempotency_key)) > 0),
+  command_kind TEXT NOT NULL CHECK(length(command_kind) > 0),
+  actor_id TEXT NOT NULL CHECK(length(trim(actor_id)) > 0),
+  resource_type TEXT NOT NULL CHECK(length(resource_type) > 0),
+  resource_id TEXT NOT NULL CHECK(length(resource_id) > 0),
+  correlation_id TEXT NOT NULL CHECK(length(correlation_id) > 0),
+  fingerprint TEXT NOT NULL CHECK(length(fingerprint) > 0),
+  outcome_status TEXT NOT NULL CHECK(outcome_status IN ('accepted','completed','rejected','conflict','pending','idempotency_mismatch')),
+  reason_code TEXT,
+  operation_id TEXT,
+  result_json TEXT NOT NULL DEFAULT '{}',
+  committed_at TEXT NOT NULL,
+  UNIQUE(project_id, idempotency_key)
+);
+CREATE INDEX command_receipts_lookup ON command_receipts(project_id, idempotency_key);
+CREATE INDEX command_receipts_resource ON command_receipts(project_id, resource_type, resource_id);
 `,
 	),
 ];

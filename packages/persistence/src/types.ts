@@ -1321,6 +1321,60 @@ export class RuntimeFailpointError extends Error {
 }
 
 /**
+ * Durable command receipt storage capability.  The command gateway records one
+ * terminal outcome per (project_id, idempotency_key) in the same tracker
+ * transaction as the domain mutation, and replays it after a restart without
+ * re-running any side effect.
+ */
+export interface CommandReceiptStorage {
+	/** Lookup an existing receipt by (project_id, idempotency_key). */
+	find(
+		projectId: string,
+		idempotencyKey: string,
+	): CommandReceiptRecord | undefined;
+	/**
+	 * Persist a terminal receipt.  Caller is responsible for running this
+	 * inside the same tracker transaction as the domain mutation.
+	 */
+	record(input: CommandReceiptRecord): void;
+}
+
+export interface CommandReceiptRecord {
+	readonly command_id: string;
+	readonly idempotency_key: string;
+	readonly command_kind: string;
+	readonly actor_id: string;
+	readonly project_id: string;
+	readonly resource_type: string;
+	readonly resource_id: string;
+	readonly correlation_id: string;
+	readonly fingerprint: string;
+	readonly outcome_status:
+		| "accepted"
+		| "completed"
+		| "rejected"
+		| "conflict"
+		| "pending"
+		| "idempotency_mismatch";
+	readonly reason_code?: string;
+	readonly operation_id?: string;
+	readonly result: Readonly<Record<string, unknown>>;
+	readonly committed_at: string;
+}
+
+/**
+ * Command gateway storage port.  Bundles the durable receipt store with a
+ * transaction boundary backed by the same tracker SQLite connection, so the
+ * gateway can run the domain mutation and the receipt recording inside one
+ * canonical transaction.  The runtime and tracker databases remain separate
+ * connections; this transaction covers only the tracker DB.
+ */
+export interface CommandGatewayStorage {
+	readonly receipts: CommandReceiptStorage;
+	transaction<Result>(fn: () => Result): Result;
+}
+
+/**
  * The only writable persistence capability exported from this package. Raw
  * better-sqlite3/Kysely handles and the owner constructor remain module-private.
  */
@@ -1362,6 +1416,8 @@ export interface PersistenceWriteCapability {
 	trackerCoreStorage(): TrackerCoreStorageCapability;
 	/** Typed management records owned by the same tracker SQLite owner. */
 	managementStorage(): TrackerManagementStorageCapability;
+	/** Bundled receipt store + transaction boundary for the command gateway. */
+	commandGatewayStorage(): CommandGatewayStorage;
 	/** Durable principal bindings/scopes for the control-plane auth composition. */
 	browserPrincipalStorage(): BrowserPrincipalStorage;
 	status(): PersistenceStatus;

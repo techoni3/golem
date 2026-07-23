@@ -4,6 +4,7 @@ import path from "node:path";
 
 import websocket from "@fastify/websocket";
 import type {
+	CommandGateway,
 	TrackerCoreServices,
 	TrackerManagementServices,
 	TrackerServices,
@@ -63,6 +64,13 @@ export interface ControlPlaneLifecycleOptions {
 	readonly trackerCore?: TrackerCoreServices;
 	/** Durable delivery, bus, and subscription capabilities. */
 	readonly trackerServices?: TrackerServices;
+	/**
+	 * One typed command gateway.  When present, every tracker/management
+	 * mutation routes through it so a durable receipt/outcome/idempotency
+	 * primitive backs every write path.  Omitted only by legacy journey
+	 * fixtures that pre-date the gateway.
+	 */
+	readonly commandGateway?: CommandGateway;
 }
 
 export interface StartedControlPlane {
@@ -157,6 +165,9 @@ export async function startControlPlane(
 				app,
 				tracker: options.trackerCore.compatibility,
 				principal,
+				...(options.commandGateway
+					? { gateway: options.commandGateway }
+					: {}),
 			});
 		}
 		if (options.trackerCore && options.trackerServices)
@@ -165,12 +176,18 @@ export async function startControlPlane(
 				principal,
 				core: options.trackerCore,
 				services: options.trackerServices,
+				...(options.commandGateway
+					? { gateway: options.commandGateway }
+					: {}),
 			});
 		if (options.management)
 			registerManagementRoutes({
 				app,
 				principal,
 				management: options.management,
+				...(options.commandGateway
+					? { gateway: options.commandGateway }
+					: {}),
 			});
 		closeTypedReplay = registerWsReplay({
 			app,

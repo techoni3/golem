@@ -1,9 +1,13 @@
 import crypto from "node:crypto";
 
-import type {
+import {
+	type CommandGateway,
+	CommandGatewayError as GatewayError,
+	type CommandGatewayInput,
+	type CommandGatewayOutcome,
 	TrackerCoreError,
-	TrackerCoreServices,
-	TrackerServices,
+	type TrackerCoreServices,
+	type TrackerServices,
 } from "@golem/tracker";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
@@ -73,12 +77,21 @@ function statusFor(error: unknown): number {
 			error.name === "BusEventConflictError")
 	)
 		return 409;
+	if (error instanceof Error && error.name === "CommandGatewayError") {
+		const gatewayError = error as GatewayError;
+		return gatewayError.httpStatus;
+	}
 	return 400;
 }
 
 function errorCode(error: unknown): string {
 	const code = (error as Partial<TrackerCoreError>)?.code;
-	return typeof code === "string" ? code : "api.request.invalid";
+	if (typeof code === "string") return code;
+	if (error instanceof Error && error.name === "CommandGatewayError") {
+		const gatewayError = error as GatewayError;
+		return gatewayError.status;
+	}
+	return "api.request.invalid";
 }
 
 function publicError(
@@ -142,14 +155,15 @@ export function registerApiV1Routes(options: {
 	readonly principal: BrowserPrincipalResolver;
 	readonly core: TrackerCoreServices;
 	readonly services: TrackerServices;
+	readonly gateway?: CommandGateway;
 }): void {
 	const claims = new Map<string, ClaimRecord>();
-	const idempotent = new Map<string, unknown>();
 	const subscriptions = new Map<
 		string,
 		ReturnType<TrackerServices["subscriptions"]["subscribe"]>
 	>();
 	const busEvents: unknown[] = [];
+	const gateway = options.gateway;
 	const guard = (
 		request: FastifyRequest,
 		reply: FastifyReply,
@@ -228,6 +242,65 @@ export function registerApiV1Routes(options: {
 	const ticketNotFound = (request: FastifyRequest, reply: FastifyReply) =>
 		fail(request, reply, 404, "tracker.not_found", "ticket was not found");
 
+	/**
+	 * Route a typed command through the durable command gateway when one is
+	 * composed.  When no gateway is present (legacy journey fixtures), fall
+	 * back to the direct service call.  Returns `undefined` if the gateway
+	 * outcome was already sent (mismatch/conflict); otherwise returns the
+	 * typed outcome for the caller to send.
+	 */
+	function gatewayRoute(input: {
+		readonly request: FastifyRequest;
+		readonly reply: FastifyReply;
+		readonly caller: Caller;
+		readonly commandKind: string;
+		readonly scope: CommandGatewayInput["scope"];
+		readonly payload: Readonly<Record<string, unknown>>;
+		readonly idempotencyKey?: string;
+		readonly expectedRevision?: number;
+		readonly handler: () => unknown;
+	}): CommandGatewayOutcome | undefined {
+		if (!gateway) return undefined;
+		const idempotencyKey =
+			typeof input.idempotencyKey === "string" && input.idempotencyKey
+				? input.idempotencyKey
+				: `auto:${input.commandKind}:${crypto.randomUUID()}`;
+		const outcome = gateway.execute({
+			commandId: `cmd_${crypto.randomUUID()}`,
+			idempotencyKey,
+			commandKind: input.commandKind,
+			actorId: input.caller.actor,
+			projectId: input.caller.projectId,
+			correlationId: `cor_${crypto.randomUUID()}`,
+			scope: input.scope,
+			...(input.expectedRevision !== undefined
+				? { expectedRevision: input.expectedRevision }
+				: {}),
+			payload: input.payload,
+			handler: input.handler,
+		});
+		return outcome;
+	}
+
+	function sendGatewayOutcome(
+		reply: FastifyReply,
+		outcome: CommandGatewayOutcome,
+		created = false,
+	): void {
+		if (outcome.status === "idempotency_mismatch") {
+			reply.code(409);
+			reply.send({
+				schema_version: "golem.api-error/v1",
+				code: "command.idempotency_mismatch",
+				message: "idempotency key reused with a differing payload",
+				correlation_id: outcome.command_id,
+			});
+			return;
+		}
+		reply.code(created && outcome.status === "completed" ? 201 : 200);
+		reply.send(outcome);
+	}
+
 	options.app.get("/api/v1/tracker/tickets", async (request, reply) => {
 		const callerValue = guard(request, reply);
 		if (!callerValue) return;
@@ -293,11 +366,62 @@ export function registerApiV1Routes(options: {
 		const input = withIdentity(request, reply, callerValue);
 		if (!input) return;
 		try {
-			const key =
-				typeof input.idempotency_key === "string"
-					? `${callerValue.projectId}:${input.idempotency_key}`
-					: undefined;
-			if (key && idempotent.has(key)) return reply.send(idempotent.get(key));
+			if (gateway) {
+				const idempotencyKey =
+					typeof input.idempotency_key === "string"
+						? input.idempotency_key
+						: `auto:ticket.create:${crypto.randomUUID()}`;
+				const outcome = gateway.execute({
+					commandId: `cmd_${crypto.randomUUID()}`,
+					idempotencyKey,
+					commandKind: "ticket.create",
+					actorId: callerValue.actor,
+					projectId: callerValue.projectId,
+					correlationId: `correlation_${crypto.randomUUID()}`,
+					scope: { resourceType: "ticket", resourceId: "new" },
+					payload: input,
+					handler: () =>
+						options.core.compatibility.createTicket({
+							projectId: callerValue.projectId,
+							kind: input.kind as never,
+							title: input.title as string,
+							...(typeof input.body === "string"
+								? { body: input.body }
+								: {}),
+							...(typeof input.priority === "string"
+								? { priority: input.priority as never }
+								: {}),
+							...(Array.isArray(input.labels)
+								? { labels: input.labels as readonly string[] }
+								: {}),
+							...(typeof input.stream_id === "string"
+								? { streamId: input.stream_id }
+								: {}),
+							...(typeof input.parent_id === "string"
+								? { parentId: input.parent_id }
+								: {}),
+							...(typeof input.assignee === "string"
+								? { assignee: input.assignee }
+								: {}),
+							...(typeof input.rank === "number"
+								? { rank: input.rank }
+								: {}),
+							...(typeof input.wave === "number"
+								? { wave: input.wave }
+								: {}),
+							actor: callerValue.actor,
+						}),
+				});
+				if (outcome.status === "idempotency_mismatch")
+					return fail(
+						request,
+						reply,
+						409,
+						"command.idempotency_mismatch",
+						"idempotency key reused with a differing payload",
+					);
+				return reply.code(201).send(outcome);
+			}
 			const result = command(
 				options.core.compatibility.createTicket({
 					projectId: callerValue.projectId,
@@ -324,7 +448,6 @@ export function registerApiV1Routes(options: {
 					actor: callerValue.actor,
 				}),
 			);
-			if (key) idempotent.set(key, result);
 			return reply.code(201).send(result);
 		} catch (error) {
 			return publicError(request, reply, error);
@@ -349,6 +472,60 @@ export function registerApiV1Routes(options: {
 				);
 			const revision = expectedRevision(input, request, reply);
 			if (revision === undefined) return;
+			if (gateway && typeof input.idempotency_key === "string") {
+				const outcome = gateway.execute({
+					commandId: `cmd_${crypto.randomUUID()}`,
+					idempotencyKey: input.idempotency_key,
+					commandKind: "ticket.update",
+					actorId: callerValue.actor,
+					projectId: callerValue.projectId,
+					correlationId: `cor_${crypto.randomUUID()}`,
+					scope: { resourceType: "ticket", resourceId: id },
+					expectedRevision: revision,
+					payload: input,
+					handler: () =>
+						options.core.compatibility.updateTicket({
+							id,
+							expectedRevision: revision,
+							patch: {
+								...(typeof input.title === "string"
+									? { title: input.title }
+									: {}),
+								...(typeof input.body === "string"
+									? { body: input.body }
+									: {}),
+								...(typeof input.priority === "string"
+									? { priority: input.priority as never }
+									: {}),
+								...(Array.isArray(input.labels)
+									? { labels: input.labels as readonly string[] }
+									: {}),
+								...(typeof input.assignee === "string"
+									? { assignee: input.assignee }
+									: {}),
+								...(typeof input.rank === "number"
+									? { rank: input.rank }
+									: {}),
+								...(typeof input.wave === "number"
+									? { wave: input.wave }
+									: {}),
+							},
+							...(typeof input.reason === "string"
+								? { reason: input.reason }
+								: {}),
+							actor: callerValue.actor,
+						}),
+				});
+				if (outcome.status === "idempotency_mismatch")
+					return fail(
+						request,
+						reply,
+						409,
+						"command.idempotency_mismatch",
+						"idempotency key reused with a differing payload",
+					);
+				return reply.send(outcome);
+			}
 			const result = command(
 				options.core.compatibility.updateTicket({
 					id,
@@ -396,10 +573,20 @@ export function registerApiV1Routes(options: {
 						"tracker.not_found",
 						"ticket was not found",
 					);
-				const revision = expectedRevision(input, request, reply);
-				if (revision === undefined) return;
-				return reply.send(
-					command(
+			const revision = expectedRevision(input, request, reply);
+			if (revision === undefined) return;
+			if (gateway && typeof input.idempotency_key === "string") {
+				const outcome = gateway.execute({
+					commandId: `cmd_${crypto.randomUUID()}`,
+					idempotencyKey: input.idempotency_key,
+					commandKind: "ticket.transition",
+					actorId: callerValue.actor,
+					projectId: callerValue.projectId,
+					correlationId: `cor_${crypto.randomUUID()}`,
+					scope: { resourceType: "ticket", resourceId: id },
+					expectedRevision: revision,
+					payload: input,
+					handler: () =>
 						options.core.compatibility.transitionTicket({
 							id,
 							expectedRevision: revision,
@@ -409,13 +596,35 @@ export function registerApiV1Routes(options: {
 								: {}),
 							actor: callerValue.actor,
 						}),
-					),
-				);
-			} catch (error) {
-				return publicError(request, reply, error);
+				});
+				if (outcome.status === "idempotency_mismatch")
+					return fail(
+						request,
+						reply,
+						409,
+						"command.idempotency_mismatch",
+						"idempotency key reused with a differing payload",
+					);
+				return reply.send(outcome);
 			}
-		},
-	);
+			return reply.send(
+				command(
+					options.core.compatibility.transitionTicket({
+						id,
+						expectedRevision: revision,
+						phase: input.phase as string,
+						...(typeof input.reason === "string"
+							? { reason: input.reason }
+							: {}),
+						actor: callerValue.actor,
+					}),
+				),
+			);
+		} catch (error) {
+			return publicError(request, reply, error);
+		}
+	},
+);
 
 	options.app.post(
 		"/api/v1/tracker/tickets/:id/close",

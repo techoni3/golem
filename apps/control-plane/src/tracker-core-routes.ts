@@ -1,4 +1,5 @@
 import {
+	type CommandGateway,
 	type TrackerCompatibilityFacade,
 	TrackerCoreError,
 } from "@golem/tracker";
@@ -132,6 +133,7 @@ export function registerTrackerCoreCompatibilityRoutes(options: {
 	readonly app: FastifyInstance;
 	readonly tracker: TrackerCompatibilityFacade;
 	readonly principal: BrowserPrincipalResolver;
+	readonly gateway?: CommandGateway;
 }): void {
 	options.app.addHook("preHandler", async (request, reply) => {
 		if (

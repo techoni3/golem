@@ -21,6 +21,14 @@ export {
 	type DurableDeliveryService,
 } from "./delivery.js";
 export {
+	type CommandGateway,
+	CommandGatewayError,
+	type CommandGatewayInput,
+	type CommandGatewayOutcome,
+	type CommandScope,
+	createCommandGateway,
+} from "./gateway.js";
+export {
 	createTrackerLinkService,
 	type TrackerLinkService,
 } from "./links/service.js";
