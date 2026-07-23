@@ -1,4 +1,8 @@
-import { RuntimeSignalV1Schema } from "@golem/contracts";
+import {
+	BrowserWorkProjectionResponseSchema,
+	BrowserWorkStreamSchema,
+	RuntimeSignalV1Schema,
+} from "@golem/contracts";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
@@ -33,6 +37,7 @@ import {
 	RuntimeProjectionQuerySchema,
 	RuntimeProjectionResponseSchema,
 } from "./schemas.js";
+import type { BrowserWorkServices } from "./browser-work-services.js";
 
 function jsonSchema(value: z.ZodType): Record<string, unknown> {
 	return z.toJSONSchema(value, {
@@ -119,6 +124,8 @@ export function registerValidatedRoutes(options: {
 	readonly principal: BrowserPrincipalResolver;
 	readonly runtimeIngress?: RuntimeIngressPort;
 	readonly runtimeHealth?: RuntimeHealthPort;
+	/** Optional until GOL-81 browser-work composition is present. */
+	readonly browserWork?: BrowserWorkServices;
 	readonly invalidResponseForTest?: boolean;
 }): void {
 	const responseSchemas = {
@@ -308,12 +315,64 @@ export function registerValidatedRoutes(options: {
 			schema: {
 				params: jsonSchema(ProjectionParamsSchema),
 				response: {
-					200: jsonSchema(ProjectionResponseSchema),
+					200: jsonSchema(
+						z.union([
+							ProjectionResponseSchema,
+							BrowserWorkProjectionResponseSchema,
+						]),
+					),
 					...responseSchemas,
 				},
 			},
 		},
 		async (request, reply) => {
+			const parsed = ProjectionParamsSchema.safeParse(request.params);
+			if (!parsed.success)
+				return fail(
+					request,
+					reply,
+					400,
+					"request.invalid",
+					"projection stream is invalid",
+				);
+			const browserStream = BrowserWorkStreamSchema.safeParse(parsed.data.stream);
+			if (browserStream.success && options.browserWork) {
+				if (hasRequestAuthorityOverride(request))
+					return fail(
+						request,
+						reply,
+						403,
+						"browser.forbidden",
+						"request authority is server-owned",
+					);
+				const context = options.principal.resolve(request, {
+					action: "read",
+					allowBrowser: true,
+					allowBearer: false,
+				});
+				if (!context)
+					return fail(
+						request,
+						reply,
+						401,
+						"browser.auth.required",
+						"an authenticated browser session is required",
+					);
+				if (!options.principal.policy.allows(context, "read"))
+					return fail(
+						request,
+						reply,
+						403,
+						"browser.forbidden",
+						"the authenticated principal is not authorized",
+					);
+				return reply.send(
+					options.browserWork.projection(
+						browserStream.data,
+						context.defaultProjectId,
+					),
+				);
+			}
 			if (!requireBrowserRead(request, reply, options.principal)) return;
 			const context = options.principal.resolve(request, {
 				action: "read",
@@ -327,15 +386,6 @@ export function registerValidatedRoutes(options: {
 					401,
 					"browser.auth.required",
 					"an authenticated principal binding is required",
-				);
-			const parsed = ProjectionParamsSchema.safeParse(request.params);
-			if (!parsed.success)
-				return fail(
-					request,
-					reply,
-					400,
-					"request.invalid",
-					"projection stream is invalid",
 				);
 			const stream = parsed.data.stream;
 			return sendValidated(request, reply, ProjectionResponseSchema, {

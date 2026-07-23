@@ -10,6 +10,7 @@ function streamFor(
 	record: ClaimedCommittedPublicationRecord,
 ): ControlPlaneStream {
 	if (record.category === "communication") return "communication.operations";
+	if (record.category === "management") return "management.controls";
 	return record.resourceType.startsWith("tracker.")
 		? "tracker.tree"
 		: "tracker.board";

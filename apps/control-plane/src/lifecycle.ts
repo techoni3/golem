@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import websocket from "@fastify/websocket";
+import { BrowserWorkStreamSchema } from "@golem/contracts";
 import type { CommittedPublicationStorage } from "@golem/persistence";
 import type {
 	CommandGateway,
@@ -26,6 +27,8 @@ import {
 } from "./compatibility.js";
 import { fail, registerErrorEnvelope } from "./errors.js";
 import { registerManagementRoutes } from "./management-routes.js";
+import { registerBrowserWorkRoutes } from "./browser-work-routes.js";
+import type { BrowserWorkServices } from "./browser-work-services.js";
 import type {
 	ControlPlaneProjectionPort,
 	ControlPlaneReplayPort,
@@ -75,6 +78,8 @@ export interface ControlPlaneLifecycleOptions {
 	readonly commandGateway?: CommandGateway;
 	/** Persistence-owned committed invalidations; absent only in legacy fixtures. */
 	readonly committedPublications?: CommittedPublicationStorage;
+	/** Read-only GOL-81 adapter over composed tracker/management services. */
+	readonly browserWork?: BrowserWorkServices;
 }
 
 export interface StartedControlPlane {
@@ -164,7 +169,22 @@ export async function startControlPlane(
 			...(options.invalidResponseForTest === undefined
 				? {}
 				: { invalidResponseForTest: options.invalidResponseForTest }),
+			...(options.browserWork ? { browserWork: options.browserWork } : {}),
 		});
+		if (
+			options.browserWork &&
+			options.trackerCore &&
+			options.management &&
+			options.commandGateway
+		)
+			registerBrowserWorkRoutes({
+				app,
+				principal,
+				browserWork: options.browserWork,
+				core: options.trackerCore,
+				management: options.management,
+				gateway: options.commandGateway,
+			});
 		if (options.trackerCore) {
 			registerTrackerCoreCompatibilityRoutes({
 				app,
@@ -193,11 +213,18 @@ export async function startControlPlane(
 			instanceId,
 			principal,
 			replay,
-			read: (stream: ControlPlaneStream, projectId?: string) =>
-				projection.read(stream, projectId),
+			read: (stream: ControlPlaneStream, projectId?: string) => {
+				const browserStream = BrowserWorkStreamSchema.safeParse(stream);
+				return options.browserWork && browserStream.success && projectId
+					? options.browserWork.projection(browserStream.data, projectId)
+					: projection.read(stream, projectId);
+			},
 			revision: (stream: ControlPlaneStream, projectId?: string) =>
 				projection.revision(stream, projectId),
 			sockets,
+			...(options.browserWork
+				? { browserOnlyStreams: BrowserWorkStreamSchema.options }
+				: {}),
 		});
 		if (options.committedPublications) {
 			const dispatcher = new CommittedPublicationDispatcher({

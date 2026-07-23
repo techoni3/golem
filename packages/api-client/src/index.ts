@@ -146,6 +146,14 @@ export type ControlPlaneProjection = Extract<
 	{ readonly kind: "snapshot" }
 >["payload"];
 
+/** Legacy generic projection envelope retained for existing dashboard consumers. */
+export interface ControlPlaneProjectionResponse {
+	readonly schema_version: "golem.control-plane-projection/v1";
+	readonly stream: ControlPlaneStream;
+	readonly resource_revision: number;
+	readonly payload: ControlPlaneProjection;
+}
+
 export class ControlPlaneClientError extends Error {
 	readonly status: number;
 
@@ -207,9 +215,15 @@ export function createBrowserControlPlaneClient(
 		async projection(stream: ControlPlaneStream) {
 			const result = await client.GET("/api/v1/projections/{stream}", {
 				headers: browserHeaders(),
-				params: { path: { stream } },
+				// The legacy runtime projection client remains wider than the
+				// browser-work OpenAPI route contract.
+				params: { path: { stream: stream as never } },
 			});
-			return requireData(result.data, result.response, "projection fetch");
+			return requireData(
+				result.data,
+				result.response,
+				"projection fetch",
+			) as unknown as ControlPlaneProjectionResponse;
 		},
 		async runtimeProjection(
 			stream: "live" | "history" | "diagnostics",

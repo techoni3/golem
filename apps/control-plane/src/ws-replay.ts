@@ -116,6 +116,7 @@ function scopeFor(
 ): ControlPlaneReplayScope {
 	return stream === "tracker.tree" ||
 		stream === "tracker.board" ||
+		stream === "management.controls" ||
 		stream === "communication.operations"
 		? { projectId: context.defaultProjectId, policyVersion: 1 }
 		: {};
@@ -154,6 +155,8 @@ export function registerWsReplay(options: {
 	) => Record<string, unknown>;
 	readonly revision: (stream: ControlPlaneStream, projectId?: string) => number;
 	readonly sockets: Set<ControlPlaneSocket>;
+	/** Streams that are deliberately browser-session-only (GOL-81). */
+	readonly browserOnlyStreams?: readonly ControlPlaneStream[];
 }): () => void {
 	const streams = new Map<
 		ControlPlaneSocket,
@@ -203,10 +206,20 @@ export function registerWsReplay(options: {
 		"/api/v1/ws",
 		{ websocket: true },
 		(socket: ControlPlaneSocket, request) => {
+			const url = new URL(request.url, originFor(request));
+			const parsed = ProjectionParamsSchema.safeParse({
+				stream: url.searchParams.get("stream") ?? "runtime.live",
+			});
+			if (!parsed.success) {
+				socket.close(1008, "stream invalid");
+				return;
+			}
+			const stream = parsed.data.stream;
+			const browserOnly = options.browserOnlyStreams?.includes(stream) ?? false;
 			const context = options.principal.resolve(request, {
 				action: "read",
 				allowBrowser: true,
-				allowBearer: true,
+				allowBearer: !browserOnly,
 			});
 			if (
 				!isExpectedHost(request.headers.host) ||
@@ -217,15 +230,6 @@ export function registerWsReplay(options: {
 				socket.close(1008, "authentication required");
 				return;
 			}
-			const url = new URL(request.url, originFor(request));
-			const parsed = ProjectionParamsSchema.safeParse({
-				stream: url.searchParams.get("stream") ?? "runtime.live",
-			});
-			if (!parsed.success) {
-				socket.close(1008, "stream invalid");
-				return;
-			}
-			const stream = parsed.data.stream;
 			const scope = scopeFor(stream, context);
 			const suppliedInstance = url.searchParams.get("instance_id");
 			const cursorValue = url.searchParams.get("cursor");

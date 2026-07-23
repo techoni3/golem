@@ -1,4 +1,7 @@
-import type { BrowserControlPlaneClient, ControlPlaneStream } from "./index.js";
+import type {
+	BrowserControlPlaneClient,
+	ControlPlaneStream,
+} from "./index.js";
 
 type Frame = ReturnType<BrowserControlPlaneClient["parseWebSocketFrame"]>;
 

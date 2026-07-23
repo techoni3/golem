@@ -33,6 +33,7 @@ export const ControlPlaneStreams = [
 	"projects",
 	"tracker.tree",
 	"tracker.board",
+	"management.controls",
 	"communication.operations",
 ] as const;
 

@@ -8,6 +8,7 @@ import {
 	RuntimeOutboxDrainer,
 } from "@golem/runtime";
 import { createBrowserPrincipalResolver } from "./auth.js";
+import { createBrowserWorkServices } from "./browser-work-services.js";
 import { openControlPlanePersistence } from "./persistence.js";
 import {
 	controlPlanePortFromEnvironment,
@@ -112,6 +113,12 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 		clock,
 		core: trackerCore,
 	});
+	const browserWork = createBrowserWorkServices({
+		core: trackerCore,
+		management,
+		projectRevision: (projectId) =>
+			owner.committedPublicationStorage().projectRevision(projectId),
+	});
 	const principalResolver = createBrowserPrincipalResolver({
 		storage: owner.browserPrincipalStorage(),
 		...(browserLocalOperatorBindingId
@@ -197,6 +204,7 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 			trackerCore,
 			trackerServices,
 			commandGateway,
+			browserWork,
 			committedPublications: owner.committedPublicationStorage(),
 			principalResolver,
 			...(replayWindowSize ? { replayWindowSize } : {}),

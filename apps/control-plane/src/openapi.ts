@@ -1,3 +1,11 @@
+import {
+	BrowserWorkAssetResponseSchema,
+	BrowserWorkCommandRequestSchema,
+	BrowserWorkCommandResponseSchema,
+	BrowserWorkDetailResponseSchema,
+	BrowserWorkErrorSchema,
+	BrowserWorkProjectionResponseSchema,
+} from "@golem/contracts";
 import { z } from "zod";
 
 import {
@@ -7,7 +15,6 @@ import {
 	BrowserSessionResponseSchema,
 	HealthResponseSchema,
 	MetaResponseSchema,
-	ProjectionResponseSchema,
 	RuntimeIngestReceiptSchema,
 	RuntimeIngestRequestSchema,
 	RuntimeProjectionResponseSchema,
@@ -221,6 +228,23 @@ export function controlPlaneOpenApiDocument(): JsonRecord {
 	return {
 		openapi: "3.1.1",
 		info: { title: "Golem control plane", version: "v1" },
+		components: {
+			securitySchemes: {
+				BrowserSession: {
+					type: "apiKey",
+					in: "cookie",
+					name: "golem_control_plane_session",
+					description: "Same-origin HttpOnly browser session; never a bearer credential.",
+				},
+				BrowserCsrf: {
+					type: "apiKey",
+					in: "header",
+					name: "x-golem-csrf",
+					description: "Same-origin mutation proof paired with BrowserSession.",
+				},
+				BearerAuth: { type: "http", scheme: "bearer" },
+			},
+		},
 		paths: {
 			...typedApiPaths(),
 			"/api/v1/management/roles": {
@@ -615,21 +639,104 @@ export function controlPlaneOpenApiDocument(): JsonRecord {
 			},
 			"/api/v1/projections/{stream}": {
 				get: {
-					operationId: "controlPlaneProjection",
+					operationId: "browserWorkProjection",
+					security: [{ BrowserSession: [] }],
 					parameters: [
 						{
 							name: "stream",
 							in: "path",
 							required: true,
-							schema: { type: "string" },
+							schema: {
+								type: "string",
+								enum: [
+									"tracker.board",
+									"tracker.tree",
+									"management.controls",
+									"communication.operations",
+								],
+							},
 						},
 					],
 					responses: {
-						"200": response("projection", ProjectionResponseSchema),
+						"200": response(
+							"bounded browser projection",
+							BrowserWorkProjectionResponseSchema,
+						),
 						"401": {
 							description: "unauthorized",
 							content: { "application/json": { schema: error } },
 						},
+					},
+				},
+			},
+			"/api/v1/browser/work/items/{opaque_id}": {
+				get: {
+					operationId: "browserWorkItem",
+					security: [{ BrowserSession: [] }],
+					parameters: [
+						{
+							name: "opaque_id",
+							in: "path",
+							required: true,
+							schema: { type: "string", maxLength: 128 },
+						},
+					],
+					responses: {
+						"200": response("bounded browser work item", BrowserWorkDetailResponseSchema),
+						"400": response("invalid item identifier", BrowserWorkErrorSchema),
+						"401": response("browser session required", BrowserWorkErrorSchema),
+						"403": response("browser authority rejected", BrowserWorkErrorSchema),
+						"404": response("item absent", BrowserWorkErrorSchema),
+					},
+				},
+			},
+			"/api/v1/browser/work/items/{opaque_id}/assets/{asset_id}": {
+				get: {
+					operationId: "browserWorkAsset",
+					security: [{ BrowserSession: [] }],
+					parameters: [
+						{
+							name: "opaque_id",
+							in: "path",
+							required: true,
+							schema: { type: "string", maxLength: 128 },
+						},
+						{
+							name: "asset_id",
+							in: "path",
+							required: true,
+							schema: { type: "string", maxLength: 128 },
+						},
+					],
+					responses: {
+						"200": response("bounded ticket asset", BrowserWorkAssetResponseSchema),
+						"400": response("invalid asset identifier", BrowserWorkErrorSchema),
+						"401": response("browser session required", BrowserWorkErrorSchema),
+						"403": response("browser authority rejected", BrowserWorkErrorSchema),
+						"404": response("asset absent", BrowserWorkErrorSchema),
+					},
+				},
+			},
+			"/api/v1/browser/work/commands": {
+				post: {
+					operationId: "browserWorkCommand",
+					security: [{ BrowserSession: [], BrowserCsrf: [] }],
+					requestBody: {
+						required: true,
+						content: {
+							"application/json": { schema: schema(BrowserWorkCommandRequestSchema) },
+						},
+					},
+					responses: {
+						"200": response("typed browser command outcome", BrowserWorkCommandResponseSchema),
+						"400": response("invalid command", BrowserWorkErrorSchema),
+						"401": response("browser session or CSRF required", BrowserWorkErrorSchema),
+						"403": response("browser authority rejected", BrowserWorkErrorSchema),
+						"404": response("resource absent", BrowserWorkErrorSchema),
+						"409": response(
+							"canonical command conflict or typed unsupported outcome",
+							z.union([BrowserWorkCommandResponseSchema, BrowserWorkErrorSchema]),
+						),
 					},
 				},
 			},
