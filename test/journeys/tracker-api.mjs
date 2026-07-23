@@ -174,34 +174,55 @@ export async function exerciseTrackerHttpMcpParity() {
 		assert.equal(mcpReceipt.command_kind, "ticket.update", "MCP receipt has the correct command kind");
 		assert.equal(mcpReceipt.outcome_status, "completed", "MCP receipt outcome is completed");
 
-		// Management adapter: route a gate create through the gateway via
-		// the composed managementRoute (bypassing HTTP which has a pre-existing
-		// hasRequestAuthorityOverride conflict with body actor/project_id).
-		// Use the gateway directly to prove the management mutation class
-		// produces a durable receipt.
+		// Management adapter: a real bearer HTTP POST to the management
+		// gate route.  The request carries no actor/project_id (those are
+		// server-owned resolver fields, rejected by hasRequestAuthorityOverride);
+		// the route resolves the ActorContext and uses context.actorId /
+		// context.defaultProjectId for the gateway input and the gate
+		// service mutation.  A known idempotency_key lets the durable
+		// receipt be looked up and asserted.
 		const managementKey = "j6:management:gate:1";
-		const commandGateway = writer.commandGatewayStorage();
-		const mgmtOutcome = commandGateway.transaction(() => {
-			return writer.commandGatewayStorage().receipts;
-		});
-		// The management services are composed with the gateway; call a gate
-		// create through the gateway.execute to prove receipt durability.
-		const gateResult = gateway.execute({
-			commandId: `cmd_mgmt_${crypto.randomUUID()}`,
-			idempotencyKey: managementKey,
-			commandKind: "management.gate.create",
-			actorId: "ses_gol43",
-			projectId,
-			correlationId: `cor_mgmt_${crypto.randomUUID()}`,
-			scope: { resourceType: "gate", resourceId: "*" },
-			payload: { kind: "approval", question: "J6 parity gate?", assignee: "ses_gol43" },
-			handler: () => "created",
-		});
-		assert.equal(gateResult.status, "completed", "management gate create through gateway succeeds");
+		const managementGate = await json(await fetch(`${origin}/api/v1/management/gates`, {
+			method: "POST",
+			headers: headers(token),
+			body: JSON.stringify({
+				kind: "approval",
+				question: "J6 parity gate?",
+				assignee: "ses_gol43",
+				idempotency_key: managementKey,
+			}),
+		}));
+		assert.equal(managementGate.status, 201, "management gate create succeeds through the real HTTP route");
+		assert.ok(managementGate.body.result && managementGate.body.result.id, "management gate create returns a real gate id");
+		const managementGateId = managementGate.body.result.id;
 		const managementReceipt = receipts.find(projectId, managementKey);
 		assert.ok(managementReceipt, "management gate create produced a durable receipt");
 		assert.equal(managementReceipt.command_kind, "management.gate.create", "management receipt has the correct command kind");
 		assert.equal(managementReceipt.outcome_status, "completed", "management receipt outcome is completed");
+		// Confirm the gate was actually persisted in the management store.
+		const managementGates = await json(await fetch(`${origin}/api/v1/management/gates`, { headers: headers(token) }));
+		assert.equal(managementGates.status, 200, "management gate list is reachable without actor/project query");
+		assert.ok(managementGates.body.result.some((gate) => gate.id === managementGateId), "the created gate is present in the management store");
+
+		// Replay: repeat an identical management gate request and assert
+		// the original outcome is returned with no new management audit
+		// effect and no second gate row.
+		const managementStorage = writer.managementStorage();
+		const managementAuditBeforeReplay = managementStorage.auditManagement(projectId).length;
+		const managementReplay = await json(await fetch(`${origin}/api/v1/management/gates`, {
+			method: "POST",
+			headers: headers(token),
+			body: JSON.stringify({
+				kind: "approval",
+				question: "J6 parity gate?",
+				assignee: "ses_gol43",
+				idempotency_key: managementKey,
+			}),
+		}));
+		assert.equal(managementReplay.status, 201, "identical management gate replay is accepted");
+		assert.equal(managementReplay.body.result.id, managementGateId, "management replay returns the original gate id");
+		assert.equal(managementStorage.auditManagement(projectId).length, managementAuditBeforeReplay, "management replay emits no new audit side effect");
+		assert.equal(managementStorage.listGates(projectId).filter((gate) => gate.id === managementGateId).length, 1, "management replay does not create a second gate row");
 
 		// Replay: repeat an identical typed comment request and assert the
 		// original outcome is returned with no new audit/domain effect.
