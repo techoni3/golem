@@ -285,6 +285,18 @@ export const scenarios = [
 		regression: "the real browser control surface can retain stale truth after a compacted cursor or control-plane restart, disclose scoped authority facts, or retain success artifacts",
 	}),
 	registerScenario({
+		id: "tracker-dispatch-ui",
+		journey: "J4",
+		tier: "integration",
+		regression: "the typed dashboard can merge legacy tracker state, lose conflict drafts, bypass revision authority, target delivery directly, or report enqueueing as settlement",
+	}),
+	registerScenario({
+		id: "roles-gates-ideas-ui",
+		journey: "J6",
+		tier: "integration",
+		regression: "the typed dashboard can fake unavailable roles or ideas, lose a human gate, hide communication settlement, or flatten spec relationships",
+	}),
+	registerScenario({
 		id: "delivery-api-fence-recheck",
 		journey: "J4",
 		tier: "integration",

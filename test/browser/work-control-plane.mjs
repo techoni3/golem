@@ -197,6 +197,19 @@ async function seed(home) {
 			assignee: sessionId,
 			actor: "act_gol75_operator",
 		});
+		const spec = core.tickets.create({
+			projectId,
+			kind: "spec",
+			title: "GOL-55 canonical browser spec",
+			actor: "act_gol75_operator",
+		});
+		const question = core.tickets.create({
+			projectId,
+			kind: "question",
+			title: "GOL-55 bounded browser question",
+			parentId: spec.id,
+			actor: "act_gol75_operator",
+		});
 		const foreignTicket = core.tickets.create({
 			projectId: foreignProjectId,
 			kind: "work-item",
@@ -257,6 +270,8 @@ async function seed(home) {
 		);
 		return Object.freeze({
 			ticket,
+			spec,
+			question,
 			foreignTicket,
 			endpointId: claim.endpointId,
 			expiredAtMs,
@@ -1250,6 +1265,370 @@ async function runWorkControlPlane() {
 	return evidence;
 }
 
+async function runWorkManagementDashboard() {
+	const home = createTemporaryHome("golem-gol55-work-management-");
+	const artifactRoot = path.join(
+		os.tmpdir(),
+		`golem-work-management-artifacts-${process.pid}-${Date.now()}`,
+	);
+	const staticRoot = path.join(
+		repositoryRoot,
+		"dashboard/dist/control-plane",
+	);
+	const contexts = [];
+	const steps = [];
+	let service;
+	let servicePort;
+	let chrome;
+	let page;
+	let failure;
+	let success = false;
+	const sensitiveValues = new Set([
+		controlToken,
+		viewerSession,
+		viewerCsrf,
+		expiredSession,
+		expiredCsrf,
+		foreignProjectId,
+		foreignTitle,
+		foreignBody,
+		sessionId,
+		generationId,
+		home.root,
+	]);
+	try {
+		assert.equal(
+			fs.existsSync(path.join(staticRoot, "index.html")),
+			true,
+			"typed dashboard build exists before the browser journey",
+		);
+		const seedData = await seed(home);
+		sensitiveValues.add(seedData.foreignTicket.id);
+		sensitiveValues.add(seedData.endpointId);
+		service = await startService(home, staticRoot);
+		servicePort = portOf(service.origin);
+		const bearer = createFetchApiClient(service.origin, {
+			bearerToken: controlToken,
+			caller: { projectId, sessionId },
+		});
+
+		chrome = await acquireChrome();
+		const context = await chrome.browser.newContext();
+		contexts.push(context);
+		page = await context.newPage();
+		page.setDefaultTimeout(10_000);
+		const browserErrors = [];
+		const browserRequests = [];
+		page.on("request", (request) => browserRequests.push(request.url()));
+		page.on("pageerror", (error) => browserErrors.push(error.name));
+		page.on("console", (message) => {
+			if (
+				message.type() === "error" &&
+				!/Failed to load resource/iu.test(message.text()) &&
+				!/WebSocket connection to .* failed/iu.test(message.text())
+			)
+				browserErrors.push("console_error");
+		});
+
+		await page.goto(`${service.origin}/tracker`, {
+			waitUntil: "domcontentloaded",
+		});
+		await page.getByTestId("tracker-dispatch-ui").waitFor();
+		await page
+			.locator("[data-testid='work-connection'][data-state='connected']")
+			.waitFor();
+		await page
+			.locator(`[data-ticket-id="${seedData.ticket.id}"]`)
+			.waitFor();
+
+		const composer = page
+			.locator("details")
+			.filter({ hasText: "Create a typed ticket" });
+		await composer.locator("summary").click();
+		await composer.getByLabel("Ticket title").fill(
+			"GOL-55 browser-created work item",
+		);
+		await composer.getByRole("button", { name: "Create ticket" }).click();
+		await page.waitForURL(/\/tickets\/[A-Za-z][A-Za-z0-9_-]*$/u);
+		const createdId = new URL(page.url()).pathname.split("/").at(-1);
+		assert(createdId, "create command navigates to the canonical detail URL");
+		const dialog = page.getByRole("dialog");
+		await dialog
+			.getByRole("heading", { name: `Ticket ${createdId}` })
+			.waitFor();
+		const updateForm = dialog
+			.locator("form")
+			.filter({ hasText: "Update fields" });
+		await updateForm.getByLabel("Replacement title").fill(
+			"GOL-55 browser-updated work item",
+		);
+		await updateForm.getByRole("button", { name: "Apply update" }).click();
+		try {
+			await updateForm
+				.locator("[role='alert']")
+				.filter({ hasText: "Command completed" })
+				.waitFor();
+		} catch (error) {
+			throw new Error(
+				`${error instanceof Error ? error.message : String(error)}; update_dialog=${JSON.stringify(await dialog.innerText())}`,
+			);
+		}
+
+		const currentRead = await bearer.request({
+			method: "GET",
+			path: `/api/v1/tracker/tickets/${createdId}`,
+		});
+		assert.equal(currentRead.status, 200);
+		const externalUpdate = await bearer.request({
+			method: "PATCH",
+			path: `/api/v1/tracker/tickets/${createdId}`,
+			body: {
+				expected_revision: currentRead.body.revision,
+				title: "GOL-55 external conflict advance",
+				idempotency_key: "gol55:external:conflict",
+			},
+		});
+		assert.equal(externalUpdate.status, 200);
+		await updateForm.getByLabel("Replacement title").fill(
+			"GOL-55 retained conflict draft",
+		);
+		await updateForm.getByRole("button", { name: "Apply update" }).click();
+		await updateForm.getByText(/draft is retained/iu).waitFor();
+		assert.equal(
+			await updateForm.getByLabel("Replacement title").inputValue(),
+			"GOL-55 retained conflict draft",
+			"conflict retains the operator draft",
+		);
+		await dialog
+			.locator("dt", { hasText: "Revision" })
+			.locator("..")
+			.locator("dd")
+			.filter({ hasText: String(externalUpdate.body.result.revision) })
+			.waitFor();
+		await updateForm.getByRole("button", { name: "Apply update" }).click();
+		await updateForm
+			.locator("[role='alert']")
+			.filter({ hasText: "Command completed" })
+			.waitFor();
+
+		const transitionForm = dialog
+			.locator("form")
+			.filter({ hasText: "Request phase transition" });
+		await transitionForm.getByLabel("Target phase").click();
+		await page.getByRole("option", { name: "Building", exact: true }).click();
+		await transitionForm
+			.getByRole("button", { name: "Request transition" })
+			.click();
+		await transitionForm
+			.locator("[role='alert']")
+			.filter({ hasText: "Command completed" })
+			.waitFor();
+		await dialog.getByText("building", { exact: true }).waitFor();
+
+		await page.goto(`${service.origin}/tickets/${seedData.ticket.id}`, {
+			waitUntil: "domcontentloaded",
+		});
+		const dispatchDialog = page.getByRole("dialog");
+		await dispatchDialog
+			.getByRole("heading", { name: `Ticket ${seedData.ticket.id}` })
+			.waitFor();
+		const dispatchSection = dispatchDialog
+			.locator("section")
+			.filter({ hasText: "Dispatch" });
+		await dispatchSection
+			.getByRole("button", { name: "Dispatch ticket" })
+			.click();
+		await dispatchSection
+			.locator("[role='alert']")
+			.filter({ hasText: "Command completed" })
+			.waitFor();
+		const operationId = await dispatchSection
+			.locator("dt", { hasText: "Operation" })
+			.locator("..")
+			.locator("dd")
+			.innerText();
+		assert(operationId, "dispatch exposes only its durable operation id");
+
+		await page.goto(`${service.origin}/review`, {
+			waitUntil: "domcontentloaded",
+		});
+		await page.getByTestId("roles-gates-ideas-ui").waitFor();
+		const operationRow = page
+			.locator("li")
+			.filter({ hasText: operationId });
+		await operationRow.waitFor();
+		await operationRow.getByText("pending", { exact: true }).waitFor();
+
+		const claims = await bearer.request({
+			method: "POST",
+			path: "/api/v1/delivery/claims",
+			body: { limit: 20 },
+		});
+		assert.equal(claims.status, 200);
+		const dispatchClaim = claims.body.items.find(
+			(item) => item.payload.ticket_id === seedData.ticket.id,
+		);
+		assert(dispatchClaim);
+		const prepared = await bearer.request({
+			method: "POST",
+			path: `/api/v1/delivery/claims/${encodeURIComponent(dispatchClaim.claimToken)}/prepare`,
+			body: {},
+		});
+		assert.equal(prepared.status, 200);
+		const acknowledged = await bearer.request({
+			method: "POST",
+			path: `/api/v1/delivery/claims/${encodeURIComponent(dispatchClaim.claimToken)}/ack`,
+			body: {
+				acknowledgement_id: "ack_gol55_dashboard",
+				payload: {},
+			},
+		});
+		assert.equal(acknowledged.status, 200);
+		await operationRow.getByText("settled", { exact: true }).waitFor();
+
+		const gateQuestion = "Approve the GOL-55 bounded browser cutover?";
+		const gateForm = page
+			.locator("form")
+			.filter({ hasText: "Create gate" });
+		await gateForm.getByLabel("Question").fill(gateQuestion);
+		await gateForm.getByRole("button", { name: "Create gate" }).click();
+		await gateForm
+			.locator("[role='alert']")
+			.filter({ hasText: "Command completed" })
+			.waitFor();
+		const gates = await bearer.request({
+			method: "GET",
+			path: "/api/v1/management/gates",
+		});
+		assert.equal(gates.status, 200);
+		assert(
+			gates.body.result.some((gate) => gate.question === gateQuestion),
+			"gate command persists through the typed management service",
+		);
+		await page
+			.getByRole("heading", { name: "Roles", exact: true })
+			.waitFor();
+		await page
+			.getByRole("heading", { name: "Ideas", exact: true })
+			.waitFor();
+		assert.equal(
+			await page.getByText("Read-only unavailable", { exact: true }).count(),
+			2,
+			"unsupported roles and ideas remain explicit instead of falling back",
+		);
+
+		await page.getByRole("link", { name: "Specs", exact: true }).click();
+		await page.getByTestId("specs-ui").waitFor();
+		const specRow = page.locator("li", {
+			has: page.getByRole("link", {
+				name: seedData.spec.id,
+				exact: true,
+			}),
+		});
+		const questionRow = page.locator("li", {
+			has: page.getByRole("link", {
+				name: seedData.question.id,
+				exact: true,
+			}),
+		});
+		await specRow.waitFor();
+		await questionRow.waitFor();
+		await questionRow
+			.getByText(`Child of ${seedData.spec.id}`, { exact: false })
+			.waitFor();
+
+		const requestedPaths = browserRequests.map(
+			(value) => new URL(value).pathname,
+		);
+		assert.equal(
+			requestedPaths.some((value) =>
+				["/api/ideas", "/api/roles", "/api/v1/management/ideas"].includes(
+					value,
+				),
+			),
+			false,
+			"typed UI never queries an unapproved role or idea endpoint",
+		);
+		const authorityRequests = browserRequests.filter((value) =>
+			new URL(value).pathname.startsWith("/api/"),
+		);
+		assert.equal(
+			authorityRequests.every(
+				(value) => new URL(value).origin === service.origin,
+			),
+			true,
+			"every dashboard authority request remains same-origin",
+		);
+		assert.deepEqual(browserErrors, [], "dashboard emits no console/page error");
+		success = true;
+	} catch (error) {
+		try {
+			await retainFailureArtifacts({
+				artifactRoot,
+				page,
+				steps,
+				error,
+				temporaryRoot: home.root,
+				sensitiveValues: [...sensitiveValues],
+				childLogs: service
+					? `${service.group.stdout()}\n${service.group.stderr()}`
+					: "",
+			});
+		} catch {
+			// Preserve the original failure when diagnostic capture is unavailable.
+		}
+		failure = new Error(
+			`${redactDiagnostic(
+				error instanceof Error ? error.stack ?? error.message : String(error),
+				home.root,
+				[...sensitiveValues],
+			)}; sanitized_artifacts=${artifactRoot}`,
+		);
+	} finally {
+		for (const context of contexts.reverse()) {
+			try {
+				await context.close();
+			} catch {
+				// Cleanup continues through every owned browser resource.
+			}
+		}
+		if (chrome) {
+			const profile = path.join(
+				os.tmpdir(),
+				`golem-chrome-headless-${chrome.port}-${process.pid}`,
+			);
+			await chrome.cleanup();
+			await waitFor(
+				async () => (!(await isPortListening(chrome.port)) ? true : undefined),
+				"headless Chrome shutdown",
+			).catch(() => undefined);
+			fs.rmSync(profile, {
+				recursive: true,
+				force: true,
+				maxRetries: 10,
+				retryDelay: 100,
+			});
+		}
+		if (service) await stopProcessGroup(service.group);
+		if (servicePort)
+			await waitFor(
+				async () =>
+					!(await isPortListening(servicePort)) ? true : undefined,
+				"control-plane shutdown",
+			).catch(() => undefined);
+		home.cleanup();
+	}
+	if (failure) throw failure;
+	assert.equal(success, true);
+	assert.equal(fs.existsSync(home.root), false, "temporary home is removed");
+	assert.equal(
+		fs.existsSync(artifactRoot),
+		false,
+		"success retains no browser artifact",
+	);
+	return "compiled dashboard plus the GOL-75 control-plane fixture prove typed tracker create/update/conflict retention/transition/canonical dispatch, pending-to-settled communication, gate persistence, bounded spec relationships, explicit role/idea capability gaps, same-origin authority, and owned-resource cleanup";
+}
+
 export async function exerciseWorkControlPlane() {
 	return runWorkControlPlane();
 }
@@ -1260,4 +1639,16 @@ export async function exerciseBrowserControlAuthorityDispatch() {
 
 export async function exerciseBrowserControlRestartResync() {
 	return runWorkControlPlane();
+}
+
+export async function exerciseWorkManagementDashboard() {
+	return runWorkManagementDashboard();
+}
+
+export async function exerciseTrackerDispatchUi() {
+	return runWorkManagementDashboard();
+}
+
+export async function exerciseRolesGatesIdeasUi() {
+	return runWorkManagementDashboard();
 }

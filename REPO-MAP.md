@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-07-23 @ 02ac958 + GOL-75 — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-23 @ edc7b16 + GOL-55 — maintained via golem:docs-maintenance.
 
 ## Structure
 
@@ -16,7 +16,8 @@
 - `TicketDispatchService` is the browser/bearer/MCP delivery seam. The current assignee must resolve fail-closed to an eligible active generation; GOL-79 queues `tracker_envelopes` as `ready`/`pull_only`/`next_turn`. Its read side joins project-scoped receipts, verified tickets, and canonical envelopes into safe dispatch operations; malformed or missing queue facts are omitted, and settlement never leaks targeting/claim/ack data. Terminal/ineligible writes create no envelope; stale CAS replays. Historical/runtime fields never select; only server-authenticated MCP exposes legacy alias/content, and durable binding—not credential spelling—defines provenance.
 - Launcher owns fail-closed writes and immutable LaunchPlan facts; CLI consumes them for picker/presets.
 - Control plane owns REST/WS. Browser work uses generated paths, same-origin cookie reads/WS, CSRF commands, and a metadata-only synchronizer that replaces snapshots and refetches every invalidation; it accepts no browser authority or domain merge. GOL-80 scopes opaque frames before construction; foreign detail is absent.
-- `test/browser/work-control-plane.mjs` is the real browser-control journey lane: a compiled control plane, public generated client, ephemeral headless Chrome, typed board HTTP refreshed by canonical tree invalidations, dispatch/delivery callbacks, bounded-gap and restart resync, and failure-only sanitized artifacts.
+- `apps/dashboard/src/routes/{tracker,specs,review}/` owns the typed browser-work UI. It renders only bounded public projections, retains one-shot command drafts across CAS conflicts, treats delivery settlement separately from dispatch disposition, and makes missing role/idea capabilities explicit instead of consulting legacy routes.
+- `test/browser/work-control-plane.mjs` is the real browser-control journey lane: a compiled control plane, public generated client, built dashboard, ephemeral headless Chrome, typed board HTTP refreshed by canonical tree invalidations, dispatch/delivery callbacks, management/spec UI, bounded-gap and restart resync, and failure-only sanitized artifacts.
 - Project identity is canonical Git paths; sessions have immutable generations, scoped aliases, provenance, terminal monotonicity, and deterministic effects.
 - Projections read canonical rows only; diagnostics and WS invalidations are redacted/bounded.
 - Endpoint claims are generation/route scoped: fences gate heartbeat, readiness, capability, delivery, and release; registration alone never qualifies delivery.
