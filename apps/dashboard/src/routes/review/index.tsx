@@ -1,14 +1,24 @@
-import { InlineAlert, Skeleton, StatePanel, StatusBadge } from "@golem/ui";
+import { Button, Skeleton, StatePanel, StatusBadge } from "@golem/ui";
 import { Link } from "react-router-dom";
 
-import { useWorkProjection } from "../tracker/data.js";
-import { CreateGateForm } from "../tracker/forms.js";
-import { formatTimestamp, operationTone } from "../tracker/types.js";
+import { useWorkCommand, useWorkProjection } from "../tracker/data.js";
+import {
+	CommandFeedback,
+	CreateGateForm,
+	CreateIdeaForm,
+} from "../tracker/forms.js";
+import {
+	formatTimestamp,
+	idempotencyKey,
+	operationTone,
+} from "../tracker/types.js";
 import styles from "./review.module.css";
 
 export function ReviewRoute() {
 	const controls = useWorkProjection("management.controls");
 	const communication = useWorkProjection("communication.operations");
+	const roleCommand = useWorkCommand();
+	const ideaCommand = useWorkCommand();
 
 	return (
 		<section className={styles.route} data-testid="roles-gates-ideas-ui">
@@ -17,9 +27,8 @@ export function ReviewRoute() {
 					<p className={styles.eyebrow}>Bounded management</p>
 					<h1>Review and operations</h1>
 					<p>
-						Gates, control requests, and communication settlement are rendered
-						from redacted public projections. Unsupported management domains
-						stay visibly unavailable.
+						Roles, gates, ideas, control requests, and communication settlement
+						come from redacted public projections and canonical commands.
 					</p>
 				</div>
 			</header>
@@ -42,6 +51,148 @@ export function ReviewRoute() {
 					</div>
 				</div>
 				<CreateGateForm />
+				{controls.data?.gates.length ? (
+					<ul className={styles.operationList}>
+						{controls.data.gates.map((gate) => (
+							<li key={gate.opaque_id}>
+								<div>
+									<strong>{gate.question}</strong>
+									<code>{gate.opaque_id}</code>
+									<span>
+										{gate.gate_kind} · {gate.assignee_kind}
+									</span>
+								</div>
+								<StatusBadge
+									label={gate.status}
+									tone={operationTone(gate.status)}
+								/>
+							</li>
+						))}
+					</ul>
+				) : null}
+			</section>
+
+			<section className={styles.section}>
+				<div className={styles.sectionHeader}>
+					<div>
+						<p className={styles.eyebrow}>Bounded authority</p>
+						<h2>Roles</h2>
+					</div>
+					<span>{controls.data?.roles.length ?? 0} roles</span>
+				</div>
+				{controls.data?.roles.length ? (
+					<ul className={styles.operationList}>
+						{controls.data.roles.map((role) => (
+							<li key={role.opaque_id}>
+								<div>
+									<strong>{role.name}</strong>
+									<code>{role.opaque_id}</code>
+									<span>{role.scope} scope</span>
+								</div>
+								<Button
+									isDisabled={role.scope !== "project"}
+									loading={roleCommand.isPending}
+									onPress={() =>
+										roleCommand.mutate({
+											kind: "management.role.assign",
+											idempotency_key: idempotencyKey("dashboard-role-assign"),
+											role_opaque_id: role.opaque_id,
+										})
+									}
+									variant="secondary"
+								>
+									{role.scope === "project"
+										? "Assign project role"
+										: "Target required"}
+								</Button>
+							</li>
+						))}
+					</ul>
+				) : (
+					<StatePanel
+						description="No project role is available to assign."
+						kind="empty"
+						title="No roles"
+					/>
+				)}
+				<CommandFeedback
+					error={roleCommand.error}
+					response={roleCommand.data}
+				/>
+			</section>
+
+			<section className={styles.section}>
+				<div className={styles.sectionHeader}>
+					<div>
+						<p className={styles.eyebrow}>Intake</p>
+						<h2>Ideas</h2>
+					</div>
+					<span>{controls.data?.ideas.length ?? 0} ideas</span>
+				</div>
+				<CreateIdeaForm />
+				{controls.data?.ideas.length ? (
+					<ul className={styles.operationList}>
+						{controls.data.ideas.map((idea) => (
+							<li key={idea.opaque_id}>
+								<div>
+									<strong>{idea.body}</strong>
+									<code>{idea.opaque_id}</code>
+									{idea.promoted_ticket_opaque_id ? (
+										<span>
+											Promoted to{" "}
+											<Link to={`/tickets/${idea.promoted_ticket_opaque_id}`}>
+												{idea.promoted_ticket_opaque_id}
+											</Link>
+										</span>
+									) : null}
+								</div>
+								<div className={styles.actions}>
+									<StatusBadge
+										label={idea.status}
+										tone={operationTone(idea.status)}
+									/>
+									{idea.status === "pending" ? (
+										<>
+											<Button
+												loading={ideaCommand.isPending}
+												onPress={() =>
+													ideaCommand.mutate({
+														kind: "management.idea.promote",
+														idempotency_key: idempotencyKey(
+															"dashboard-idea-promote",
+														),
+														idea_opaque_id: idea.opaque_id,
+													})
+												}
+												variant="primary"
+											>
+												Promote
+											</Button>
+											<Button
+												loading={ideaCommand.isPending}
+												onPress={() =>
+													ideaCommand.mutate({
+														kind: "management.idea.pop",
+														idempotency_key:
+															idempotencyKey("dashboard-idea-pop"),
+														idea_opaque_id: idea.opaque_id,
+													})
+												}
+												variant="secondary"
+											>
+												Pop
+											</Button>
+										</>
+									) : null}
+								</div>
+							</li>
+						))}
+					</ul>
+				) : null}
+				<CommandFeedback
+					error={ideaCommand.error}
+					response={ideaCommand.data}
+				/>
 			</section>
 
 			<section className={styles.section}>
@@ -156,42 +307,6 @@ export function ReviewRoute() {
 					</ul>
 				) : null}
 			</section>
-
-			<section
-				className={styles.capabilityGrid}
-				aria-label="Management capabilities"
-			>
-				<article>
-					<h2>Roles</h2>
-					<StatusBadge label="Read-only unavailable" tone="warning" />
-					<p>
-						The current browser allowlist exposes no role roster or role-change
-						command. This screen does not fall back to session internals.
-					</p>
-				</article>
-				<article>
-					<h2>Ideas</h2>
-					<StatusBadge label="Read-only unavailable" tone="warning" />
-					<p>
-						Idea list, promote, and pop operations are not in the public browser
-						contract, so no inert or misleading controls are rendered.
-					</p>
-				</article>
-				<article>
-					<h2>Assets</h2>
-					<StatusBadge label="ID-scoped reads only" tone="info" />
-					<p>
-						An asset can be read only from a known ticket and asset ID. The
-						contract exposes no asset index, so this page cannot enumerate one.
-					</p>
-				</article>
-			</section>
-
-			<InlineAlert tone="info">
-				Capability gaps are explicit product state. Adding roles or ideas here
-				requires extending the public browser contract, not querying legacy
-				routes.
-			</InlineAlert>
 		</section>
 	);
 }

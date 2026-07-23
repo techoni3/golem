@@ -188,6 +188,30 @@
 	.wideField {
 		grid-column: 1 / -1;
 	}
+	.fieldLabel {
+		display: block;
+		margin-bottom: var(--g-space-2);
+		color: var(--g-text);
+		font-size: 0.82rem;
+		font-weight: 700;
+	}
+	.textarea {
+		box-sizing: border-box;
+		width: 100%;
+		min-height: 7rem;
+		resize: vertical;
+		border: 1px solid var(--g-border);
+		border-radius: var(--g-radius-md);
+		padding: var(--g-space-3);
+		background: var(--g-surface);
+		color: var(--g-text);
+		font: inherit;
+		line-height: 1.5;
+	}
+	.textarea:focus-visible {
+		outline: 2px solid var(--g-accent);
+		outline-offset: 2px;
+	}
 	.formActions {
 		justify-content: space-between;
 	}
@@ -229,6 +253,26 @@
 	.relationship ul {
 		margin: var(--g-space-1) 0 0;
 		padding-left: var(--g-space-4);
+	}
+	.bodyText,
+	.commentList {
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+	.commentList,
+	.assetList {
+		display: grid;
+		gap: var(--g-space-2);
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+	.commentList li,
+	.assetList li {
+		border: 1px solid var(--g-divider);
+		border-radius: var(--g-radius-md);
+		padding: var(--g-space-3);
+		background: var(--g-surface-sunken);
 	}
 
 	@media (max-width: 48rem) {

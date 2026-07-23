@@ -6632,10 +6632,17 @@ export interface operations {
                             readonly opaque_id: string;
                             /** @enum {string} */
                             readonly kind: "work-item" | "spec" | "question" | "decision" | "fix";
+                            readonly title: string;
                             /** @enum {string} */
                             readonly state: "todo" | "in_progress" | "blocked" | "review" | "done" | "archived";
                             readonly phase: string;
                             readonly priority: ("P0" | "P1" | "P2" | "P3") | null;
+                            readonly labels: readonly string[];
+                            readonly parent_opaque_id?: string;
+                            readonly stream_opaque_id?: string;
+                            readonly wave?: number;
+                            readonly legal_phases: readonly string[];
+                            readonly has_assignee: boolean;
                             readonly revision: number;
                             /** Format: date-time */
                             readonly updated_at: string;
@@ -6651,14 +6658,20 @@ export interface operations {
                             readonly opaque_id: string;
                             /** @enum {string} */
                             readonly kind: "work-item" | "spec" | "question" | "decision" | "fix";
+                            readonly title: string;
                             /** @enum {string} */
                             readonly state: "todo" | "in_progress" | "blocked" | "review" | "done" | "archived";
                             readonly phase: string;
                             readonly priority: ("P0" | "P1" | "P2" | "P3") | null;
+                            readonly labels: readonly string[];
+                            readonly parent_opaque_id?: string;
+                            readonly stream_opaque_id?: string;
+                            readonly wave?: number;
+                            readonly legal_phases: readonly string[];
+                            readonly has_assignee: boolean;
                             readonly revision: number;
                             /** Format: date-time */
                             readonly updated_at: string;
-                            readonly parent_opaque_id?: string;
                         }[];
                     } | {
                         /** @constant */
@@ -6673,6 +6686,38 @@ export interface operations {
                             readonly operation_kind: "chat" | "brief" | "interrupt" | "halt" | "control";
                             /** @enum {string} */
                             readonly status: "queued" | "ineligible" | "delivered";
+                            /** Format: date-time */
+                            readonly created_at: string;
+                            /** Format: date-time */
+                            readonly updated_at: string;
+                        }[];
+                        readonly roles: readonly {
+                            readonly opaque_id: string;
+                            readonly name: string;
+                            /** @enum {string} */
+                            readonly scope: "project" | "session" | "generation";
+                            readonly revision: number;
+                            /** Format: date-time */
+                            readonly updated_at: string;
+                        }[];
+                        readonly gates: readonly {
+                            readonly opaque_id: string;
+                            /** @enum {string} */
+                            readonly gate_kind: "approval" | "input";
+                            /** @enum {string} */
+                            readonly status: "awaiting" | "approved" | "denied" | "cancelled";
+                            readonly question: string;
+                            /** @enum {string} */
+                            readonly assignee_kind: "human" | "operator";
+                            /** Format: date-time */
+                            readonly updated_at: string;
+                        }[];
+                        readonly ideas: readonly {
+                            readonly opaque_id: string;
+                            readonly body: string;
+                            /** @enum {string} */
+                            readonly status: "pending" | "popped" | "promoted";
+                            readonly promoted_ticket_opaque_id?: string;
                             /** Format: date-time */
                             readonly created_at: string;
                             /** Format: date-time */
@@ -6758,14 +6803,81 @@ export interface operations {
                             readonly opaque_id: string;
                             /** @enum {string} */
                             readonly kind: "work-item" | "spec" | "question" | "decision" | "fix";
+                            readonly title: string;
                             /** @enum {string} */
                             readonly state: "todo" | "in_progress" | "blocked" | "review" | "done" | "archived";
                             readonly phase: string;
                             readonly priority: ("P0" | "P1" | "P2" | "P3") | null;
+                            readonly labels: readonly string[];
+                            readonly parent_opaque_id?: string;
+                            readonly stream_opaque_id?: string;
+                            readonly wave?: number;
+                            readonly legal_phases: readonly string[];
+                            readonly has_assignee: boolean;
                             readonly revision: number;
                             /** Format: date-time */
                             readonly updated_at: string;
                         };
+                        readonly body: string;
+                        readonly comments: readonly {
+                            readonly opaque_id: string;
+                            readonly parent_opaque_id?: string;
+                            /** @enum {string} */
+                            readonly author_kind: "human" | "session" | "system";
+                            readonly body: string;
+                            readonly tag: string;
+                            readonly status: string;
+                            readonly revision: number;
+                            /** Format: date-time */
+                            readonly created_at: string;
+                            /** Format: date-time */
+                            readonly updated_at: string;
+                        }[];
+                        readonly links: readonly {
+                            readonly opaque_id: string;
+                            readonly target_opaque_id: string;
+                            /** @enum {string} */
+                            readonly relation: "blocks" | "relates" | "duplicates";
+                            /** Format: date-time */
+                            readonly created_at?: string;
+                        }[];
+                        readonly children: readonly {
+                            readonly opaque_id: string;
+                            /** @enum {string} */
+                            readonly kind: "work-item" | "spec" | "question" | "decision" | "fix";
+                            readonly title: string;
+                            /** @enum {string} */
+                            readonly state: "todo" | "in_progress" | "blocked" | "review" | "done" | "archived";
+                            readonly phase: string;
+                            readonly priority: ("P0" | "P1" | "P2" | "P3") | null;
+                            readonly labels: readonly string[];
+                            readonly parent_opaque_id?: string;
+                            readonly stream_opaque_id?: string;
+                            readonly wave?: number;
+                            readonly legal_phases: readonly string[];
+                            readonly has_assignee: boolean;
+                            readonly revision: number;
+                            /** Format: date-time */
+                            readonly updated_at: string;
+                        }[];
+                        readonly streams: readonly {
+                            readonly opaque_id: string;
+                            readonly name: string;
+                            /** @enum {string} */
+                            readonly mode: "sequential" | "parallel";
+                            readonly description: string;
+                            readonly revision: number;
+                            /** Format: date-time */
+                            readonly updated_at: string;
+                        }[];
+                        readonly assets: readonly {
+                            readonly opaque_id: string;
+                            /** @enum {string} */
+                            readonly mime_type: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+                            readonly byte_size: number;
+                            /** Format: date-time */
+                            readonly created_at: string;
+                        }[];
                     };
                 };
             };
@@ -6942,9 +7054,13 @@ export interface operations {
                     /** @enum {string} */
                     readonly ticket_kind?: "work-item" | "spec" | "question" | "decision" | "fix";
                     readonly title: string;
+                    readonly body?: string;
                     /** @enum {string} */
                     readonly priority?: "P0" | "P1" | "P2" | "P3";
                     readonly labels?: readonly string[];
+                    readonly parent_opaque_id?: string;
+                    readonly stream_opaque_id?: string;
+                    readonly wave?: number;
                 } | {
                     readonly idempotency_key: string;
                     /** @constant */
@@ -6952,17 +7068,44 @@ export interface operations {
                     readonly opaque_id: string;
                     readonly expected_revision: number;
                     readonly title?: string;
+                    readonly body?: string;
                     /** @enum {string} */
                     readonly priority?: "P0" | "P1" | "P2" | "P3";
                     readonly labels?: readonly string[];
+                    readonly parent_opaque_id?: string;
+                    readonly stream_opaque_id?: string;
+                    readonly wave?: number;
                 } | {
                     readonly idempotency_key: string;
                     /** @constant */
                     readonly kind: "ticket.transition";
                     readonly opaque_id: string;
                     readonly expected_revision: number;
+                    readonly phase: string;
+                    readonly reason?: string;
+                } | {
+                    readonly idempotency_key: string;
+                    /** @constant */
+                    readonly kind: "comment.create";
+                    readonly opaque_id: string;
+                    readonly parent_comment_opaque_id?: string;
+                    readonly body: string;
+                } | {
+                    readonly idempotency_key: string;
+                    /** @constant */
+                    readonly kind: "link.create";
+                    readonly opaque_id: string;
+                    readonly target_opaque_id: string;
                     /** @enum {string} */
-                    readonly phase: "queued" | "building" | "blocked" | "built" | "verifying" | "verified" | "rejected" | "done";
+                    readonly relation: "blocks" | "relates" | "duplicates";
+                } | {
+                    readonly idempotency_key: string;
+                    /** @constant */
+                    readonly kind: "stream.create";
+                    readonly name: string;
+                    /** @enum {string} */
+                    readonly mode: "sequential" | "parallel";
+                    readonly description?: string;
                 } | {
                     readonly idempotency_key: string;
                     /** @constant */
@@ -6971,6 +7114,27 @@ export interface operations {
                     readonly gate_kind: "approval" | "input";
                     readonly question: string;
                     readonly assignee: string;
+                } | {
+                    readonly idempotency_key: string;
+                    /** @constant */
+                    readonly kind: "management.role.assign";
+                    readonly role_opaque_id: string;
+                } | {
+                    readonly idempotency_key: string;
+                    /** @constant */
+                    readonly kind: "management.idea.create";
+                    readonly body: string;
+                } | {
+                    readonly idempotency_key: string;
+                    /** @constant */
+                    readonly kind: "management.idea.pop";
+                    readonly idea_opaque_id: string;
+                } | {
+                    readonly idempotency_key: string;
+                    /** @constant */
+                    readonly kind: "management.idea.promote";
+                    readonly idea_opaque_id: string;
+                    readonly title?: string;
                 } | {
                     readonly idempotency_key: string;
                     /** @constant */
@@ -7001,10 +7165,58 @@ export interface operations {
                                 readonly opaque_id: string;
                                 /** @enum {string} */
                                 readonly kind: "work-item" | "spec" | "question" | "decision" | "fix";
+                                readonly title: string;
                                 /** @enum {string} */
                                 readonly state: "todo" | "in_progress" | "blocked" | "review" | "done" | "archived";
                                 readonly phase: string;
                                 readonly priority: ("P0" | "P1" | "P2" | "P3") | null;
+                                readonly labels: readonly string[];
+                                readonly parent_opaque_id?: string;
+                                readonly stream_opaque_id?: string;
+                                readonly wave?: number;
+                                readonly legal_phases: readonly string[];
+                                readonly has_assignee: boolean;
+                                readonly revision: number;
+                                /** Format: date-time */
+                                readonly updated_at: string;
+                            };
+                        } | {
+                            /** @constant */
+                            readonly kind: "comment";
+                            readonly comment: {
+                                readonly opaque_id: string;
+                                readonly parent_opaque_id?: string;
+                                /** @enum {string} */
+                                readonly author_kind: "human" | "session" | "system";
+                                readonly body: string;
+                                readonly tag: string;
+                                readonly status: string;
+                                readonly revision: number;
+                                /** Format: date-time */
+                                readonly created_at: string;
+                                /** Format: date-time */
+                                readonly updated_at: string;
+                            };
+                        } | {
+                            /** @constant */
+                            readonly kind: "link";
+                            readonly link: {
+                                readonly opaque_id: string;
+                                readonly target_opaque_id: string;
+                                /** @enum {string} */
+                                readonly relation: "blocks" | "relates" | "duplicates";
+                                /** Format: date-time */
+                                readonly created_at?: string;
+                            };
+                        } | {
+                            /** @constant */
+                            readonly kind: "stream";
+                            readonly stream: {
+                                readonly opaque_id: string;
+                                readonly name: string;
+                                /** @enum {string} */
+                                readonly mode: "sequential" | "parallel";
+                                readonly description: string;
                                 readonly revision: number;
                                 /** Format: date-time */
                                 readonly updated_at: string;
@@ -7017,6 +7229,26 @@ export interface operations {
                             readonly status: "awaiting" | "approved" | "denied" | "cancelled";
                             /** Format: date-time */
                             readonly updated_at: string;
+                        } | {
+                            /** @constant */
+                            readonly kind: "role_assignment";
+                            readonly role_opaque_id: string;
+                            /** Format: date-time */
+                            readonly assigned_at: string;
+                        } | {
+                            /** @constant */
+                            readonly kind: "idea";
+                            readonly idea: {
+                                readonly opaque_id: string;
+                                readonly body: string;
+                                /** @enum {string} */
+                                readonly status: "pending" | "popped" | "promoted";
+                                readonly promoted_ticket_opaque_id?: string;
+                                /** Format: date-time */
+                                readonly created_at: string;
+                                /** Format: date-time */
+                                readonly updated_at: string;
+                            };
                         } | {
                             /** @constant */
                             readonly kind: "dispatch";
@@ -7111,10 +7343,58 @@ export interface operations {
                                 readonly opaque_id: string;
                                 /** @enum {string} */
                                 readonly kind: "work-item" | "spec" | "question" | "decision" | "fix";
+                                readonly title: string;
                                 /** @enum {string} */
                                 readonly state: "todo" | "in_progress" | "blocked" | "review" | "done" | "archived";
                                 readonly phase: string;
                                 readonly priority: ("P0" | "P1" | "P2" | "P3") | null;
+                                readonly labels: readonly string[];
+                                readonly parent_opaque_id?: string;
+                                readonly stream_opaque_id?: string;
+                                readonly wave?: number;
+                                readonly legal_phases: readonly string[];
+                                readonly has_assignee: boolean;
+                                readonly revision: number;
+                                /** Format: date-time */
+                                readonly updated_at: string;
+                            };
+                        } | {
+                            /** @constant */
+                            readonly kind: "comment";
+                            readonly comment: {
+                                readonly opaque_id: string;
+                                readonly parent_opaque_id?: string;
+                                /** @enum {string} */
+                                readonly author_kind: "human" | "session" | "system";
+                                readonly body: string;
+                                readonly tag: string;
+                                readonly status: string;
+                                readonly revision: number;
+                                /** Format: date-time */
+                                readonly created_at: string;
+                                /** Format: date-time */
+                                readonly updated_at: string;
+                            };
+                        } | {
+                            /** @constant */
+                            readonly kind: "link";
+                            readonly link: {
+                                readonly opaque_id: string;
+                                readonly target_opaque_id: string;
+                                /** @enum {string} */
+                                readonly relation: "blocks" | "relates" | "duplicates";
+                                /** Format: date-time */
+                                readonly created_at?: string;
+                            };
+                        } | {
+                            /** @constant */
+                            readonly kind: "stream";
+                            readonly stream: {
+                                readonly opaque_id: string;
+                                readonly name: string;
+                                /** @enum {string} */
+                                readonly mode: "sequential" | "parallel";
+                                readonly description: string;
                                 readonly revision: number;
                                 /** Format: date-time */
                                 readonly updated_at: string;
@@ -7127,6 +7407,26 @@ export interface operations {
                             readonly status: "awaiting" | "approved" | "denied" | "cancelled";
                             /** Format: date-time */
                             readonly updated_at: string;
+                        } | {
+                            /** @constant */
+                            readonly kind: "role_assignment";
+                            readonly role_opaque_id: string;
+                            /** Format: date-time */
+                            readonly assigned_at: string;
+                        } | {
+                            /** @constant */
+                            readonly kind: "idea";
+                            readonly idea: {
+                                readonly opaque_id: string;
+                                readonly body: string;
+                                /** @enum {string} */
+                                readonly status: "pending" | "popped" | "promoted";
+                                readonly promoted_ticket_opaque_id?: string;
+                                /** Format: date-time */
+                                readonly created_at: string;
+                                /** Format: date-time */
+                                readonly updated_at: string;
+                            };
                         } | {
                             /** @constant */
                             readonly kind: "dispatch";

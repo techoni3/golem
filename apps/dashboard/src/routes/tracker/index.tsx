@@ -88,10 +88,12 @@ function matches(
 	const needle = query.trim().toLocaleLowerCase();
 	return [
 		ticket.opaque_id,
+		ticket.title,
 		ticket.kind,
 		ticket.phase,
 		ticket.state,
 		ticket.priority ?? "",
+		...ticket.labels,
 	]
 		.join(" ")
 		.toLocaleLowerCase()
@@ -115,10 +117,11 @@ function TicketCard({
 				<span className={styles.revision}>r{ticket.revision}</span>
 			</div>
 			<h2>
-				<Link to={`/tickets/${ticket.opaque_id}`}>{ticket.opaque_id}</Link>
+				<Link to={`/tickets/${ticket.opaque_id}`}>{ticket.title}</Link>
 			</h2>
 			<p>
-				{ticket.priority ?? "No priority"} · legacy state {ticket.state}
+				{ticket.opaque_id} · {ticket.priority ?? "No priority"} · legacy state{" "}
+				{ticket.state}
 			</p>
 			<dl className={styles.cardFacts}>
 				<div>

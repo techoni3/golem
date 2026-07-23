@@ -12676,6 +12676,11 @@
                                       "fix"
                                     ]
                                   },
+                                  "title": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 256
+                                  },
                                   "state": {
                                     "type": "string",
                                     "enum": [
@@ -12708,6 +12713,42 @@
                                       }
                                     ]
                                   },
+                                  "labels": {
+                                    "maxItems": 32,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 64
+                                    }
+                                  },
+                                  "parent_opaque_id": {
+                                    "type": "string",
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                  },
+                                  "stream_opaque_id": {
+                                    "type": "string",
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                  },
+                                  "wave": {
+                                    "type": "integer",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 10000
+                                  },
+                                  "legal_phases": {
+                                    "maxItems": 16,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 64
+                                    }
+                                  },
+                                  "has_assignee": {
+                                    "type": "boolean"
+                                  },
                                   "revision": {
                                     "type": "integer",
                                     "exclusiveMinimum": 0,
@@ -12722,9 +12763,13 @@
                                 "required": [
                                   "opaque_id",
                                   "kind",
+                                  "title",
                                   "state",
                                   "phase",
                                   "priority",
+                                  "labels",
+                                  "legal_phases",
+                                  "has_assignee",
                                   "revision",
                                   "updated_at"
                                 ],
@@ -12790,6 +12835,11 @@
                                       "fix"
                                     ]
                                   },
+                                  "title": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 256
+                                  },
                                   "state": {
                                     "type": "string",
                                     "enum": [
@@ -12822,6 +12872,42 @@
                                       }
                                     ]
                                   },
+                                  "labels": {
+                                    "maxItems": 32,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 64
+                                    }
+                                  },
+                                  "parent_opaque_id": {
+                                    "type": "string",
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                  },
+                                  "stream_opaque_id": {
+                                    "type": "string",
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                  },
+                                  "wave": {
+                                    "type": "integer",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 10000
+                                  },
+                                  "legal_phases": {
+                                    "maxItems": 16,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 64
+                                    }
+                                  },
+                                  "has_assignee": {
+                                    "type": "boolean"
+                                  },
                                   "revision": {
                                     "type": "integer",
                                     "exclusiveMinimum": 0,
@@ -12831,19 +12917,18 @@
                                     "type": "string",
                                     "format": "date-time",
                                     "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
-                                  },
-                                  "parent_opaque_id": {
-                                    "type": "string",
-                                    "maxLength": 128,
-                                    "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
                                   }
                                 },
                                 "required": [
                                   "opaque_id",
                                   "kind",
+                                  "title",
                                   "state",
                                   "phase",
                                   "priority",
+                                  "labels",
+                                  "legal_phases",
+                                  "has_assignee",
                                   "revision",
                                   "updated_at"
                                 ],
@@ -12937,6 +13022,156 @@
                                 ],
                                 "additionalProperties": false
                               }
+                            },
+                            "roles": {
+                              "maxItems": 100,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "opaque_id": {
+                                    "type": "string",
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                  },
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 128
+                                  },
+                                  "scope": {
+                                    "type": "string",
+                                    "enum": [
+                                      "project",
+                                      "session",
+                                      "generation"
+                                    ]
+                                  },
+                                  "revision": {
+                                    "type": "integer",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "updated_at": {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                  }
+                                },
+                                "required": [
+                                  "opaque_id",
+                                  "name",
+                                  "scope",
+                                  "revision",
+                                  "updated_at"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "gates": {
+                              "maxItems": 100,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "opaque_id": {
+                                    "type": "string",
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                  },
+                                  "gate_kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "approval",
+                                      "input"
+                                    ]
+                                  },
+                                  "status": {
+                                    "type": "string",
+                                    "enum": [
+                                      "awaiting",
+                                      "approved",
+                                      "denied",
+                                      "cancelled"
+                                    ]
+                                  },
+                                  "question": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 4096
+                                  },
+                                  "assignee_kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "human",
+                                      "operator"
+                                    ]
+                                  },
+                                  "updated_at": {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                  }
+                                },
+                                "required": [
+                                  "opaque_id",
+                                  "gate_kind",
+                                  "status",
+                                  "question",
+                                  "assignee_kind",
+                                  "updated_at"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "ideas": {
+                              "maxItems": 100,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "opaque_id": {
+                                    "type": "string",
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                  },
+                                  "body": {
+                                    "type": "string",
+                                    "maxLength": 16384
+                                  },
+                                  "status": {
+                                    "type": "string",
+                                    "enum": [
+                                      "pending",
+                                      "popped",
+                                      "promoted"
+                                    ]
+                                  },
+                                  "promoted_ticket_opaque_id": {
+                                    "type": "string",
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                  },
+                                  "created_at": {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                  },
+                                  "updated_at": {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                  }
+                                },
+                                "required": [
+                                  "opaque_id",
+                                  "body",
+                                  "status",
+                                  "created_at",
+                                  "updated_at"
+                                ],
+                                "additionalProperties": false
+                              }
                             }
                           },
                           "required": [
@@ -12944,7 +13179,10 @@
                             "resource_revision",
                             "next_cursor",
                             "stream",
-                            "items"
+                            "items",
+                            "roles",
+                            "gates",
+                            "ideas"
                           ],
                           "additionalProperties": false
                         },
@@ -13211,6 +13449,11 @@
                             "fix"
                           ]
                         },
+                        "title": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        },
                         "state": {
                           "type": "string",
                           "enum": [
@@ -13243,6 +13486,42 @@
                             }
                           ]
                         },
+                        "labels": {
+                          "maxItems": 32,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          }
+                        },
+                        "parent_opaque_id": {
+                          "type": "string",
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                        },
+                        "stream_opaque_id": {
+                          "type": "string",
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                        },
+                        "wave": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 10000
+                        },
+                        "legal_phases": {
+                          "maxItems": 16,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          }
+                        },
+                        "has_assignee": {
+                          "type": "boolean"
+                        },
                         "revision": {
                           "type": "integer",
                           "exclusiveMinimum": 0,
@@ -13257,18 +13536,347 @@
                       "required": [
                         "opaque_id",
                         "kind",
+                        "title",
                         "state",
                         "phase",
                         "priority",
+                        "labels",
+                        "legal_phases",
+                        "has_assignee",
                         "revision",
                         "updated_at"
                       ],
                       "additionalProperties": false
+                    },
+                    "body": {
+                      "type": "string",
+                      "maxLength": 16384
+                    },
+                    "comments": {
+                      "maxItems": 500,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "opaque_id": {
+                            "type": "string",
+                            "maxLength": 128,
+                            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                          },
+                          "parent_opaque_id": {
+                            "type": "string",
+                            "maxLength": 128,
+                            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                          },
+                          "author_kind": {
+                            "type": "string",
+                            "enum": [
+                              "human",
+                              "session",
+                              "system"
+                            ]
+                          },
+                          "body": {
+                            "type": "string",
+                            "maxLength": 16384
+                          },
+                          "tag": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "status": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "revision": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "created_at": {
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          },
+                          "updated_at": {
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          }
+                        },
+                        "required": [
+                          "opaque_id",
+                          "author_kind",
+                          "body",
+                          "tag",
+                          "status",
+                          "revision",
+                          "created_at",
+                          "updated_at"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "links": {
+                      "maxItems": 200,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "opaque_id": {
+                            "type": "string",
+                            "maxLength": 128,
+                            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                          },
+                          "target_opaque_id": {
+                            "type": "string",
+                            "maxLength": 128,
+                            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                          },
+                          "relation": {
+                            "type": "string",
+                            "enum": [
+                              "blocks",
+                              "relates",
+                              "duplicates"
+                            ]
+                          },
+                          "created_at": {
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          }
+                        },
+                        "required": [
+                          "opaque_id",
+                          "target_opaque_id",
+                          "relation"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "children": {
+                      "maxItems": 200,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "opaque_id": {
+                            "type": "string",
+                            "maxLength": 128,
+                            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "work-item",
+                              "spec",
+                              "question",
+                              "decision",
+                              "fix"
+                            ]
+                          },
+                          "title": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "todo",
+                              "in_progress",
+                              "blocked",
+                              "review",
+                              "done",
+                              "archived"
+                            ]
+                          },
+                          "phase": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "priority": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "P0",
+                                  "P1",
+                                  "P2",
+                                  "P3"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "labels": {
+                            "maxItems": 32,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64
+                            }
+                          },
+                          "parent_opaque_id": {
+                            "type": "string",
+                            "maxLength": 128,
+                            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                          },
+                          "stream_opaque_id": {
+                            "type": "string",
+                            "maxLength": 128,
+                            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                          },
+                          "wave": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 10000
+                          },
+                          "legal_phases": {
+                            "maxItems": 16,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64
+                            }
+                          },
+                          "has_assignee": {
+                            "type": "boolean"
+                          },
+                          "revision": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "updated_at": {
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          }
+                        },
+                        "required": [
+                          "opaque_id",
+                          "kind",
+                          "title",
+                          "state",
+                          "phase",
+                          "priority",
+                          "labels",
+                          "legal_phases",
+                          "has_assignee",
+                          "revision",
+                          "updated_at"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "streams": {
+                      "maxItems": 100,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "opaque_id": {
+                            "type": "string",
+                            "maxLength": 128,
+                            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                          },
+                          "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          },
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "sequential",
+                              "parallel"
+                            ]
+                          },
+                          "description": {
+                            "type": "string",
+                            "maxLength": 4096
+                          },
+                          "revision": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "updated_at": {
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          }
+                        },
+                        "required": [
+                          "opaque_id",
+                          "name",
+                          "mode",
+                          "description",
+                          "revision",
+                          "updated_at"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "assets": {
+                      "maxItems": 100,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "opaque_id": {
+                            "type": "string",
+                            "maxLength": 128,
+                            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                          },
+                          "mime_type": {
+                            "type": "string",
+                            "enum": [
+                              "image/png",
+                              "image/jpeg",
+                              "image/gif",
+                              "image/webp"
+                            ]
+                          },
+                          "byte_size": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 10485760
+                          },
+                          "created_at": {
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          }
+                        },
+                        "required": [
+                          "opaque_id",
+                          "mime_type",
+                          "byte_size",
+                          "created_at"
+                        ],
+                        "additionalProperties": false
+                      }
                     }
                   },
                   "required": [
                     "schema_version",
-                    "item"
+                    "item",
+                    "body",
+                    "comments",
+                    "links",
+                    "children",
+                    "streams",
+                    "assets"
                   ],
                   "additionalProperties": false
                 }
@@ -13817,6 +14425,10 @@
                         "minLength": 1,
                         "maxLength": 256
                       },
+                      "body": {
+                        "type": "string",
+                        "maxLength": 16384
+                      },
                       "priority": {
                         "type": "string",
                         "enum": [
@@ -13834,6 +14446,21 @@
                           "minLength": 1,
                           "maxLength": 64
                         }
+                      },
+                      "parent_opaque_id": {
+                        "type": "string",
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                      },
+                      "stream_opaque_id": {
+                        "type": "string",
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                      },
+                      "wave": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 10000
                       }
                     },
                     "required": [
@@ -13870,6 +14497,10 @@
                         "minLength": 1,
                         "maxLength": 256
                       },
+                      "body": {
+                        "type": "string",
+                        "maxLength": 16384
+                      },
                       "priority": {
                         "type": "string",
                         "enum": [
@@ -13887,6 +14518,21 @@
                           "minLength": 1,
                           "maxLength": 64
                         }
+                      },
+                      "parent_opaque_id": {
+                        "type": "string",
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                      },
+                      "stream_opaque_id": {
+                        "type": "string",
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                      },
+                      "wave": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 10000
                       }
                     },
                     "required": [
@@ -13921,16 +14567,13 @@
                       },
                       "phase": {
                         "type": "string",
-                        "enum": [
-                          "queued",
-                          "building",
-                          "blocked",
-                          "built",
-                          "verifying",
-                          "verified",
-                          "rejected",
-                          "done"
-                        ]
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "reason": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1024
                       }
                     },
                     "required": [
@@ -13939,6 +14582,118 @@
                       "opaque_id",
                       "expected_revision",
                       "phase"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "comment.create"
+                      },
+                      "opaque_id": {
+                        "type": "string",
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                      },
+                      "parent_comment_opaque_id": {
+                        "type": "string",
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                      },
+                      "body": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "kind",
+                      "opaque_id",
+                      "body"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "link.create"
+                      },
+                      "opaque_id": {
+                        "type": "string",
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                      },
+                      "target_opaque_id": {
+                        "type": "string",
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                      },
+                      "relation": {
+                        "type": "string",
+                        "enum": [
+                          "blocks",
+                          "relates",
+                          "duplicates"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "kind",
+                      "opaque_id",
+                      "target_opaque_id",
+                      "relation"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "stream.create"
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "mode": {
+                        "type": "string",
+                        "enum": [
+                          "sequential",
+                          "parallel"
+                        ]
+                      },
+                      "description": {
+                        "type": "string",
+                        "maxLength": 4096
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "kind",
+                      "name",
+                      "mode"
                     ],
                     "additionalProperties": false
                   },
@@ -13978,6 +14733,110 @@
                       "gate_kind",
                       "question",
                       "assignee"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "management.role.assign"
+                      },
+                      "role_opaque_id": {
+                        "type": "string",
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "kind",
+                      "role_opaque_id"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "management.idea.create"
+                      },
+                      "body": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "kind",
+                      "body"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "management.idea.pop"
+                      },
+                      "idea_opaque_id": {
+                        "type": "string",
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "kind",
+                      "idea_opaque_id"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "idempotency_key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "management.idea.promote"
+                      },
+                      "idea_opaque_id": {
+                        "type": "string",
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                      },
+                      "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      }
+                    },
+                    "required": [
+                      "idempotency_key",
+                      "kind",
+                      "idea_opaque_id"
                     ],
                     "additionalProperties": false
                   },
@@ -14076,6 +14935,11 @@
                                     "fix"
                                   ]
                                 },
+                                "title": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256
+                                },
                                 "state": {
                                   "type": "string",
                                   "enum": [
@@ -14108,6 +14972,42 @@
                                     }
                                   ]
                                 },
+                                "labels": {
+                                  "maxItems": 32,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64
+                                  }
+                                },
+                                "parent_opaque_id": {
+                                  "type": "string",
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                },
+                                "stream_opaque_id": {
+                                  "type": "string",
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                },
+                                "wave": {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 10000
+                                },
+                                "legal_phases": {
+                                  "maxItems": 16,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64
+                                  }
+                                },
+                                "has_assignee": {
+                                  "type": "boolean"
+                                },
                                 "revision": {
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
@@ -14122,9 +15022,13 @@
                               "required": [
                                 "opaque_id",
                                 "kind",
+                                "title",
                                 "state",
                                 "phase",
                                 "priority",
+                                "labels",
+                                "legal_phases",
+                                "has_assignee",
                                 "revision",
                                 "updated_at"
                               ],
@@ -14134,6 +15038,190 @@
                           "required": [
                             "kind",
                             "ticket"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "comment"
+                            },
+                            "comment": {
+                              "type": "object",
+                              "properties": {
+                                "opaque_id": {
+                                  "type": "string",
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                },
+                                "parent_opaque_id": {
+                                  "type": "string",
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                },
+                                "author_kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "human",
+                                    "session",
+                                    "system"
+                                  ]
+                                },
+                                "body": {
+                                  "type": "string",
+                                  "maxLength": 16384
+                                },
+                                "tag": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 64
+                                },
+                                "status": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 64
+                                },
+                                "revision": {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "created_at": {
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                },
+                                "updated_at": {
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                }
+                              },
+                              "required": [
+                                "opaque_id",
+                                "author_kind",
+                                "body",
+                                "tag",
+                                "status",
+                                "revision",
+                                "created_at",
+                                "updated_at"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "comment"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "link"
+                            },
+                            "link": {
+                              "type": "object",
+                              "properties": {
+                                "opaque_id": {
+                                  "type": "string",
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                },
+                                "target_opaque_id": {
+                                  "type": "string",
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                },
+                                "relation": {
+                                  "type": "string",
+                                  "enum": [
+                                    "blocks",
+                                    "relates",
+                                    "duplicates"
+                                  ]
+                                },
+                                "created_at": {
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                }
+                              },
+                              "required": [
+                                "opaque_id",
+                                "target_opaque_id",
+                                "relation"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "link"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "stream"
+                            },
+                            "stream": {
+                              "type": "object",
+                              "properties": {
+                                "opaque_id": {
+                                  "type": "string",
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                },
+                                "name": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256
+                                },
+                                "mode": {
+                                  "type": "string",
+                                  "enum": [
+                                    "sequential",
+                                    "parallel"
+                                  ]
+                                },
+                                "description": {
+                                  "type": "string",
+                                  "maxLength": 4096
+                                },
+                                "revision": {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "updated_at": {
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                }
+                              },
+                              "required": [
+                                "opaque_id",
+                                "name",
+                                "mode",
+                                "description",
+                                "revision",
+                                "updated_at"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "stream"
                           ],
                           "additionalProperties": false
                         },
@@ -14169,6 +15257,90 @@
                             "opaque_id",
                             "status",
                             "updated_at"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "role_assignment"
+                            },
+                            "role_opaque_id": {
+                              "type": "string",
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                            },
+                            "assigned_at": {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "role_opaque_id",
+                            "assigned_at"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "idea"
+                            },
+                            "idea": {
+                              "type": "object",
+                              "properties": {
+                                "opaque_id": {
+                                  "type": "string",
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                },
+                                "body": {
+                                  "type": "string",
+                                  "maxLength": 16384
+                                },
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "pending",
+                                    "popped",
+                                    "promoted"
+                                  ]
+                                },
+                                "promoted_ticket_opaque_id": {
+                                  "type": "string",
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                },
+                                "created_at": {
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                },
+                                "updated_at": {
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                }
+                              },
+                              "required": [
+                                "opaque_id",
+                                "body",
+                                "status",
+                                "created_at",
+                                "updated_at"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "idea"
                           ],
                           "additionalProperties": false
                         },
@@ -14491,6 +15663,11 @@
                                         "fix"
                                       ]
                                     },
+                                    "title": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 256
+                                    },
                                     "state": {
                                       "type": "string",
                                       "enum": [
@@ -14523,6 +15700,42 @@
                                         }
                                       ]
                                     },
+                                    "labels": {
+                                      "maxItems": 32,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 64
+                                      }
+                                    },
+                                    "parent_opaque_id": {
+                                      "type": "string",
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                    },
+                                    "stream_opaque_id": {
+                                      "type": "string",
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                    },
+                                    "wave": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 10000
+                                    },
+                                    "legal_phases": {
+                                      "maxItems": 16,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 64
+                                      }
+                                    },
+                                    "has_assignee": {
+                                      "type": "boolean"
+                                    },
                                     "revision": {
                                       "type": "integer",
                                       "exclusiveMinimum": 0,
@@ -14537,9 +15750,13 @@
                                   "required": [
                                     "opaque_id",
                                     "kind",
+                                    "title",
                                     "state",
                                     "phase",
                                     "priority",
+                                    "labels",
+                                    "legal_phases",
+                                    "has_assignee",
                                     "revision",
                                     "updated_at"
                                   ],
@@ -14549,6 +15766,190 @@
                               "required": [
                                 "kind",
                                 "ticket"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "const": "comment"
+                                },
+                                "comment": {
+                                  "type": "object",
+                                  "properties": {
+                                    "opaque_id": {
+                                      "type": "string",
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                    },
+                                    "parent_opaque_id": {
+                                      "type": "string",
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                    },
+                                    "author_kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "human",
+                                        "session",
+                                        "system"
+                                      ]
+                                    },
+                                    "body": {
+                                      "type": "string",
+                                      "maxLength": 16384
+                                    },
+                                    "tag": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 64
+                                    },
+                                    "status": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 64
+                                    },
+                                    "revision": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "created_at": {
+                                      "type": "string",
+                                      "format": "date-time",
+                                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                    },
+                                    "updated_at": {
+                                      "type": "string",
+                                      "format": "date-time",
+                                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                    }
+                                  },
+                                  "required": [
+                                    "opaque_id",
+                                    "author_kind",
+                                    "body",
+                                    "tag",
+                                    "status",
+                                    "revision",
+                                    "created_at",
+                                    "updated_at"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "comment"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "const": "link"
+                                },
+                                "link": {
+                                  "type": "object",
+                                  "properties": {
+                                    "opaque_id": {
+                                      "type": "string",
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                    },
+                                    "target_opaque_id": {
+                                      "type": "string",
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                    },
+                                    "relation": {
+                                      "type": "string",
+                                      "enum": [
+                                        "blocks",
+                                        "relates",
+                                        "duplicates"
+                                      ]
+                                    },
+                                    "created_at": {
+                                      "type": "string",
+                                      "format": "date-time",
+                                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                    }
+                                  },
+                                  "required": [
+                                    "opaque_id",
+                                    "target_opaque_id",
+                                    "relation"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "link"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "const": "stream"
+                                },
+                                "stream": {
+                                  "type": "object",
+                                  "properties": {
+                                    "opaque_id": {
+                                      "type": "string",
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                    },
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 256
+                                    },
+                                    "mode": {
+                                      "type": "string",
+                                      "enum": [
+                                        "sequential",
+                                        "parallel"
+                                      ]
+                                    },
+                                    "description": {
+                                      "type": "string",
+                                      "maxLength": 4096
+                                    },
+                                    "revision": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "updated_at": {
+                                      "type": "string",
+                                      "format": "date-time",
+                                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                    }
+                                  },
+                                  "required": [
+                                    "opaque_id",
+                                    "name",
+                                    "mode",
+                                    "description",
+                                    "revision",
+                                    "updated_at"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "stream"
                               ],
                               "additionalProperties": false
                             },
@@ -14584,6 +15985,90 @@
                                 "opaque_id",
                                 "status",
                                 "updated_at"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "const": "role_assignment"
+                                },
+                                "role_opaque_id": {
+                                  "type": "string",
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                },
+                                "assigned_at": {
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "role_opaque_id",
+                                "assigned_at"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "const": "idea"
+                                },
+                                "idea": {
+                                  "type": "object",
+                                  "properties": {
+                                    "opaque_id": {
+                                      "type": "string",
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                    },
+                                    "body": {
+                                      "type": "string",
+                                      "maxLength": 16384
+                                    },
+                                    "status": {
+                                      "type": "string",
+                                      "enum": [
+                                        "pending",
+                                        "popped",
+                                        "promoted"
+                                      ]
+                                    },
+                                    "promoted_ticket_opaque_id": {
+                                      "type": "string",
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                    },
+                                    "created_at": {
+                                      "type": "string",
+                                      "format": "date-time",
+                                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                    },
+                                    "updated_at": {
+                                      "type": "string",
+                                      "format": "date-time",
+                                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                    }
+                                  },
+                                  "required": [
+                                    "opaque_id",
+                                    "body",
+                                    "status",
+                                    "created_at",
+                                    "updated_at"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "idea"
                               ],
                               "additionalProperties": false
                             },

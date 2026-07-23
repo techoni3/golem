@@ -24,6 +24,10 @@ const BrowserTicketStateSchema = z.enum([
 	"archived",
 ]);
 const BrowserTicketPrioritySchema = z.enum(["P0", "P1", "P2", "P3"]);
+const BrowserTitleSchema = z.string().min(1).max(256);
+const BrowserBodySchema = z.string().max(16_384);
+const BrowserLabelSchema = z.string().min(1).max(64);
+const BrowserPhaseSchema = z.string().min(1).max(64);
 const BrowserOperationStatusSchema = z.enum([
 	"queued",
 	"ineligible",
@@ -51,17 +55,101 @@ export const BrowserWorkTicketSchema = z
 	.object({
 		opaque_id: BrowserOpaqueIdSchema,
 		kind: BrowserTicketKindSchema,
+		title: BrowserTitleSchema,
 		state: BrowserTicketStateSchema,
-		phase: z.string().min(1).max(64),
+		phase: BrowserPhaseSchema,
 		priority: BrowserTicketPrioritySchema.nullable(),
+		labels: z.array(BrowserLabelSchema).max(32),
+		parent_opaque_id: BrowserOpaqueIdSchema.optional(),
+		stream_opaque_id: BrowserOpaqueIdSchema.optional(),
+		wave: z.number().int().positive().max(10_000).optional(),
+		legal_phases: z.array(BrowserPhaseSchema).max(16),
+		has_assignee: z.boolean(),
 		revision: z.number().int().positive(),
 		updated_at: BrowserTimestampSchema,
 	})
 	.strict();
 
-const BrowserWorkTreeTicketSchema = BrowserWorkTicketSchema.extend({
-	parent_opaque_id: BrowserOpaqueIdSchema.optional(),
-}).strict();
+const BrowserWorkTreeTicketSchema = BrowserWorkTicketSchema;
+
+export const BrowserWorkRoleSchema = z
+	.object({
+		opaque_id: BrowserOpaqueIdSchema,
+		name: z.string().min(1).max(128),
+		scope: z.enum(["project", "session", "generation"]),
+		revision: z.number().int().positive(),
+		updated_at: BrowserTimestampSchema,
+	})
+	.strict();
+
+export const BrowserWorkGateSchema = z
+	.object({
+		opaque_id: BrowserOpaqueIdSchema,
+		gate_kind: z.enum(["approval", "input"]),
+		status: z.enum(["awaiting", "approved", "denied", "cancelled"]),
+		question: z.string().min(1).max(4_096),
+		assignee_kind: z.enum(["human", "operator"]),
+		updated_at: BrowserTimestampSchema,
+	})
+	.strict();
+
+export const BrowserWorkIdeaSchema = z
+	.object({
+		opaque_id: BrowserOpaqueIdSchema,
+		body: BrowserBodySchema,
+		status: z.enum(["pending", "popped", "promoted"]),
+		promoted_ticket_opaque_id: BrowserOpaqueIdSchema.optional(),
+		created_at: BrowserTimestampSchema,
+		updated_at: BrowserTimestampSchema,
+	})
+	.strict();
+
+export const BrowserWorkAssetMetadataSchema = z
+	.object({
+		opaque_id: BrowserOpaqueIdSchema,
+		mime_type: z.enum(["image/png", "image/jpeg", "image/gif", "image/webp"]),
+		byte_size: z
+			.number()
+			.int()
+			.positive()
+			.max(10 * 1024 * 1024),
+		created_at: BrowserTimestampSchema,
+	})
+	.strict();
+
+export const BrowserWorkCommentSchema = z
+	.object({
+		opaque_id: BrowserOpaqueIdSchema,
+		parent_opaque_id: BrowserOpaqueIdSchema.optional(),
+		author_kind: z.enum(["human", "session", "system"]),
+		body: BrowserBodySchema,
+		tag: z.string().min(1).max(64),
+		status: z.string().min(1).max(64),
+		revision: z.number().int().positive(),
+		created_at: BrowserTimestampSchema,
+		updated_at: BrowserTimestampSchema,
+	})
+	.strict();
+
+export const BrowserWorkLinkSchema = z
+	.object({
+		opaque_id: BrowserOpaqueIdSchema,
+		target_opaque_id: BrowserOpaqueIdSchema,
+		relation: z.enum(["blocks", "relates", "duplicates"]),
+		created_at: BrowserTimestampSchema.optional(),
+	})
+	.strict();
+
+export const BrowserWorkTrackerStreamSchema = z
+	.object({
+		opaque_id: BrowserOpaqueIdSchema,
+		name: z.string().min(1).max(256),
+		mode: z.enum(["sequential", "parallel"]),
+		description: z.string().max(4_096),
+		revision: z.number().int().positive(),
+		updated_at: BrowserTimestampSchema,
+	})
+	.strict();
 
 export const BrowserWorkManagementOperationSchema = z
 	.object({
@@ -133,6 +221,9 @@ export const BrowserWorkManagementProjectionSchema =
 	BrowserWorkProjectionBaseSchema.extend({
 		stream: z.literal("management.controls"),
 		items: z.array(BrowserWorkManagementOperationSchema).max(100),
+		roles: z.array(BrowserWorkRoleSchema).max(100),
+		gates: z.array(BrowserWorkGateSchema).max(100),
+		ideas: z.array(BrowserWorkIdeaSchema).max(100),
 	}).strict();
 
 export const BrowserWorkCommunicationProjectionSchema =
@@ -141,12 +232,15 @@ export const BrowserWorkCommunicationProjectionSchema =
 		items: z.array(BrowserWorkOperationSchema).max(100),
 	}).strict();
 
-export const BrowserWorkProjectionResponseSchema = z.discriminatedUnion("stream", [
-	BrowserWorkBoardProjectionSchema,
-	BrowserWorkTreeProjectionSchema,
-	BrowserWorkManagementProjectionSchema,
-	BrowserWorkCommunicationProjectionSchema,
-]);
+export const BrowserWorkProjectionResponseSchema = z.discriminatedUnion(
+	"stream",
+	[
+		BrowserWorkBoardProjectionSchema,
+		BrowserWorkTreeProjectionSchema,
+		BrowserWorkManagementProjectionSchema,
+		BrowserWorkCommunicationProjectionSchema,
+	],
+);
 
 export const BrowserWorkInvalidationSchema = z
 	.object({
@@ -284,70 +378,98 @@ export const BrowserWorkDetailResponseSchema = z
 	.object({
 		schema_version: z.literal("golem.browser-work-detail/v1"),
 		item: BrowserWorkTicketSchema,
+		body: BrowserBodySchema,
+		comments: z.array(BrowserWorkCommentSchema).max(500),
+		links: z.array(BrowserWorkLinkSchema).max(200),
+		children: z.array(BrowserWorkTicketSchema).max(200),
+		streams: z.array(BrowserWorkTrackerStreamSchema).max(100),
+		assets: z.array(BrowserWorkAssetMetadataSchema).max(100),
 	})
 	.strict();
 
 export const BrowserWorkAssetResponseSchema = z
 	.object({
 		schema_version: z.literal("golem.browser-work-asset/v1"),
-		asset: z
-			.object({
-				opaque_id: BrowserOpaqueIdSchema,
-				mime_type: z.enum([
-					"image/png",
-					"image/jpeg",
-					"image/gif",
-					"image/webp",
-				]),
-				byte_size: z.number().int().positive().max(10 * 1024 * 1024),
-				created_at: BrowserTimestampSchema,
-			})
-			.strict(),
+		asset: BrowserWorkAssetMetadataSchema,
 		content_base64: z.string().min(1).max(14_000_000),
 	})
 	.strict();
 
-const BrowserWorkCommandBaseSchema = z
-	.object({
-		idempotency_key: z.string().min(1).max(256),
-	});
+const BrowserWorkCommandBaseSchema = z.object({
+	idempotency_key: z.string().min(1).max(256),
+});
 
 export const BrowserWorkCommandRequestSchema = z.discriminatedUnion("kind", [
 	BrowserWorkCommandBaseSchema.extend({
 		kind: z.literal("ticket.create"),
 		ticket_kind: BrowserTicketKindSchema.optional(),
-		title: z.string().min(1).max(256),
+		title: BrowserTitleSchema,
+		body: BrowserBodySchema.optional(),
 		priority: BrowserTicketPrioritySchema.optional(),
-		labels: z.array(z.string().min(1).max(64)).max(32).optional(),
+		labels: z.array(BrowserLabelSchema).max(32).optional(),
+		parent_opaque_id: BrowserOpaqueIdSchema.optional(),
+		stream_opaque_id: BrowserOpaqueIdSchema.optional(),
+		wave: z.number().int().positive().max(10_000).optional(),
 	}).strict(),
 	BrowserWorkCommandBaseSchema.extend({
 		kind: z.literal("ticket.update"),
 		opaque_id: BrowserOpaqueIdSchema,
 		expected_revision: z.number().int().positive(),
-		title: z.string().min(1).max(256).optional(),
+		title: BrowserTitleSchema.optional(),
+		body: BrowserBodySchema.optional(),
 		priority: BrowserTicketPrioritySchema.optional(),
-		labels: z.array(z.string().min(1).max(64)).max(32).optional(),
+		labels: z.array(BrowserLabelSchema).max(32).optional(),
+		parent_opaque_id: BrowserOpaqueIdSchema.optional(),
+		stream_opaque_id: BrowserOpaqueIdSchema.optional(),
+		wave: z.number().int().positive().max(10_000).optional(),
 	}).strict(),
 	BrowserWorkCommandBaseSchema.extend({
 		kind: z.literal("ticket.transition"),
 		opaque_id: BrowserOpaqueIdSchema,
 		expected_revision: z.number().int().positive(),
-		phase: z.enum([
-			"queued",
-			"building",
-			"blocked",
-			"built",
-			"verifying",
-			"verified",
-			"rejected",
-			"done",
-		]),
+		phase: BrowserPhaseSchema,
+		reason: z.string().min(1).max(1_024).optional(),
+	}).strict(),
+	BrowserWorkCommandBaseSchema.extend({
+		kind: z.literal("comment.create"),
+		opaque_id: BrowserOpaqueIdSchema,
+		parent_comment_opaque_id: BrowserOpaqueIdSchema.optional(),
+		body: BrowserBodySchema.pipe(z.string().min(1)),
+	}).strict(),
+	BrowserWorkCommandBaseSchema.extend({
+		kind: z.literal("link.create"),
+		opaque_id: BrowserOpaqueIdSchema,
+		target_opaque_id: BrowserOpaqueIdSchema,
+		relation: z.enum(["blocks", "relates", "duplicates"]),
+	}).strict(),
+	BrowserWorkCommandBaseSchema.extend({
+		kind: z.literal("stream.create"),
+		name: z.string().min(1).max(256),
+		mode: z.enum(["sequential", "parallel"]),
+		description: z.string().max(4_096).optional(),
 	}).strict(),
 	BrowserWorkCommandBaseSchema.extend({
 		kind: z.literal("management.gate.create"),
 		gate_kind: z.enum(["approval", "input"]),
 		question: z.string().min(1).max(512),
 		assignee: z.string().min(1).max(128),
+	}).strict(),
+	BrowserWorkCommandBaseSchema.extend({
+		kind: z.literal("management.role.assign"),
+		role_opaque_id: BrowserOpaqueIdSchema,
+	}).strict(),
+	BrowserWorkCommandBaseSchema.extend({
+		kind: z.literal("management.idea.create"),
+		body: BrowserBodySchema.pipe(z.string().min(1)),
+	}).strict(),
+	BrowserWorkCommandBaseSchema.extend({
+		kind: z.literal("management.idea.pop"),
+		idea_opaque_id: BrowserOpaqueIdSchema,
+	}).strict(),
+	BrowserWorkCommandBaseSchema.extend({
+		kind: z.literal("management.idea.promote"),
+		idea_opaque_id: BrowserOpaqueIdSchema,
+		title: BrowserTitleSchema.optional(),
 	}).strict(),
 	BrowserWorkCommandBaseSchema.extend({
 		kind: z.literal("dispatch"),
@@ -357,7 +479,22 @@ export const BrowserWorkCommandRequestSchema = z.discriminatedUnion("kind", [
 ]);
 
 export const BrowserWorkCommandResultSchema = z.discriminatedUnion("kind", [
-	z.object({ kind: z.literal("ticket"), ticket: BrowserWorkTicketSchema }).strict(),
+	z
+		.object({ kind: z.literal("ticket"), ticket: BrowserWorkTicketSchema })
+		.strict(),
+	z
+		.object({
+			kind: z.literal("comment"),
+			comment: BrowserWorkCommentSchema,
+		})
+		.strict(),
+	z.object({ kind: z.literal("link"), link: BrowserWorkLinkSchema }).strict(),
+	z
+		.object({
+			kind: z.literal("stream"),
+			stream: BrowserWorkTrackerStreamSchema,
+		})
+		.strict(),
 	z
 		.object({
 			kind: z.literal("gate"),
@@ -366,6 +503,14 @@ export const BrowserWorkCommandResultSchema = z.discriminatedUnion("kind", [
 			updated_at: BrowserTimestampSchema,
 		})
 		.strict(),
+	z
+		.object({
+			kind: z.literal("role_assignment"),
+			role_opaque_id: BrowserOpaqueIdSchema,
+			assigned_at: BrowserTimestampSchema,
+		})
+		.strict(),
+	z.object({ kind: z.literal("idea"), idea: BrowserWorkIdeaSchema }).strict(),
 	z
 		.object({
 			kind: z.literal("dispatch"),

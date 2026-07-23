@@ -8,23 +8,31 @@ import {
 	StatusBadge,
 	TextField,
 } from "@golem/ui";
-import type * as React from "react";
+import * as React from "react";
 import { Link } from "react-router-dom";
 
-import { useWorkCommand, useWorkDetail, useWorkProjection } from "./data.js";
-import { CommandFeedback, useRetainedDraft } from "./forms.js";
-import styles from "./tracker.module.css";
+import { useWorkAsset, useWorkCommand, useWorkDetail } from "./data.js";
 import {
-	formatTimestamp,
-	idempotencyKey,
-	phaseOptions,
-	ticketTone,
-} from "./types.js";
+	CommandFeedback,
+	CreateCommentForm,
+	CreateLinkForm,
+	CreateStreamForm,
+	CreateTicketForm,
+	useRetainedDraft,
+} from "./forms.js";
+import styles from "./tracker.module.css";
+import { formatTimestamp, idempotencyKey, ticketTone } from "./types.js";
 
 type DetailDraft = {
+	body: string;
+	labels: string;
+	parentId: string;
 	priority: "unchanged" | "P0" | "P1" | "P2" | "P3";
+	reason: string;
+	streamId: string;
 	title: string;
-	transition: (typeof phaseOptions)[number]["id"];
+	transition: string;
+	wave: string;
 };
 
 const updatePriorityOptions = [
@@ -43,27 +51,58 @@ export function TicketDetailDrawer({
 	readonly onClose: () => void;
 }) {
 	const detail = useWorkDetail(opaqueId);
-	const tree = useWorkProjection("tracker.tree");
 	const updateCommand = useWorkCommand();
 	const transitionCommand = useWorkCommand();
 	const dispatchCommand = useWorkCommand();
+	const [selectedAssetId, setSelectedAssetId] = React.useState<
+		string | undefined
+	>();
+	const asset = useWorkAsset(opaqueId, selectedAssetId);
 	const [draft, setDraft, clearDraft] = useRetainedDraft<DetailDraft>(
 		`golem:work:detail:${opaqueId ?? "none"}`,
-		{ priority: "unchanged", title: "", transition: "queued" },
+		{
+			body: "",
+			labels: "",
+			parentId: "",
+			priority: "unchanged",
+			reason: "",
+			streamId: "",
+			title: "",
+			transition: "",
+			wave: "",
+		},
 	);
-	const item = detail.data?.item;
-	const relationship = tree.data?.items.find(
-		(ticket) => ticket.opaque_id === opaqueId,
-	);
-	const children =
-		tree.data?.items.filter((ticket) => ticket.parent_opaque_id === opaqueId) ??
-		[];
+	const workDetail = detail.data;
+	const item = workDetail?.item;
+	const children = workDetail?.children ?? [];
+	const legalPhaseOptions = (item?.legal_phases ?? []).map((phase) => ({
+		id: phase,
+		label: `${phase.charAt(0).toUpperCase()}${phase.slice(1)}`,
+	}));
+	const transition =
+		item?.legal_phases.includes(draft.transition) === true
+			? draft.transition
+			: item?.legal_phases[0];
 
 	const submitUpdate = (event: React.FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
 		if (!item || updateCommand.isPending) return;
 		const title = draft.title.trim();
-		if (!title && draft.priority === "unchanged") return;
+		const labels = draft.labels
+			.split(",")
+			.map((label) => label.trim())
+			.filter(Boolean);
+		const wave = Number.parseInt(draft.wave, 10);
+		if (
+			!title &&
+			!draft.body &&
+			!labels.length &&
+			!draft.parentId.trim() &&
+			!draft.streamId.trim() &&
+			!Number.isSafeInteger(wave) &&
+			draft.priority === "unchanged"
+		)
+			return;
 		updateCommand.mutate(
 			{
 				kind: "ticket.update",
@@ -71,7 +110,16 @@ export function TicketDetailDrawer({
 				opaque_id: item.opaque_id,
 				expected_revision: item.revision,
 				...(title ? { title } : {}),
+				...(draft.body ? { body: draft.body } : {}),
 				...(draft.priority === "unchanged" ? {} : { priority: draft.priority }),
+				...(labels.length ? { labels } : {}),
+				...(draft.parentId.trim()
+					? { parent_opaque_id: draft.parentId.trim() }
+					: {}),
+				...(draft.streamId.trim()
+					? { stream_opaque_id: draft.streamId.trim() }
+					: {}),
+				...(Number.isSafeInteger(wave) && wave > 0 ? { wave } : {}),
 			},
 			{
 				onSuccess(response) {
@@ -83,13 +131,14 @@ export function TicketDetailDrawer({
 
 	const submitTransition = (event: React.FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
-		if (!item || transitionCommand.isPending) return;
+		if (!item || !transition || transitionCommand.isPending) return;
 		transitionCommand.mutate({
 			kind: "ticket.transition",
 			idempotency_key: idempotencyKey("dashboard-ticket-transition"),
 			opaque_id: item.opaque_id,
 			expected_revision: item.revision,
-			phase: draft.transition,
+			phase: transition,
+			...(draft.reason.trim() ? { reason: draft.reason.trim() } : {}),
 		});
 	};
 
@@ -125,7 +174,7 @@ export function TicketDetailDrawer({
 						title="Ticket unavailable"
 					/>
 				) : null}
-				{item ? (
+				{item && workDetail ? (
 					<>
 						<section className={styles.detailSummary}>
 							<div className={styles.badgeRow}>
@@ -136,6 +185,12 @@ export function TicketDetailDrawer({
 									tone="neutral"
 								/>
 							</div>
+							<h2>{item.title}</h2>
+							{workDetail.body ? (
+								<p className={styles.bodyText}>{workDetail.body}</p>
+							) : (
+								<p className={styles.helper}>No body.</p>
+							)}
 							<dl className={styles.facts}>
 								<div>
 									<dt>Opaque ID</dt>
@@ -153,12 +208,28 @@ export function TicketDetailDrawer({
 									<dt>Updated</dt>
 									<dd>{formatTimestamp(item.updated_at)}</dd>
 								</div>
+								<div>
+									<dt>Labels</dt>
+									<dd>{item.labels.join(", ") || "None"}</dd>
+								</div>
+								<div>
+									<dt>Stream</dt>
+									<dd>{item.stream_opaque_id ?? "None"}</dd>
+								</div>
+								<div>
+									<dt>Wave</dt>
+									<dd>{item.wave ?? "None"}</dd>
+								</div>
+								<div>
+									<dt>Assignee</dt>
+									<dd>{item.has_assignee ? "Assigned" : "Unassigned"}</dd>
+								</div>
 							</dl>
-							{relationship?.parent_opaque_id ? (
+							{item.parent_opaque_id ? (
 								<p className={styles.relationship}>
 									Parent:{" "}
-									<Link to={`/tickets/${relationship.parent_opaque_id}`}>
-										{relationship.parent_opaque_id}
+									<Link to={`/tickets/${item.parent_opaque_id}`}>
+										{item.parent_opaque_id}
 									</Link>
 								</p>
 							) : null}
@@ -178,16 +249,10 @@ export function TicketDetailDrawer({
 							) : null}
 						</section>
 
-						<InlineAlert tone="info">
-							The bounded detail contract does not expose body text, comments,
-							or labels. This drawer never fills those fields from legacy
-							payloads.
-						</InlineAlert>
-
 						<form className={styles.form} onSubmit={submitUpdate}>
 							<h3>Update fields</h3>
 							<TextField
-								description="Leave blank to keep the current title. The current title is intentionally not exposed by this browser contract."
+								description={`Current: ${item.title}. Leave blank to keep it.`}
 								label="Replacement title"
 								onChange={(title) =>
 									setDraft((current) => ({ ...current, title }))
@@ -205,9 +270,62 @@ export function TicketDetailDrawer({
 								options={updatePriorityOptions}
 								value={draft.priority}
 							/>
+							<TextField
+								description={`Current: ${item.labels.join(", ") || "none"}.`}
+								label="Replacement labels"
+								onChange={(labels) =>
+									setDraft((current) => ({ ...current, labels }))
+								}
+								placeholder="Comma-separated; blank keeps current"
+								value={draft.labels}
+							/>
+							<TextField
+								description={`Current: ${item.parent_opaque_id ?? "none"}.`}
+								label="Replacement parent ID"
+								onChange={(parentId) =>
+									setDraft((current) => ({ ...current, parentId }))
+								}
+								value={draft.parentId}
+							/>
+							<TextField
+								description={`Current: ${item.stream_opaque_id ?? "none"}.`}
+								label="Replacement stream ID"
+								onChange={(streamId) =>
+									setDraft((current) => ({ ...current, streamId }))
+								}
+								value={draft.streamId}
+							/>
+							<TextField
+								description={`Current: ${item.wave ?? "none"}.`}
+								label="Replacement wave"
+								onChange={(wave) =>
+									setDraft((current) => ({ ...current, wave }))
+								}
+								value={draft.wave}
+							/>
+							<label>
+								<span className={styles.fieldLabel}>Replacement body</span>
+								<textarea
+									className={styles.textarea}
+									onChange={(event) =>
+										setDraft((current) => ({
+											...current,
+											body: event.currentTarget.value,
+										}))
+									}
+									placeholder="Blank keeps the current body"
+									value={draft.body}
+								/>
+							</label>
 							<Button
 								isDisabled={
-									!draft.title.trim() && draft.priority === "unchanged"
+									!draft.title.trim() &&
+									!draft.body &&
+									!draft.labels.trim() &&
+									!draft.parentId.trim() &&
+									!draft.streamId.trim() &&
+									!draft.wave.trim() &&
+									draft.priority === "unchanged"
 								}
 								loading={updateCommand.isPending}
 								type="submit"
@@ -223,22 +341,37 @@ export function TicketDetailDrawer({
 
 						<form className={styles.form} onSubmit={submitTransition}>
 							<h3>Request phase transition</h3>
-							<Select
-								label="Target phase"
-								onChange={(transition) =>
-									setDraft((current) => ({
-										...current,
-										transition: transition as DetailDraft["transition"],
-									}))
+							{legalPhaseOptions.length ? (
+								<Select
+									label="Target phase"
+									onChange={(nextPhase) =>
+										setDraft((current) => ({
+											...current,
+											transition: nextPhase,
+										}))
+									}
+									options={legalPhaseOptions}
+									value={transition ?? ""}
+								/>
+							) : (
+								<InlineAlert tone="info">
+									The server reports no currently legal transition.
+								</InlineAlert>
+							)}
+							<TextField
+								description="Required for blocked or parked transitions."
+								label="Reason"
+								onChange={(reason) =>
+									setDraft((current) => ({ ...current, reason }))
 								}
-								options={phaseOptions}
-								value={draft.transition}
+								value={draft.reason}
 							/>
 							<p className={styles.helper}>
-								The browser does not infer legal transitions. The tracker
-								validates this request against the canonical phase machine.
+								These candidates come from the canonical phase machine and
+								durable evidence. The server validates again when submitted.
 							</p>
 							<Button
+								isDisabled={!transition}
 								loading={transitionCommand.isPending}
 								type="submit"
 								variant="secondary"
@@ -250,6 +383,120 @@ export function TicketDetailDrawer({
 								response={transitionCommand.data}
 							/>
 						</form>
+
+						<section className={styles.form}>
+							<h3>Comments and replies</h3>
+							{workDetail.comments.length ? (
+								<ul className={styles.commentList}>
+									{workDetail.comments.map((comment) => (
+										<li key={comment.opaque_id}>
+											<div className={styles.badgeRow}>
+												<StatusBadge
+													label={comment.author_kind}
+													tone="neutral"
+												/>
+												<StatusBadge label={comment.tag} tone="info" />
+												{comment.parent_opaque_id ? (
+													<span className={styles.helper}>
+														Reply to {comment.parent_opaque_id}
+													</span>
+												) : null}
+											</div>
+											<p className={styles.bodyText}>{comment.body}</p>
+										</li>
+									))}
+								</ul>
+							) : (
+								<p className={styles.helper}>No comments yet.</p>
+							)}
+						</section>
+						<CreateCommentForm
+							comments={workDetail.comments}
+							opaqueId={item.opaque_id}
+						/>
+
+						<section className={styles.form}>
+							<h3>Links</h3>
+							{workDetail.links.length ? (
+								<ul className={styles.commentList}>
+									{workDetail.links.map((link) => (
+										<li key={link.opaque_id}>
+											{link.relation}{" "}
+											<Link to={`/tickets/${link.target_opaque_id}`}>
+												{link.target_opaque_id}
+											</Link>
+										</li>
+									))}
+								</ul>
+							) : (
+								<p className={styles.helper}>No links yet.</p>
+							)}
+						</section>
+						<CreateLinkForm opaqueId={item.opaque_id} />
+
+						<details className={styles.composer}>
+							<summary>Create a child ticket</summary>
+							<CreateTicketForm
+								defaultParent={item.opaque_id}
+								scope={`child:${item.opaque_id}`}
+							/>
+						</details>
+
+						<section className={styles.form}>
+							<h3>Streams</h3>
+							{workDetail.streams.length ? (
+								<ul className={styles.commentList}>
+									{workDetail.streams.map((stream) => (
+										<li key={stream.opaque_id}>
+											<strong>{stream.name}</strong>
+											<p className={styles.helper}>
+												{stream.opaque_id} · {stream.mode}
+											</p>
+										</li>
+									))}
+								</ul>
+							) : (
+								<p className={styles.helper}>No streams yet.</p>
+							)}
+						</section>
+						<CreateStreamForm />
+
+						<section className={styles.form}>
+							<h3>Safe assets</h3>
+							{workDetail.assets.length ? (
+								<ul className={styles.assetList}>
+									{workDetail.assets.map((entry) => (
+										<li key={entry.opaque_id}>
+											<div className={styles.badgeRow}>
+												<code>{entry.opaque_id}</code>
+												<span className={styles.helper}>
+													{entry.mime_type} · {entry.byte_size} bytes
+												</span>
+												<Button
+													onPress={() => setSelectedAssetId(entry.opaque_id)}
+													variant="secondary"
+												>
+													Read asset
+												</Button>
+											</div>
+										</li>
+									))}
+								</ul>
+							) : (
+								<p className={styles.helper}>No ticket-bound assets.</p>
+							)}
+							{asset.isError ? (
+								<InlineAlert tone="danger">
+									The scoped asset read was refused.
+								</InlineAlert>
+							) : null}
+							{asset.data ? (
+								<img
+									alt={`Ticket asset ${asset.data.asset.opaque_id}`}
+									src={`data:${asset.data.asset.mime_type};base64,${asset.data.content_base64}`}
+								/>
+							) : null}
+						</section>
 
 						<section className={styles.form}>
 							<h3>Dispatch</h3>

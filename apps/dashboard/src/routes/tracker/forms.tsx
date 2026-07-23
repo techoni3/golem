@@ -9,13 +9,18 @@ import {
 	priorityOptions,
 	ticketKindOptions,
 	type WorkCommandResponse,
+	type WorkDetail,
 } from "./types.js";
 
 type CreateDraft = {
+	body: string;
 	kind: (typeof ticketKindOptions)[number]["id"];
 	labels: string;
+	parentId: string;
 	priority: "" | "P0" | "P1" | "P2" | "P3";
+	streamId: string;
 	title: string;
+	wave: string;
 };
 
 type GateDraft = {
@@ -101,9 +106,11 @@ export function CommandFeedback({
 
 export function CreateTicketForm({
 	defaultKind = "work-item",
+	defaultParent = "",
 	scope = "tracker",
 }: {
 	readonly defaultKind?: CreateDraft["kind"];
+	readonly defaultParent?: string;
 	readonly scope?: string;
 }) {
 	const navigate = useNavigate();
@@ -111,10 +118,14 @@ export function CreateTicketForm({
 	const [draft, setDraft, clearDraft] = useRetainedDraft<CreateDraft>(
 		`golem:work:create:${scope}`,
 		{
+			body: "",
 			kind: defaultKind,
 			labels: "",
+			parentId: defaultParent,
 			priority: "",
+			streamId: "",
 			title: "",
+			wave: "",
 		},
 	);
 
@@ -126,14 +137,23 @@ export function CreateTicketForm({
 			.split(",")
 			.map((label) => label.trim())
 			.filter(Boolean);
+		const wave = Number.parseInt(draft.wave, 10);
 		command.mutate(
 			{
 				kind: "ticket.create",
 				idempotency_key: idempotencyKey(`dashboard-${scope}-create`),
 				ticket_kind: draft.kind,
 				title,
+				...(draft.body ? { body: draft.body } : {}),
 				...(draft.priority ? { priority: draft.priority } : {}),
 				...(labels.length ? { labels } : {}),
+				...(draft.parentId.trim()
+					? { parent_opaque_id: draft.parentId.trim() }
+					: {}),
+				...(draft.streamId.trim()
+					? { stream_opaque_id: draft.streamId.trim() }
+					: {}),
+				...(Number.isSafeInteger(wave) && wave > 0 ? { wave } : {}),
 			},
 			{
 				onSuccess(response) {
@@ -187,6 +207,42 @@ export function CreateTicketForm({
 					placeholder="dashboard, operator"
 					value={draft.labels}
 				/>
+				<TextField
+					label="Parent ticket ID"
+					onChange={(parentId) =>
+						setDraft((current) => ({ ...current, parentId }))
+					}
+					placeholder="Optional"
+					value={draft.parentId}
+				/>
+				<TextField
+					label="Stream ID"
+					onChange={(streamId) =>
+						setDraft((current) => ({ ...current, streamId }))
+					}
+					placeholder="Optional"
+					value={draft.streamId}
+				/>
+				<TextField
+					label="Wave"
+					onChange={(wave) => setDraft((current) => ({ ...current, wave }))}
+					placeholder="Optional positive number"
+					value={draft.wave}
+				/>
+				<label className={styles.wideField}>
+					<span className={styles.fieldLabel}>Body</span>
+					<textarea
+						className={styles.textarea}
+						onChange={(event) =>
+							setDraft((current) => ({
+								...current,
+								body: event.currentTarget.value,
+							}))
+						}
+						placeholder="Context, outcome, and acceptance criteria"
+						value={draft.body}
+					/>
+				</label>
 			</div>
 			<div className={styles.formActions}>
 				<Button
@@ -199,6 +255,263 @@ export function CreateTicketForm({
 				</Button>
 				<span>One command · no automatic retry</span>
 			</div>
+			<CommandFeedback error={command.error} response={command.data} />
+		</form>
+	);
+}
+
+export function CreateCommentForm({
+	comments,
+	opaqueId,
+}: {
+	readonly comments: WorkDetail["comments"];
+	readonly opaqueId: string;
+}) {
+	const command = useWorkCommand();
+	const [draft, setDraft, clearDraft] = useRetainedDraft(
+		`golem:work:comment:${opaqueId}`,
+		{ body: "", parentId: "" },
+	);
+	const submit = (event: React.FormEvent<HTMLFormElement>) => {
+		event.preventDefault();
+		if (!draft.body.trim() || command.isPending) return;
+		command.mutate(
+			{
+				kind: "comment.create",
+				idempotency_key: idempotencyKey("dashboard-comment-create"),
+				opaque_id: opaqueId,
+				body: draft.body.trim(),
+				...(draft.parentId ? { parent_comment_opaque_id: draft.parentId } : {}),
+			},
+			{
+				onSuccess(response) {
+					if (response.status === "completed") clearDraft();
+				},
+			},
+		);
+	};
+	return (
+		<form className={styles.form} onSubmit={submit}>
+			<h3>Add comment or reply</h3>
+			<Select
+				label="Thread"
+				onChange={(parentId) =>
+					setDraft((current) => ({ ...current, parentId }))
+				}
+				options={[
+					{ id: "", label: "New top-level comment" },
+					...comments.map((comment) => ({
+						id: comment.opaque_id,
+						label: `Reply to ${comment.opaque_id}`,
+					})),
+				]}
+				value={draft.parentId}
+			/>
+			<label>
+				<span className={styles.fieldLabel}>Comment</span>
+				<textarea
+					className={styles.textarea}
+					onChange={(event) =>
+						setDraft((current) => ({
+							...current,
+							body: event.currentTarget.value,
+						}))
+					}
+					value={draft.body}
+				/>
+			</label>
+			<Button
+				isDisabled={!draft.body.trim()}
+				loading={command.isPending}
+				type="submit"
+				variant="primary"
+			>
+				{draft.parentId ? "Add reply" : "Add comment"}
+			</Button>
+			<CommandFeedback error={command.error} response={command.data} />
+		</form>
+	);
+}
+
+export function CreateLinkForm({ opaqueId }: { readonly opaqueId: string }) {
+	const command = useWorkCommand();
+	const [draft, setDraft, clearDraft] = useRetainedDraft(
+		`golem:work:link:${opaqueId}`,
+		{ relation: "relates" as "blocks" | "relates" | "duplicates", target: "" },
+	);
+	const submit = (event: React.FormEvent<HTMLFormElement>) => {
+		event.preventDefault();
+		if (!draft.target.trim() || command.isPending) return;
+		command.mutate(
+			{
+				kind: "link.create",
+				idempotency_key: idempotencyKey("dashboard-link-create"),
+				opaque_id: opaqueId,
+				target_opaque_id: draft.target.trim(),
+				relation: draft.relation,
+			},
+			{
+				onSuccess(response) {
+					if (response.status === "completed") clearDraft();
+				},
+			},
+		);
+	};
+	return (
+		<form className={styles.form} onSubmit={submit}>
+			<h3>Link ticket</h3>
+			<div className={styles.formGrid}>
+				<TextField
+					label="Target ticket ID"
+					onChange={(target) => setDraft((current) => ({ ...current, target }))}
+					value={draft.target}
+				/>
+				<Select
+					label="Relationship"
+					onChange={(relation) =>
+						setDraft((current) => ({
+							...current,
+							relation: relation as typeof draft.relation,
+						}))
+					}
+					options={[
+						{ id: "relates", label: "Relates to" },
+						{ id: "blocks", label: "Blocks" },
+						{ id: "duplicates", label: "Duplicates" },
+					]}
+					value={draft.relation}
+				/>
+			</div>
+			<Button
+				isDisabled={!draft.target.trim()}
+				loading={command.isPending}
+				type="submit"
+				variant="secondary"
+			>
+				Add link
+			</Button>
+			<CommandFeedback error={command.error} response={command.data} />
+		</form>
+	);
+}
+
+export function CreateStreamForm() {
+	const command = useWorkCommand();
+	const [draft, setDraft, clearDraft] = useRetainedDraft(
+		"golem:work:stream:create",
+		{
+			description: "",
+			mode: "parallel" as "parallel" | "sequential",
+			name: "",
+		},
+	);
+	const submit = (event: React.FormEvent<HTMLFormElement>) => {
+		event.preventDefault();
+		if (!draft.name.trim() || command.isPending) return;
+		command.mutate(
+			{
+				kind: "stream.create",
+				idempotency_key: idempotencyKey("dashboard-stream-create"),
+				name: draft.name.trim(),
+				mode: draft.mode,
+				...(draft.description.trim()
+					? { description: draft.description.trim() }
+					: {}),
+			},
+			{
+				onSuccess(response) {
+					if (response.status === "completed") clearDraft();
+				},
+			},
+		);
+	};
+	return (
+		<form className={styles.form} onSubmit={submit}>
+			<h3>Create stream</h3>
+			<div className={styles.formGrid}>
+				<TextField
+					label="Name"
+					onChange={(name) => setDraft((current) => ({ ...current, name }))}
+					value={draft.name}
+				/>
+				<Select
+					label="Mode"
+					onChange={(mode) =>
+						setDraft((current) => ({
+							...current,
+							mode: mode as typeof draft.mode,
+						}))
+					}
+					options={[
+						{ id: "parallel", label: "Parallel" },
+						{ id: "sequential", label: "Sequential" },
+					]}
+					value={draft.mode}
+				/>
+				<div className={styles.wideField}>
+					<TextField
+						label="Description"
+						onChange={(description) =>
+							setDraft((current) => ({ ...current, description }))
+						}
+						value={draft.description}
+					/>
+				</div>
+			</div>
+			<Button
+				isDisabled={!draft.name.trim()}
+				loading={command.isPending}
+				type="submit"
+				variant="secondary"
+			>
+				Create stream
+			</Button>
+			<CommandFeedback error={command.error} response={command.data} />
+		</form>
+	);
+}
+
+export function CreateIdeaForm() {
+	const command = useWorkCommand();
+	const [body, setBody, clearDraft] = useRetainedDraft(
+		"golem:work:idea:create",
+		"",
+	);
+	const submit = (event: React.FormEvent<HTMLFormElement>) => {
+		event.preventDefault();
+		if (!body.trim() || command.isPending) return;
+		command.mutate(
+			{
+				kind: "management.idea.create",
+				idempotency_key: idempotencyKey("dashboard-idea-create"),
+				body: body.trim(),
+			},
+			{
+				onSuccess(response) {
+					if (response.status === "completed") clearDraft();
+				},
+			},
+		);
+	};
+	return (
+		<form className={styles.form} onSubmit={submit}>
+			<h3>Capture an idea</h3>
+			<label>
+				<span className={styles.fieldLabel}>Idea</span>
+				<textarea
+					className={styles.textarea}
+					onChange={(event) => setBody(event.currentTarget.value)}
+					value={body}
+				/>
+			</label>
+			<Button
+				isDisabled={!body.trim()}
+				loading={command.isPending}
+				type="submit"
+				variant="primary"
+			>
+				Add idea
+			</Button>
 			<CommandFeedback error={command.error} response={command.data} />
 		</form>
 	);

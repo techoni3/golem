@@ -21,18 +21,6 @@ export {
 	type DurableDeliveryService,
 } from "./delivery.js";
 export {
-	createTicketDispatchService,
-	type TicketDispatchDisposition,
-	type TicketDispatchInput,
-	type TicketDispatchOperation,
-	type TicketDispatchOperationPort,
-	type TicketDispatchOutcome,
-	type TicketDispatchService,
-	type TicketDispatchSessionPort,
-	type TicketDispatchSettlement,
-	type TicketDispatchTicketPort,
-} from "./ticket-dispatch.js";
-export {
 	type CommandGateway,
 	CommandGatewayError,
 	type CommandGatewayInput,
@@ -55,6 +43,7 @@ export {
 	type PassiveSlotService,
 } from "./passive.js";
 export {
+	candidateTrackerPhaseTransitions,
 	canonicalTrackerState,
 	initialTrackerPhase,
 	TrackerPhaseError,
@@ -85,6 +74,18 @@ export {
 	createDurableSubscriptionService,
 	type DurableSubscriptionService,
 } from "./subscriptions.js";
+export {
+	createTicketDispatchService,
+	type TicketDispatchDisposition,
+	type TicketDispatchInput,
+	type TicketDispatchOperation,
+	type TicketDispatchOperationPort,
+	type TicketDispatchOutcome,
+	type TicketDispatchService,
+	type TicketDispatchSessionPort,
+	type TicketDispatchSettlement,
+	type TicketDispatchTicketPort,
+} from "./ticket-dispatch.js";
 export {
 	createTrackerMutation,
 	createTrackerTicketService,
