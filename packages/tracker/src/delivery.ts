@@ -106,6 +106,7 @@ export function createDurableDeliveryService(options: {
 		const now = options.clock.now();
 		const envelope: DeliveryEnvelope = Object.freeze({
 			id: input.id,
+			projectId: input.projectId ?? "system",
 			rootId: input.id,
 			idempotencyKey: input.idempotencyKey,
 			senderId: input.senderId,
@@ -216,6 +217,7 @@ export function createDurableDeliveryService(options: {
 					throw new Error("reply endpoint is not eligible");
 				const child: DeliveryEnvelope = Object.freeze({
 					id: input.id,
+					projectId: envelope.projectId,
 					rootId: envelope.rootId,
 					parentId: envelope.id,
 					idempotencyKey: input.idempotencyKey,

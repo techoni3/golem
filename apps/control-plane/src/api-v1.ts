@@ -953,6 +953,7 @@ export function registerApiV1Routes(options: {
 				);
 			const envelope = options.services.delivery.enqueue({
 				id: input.id as string,
+				projectId: callerValue.projectId,
 				idempotencyKey: input.idempotency_key as string,
 				senderId: callerValue.actor,
 				recipientId: input.recipient_id as string,
@@ -1098,6 +1099,7 @@ export function registerApiV1Routes(options: {
 		try {
 			const event = options.services.bus.append({
 				id: input.id as string,
+				projectId: callerValue.projectId,
 				deduplicationKey: input.deduplication_key as string,
 				topic: input.topic as string,
 				class: input.class as never,

@@ -59,6 +59,7 @@ const persistenceJourney = path.join(repositoryRoot, "test/persistence/sqlite-ow
 const runtimeEngineJourney = path.join(repositoryRoot, "test/runtime/materializer-crash-matrix.test.mjs");
 const dashboardDownJourney = path.join(repositoryRoot, "test/runtime/dashboard-down-inbox-replay.test.mjs");
 const deliveryBusJourney = path.join(repositoryRoot, "test/tracker/delivery-bus.test.mjs");
+const committedPublicationJourney = path.join(repositoryRoot, "test/tracker/committed-publication.test.mjs");
 const projectIdentityJourney = path.join(repositoryRoot, "test/projects/project-identity-git-worktree-relocation.test.mjs");
 const projectConcurrencyJourney = path.join(repositoryRoot, "test/projects/project-register-concurrency.test.mjs");
 const controlPlaneProgram = path.join(repositoryRoot, "apps/control-plane/dist/main.js");
@@ -442,6 +443,25 @@ function runRuntimeProjectionJourney(testNamePattern) {
 	}
 }
 
+function runCommittedPublicationJourney(testNamePattern) {
+	const home = createTemporaryHome("golem-gol80-publication-runner-");
+	try {
+		const result = spawnSync(
+			process.execPath,
+			["--test", "--test-concurrency=1", "--test-name-pattern", testNamePattern, committedPublicationJourney],
+			{ cwd: repositoryRoot, encoding: "utf8", env: home.env },
+		);
+		if (result.status !== 0)
+			throw new JourneyDiagnosticError(
+				`committed publication journey exited ${result.status}; stdout=${result.stdout}; stderr=${result.stderr}`,
+				home.root,
+				[home.token],
+			);
+	} finally {
+		cleanupHome(home);
+	}
+}
+
 export async function exerciseRuntimeProjectionLiveHistoryDiagnostics() {
 	runRuntimeProjectionJourney("GOL-46 live/history/diagnostics");
 	return "real runtime.db live/history/diagnostic read models, endpoint facts, redaction, observation separation, pagination, and restart stability verified";
@@ -450,6 +470,16 @@ export async function exerciseRuntimeProjectionLiveHistoryDiagnostics() {
 export async function exerciseRuntimeProjectionWsRestartResync() {
 	runRuntimeProjectionJourney("GOL-46 authenticated WS");
 	return "real authenticated runtime.live WebSocket snapshot/delta, monotonic cursor, and service-restart instance resync verified";
+}
+
+export async function exerciseCommittedOutboxAllWritePaths() {
+	runCommittedPublicationJourney("committed-outbox-all-write-paths");
+	return "real managed SQLite commits bearer HTTP, storage-free MCP, core, management, asset, and delivery acknowledgement/settlement writes with opaque scoped invalidations; stale and rolled-back writes emit nothing";
+}
+
+export async function exerciseCommittedProjectionWsRestartResync() {
+	runCommittedPublicationJourney("projection-ws-restart-resync");
+	return "real managed SQLite restart, scoped WebSocket replay compaction, policy change, and HTTP revision truth require resync instead of unsafe deltas";
 }
 
 export async function exerciseDashboardRuntimeLifecycle() {
@@ -980,6 +1010,7 @@ export const exercises = Object.freeze({
 	"tracker-fresh-db-transition": exerciseTrackerFreshDbTransition,
 	"tracker-http-mcp-parity": exerciseTrackerHttpMcpParity,
 	"durable-command-idempotency-cas": exerciseDurableCommandIdempotencyCas,
+	"committed-outbox-all-write-paths": exerciseCommittedOutboxAllWritePaths,
 	"browser-principal-scope-authority": exerciseBrowserPrincipalScopeAuthority,
 	"delivery-api-fence-recheck": exerciseDeliveryApiFenceRecheck,
 	"pi-next-turn-crash-replay": exercisePiNextTurnCrashReplay,
@@ -993,7 +1024,7 @@ export const exercises = Object.freeze({
 	"roles-gates-ideas-controls": exerciseRolesGatesIdeasControls,
 	"ticket-assets-security": exerciseTicketAssetsSecurity,
 	"live-history-diagnostics": exerciseRuntimeProjectionLiveHistoryDiagnostics,
-	"projection-ws-restart-resync": exerciseRuntimeProjectionWsRestartResync,
+	"projection-ws-restart-resync": exerciseCommittedProjectionWsRestartResync,
 	"dashboard-runtime-lifecycle": exerciseDashboardRuntimeLifecycle,
 	"dashboard-disconnect-resync": exerciseDashboardDisconnectResync,
 });

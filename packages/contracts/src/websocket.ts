@@ -26,6 +26,7 @@ const WebSocketFramePayloadSchema = z.discriminatedUnion("kind", [
 				"instance_changed",
 				"cursor_gap",
 				"cursor_compacted",
+				"policy_changed",
 				"protocol_mismatch",
 			]),
 			snapshot_url: z.string().url().max(2048),

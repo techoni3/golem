@@ -25,6 +25,7 @@ function fingerprint(value: unknown): string {
 export interface DurableBusService {
 	append(input: {
 		readonly id: string;
+		readonly projectId?: string;
 		readonly deduplicationKey: string;
 		readonly topic: string;
 		readonly class: BusEvent["class"];
@@ -45,6 +46,7 @@ export function createDurableBusService(options: {
 			requireJsonObject(input.payload, "bus payload");
 			const event = Object.freeze({
 				id: input.id,
+				projectId: input.projectId ?? "system",
 				deduplicationKey: input.deduplicationKey,
 				topic: input.topic,
 				class: input.class,

@@ -5,7 +5,7 @@ import type { DatabaseScope, MigrationDefinition } from "./types.js";
 
 export const busyTimeoutMs = 2_500;
 export const latestRuntimeVersion = 1;
-export const latestTrackerVersion = 7;
+export const latestTrackerVersion = 9;
 
 function migrationChecksum(value: string): string {
 	return crypto.createHash("sha256").update(value).digest("hex");
@@ -700,6 +700,333 @@ CREATE TABLE command_receipts (
 );
 CREATE INDEX command_receipts_lookup ON command_receipts(project_id, idempotency_key);
 CREATE INDEX command_receipts_resource ON command_receipts(project_id, resource_type, resource_id);
+		`,
+	),
+	migration(
+		"tracker/008-committed-publication-outbox",
+		`
+/*
+ * GOL-80 publication is a persistence-owned extension of GOL-36, never a
+ * browser event store.  Rows carry only allowlisted category/scope/revision
+ * facts.  Historic management_outbox payloads remain preserved in place and
+ * are deliberately not replayed by this new dispatcher.
+ */
+CREATE TABLE committed_project_revisions (
+  project_id TEXT PRIMARY KEY CHECK(length(trim(project_id)) > 0),
+  revision INTEGER NOT NULL CHECK(revision >= 1),
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE committed_resource_revisions (
+  project_id TEXT NOT NULL REFERENCES committed_project_revisions(project_id) ON DELETE CASCADE,
+  resource_type TEXT NOT NULL CHECK(length(resource_type) > 0 AND length(resource_type) <= 64),
+  resource_id TEXT NOT NULL CHECK(length(resource_id) > 0 AND length(resource_id) <= 256),
+  revision INTEGER NOT NULL CHECK(revision >= 1),
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(project_id, resource_type, resource_id)
+);
+CREATE TABLE committed_publication_outbox (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES committed_project_revisions(project_id) ON DELETE CASCADE,
+  category TEXT NOT NULL CHECK(category IN ('tracker', 'management', 'communication', 'asset', 'delivery')),
+  resource_type TEXT NOT NULL CHECK(length(resource_type) > 0 AND length(resource_type) <= 64),
+  resource_id TEXT NOT NULL CHECK(length(resource_id) > 0 AND length(resource_id) <= 256),
+  resource_revision INTEGER NOT NULL CHECK(resource_revision >= 1),
+  project_revision INTEGER NOT NULL CHECK(project_revision >= 1),
+  schema_version TEXT NOT NULL CHECK(schema_version = 'golem.committed-invalidation/v1'),
+  policy_version INTEGER NOT NULL CHECK(policy_version >= 1),
+  status TEXT NOT NULL CHECK(status IN ('pending', 'claimed', 'published')),
+  created_at TEXT NOT NULL,
+  published_at TEXT,
+  claim_owner TEXT,
+  claim_token TEXT,
+  claim_until TEXT,
+  CHECK((status = 'claimed' AND claim_owner IS NOT NULL AND claim_token IS NOT NULL AND claim_until IS NOT NULL) OR status <> 'claimed')
+);
+CREATE INDEX committed_publication_claimable ON committed_publication_outbox(status, created_at, id);
+CREATE INDEX committed_publication_project ON committed_publication_outbox(project_id, project_revision);
+
+/* Delivery and bus rows predate project-scoped invalidations.  Preserve every
+ * historic row as system-scoped (there is no safe inference), while all new
+ * typed callers provide the project id. */
+ALTER TABLE tracker_envelopes ADD COLUMN project_id TEXT NOT NULL DEFAULT 'system';
+ALTER TABLE tracker_bus_events ADD COLUMN project_id TEXT NOT NULL DEFAULT 'system';
+CREATE INDEX tracker_envelopes_project ON tracker_envelopes(project_id, status);
+CREATE INDEX tracker_bus_events_project_sequence ON tracker_bus_events(project_id, sequence);
+
+/* Each trigger advances one resource revision and one project-visible revision,
+ * then appends one opaque row in the enclosing SQLite transaction. */
+CREATE TRIGGER committed_pub_ticket_insert AFTER INSERT ON tickets BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) VALUES (NEW.project_id, 1, NEW.updated_at)
+    ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) VALUES (NEW.project_id, 'tracker.ticket', NEW.id, 1, NEW.updated_at)
+    ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at)
+    VALUES ('cpub_' || lower(hex(randomblob(16))), NEW.project_id, 'tracker', 'tracker.ticket', NEW.id,
+      (SELECT revision FROM committed_resource_revisions WHERE project_id = NEW.project_id AND resource_type = 'tracker.ticket' AND resource_id = NEW.id),
+      (SELECT revision FROM committed_project_revisions WHERE project_id = NEW.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.updated_at);
+END;
+CREATE TRIGGER committed_pub_ticket_update AFTER UPDATE ON tickets WHEN NEW.updated_at <> OLD.updated_at BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) VALUES (NEW.project_id, 1, NEW.updated_at)
+    ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) VALUES (NEW.project_id, 'tracker.ticket', NEW.id, 1, NEW.updated_at)
+    ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at)
+    VALUES ('cpub_' || lower(hex(randomblob(16))), NEW.project_id, 'tracker', 'tracker.ticket', NEW.id,
+      (SELECT revision FROM committed_resource_revisions WHERE project_id = NEW.project_id AND resource_type = 'tracker.ticket' AND resource_id = NEW.id),
+      (SELECT revision FROM committed_project_revisions WHERE project_id = NEW.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.updated_at);
+END;
+CREATE TRIGGER committed_pub_comment_insert AFTER INSERT ON comments BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) SELECT project_id, 1, NEW.updated_at FROM tickets WHERE id = NEW.ticket_id
+    ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) SELECT project_id, 'tracker.comment', NEW.id, 1, NEW.updated_at FROM tickets WHERE id = NEW.ticket_id
+    ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at)
+    SELECT 'cpub_' || lower(hex(randomblob(16))), project_id, 'tracker', 'tracker.comment', NEW.id,
+      (SELECT revision FROM committed_resource_revisions WHERE project_id = tickets.project_id AND resource_type = 'tracker.comment' AND resource_id = NEW.id),
+      (SELECT revision FROM committed_project_revisions WHERE project_id = tickets.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.updated_at FROM tickets WHERE id = NEW.ticket_id;
+END;
+CREATE TRIGGER committed_pub_comment_update AFTER UPDATE ON comments WHEN NEW.updated_at <> OLD.updated_at BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) SELECT project_id, 1, NEW.updated_at FROM tickets WHERE id = NEW.ticket_id
+    ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) SELECT project_id, 'tracker.comment', NEW.id, 1, NEW.updated_at FROM tickets WHERE id = NEW.ticket_id
+    ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at)
+    SELECT 'cpub_' || lower(hex(randomblob(16))), project_id, 'tracker', 'tracker.comment', NEW.id,
+      (SELECT revision FROM committed_resource_revisions WHERE project_id = tickets.project_id AND resource_type = 'tracker.comment' AND resource_id = NEW.id),
+      (SELECT revision FROM committed_project_revisions WHERE project_id = tickets.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.updated_at FROM tickets WHERE id = NEW.ticket_id;
+END;
+CREATE TRIGGER committed_pub_stream_insert AFTER INSERT ON streams BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) VALUES (NEW.project_id, 1, NEW.updated_at)
+    ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) VALUES (NEW.project_id, 'tracker.stream', NEW.id, 1, NEW.updated_at)
+    ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at)
+    VALUES ('cpub_' || lower(hex(randomblob(16))), NEW.project_id, 'tracker', 'tracker.stream', NEW.id,
+      (SELECT revision FROM committed_resource_revisions WHERE project_id = NEW.project_id AND resource_type = 'tracker.stream' AND resource_id = NEW.id),
+      (SELECT revision FROM committed_project_revisions WHERE project_id = NEW.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.updated_at);
+END;
+CREATE TRIGGER committed_pub_stream_update AFTER UPDATE ON streams WHEN NEW.updated_at <> OLD.updated_at BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) VALUES (NEW.project_id, 1, NEW.updated_at)
+    ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) VALUES (NEW.project_id, 'tracker.stream', NEW.id, 1, NEW.updated_at)
+    ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at)
+    VALUES ('cpub_' || lower(hex(randomblob(16))), NEW.project_id, 'tracker', 'tracker.stream', NEW.id,
+      (SELECT revision FROM committed_resource_revisions WHERE project_id = NEW.project_id AND resource_type = 'tracker.stream' AND resource_id = NEW.id),
+      (SELECT revision FROM committed_project_revisions WHERE project_id = NEW.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.updated_at);
+END;
+CREATE TRIGGER committed_pub_link_insert AFTER INSERT ON links BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) SELECT project_id, 1, updated_at FROM tickets WHERE id = NEW.from_ticket
+    ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) SELECT project_id, 'tracker.link', NEW.from_ticket || ':' || NEW.to_ticket || ':' || NEW.type, 1, updated_at FROM tickets WHERE id = NEW.from_ticket
+    ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at)
+    SELECT 'cpub_' || lower(hex(randomblob(16))), project_id, 'tracker', 'tracker.link', NEW.from_ticket || ':' || NEW.to_ticket || ':' || NEW.type,
+      (SELECT revision FROM committed_resource_revisions WHERE project_id = tickets.project_id AND resource_type = 'tracker.link' AND resource_id = NEW.from_ticket || ':' || NEW.to_ticket || ':' || NEW.type),
+      (SELECT revision FROM committed_project_revisions WHERE project_id = tickets.project_id), 'golem.committed-invalidation/v1', 1, 'pending', updated_at FROM tickets WHERE id = NEW.from_ticket;
+END;
+CREATE TRIGGER committed_pub_link_delete AFTER DELETE ON links BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) SELECT project_id, 1, updated_at FROM tickets WHERE id = OLD.from_ticket
+    ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) SELECT project_id, 'tracker.link', OLD.from_ticket || ':' || OLD.to_ticket || ':' || OLD.type, 1, updated_at FROM tickets WHERE id = OLD.from_ticket
+    ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at)
+    SELECT 'cpub_' || lower(hex(randomblob(16))), project_id, 'tracker', 'tracker.link', OLD.from_ticket || ':' || OLD.to_ticket || ':' || OLD.type,
+      (SELECT revision FROM committed_resource_revisions WHERE project_id = tickets.project_id AND resource_type = 'tracker.link' AND resource_id = OLD.from_ticket || ':' || OLD.to_ticket || ':' || OLD.type),
+      (SELECT revision FROM committed_project_revisions WHERE project_id = tickets.project_id), 'golem.committed-invalidation/v1', 1, 'pending', updated_at FROM tickets WHERE id = OLD.from_ticket;
+END;
+
+CREATE TRIGGER committed_pub_management_role_insert AFTER INSERT ON management_roles BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) VALUES (NEW.project_id, 1, NEW.updated_at) ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) VALUES (NEW.project_id, 'management.role', NEW.id, 1, NEW.updated_at) ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at) VALUES ('cpub_' || lower(hex(randomblob(16))), NEW.project_id, 'management', 'management.role', NEW.id, (SELECT revision FROM committed_resource_revisions WHERE project_id = NEW.project_id AND resource_type = 'management.role' AND resource_id = NEW.id), (SELECT revision FROM committed_project_revisions WHERE project_id = NEW.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.updated_at);
+END;
+CREATE TRIGGER committed_pub_management_role_update AFTER UPDATE ON management_roles WHEN NEW.updated_at <> OLD.updated_at BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) VALUES (NEW.project_id, 1, NEW.updated_at) ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) VALUES (NEW.project_id, 'management.role', NEW.id, 1, NEW.updated_at) ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at) VALUES ('cpub_' || lower(hex(randomblob(16))), NEW.project_id, 'management', 'management.role', NEW.id, (SELECT revision FROM committed_resource_revisions WHERE project_id = NEW.project_id AND resource_type = 'management.role' AND resource_id = NEW.id), (SELECT revision FROM committed_project_revisions WHERE project_id = NEW.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.updated_at);
+END;
+CREATE TRIGGER committed_pub_management_assignment_insert AFTER INSERT ON management_role_assignments BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) VALUES (NEW.project_id, 1, NEW.created_at) ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) VALUES (NEW.project_id, 'management.assignment', NEW.id, 1, NEW.created_at) ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at) VALUES ('cpub_' || lower(hex(randomblob(16))), NEW.project_id, 'management', 'management.assignment', NEW.id, (SELECT revision FROM committed_resource_revisions WHERE project_id = NEW.project_id AND resource_type = 'management.assignment' AND resource_id = NEW.id), (SELECT revision FROM committed_project_revisions WHERE project_id = NEW.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.created_at);
+END;
+CREATE TRIGGER committed_pub_management_gate_insert AFTER INSERT ON management_gates BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) VALUES (NEW.project_id, 1, NEW.updated_at) ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) VALUES (NEW.project_id, 'management.gate', NEW.id, 1, NEW.updated_at) ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at) VALUES ('cpub_' || lower(hex(randomblob(16))), NEW.project_id, 'management', 'management.gate', NEW.id, (SELECT revision FROM committed_resource_revisions WHERE project_id = NEW.project_id AND resource_type = 'management.gate' AND resource_id = NEW.id), (SELECT revision FROM committed_project_revisions WHERE project_id = NEW.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.updated_at);
+END;
+CREATE TRIGGER committed_pub_management_gate_update AFTER UPDATE ON management_gates WHEN NEW.updated_at <> OLD.updated_at BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) VALUES (NEW.project_id, 1, NEW.updated_at) ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) VALUES (NEW.project_id, 'management.gate', NEW.id, 1, NEW.updated_at) ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at) VALUES ('cpub_' || lower(hex(randomblob(16))), NEW.project_id, 'management', 'management.gate', NEW.id, (SELECT revision FROM committed_resource_revisions WHERE project_id = NEW.project_id AND resource_type = 'management.gate' AND resource_id = NEW.id), (SELECT revision FROM committed_project_revisions WHERE project_id = NEW.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.updated_at);
+END;
+CREATE TRIGGER committed_pub_management_idea_insert AFTER INSERT ON management_ideas BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) VALUES (NEW.project_id, 1, NEW.updated_at) ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) VALUES (NEW.project_id, 'management.idea', NEW.id, 1, NEW.updated_at) ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at) VALUES ('cpub_' || lower(hex(randomblob(16))), NEW.project_id, 'management', 'management.idea', NEW.id, (SELECT revision FROM committed_resource_revisions WHERE project_id = NEW.project_id AND resource_type = 'management.idea' AND resource_id = NEW.id), (SELECT revision FROM committed_project_revisions WHERE project_id = NEW.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.updated_at);
+END;
+CREATE TRIGGER committed_pub_management_idea_update AFTER UPDATE ON management_ideas WHEN NEW.updated_at <> OLD.updated_at BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) VALUES (NEW.project_id, 1, NEW.updated_at) ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) VALUES (NEW.project_id, 'management.idea', NEW.id, 1, NEW.updated_at) ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at) VALUES ('cpub_' || lower(hex(randomblob(16))), NEW.project_id, 'management', 'management.idea', NEW.id, (SELECT revision FROM committed_resource_revisions WHERE project_id = NEW.project_id AND resource_type = 'management.idea' AND resource_id = NEW.id), (SELECT revision FROM committed_project_revisions WHERE project_id = NEW.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.updated_at);
+END;
+CREATE TRIGGER committed_pub_management_asset_insert AFTER INSERT ON management_assets BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) VALUES (NEW.project_id, 1, NEW.created_at) ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) VALUES (NEW.project_id, 'management.asset', NEW.id, 1, NEW.created_at) ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at) VALUES ('cpub_' || lower(hex(randomblob(16))), NEW.project_id, 'asset', 'management.asset', NEW.id, (SELECT revision FROM committed_resource_revisions WHERE project_id = NEW.project_id AND resource_type = 'management.asset' AND resource_id = NEW.id), (SELECT revision FROM committed_project_revisions WHERE project_id = NEW.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.created_at);
+END;
+CREATE TRIGGER committed_pub_management_operation_insert AFTER INSERT ON management_operations BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) VALUES (NEW.project_id, 1, NEW.updated_at) ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) VALUES (NEW.project_id, 'communication.operation', NEW.id, 1, NEW.updated_at) ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at) VALUES ('cpub_' || lower(hex(randomblob(16))), NEW.project_id, 'communication', 'communication.operation', NEW.id, (SELECT revision FROM committed_resource_revisions WHERE project_id = NEW.project_id AND resource_type = 'communication.operation' AND resource_id = NEW.id), (SELECT revision FROM committed_project_revisions WHERE project_id = NEW.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.updated_at);
+END;
+CREATE TRIGGER committed_pub_management_operation_update AFTER UPDATE ON management_operations WHEN NEW.updated_at <> OLD.updated_at BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) VALUES (NEW.project_id, 1, NEW.updated_at) ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) VALUES (NEW.project_id, 'communication.operation', NEW.id, 1, NEW.updated_at) ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at) VALUES ('cpub_' || lower(hex(randomblob(16))), NEW.project_id, 'communication', 'communication.operation', NEW.id, (SELECT revision FROM committed_resource_revisions WHERE project_id = NEW.project_id AND resource_type = 'communication.operation' AND resource_id = NEW.id), (SELECT revision FROM committed_project_revisions WHERE project_id = NEW.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.updated_at);
+END;
+
+CREATE TRIGGER committed_pub_delivery_envelope_insert AFTER INSERT ON tracker_envelopes BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) VALUES (NEW.project_id, 1, NEW.created_at) ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) VALUES (NEW.project_id, 'delivery.envelope', NEW.id, 1, NEW.created_at) ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at) VALUES ('cpub_' || lower(hex(randomblob(16))), NEW.project_id, 'delivery', 'delivery.envelope', NEW.id, (SELECT revision FROM committed_resource_revisions WHERE project_id = NEW.project_id AND resource_type = 'delivery.envelope' AND resource_id = NEW.id), (SELECT revision FROM committed_project_revisions WHERE project_id = NEW.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.created_at);
+END;
+CREATE TRIGGER committed_pub_delivery_envelope_settlement AFTER UPDATE ON tracker_envelopes WHEN NEW.status <> OLD.status AND NEW.status <> 'claimed' BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) VALUES (NEW.project_id, 1, COALESCE(NEW.delivered_at, NEW.created_at)) ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) VALUES (NEW.project_id, 'delivery.envelope', NEW.id, 1, COALESCE(NEW.delivered_at, NEW.created_at)) ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at) VALUES ('cpub_' || lower(hex(randomblob(16))), NEW.project_id, 'delivery', 'delivery.envelope', NEW.id, (SELECT revision FROM committed_resource_revisions WHERE project_id = NEW.project_id AND resource_type = 'delivery.envelope' AND resource_id = NEW.id), (SELECT revision FROM committed_project_revisions WHERE project_id = NEW.project_id), 'golem.committed-invalidation/v1', 1, 'pending', COALESCE(NEW.delivered_at, NEW.created_at));
+END;
+CREATE TRIGGER committed_pub_delivery_ack_insert AFTER INSERT ON tracker_envelope_acknowledgements BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) SELECT project_id, 1, NEW.acknowledged_at FROM tracker_envelopes WHERE id = NEW.envelope_id ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) SELECT project_id, 'delivery.ack', NEW.envelope_id || ':' || NEW.acknowledgement_id, 1, NEW.acknowledged_at FROM tracker_envelopes WHERE id = NEW.envelope_id ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at) SELECT 'cpub_' || lower(hex(randomblob(16))), project_id, 'delivery', 'delivery.ack', NEW.envelope_id || ':' || NEW.acknowledgement_id, (SELECT revision FROM committed_resource_revisions WHERE project_id = tracker_envelopes.project_id AND resource_type = 'delivery.ack' AND resource_id = NEW.envelope_id || ':' || NEW.acknowledgement_id), (SELECT revision FROM committed_project_revisions WHERE project_id = tracker_envelopes.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.acknowledged_at FROM tracker_envelopes WHERE id = NEW.envelope_id;
+END;
+CREATE TRIGGER committed_pub_bus_insert AFTER INSERT ON tracker_bus_events BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) VALUES (NEW.project_id, 1, NEW.created_at) ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) VALUES (NEW.project_id, 'delivery.bus', NEW.id, 1, NEW.created_at) ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at) VALUES ('cpub_' || lower(hex(randomblob(16))), NEW.project_id, 'delivery', 'delivery.bus', NEW.id, (SELECT revision FROM committed_resource_revisions WHERE project_id = NEW.project_id AND resource_type = 'delivery.bus' AND resource_id = NEW.id), (SELECT revision FROM committed_project_revisions WHERE project_id = NEW.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.created_at);
+END;
+`,
+	),
+	migration(
+		"tracker/009-semantic-committed-publication",
+		`
+/* GOL-80 repair: timestamps are observation facts, not semantic change
+ * detectors.  Recreate the update triggers with null-safe domain-column
+ * predicates so fixed clocks cannot hide a committed mutation and an actual
+ * no-op cannot manufacture a revision/outbox row. */
+DROP TRIGGER committed_pub_ticket_update;
+DROP TRIGGER committed_pub_comment_update;
+DROP TRIGGER committed_pub_stream_update;
+DROP TRIGGER committed_pub_management_role_update;
+DROP TRIGGER committed_pub_management_gate_update;
+DROP TRIGGER committed_pub_management_idea_update;
+DROP TRIGGER committed_pub_management_operation_update;
+DROP TRIGGER committed_pub_delivery_envelope_settlement;
+
+CREATE TRIGGER committed_pub_ticket_update AFTER UPDATE ON tickets
+WHEN NEW.kind IS NOT OLD.kind OR NEW.title IS NOT OLD.title
+  OR NEW.body IS NOT OLD.body OR NEW.state IS NOT OLD.state
+  OR NEW.phase IS NOT OLD.phase OR NEW.priority IS NOT OLD.priority
+  OR NEW.labels IS NOT OLD.labels OR NEW.stream_id IS NOT OLD.stream_id
+  OR NEW.parent_id IS NOT OLD.parent_id OR NEW.wave IS NOT OLD.wave
+  OR NEW.assignee IS NOT OLD.assignee OR NEW.created_by IS NOT OLD.created_by
+  OR NEW.dispatched_to IS NOT OLD.dispatched_to
+  OR NEW.source_ref IS NOT OLD.source_ref OR NEW.rank IS NOT OLD.rank
+  OR NEW.display_id IS NOT OLD.display_id
+BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) VALUES (NEW.project_id, 1, NEW.updated_at)
+    ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) VALUES (NEW.project_id, 'tracker.ticket', NEW.id, 1, NEW.updated_at)
+    ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at)
+    VALUES ('cpub_' || lower(hex(randomblob(16))), NEW.project_id, 'tracker', 'tracker.ticket', NEW.id,
+      (SELECT revision FROM committed_resource_revisions WHERE project_id = NEW.project_id AND resource_type = 'tracker.ticket' AND resource_id = NEW.id),
+      (SELECT revision FROM committed_project_revisions WHERE project_id = NEW.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.updated_at);
+END;
+
+CREATE TRIGGER committed_pub_comment_update AFTER UPDATE ON comments
+WHEN NEW.ticket_id IS NOT OLD.ticket_id OR NEW.author IS NOT OLD.author
+  OR NEW.body IS NOT OLD.body OR NEW.quote IS NOT OLD.quote
+  OR NEW.prefix IS NOT OLD.prefix OR NEW.suffix IS NOT OLD.suffix
+  OR NEW.section IS NOT OLD.section OR NEW.section_id IS NOT OLD.section_id
+  OR NEW.tag IS NOT OLD.tag OR NEW.status IS NOT OLD.status
+  OR NEW.dispatch_state IS NOT OLD.dispatch_state OR NEW.parent_id IS NOT OLD.parent_id
+BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) SELECT project_id, 1, NEW.updated_at FROM tickets WHERE id = NEW.ticket_id
+    ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) SELECT project_id, 'tracker.comment', NEW.id, 1, NEW.updated_at FROM tickets WHERE id = NEW.ticket_id
+    ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at)
+    SELECT 'cpub_' || lower(hex(randomblob(16))), project_id, 'tracker', 'tracker.comment', NEW.id,
+      (SELECT revision FROM committed_resource_revisions WHERE project_id = tickets.project_id AND resource_type = 'tracker.comment' AND resource_id = NEW.id),
+      (SELECT revision FROM committed_project_revisions WHERE project_id = tickets.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.updated_at FROM tickets WHERE id = NEW.ticket_id;
+END;
+
+CREATE TRIGGER committed_pub_stream_update AFTER UPDATE ON streams
+WHEN NEW.project_id IS NOT OLD.project_id OR NEW.name IS NOT OLD.name
+  OR NEW.mode IS NOT OLD.mode OR NEW.description IS NOT OLD.description
+BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) VALUES (NEW.project_id, 1, NEW.updated_at)
+    ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) VALUES (NEW.project_id, 'tracker.stream', NEW.id, 1, NEW.updated_at)
+    ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at)
+    VALUES ('cpub_' || lower(hex(randomblob(16))), NEW.project_id, 'tracker', 'tracker.stream', NEW.id,
+      (SELECT revision FROM committed_resource_revisions WHERE project_id = NEW.project_id AND resource_type = 'tracker.stream' AND resource_id = NEW.id),
+      (SELECT revision FROM committed_project_revisions WHERE project_id = NEW.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.updated_at);
+END;
+
+CREATE TRIGGER committed_pub_management_role_update AFTER UPDATE ON management_roles
+WHEN NEW.name IS NOT OLD.name OR NEW.scope IS NOT OLD.scope
+  OR NEW.definition_json IS NOT OLD.definition_json
+BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) VALUES (NEW.project_id, 1, NEW.updated_at) ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) VALUES (NEW.project_id, 'management.role', NEW.id, 1, NEW.updated_at) ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at) VALUES ('cpub_' || lower(hex(randomblob(16))), NEW.project_id, 'management', 'management.role', NEW.id, (SELECT revision FROM committed_resource_revisions WHERE project_id = NEW.project_id AND resource_type = 'management.role' AND resource_id = NEW.id), (SELECT revision FROM committed_project_revisions WHERE project_id = NEW.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.updated_at);
+END;
+
+CREATE TRIGGER committed_pub_management_gate_update AFTER UPDATE ON management_gates
+WHEN NEW.kind IS NOT OLD.kind OR NEW.status IS NOT OLD.status
+  OR NEW.question IS NOT OLD.question OR NEW.assignee IS NOT OLD.assignee
+  OR NEW.verdict_json IS NOT OLD.verdict_json
+BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) VALUES (NEW.project_id, 1, NEW.updated_at) ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) VALUES (NEW.project_id, 'management.gate', NEW.id, 1, NEW.updated_at) ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at) VALUES ('cpub_' || lower(hex(randomblob(16))), NEW.project_id, 'management', 'management.gate', NEW.id, (SELECT revision FROM committed_resource_revisions WHERE project_id = NEW.project_id AND resource_type = 'management.gate' AND resource_id = NEW.id), (SELECT revision FROM committed_project_revisions WHERE project_id = NEW.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.updated_at);
+END;
+
+CREATE TRIGGER committed_pub_management_idea_update AFTER UPDATE ON management_ideas
+WHEN NEW.body IS NOT OLD.body OR NEW.status IS NOT OLD.status
+  OR NEW.promoted_ticket_id IS NOT OLD.promoted_ticket_id
+BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) VALUES (NEW.project_id, 1, NEW.updated_at) ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) VALUES (NEW.project_id, 'management.idea', NEW.id, 1, NEW.updated_at) ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at) VALUES ('cpub_' || lower(hex(randomblob(16))), NEW.project_id, 'management', 'management.idea', NEW.id, (SELECT revision FROM committed_resource_revisions WHERE project_id = NEW.project_id AND resource_type = 'management.idea' AND resource_id = NEW.id), (SELECT revision FROM committed_project_revisions WHERE project_id = NEW.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.updated_at);
+END;
+
+CREATE TRIGGER committed_pub_management_operation_update AFTER UPDATE ON management_operations
+WHEN NEW.session_id IS NOT OLD.session_id OR NEW.generation_id IS NOT OLD.generation_id
+  OR NEW.kind IS NOT OLD.kind OR NEW.command IS NOT OLD.command
+  OR NEW.payload_json IS NOT OLD.payload_json OR NEW.status IS NOT OLD.status
+  OR NEW.actor IS NOT OLD.actor
+BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) VALUES (NEW.project_id, 1, NEW.updated_at) ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) VALUES (NEW.project_id, 'communication.operation', NEW.id, 1, NEW.updated_at) ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at) VALUES ('cpub_' || lower(hex(randomblob(16))), NEW.project_id, 'communication', 'communication.operation', NEW.id, (SELECT revision FROM committed_resource_revisions WHERE project_id = NEW.project_id AND resource_type = 'communication.operation' AND resource_id = NEW.id), (SELECT revision FROM committed_project_revisions WHERE project_id = NEW.project_id), 'golem.committed-invalidation/v1', 1, 'pending', NEW.updated_at);
+END;
+
+/* acknowledgeEnvelope inserts one acknowledgement and changes status in one
+ * transaction.  The acknowledgement trigger is the sole canonical owner for
+ * that event; every other terminal delivery status stays envelope-owned. */
+CREATE TRIGGER committed_pub_delivery_envelope_settlement AFTER UPDATE ON tracker_envelopes
+WHEN NEW.status <> OLD.status AND NEW.status <> 'claimed' AND NEW.status <> 'acknowledged'
+BEGIN
+  INSERT INTO committed_project_revisions(project_id, revision, updated_at) VALUES (NEW.project_id, 1, COALESCE(NEW.delivered_at, NEW.created_at)) ON CONFLICT(project_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_resource_revisions(project_id, resource_type, resource_id, revision, updated_at) VALUES (NEW.project_id, 'delivery.envelope', NEW.id, 1, COALESCE(NEW.delivered_at, NEW.created_at)) ON CONFLICT(project_id, resource_type, resource_id) DO UPDATE SET revision = revision + 1, updated_at = excluded.updated_at;
+  INSERT INTO committed_publication_outbox(id, project_id, category, resource_type, resource_id, resource_revision, project_revision, schema_version, policy_version, status, created_at) VALUES ('cpub_' || lower(hex(randomblob(16))), NEW.project_id, 'delivery', 'delivery.envelope', NEW.id, (SELECT revision FROM committed_resource_revisions WHERE project_id = NEW.project_id AND resource_type = 'delivery.envelope' AND resource_id = NEW.id), (SELECT revision FROM committed_project_revisions WHERE project_id = NEW.project_id), 'golem.committed-invalidation/v1', 1, 'pending', COALESCE(NEW.delivered_at, NEW.created_at));
+END;
 `,
 	),
 ];

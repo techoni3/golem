@@ -19,6 +19,7 @@ type EnvelopeStatus = TrackerDeliveryEnvelope["status"];
 
 interface EnvelopeRow {
 	readonly id: string;
+	readonly project_id: string;
 	readonly root_id: string;
 	readonly parent_id: string | null;
 	readonly idempotency_key: string;
@@ -42,6 +43,7 @@ interface EnvelopeRow {
 
 interface EventRow {
 	readonly sequence: number;
+	readonly project_id: string;
 	readonly id: string;
 	readonly deduplication_key: string;
 	readonly fingerprint: string;
@@ -136,6 +138,7 @@ function endpoint(value: string): TrackerDeliveryEligibility {
 function hydrateEnvelope(row: EnvelopeRow): TrackerDeliveryEnvelope {
 	return Object.freeze({
 		id: row.id,
+		projectId: row.project_id,
 		rootId: row.root_id,
 		...(row.parent_id ? { parentId: row.parent_id } : {}),
 		idempotencyKey: row.idempotency_key,
@@ -171,6 +174,7 @@ function hydrateClaim(row: EnvelopeRow): ClaimedTrackerDeliveryEnvelope {
 function hydrateEvent(row: EventRow): TrackerBusEvent {
 	return Object.freeze({
 		sequence: Number(row.sequence),
+		projectId: row.project_id,
 		id: row.id,
 		deduplicationKey: row.deduplication_key,
 		topic: row.topic,
@@ -260,10 +264,11 @@ export class TrackerRepository implements TrackerStorageCapability {
 				: { kind: "conflict", reason: "idempotency_key" };
 		this.#database
 			.prepare(
-				"INSERT INTO tracker_envelopes(id, root_id, parent_id, idempotency_key, fingerprint, sender_id, recipient_id, reply_to_recipient_id, kind, payload_json, endpoint_json, status, attempts, max_attempts, deadline_at, next_attempt_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+				"INSERT INTO tracker_envelopes(id, project_id, root_id, parent_id, idempotency_key, fingerprint, sender_id, recipient_id, reply_to_recipient_id, kind, payload_json, endpoint_json, status, attempts, max_attempts, deadline_at, next_attempt_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 			)
 			.run(
 				envelope.id,
+				envelope.projectId,
 				envelope.rootId,
 				envelope.parentId ?? null,
 				envelope.idempotencyKey,
@@ -572,10 +577,11 @@ export class TrackerRepository implements TrackerStorageCapability {
 					: { kind: "conflict", reason: "deduplication_key" };
 			this.#database
 				.prepare(
-					"INSERT INTO tracker_bus_events(id, deduplication_key, fingerprint, topic, class, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+					"INSERT INTO tracker_bus_events(id, project_id, deduplication_key, fingerprint, topic, class, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 				)
 				.run(
 					input.event.id,
+					input.event.projectId,
 					input.event.deduplicationKey,
 					input.fingerprint,
 					input.event.topic,

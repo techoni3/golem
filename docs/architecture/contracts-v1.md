@@ -42,7 +42,8 @@ redeclaring DTOs.
   cannot cross project scope.
 - Endpoint/capability facts keep route health, delivery mode, readiness, and
   qualification separate. WebSocket frames require instance id, sequence,
-  resource revision, and snapshot/delta/resync variants.
+  resource revision, and snapshot/opaque-delta/resync variants; resync includes
+  `policy_changed` alongside cursor/instance reasons.
 - Launcher config and presets are strict and carry only safe arguments and
   environment-key references. Sensitive option names fail in both inline and
   split argv forms with field paths; unknown managed fields fail too. No schema

@@ -9,6 +9,7 @@ export { openTrackerCoreCapability } from "./tracker-core-capability.js";
 export type {
 	BrowserPrincipalStorage,
 	CapabilityQualification,
+	ClaimedCommittedPublicationRecord,
 	ClaimedOutboxRecord,
 	ClaimedTrackerDeliveryEnvelope,
 	ClaimedTrackerPassiveBatch,
@@ -16,6 +17,9 @@ export type {
 	CommandReceiptRecord,
 	CommandReceiptStorage,
 	CommandStatus,
+	CommittedPublicationCategory,
+	CommittedPublicationRecord,
+	CommittedPublicationStorage,
 	DatabaseHealth,
 	DatabaseScope,
 	DeliveryEnvelopeStatus,

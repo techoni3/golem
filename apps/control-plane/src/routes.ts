@@ -315,6 +315,19 @@ export function registerValidatedRoutes(options: {
 		},
 		async (request, reply) => {
 			if (!requireBrowserRead(request, reply, options.principal)) return;
+			const context = options.principal.resolve(request, {
+				action: "read",
+				allowBrowser: true,
+				allowBearer: true,
+			});
+			if (!context)
+				return fail(
+					request,
+					reply,
+					401,
+					"browser.auth.required",
+					"an authenticated principal binding is required",
+				);
 			const parsed = ProjectionParamsSchema.safeParse(request.params);
 			if (!parsed.success)
 				return fail(
@@ -328,8 +341,11 @@ export function registerValidatedRoutes(options: {
 			return sendValidated(request, reply, ProjectionResponseSchema, {
 				schema_version: "golem.control-plane-projection/v1",
 				stream,
-				resource_revision: options.projection.revision(stream),
-				payload: options.projection.read(stream),
+				resource_revision: options.projection.revision(
+					stream,
+					context.defaultProjectId,
+				),
+				payload: options.projection.read(stream, context.defaultProjectId),
 			});
 		},
 	);

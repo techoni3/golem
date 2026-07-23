@@ -198,7 +198,7 @@ test("tracker core compatibility journey", async () => {
 		try {
 			const freshStatus = freshOwner.status();
 			assert.equal(freshStatus.tracker.baseline, "managed", "a fresh tracker is managed on first owner open");
-			assert.equal(freshStatus.tracker.userVersion, 6, "a fresh tracker reaches the canonical schema version on first owner open");
+			assert.equal(freshStatus.tracker.userVersion, 9, "a fresh tracker reaches the canonical schema version on first owner open");
 			const freshTables = sqliteTableNames(freshTrackerPath);
 			for (const table of ["golem_migrations", "tickets", "comments", "comment_dispatches", "browser_principal_bindings", "browser_principal_scopes", "browser_principal_credentials", "browser_principal_sessions", "streams", "links", "events"]) {
 				assert.equal(freshTables.includes(table), true, `fresh managed tracker contains canonical ${table} table`);
@@ -284,6 +284,8 @@ test("tracker core compatibility journey", async () => {
 		assert(applied.applied.includes("tracker/005-comment-dispatches"), "explicit migration records the canonical comment-dispatch relation");
 		assert(applied.applied.includes("tracker/006-browser-principal-policy"), "explicit migration adds durable opaque principal bindings without rewriting legacy tracker rows");
 		assert(applied.applied.includes("tracker/007-command-receipts"), "explicit migration adds durable command receipts without rewriting legacy tracker rows");
+		assert(applied.applied.includes("tracker/008-committed-publication-outbox"), "explicit migration adds committed opaque invalidation ownership without rewriting legacy tracker rows");
+		assert(applied.applied.includes("tracker/009-semantic-committed-publication"), "semantic trigger repair is applied without rewriting legacy tracker rows");
 		const afterApply = legacyCounts(home.trackerDb);
 		assert.deepEqual(
 			{

@@ -204,6 +204,11 @@ export class TrackerManagementRepository
 					.where("id", "=", input.id),
 			);
 			if (existing) {
+				if (
+					existing.scope === input.scope &&
+					existing.definition_json === json(input.definition)
+				)
+					return rowRole(existing);
 				this.#store.run(
 					this.#store.queries
 						.updateTable("management_roles")
