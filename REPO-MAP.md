@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-07-23 @ 037c0bd — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-23 @ e206aec + GOL-89 — maintained via golem:docs-maintenance.
 
 ## Structure
 
@@ -13,7 +13,7 @@
 - One npm11 lock; `packages/persistence` is the sole SQLite writer, recovery owner, and migration owner.
 - Tracker owns durable delivery and typed work-item/phase/comment/link/stream services; exceptional close is server-composed.
 - `CommandGateway` atomically writes tracker/management mutations, GOL-79 receipts, invalidations, settlement, and direct-core effects. Replays are inert; changed keys return `409`; semantic changes publish once; scope filtering precedes WS; HTTP revisions are truth.
-- `TicketDispatchService` is the browser/bearer/MCP delivery seam. The current assignee must resolve fail-closed to an eligible active generation; GOL-79 queues `tracker_envelopes` as `ready`/`pull_only`/`next_turn`. Terminal/ineligible writes create none; stale CAS replays. Historical/runtime fields never select; only server-authenticated MCP exposes legacy alias/content, and durable binding—not credential spelling—defines provenance.
+- `TicketDispatchService` is the browser/bearer/MCP delivery seam. The current assignee must resolve fail-closed to an eligible active generation; GOL-79 queues `tracker_envelopes` as `ready`/`pull_only`/`next_turn`. Its read side joins project-scoped receipts, verified tickets, and canonical envelopes into safe dispatch operations; malformed or missing queue facts are omitted, and settlement never leaks targeting/claim/ack data. Terminal/ineligible writes create no envelope; stale CAS replays. Historical/runtime fields never select; only server-authenticated MCP exposes legacy alias/content, and durable binding—not credential spelling—defines provenance.
 - Launcher owns fail-closed writes and immutable LaunchPlan facts; CLI consumes them for picker/presets.
 - Control plane owns REST/WS. Browser work uses generated paths, same-origin cookie reads/WS, CSRF commands, and a metadata-only synchronizer that replaces snapshots and refetches every invalidation; it accepts no browser authority or domain merge. GOL-80 scopes opaque frames before construction; foreign detail is absent.
 - Project identity is canonical Git paths; sessions have immutable generations, scoped aliases, provenance, terminal monotonicity, and deterministic effects.

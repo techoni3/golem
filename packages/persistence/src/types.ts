@@ -819,7 +819,24 @@ export type TrackerAppendBusEventResult =
 	| { readonly kind: "duplicate"; readonly event: TrackerBusEvent }
 	| { readonly kind: "conflict"; readonly reason: "id" | "deduplication_key" };
 
+/**
+ * Positive-allowlist read model for browser-visible dispatch operations.
+ * Persistence selects no recipient, endpoint, claim, acknowledgement, envelope,
+ * payload, actor, correlation, or fingerprint data across this boundary.
+ */
+export interface TrackerDispatchOperationRecord {
+	readonly commandId: string;
+	readonly projectId: string;
+	readonly ticketId: string;
+	readonly result: TrackerJsonObject;
+	readonly envelopeStatus?: TrackerDeliveryEnvelope["status"];
+	readonly committedAt: string;
+}
+
 export interface TrackerStorageCapability {
+	listDispatchOperations(
+		projectId: string,
+	): readonly TrackerDispatchOperationRecord[];
 	createEnvelope(input: {
 		readonly envelope: TrackerDeliveryEnvelope;
 		readonly fingerprint: string;

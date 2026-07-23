@@ -12980,50 +12980,120 @@
                               "maxItems": 100,
                               "type": "array",
                               "items": {
-                                "type": "object",
-                                "properties": {
-                                  "opaque_id": {
-                                    "type": "string",
-                                    "maxLength": 128,
-                                    "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "opaque_id": {
+                                        "type": "string",
+                                        "maxLength": 128,
+                                        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                      },
+                                      "operation_kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "chat",
+                                          "brief",
+                                          "interrupt",
+                                          "halt",
+                                          "control"
+                                        ]
+                                      },
+                                      "status": {
+                                        "type": "string",
+                                        "enum": [
+                                          "queued",
+                                          "ineligible",
+                                          "delivered"
+                                        ]
+                                      },
+                                      "created_at": {
+                                        "type": "string",
+                                        "format": "date-time",
+                                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                      },
+                                      "updated_at": {
+                                        "type": "string",
+                                        "format": "date-time",
+                                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                      }
+                                    },
+                                    "required": [
+                                      "opaque_id",
+                                      "operation_kind",
+                                      "status",
+                                      "created_at",
+                                      "updated_at"
+                                    ],
+                                    "additionalProperties": false
                                   },
-                                  "operation_kind": {
-                                    "type": "string",
-                                    "enum": [
-                                      "chat",
-                                      "brief",
-                                      "interrupt",
-                                      "halt",
-                                      "control"
-                                    ]
-                                  },
-                                  "status": {
-                                    "type": "string",
-                                    "enum": [
-                                      "queued",
-                                      "ineligible",
-                                      "delivered"
-                                    ]
-                                  },
-                                  "created_at": {
-                                    "type": "string",
-                                    "format": "date-time",
-                                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
-                                  },
-                                  "updated_at": {
-                                    "type": "string",
-                                    "format": "date-time",
-                                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "opaque_id": {
+                                        "type": "string",
+                                        "maxLength": 128,
+                                        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                      },
+                                      "operation_kind": {
+                                        "type": "string",
+                                        "const": "dispatch"
+                                      },
+                                      "subject_opaque_id": {
+                                        "type": "string",
+                                        "maxLength": 128,
+                                        "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+                                      },
+                                      "disposition": {
+                                        "type": "string",
+                                        "enum": [
+                                          "queued",
+                                          "pull_only",
+                                          "next_turn",
+                                          "ineligible",
+                                          "stale"
+                                        ]
+                                      },
+                                      "capability": {
+                                        "type": "string",
+                                        "const": "delivery"
+                                      },
+                                      "remediation": {
+                                        "type": "string",
+                                        "enum": [
+                                          "await_delivery",
+                                          "await_next_turn",
+                                          "refresh_ticket"
+                                        ]
+                                      },
+                                      "settlement": {
+                                        "type": "string",
+                                        "enum": [
+                                          "pending",
+                                          "delivered",
+                                          "settled",
+                                          "retrying",
+                                          "failed",
+                                          "expired",
+                                          "cancelled"
+                                        ]
+                                      },
+                                      "created_at": {
+                                        "type": "string",
+                                        "format": "date-time",
+                                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                      }
+                                    },
+                                    "required": [
+                                      "opaque_id",
+                                      "operation_kind",
+                                      "subject_opaque_id",
+                                      "disposition",
+                                      "created_at"
+                                    ],
+                                    "additionalProperties": false
                                   }
-                                },
-                                "required": [
-                                  "opaque_id",
-                                  "operation_kind",
-                                  "status",
-                                  "created_at",
-                                  "updated_at"
-                                ],
-                                "additionalProperties": false
+                                ]
                               }
                             }
                           },

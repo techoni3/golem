@@ -184,6 +184,12 @@ function compose(writer, fixtureClock, home) {
 		clock: appClock,
 		eligibility,
 	});
+	const ticketDispatch = composeControlPlaneTicketDispatchService({
+		writer,
+		core,
+		services,
+		eligibility,
+	});
 	return {
 		core,
 		management,
@@ -193,15 +199,11 @@ function compose(writer, fixtureClock, home) {
 			clock: appClock,
 			core,
 		}),
-		ticketDispatch: composeControlPlaneTicketDispatchService({
-			writer,
-			core,
-			services,
-			eligibility,
-		}),
+		ticketDispatch,
 		browserWork: createBrowserWorkServices({
 			core,
 			management,
+			ticketDispatch,
 			projectRevision: (projectId) =>
 				writer.committedPublicationStorage().projectRevision(projectId),
 		}),

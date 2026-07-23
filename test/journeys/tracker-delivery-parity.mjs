@@ -149,6 +149,40 @@ function noFrame(socket, milliseconds = 175) {
 	});
 }
 
+function assertSafeDispatchProjection(value, message) {
+	const serialized = JSON.stringify(value);
+	for (const forbidden of [
+		'"recipient_id"',
+		'"session_id"',
+		'"generation_id"',
+		'"endpoint"',
+		'"fence"',
+		'"claim_owner"',
+		'"claim_token"',
+		'"acknowledgement_id"',
+		'"envelope_id"',
+		'"payload"',
+		'"result"',
+		'"note"',
+		'"workspace"',
+		sessionId,
+		generationId,
+		"GOL89_HOSTILE_PAYLOAD",
+	])
+		assert.equal(
+			serialized.includes(forbidden),
+			false,
+			`${message}: ${forbidden} stays outside the browser projection`,
+		);
+}
+
+function projectedDispatch(projection, commandId) {
+	return projection?.items?.find(
+		(item) =>
+			item.operation_kind === "dispatch" && item.opaque_id === commandId,
+	);
+}
+
 function queueCounts(home) {
 	const database = new Database(home.trackerDb, { readonly: true, fileMustExist: true });
 	try {
@@ -192,6 +226,51 @@ function envelopeRecipient(home, ticketId, idempotencyKey) {
 			.all(idempotencyKey)
 			.find((candidate) => JSON.parse(candidate.payload_json).ticket_id === ticketId);
 		return row?.recipient_id;
+	} finally {
+		database.close();
+	}
+}
+
+function deleteEnvelope(home, idempotencyKey) {
+	const database = new Database(home.trackerDb, { fileMustExist: true });
+	try {
+		return database
+			.prepare(
+				"DELETE FROM tracker_envelopes WHERE project_id = ? AND idempotency_key = ?",
+			)
+			.run(projectId, idempotencyKey).changes;
+	} finally {
+		database.close();
+	}
+}
+
+function insertMalformedDispatchReceipt(home, ticketId, committedAt) {
+	const database = new Database(home.trackerDb, { fileMustExist: true });
+	const commandId = "cmd_gol89_malformed_projection";
+	try {
+		database
+			.prepare(
+				`INSERT INTO command_receipts(
+					command_id, project_id, idempotency_key, command_kind, actor_id,
+					resource_type, resource_id, correlation_id, fingerprint,
+					outcome_status, result_json, committed_at
+				) VALUES (?, ?, ?, 'dispatch', 'fixture', 'ticket', ?, 'fixture',
+					'fixture', 'completed', ?, ?)`,
+			)
+			.run(
+				commandId,
+				projectId,
+				"gol89:malformed-projection",
+				ticketId,
+				JSON.stringify({
+					kind: "dispatch",
+					disposition: "ineligible",
+					operation_id: commandId,
+					recipient_id: sessionId,
+				}),
+				committedAt,
+			);
+		return commandId;
 	} finally {
 		database.close();
 	}
@@ -364,15 +443,17 @@ function compose(writer, fixtureClock, home) {
 	const services = composeControlPlaneTrackerServices({ writer, clock: appClock, eligibility });
 	const management = composeControlPlaneManagementServices({ writer, clock: appClock, assetRoot: path.join(home.root, "assets"), tickets: core.tickets });
 	const gateway = composeControlPlaneCommandGateway({ writer, clock: appClock, core });
+	const ticketDispatch = composeControlPlaneTicketDispatchService({ writer, core, services, eligibility });
 	return {
 		core,
 		services,
 		management,
 		gateway,
-		ticketDispatch: composeControlPlaneTicketDispatchService({ writer, core, services, eligibility }),
+		ticketDispatch,
 		browserWork: createBrowserWorkServices({
 			core,
 			management,
+			ticketDispatch,
 			projectRevision: (id) => writer.committedPublicationStorage().projectRevision(id),
 		}),
 	};
@@ -441,14 +522,22 @@ export async function exerciseBrowserTrackerDeliveryParity() {
 		assert.equal(browser.result.operation_id, browser.command_id);
 		const pendingCommunication =
 			await browserClient.browserWorkProjection("communication.operations");
-		assert.equal(
-			pendingCommunication.items.some(
-				(item) =>
-					item.opaque_id === browser.command_id &&
-					item.status === "delivered",
-			),
-			false,
-			"command-time queued classification is not synthesized as settlement",
+		assert.deepEqual(
+			projectedDispatch(pendingCommunication, browser.command_id),
+			{
+				opaque_id: browser.command_id,
+				operation_kind: "dispatch",
+				subject_opaque_id: browserTicket.id,
+				disposition: "queued",
+				capability: "delivery",
+				settlement: "pending",
+				created_at: fixtureClock.now(),
+			},
+			"canonical receipt plus envelope materializes pending dispatch truth",
+		);
+		assertSafeDispatchProjection(
+			pendingCommunication,
+			"pending browser dispatch",
 		);
 		const bearerBody = { expected_revision: bearerTicket.revision, idempotency_key: "gol82:bearer" };
 		const bearer = await json(origin, `/api/v1/tracker/tickets/${bearerTicket.id}/dispatch`, { method: "POST", headers: bearerHeaders(), body: JSON.stringify(bearerBody) });
@@ -457,11 +546,43 @@ export async function exerciseBrowserTrackerDeliveryParity() {
 		const mcp = await invokeMcpTool(
 			createFetchApiClient(origin, { bearerToken: mcpToken, caller: { projectId, sessionId } }),
 			"ticket_dispatch",
-			{ id: mcpTicket.id, session_id: sessionId, expected_revision: mcpTicket.revision, idempotency_key: "gol82:mcp" },
+			{
+				id: mcpTicket.id,
+				session_id: sessionId,
+				expected_revision: mcpTicket.revision,
+				idempotency_key: "gol82:mcp",
+				note: "GOL89_HOSTILE_PAYLOAD",
+				workspace: "GOL89_HOSTILE_PAYLOAD",
+			},
 		);
 		assert.equal(mcp.isError, undefined);
 		assert.equal(JSON.parse(mcp.content[0].text).result.disposition, "queued");
 		assert.deepEqual(queueCounts(home), { envelopes: 3, dispatchQueue: 0 }, "browser, bearer, and MCP each queue only canonical envelopes");
+		const transportParityProjection =
+			await browserClient.browserWorkProjection("communication.operations");
+		for (const [outcome, subject] of [
+			[browser, browserTicket.id],
+			[bearer.body, bearerTicket.id],
+			[JSON.parse(mcp.content[0].text), mcpTicket.id],
+		]) {
+			assert.deepEqual(
+				projectedDispatch(transportParityProjection, outcome.command_id),
+				{
+					opaque_id: outcome.command_id,
+					operation_kind: "dispatch",
+					subject_opaque_id: subject,
+					disposition: "queued",
+					capability: "delivery",
+					settlement: "pending",
+					created_at: fixtureClock.now(),
+				},
+				"browser, bearer, and MCP receipts converge on one safe read model",
+			);
+		}
+		assertSafeDispatchProjection(
+			transportParityProjection,
+			"transport-parity projection",
+		);
 
 		const runtimeReferenceTicket = control.core.tickets.create({
 			projectId,
@@ -547,10 +668,113 @@ export async function exerciseBrowserTrackerDeliveryParity() {
 		);
 		assert.deepEqual(queueCounts(home), { envelopes: 6, dispatchQueue: 0 });
 
+		const prunedTicket = ticket(
+			control.core,
+			"queueable receipt whose envelope is no longer present",
+		);
+		const prunedDispatch = await json(
+			origin,
+			"/api/v1/browser/work/commands",
+			{
+				method: "POST",
+				headers: browserHeaders(origin),
+				body: JSON.stringify({
+					kind: "dispatch",
+					opaque_id: prunedTicket.id,
+					expected_revision: prunedTicket.revision,
+					idempotency_key: "gol82:pruned-envelope",
+				}),
+			},
+		);
+		assert.equal(prunedDispatch.body.result.disposition, "queued");
+		assert.deepEqual(queueCounts(home), { envelopes: 7, dispatchQueue: 0 });
+		assert.equal(deleteEnvelope(home, "gol82:pruned-envelope"), 1);
+		const missingEnvelopeProjection =
+			await browserClient.browserWorkProjection("communication.operations");
+		assert.equal(
+			projectedDispatch(
+				missingEnvelopeProjection,
+				prunedDispatch.body.command_id,
+			),
+			undefined,
+			"queueable receipt with a missing/pruned envelope fails closed",
+		);
+		assert.deepEqual(queueCounts(home), { envelopes: 6, dispatchQueue: 0 });
+
+		const ineligibleTicket = control.core.tickets.create({
+			projectId,
+			kind: "work-item",
+			title: "durable ineligible dispatch projection",
+			assignee: "human",
+			actor: "act_gol82_browser",
+		});
+		const ineligible = await json(
+			origin,
+			"/api/v1/browser/work/commands",
+			{
+				method: "POST",
+				headers: browserHeaders(origin),
+				body: JSON.stringify({
+					kind: "dispatch",
+					opaque_id: ineligibleTicket.id,
+					expected_revision: ineligibleTicket.revision,
+					idempotency_key: "gol82:ineligible-projection",
+				}),
+			},
+		);
+		assert.equal(ineligible.status, 200);
+		assert.equal(ineligible.body.result.disposition, "ineligible");
+		const ineligibleProjection =
+			await browserClient.browserWorkProjection("communication.operations");
+		assert.deepEqual(
+			projectedDispatch(ineligibleProjection, ineligible.body.command_id),
+			{
+				opaque_id: ineligible.body.command_id,
+				operation_kind: "dispatch",
+				subject_opaque_id: ineligibleTicket.id,
+				disposition: "ineligible",
+				created_at: fixtureClock.now(),
+			},
+			"ineligible durable outcome has no fabricated envelope settlement",
+		);
+		assert.deepEqual(queueCounts(home), { envelopes: 6, dispatchQueue: 0 });
+		assertSafeDispatchProjection(ineligibleProjection, "ineligible projection");
+		const malformedCommandId = insertMalformedDispatchReceipt(
+			home,
+			ineligibleTicket.id,
+			fixtureClock.now(),
+		);
+		const malformedProjection =
+			await browserClient.browserWorkProjection("communication.operations");
+		assert.equal(
+			projectedDispatch(malformedProjection, malformedCommandId),
+			undefined,
+			"receipt result with a non-allowlisted field fails closed",
+		);
+		assertSafeDispatchProjection(malformedProjection, "malformed receipt projection");
+
 		const foreignTicket = control.core.tickets.create({ projectId: foreignProjectId, kind: "work-item", title: "foreign", assignee: sessionId, actor: "act_gol82_foreign" });
 		const foreign = await json(origin, "/api/v1/browser/work/commands", { method: "POST", headers: browserHeaders(origin), body: JSON.stringify({ kind: "dispatch", opaque_id: foreignTicket.id, expected_revision: foreignTicket.revision, idempotency_key: "gol82:foreign" }) });
 		assert.equal(foreign.status, 404, "cross-scope browser target is non-disclosing");
 		assert.equal(JSON.stringify(foreign.body).includes(foreignTicket.id), false);
+		const foreignProjection = await json(
+			origin,
+			"/api/v1/projections/communication.operations",
+			{
+				headers: {
+					origin,
+					cookie: `golem_control_plane_session=${foreignSession}`,
+				},
+			},
+		);
+		assert.equal(foreignProjection.status, 200);
+		assert.equal(
+			foreignProjection.body.items.some(
+				(item) => item.operation_kind === "dispatch",
+			),
+			false,
+			"foreign browser sees no project dispatch operation",
+		);
 		const beforeForgery = queueCounts(home);
 		for (const key of ["session_id", "generation_id", "endpoint", "fence", "readiness", "acknowledgement_id", "settlement"]) {
 			const forged = await json(origin, "/api/v1/browser/work/commands", { method: "POST", headers: browserHeaders(origin), body: JSON.stringify({ ...browserBody, idempotency_key: `gol82:forged:${key}`, [key]: "forged" }) });
@@ -568,7 +792,16 @@ export async function exerciseBrowserTrackerDeliveryParity() {
 			onSnapshot: (snapshot, source) =>
 				settlementSnapshots.push({ snapshot, source }),
 		});
-		await settlementSync.consume(await nextFrame(socket));
+		const initialSettlementRaw = await nextFrame(socket);
+		const initialSettlement = BrowserWorkWebSocketFrameSchema.parse(
+			JSON.parse(initialSettlementRaw),
+		);
+		assert.equal(initialSettlement.payload.kind, "snapshot");
+		assertSafeDispatchProjection(
+			initialSettlement.payload.payload,
+			"communication WebSocket snapshot",
+		);
+		await settlementSync.consume(initialSettlementRaw);
 		BrowserWorkWebSocketFrameSchema.parse(JSON.parse(await nextFrame(foreignSocket)));
 		const claims = await json(origin, "/api/v1/delivery/claims", { method: "POST", headers: bearerHeaders(), body: JSON.stringify({ limit: 10 }) });
 		const claim = claims.body.items.find((item) => item.payload.ticket_id === browserTicket.id);
@@ -580,6 +813,14 @@ export async function exerciseBrowserTrackerDeliveryParity() {
 		const acknowledged = await json(origin, `/api/v1/delivery/claims/${encodeURIComponent(claim.claimToken)}/ack`, { method: "POST", headers: bearerHeaders(), body: JSON.stringify({ acknowledgement_id: "ack_gol82_browser", payload: {} }) });
 		assert.equal(acknowledged.status, 200, "settlement remains the later canonical callback");
 		assert.equal(writer.committedPublicationStorage().projectRevision(projectId), beforeAck + 1);
+		const settledProjection =
+			await browserClient.browserWorkProjection("communication.operations");
+		assert.equal(
+			projectedDispatch(settledProjection, browser.command_id)?.settlement,
+			"settled",
+			"authoritative HTTP truth reflects canonical acknowledgement",
+		);
+		assertSafeDispatchProjection(settledProjection, "settled HTTP projection");
 		const duplicateAcknowledgement = await json(
 			origin,
 			`/api/v1/delivery/claims/${encodeURIComponent(claim.claimToken)}/ack`,
@@ -595,9 +836,15 @@ export async function exerciseBrowserTrackerDeliveryParity() {
 			beforeAck + 1,
 			"duplicate settlement publishes +0",
 		);
+		assert.deepEqual(
+			await browserClient.browserWorkProjection("communication.operations"),
+			settledProjection,
+			"duplicate acknowledgement leaves projection unchanged",
+		);
 		const deltaRaw = await deltaFrame;
 		const delta = BrowserWorkWebSocketFrameSchema.parse(JSON.parse(deltaRaw));
 		assert.equal(delta.payload.kind, "delta");
+		assertSafeDispatchProjection(delta.payload.delta, "settlement invalidation");
 		await settlementSync.consume(deltaRaw);
 		assert.equal(
 			settlementSnapshots.at(-1)?.source,
@@ -609,13 +856,12 @@ export async function exerciseBrowserTrackerDeliveryParity() {
 			writer.committedPublicationStorage().projectRevision(projectId),
 		);
 		assert.equal(
-			settlementSnapshots.at(-1)?.snapshot.items.some(
-				(item) =>
-					item.opaque_id === browser.command_id &&
-					item.status === "delivered",
-			),
-			false,
-			"the client does not fabricate a settlement item absent from canonical HTTP truth",
+			projectedDispatch(
+				settlementSnapshots.at(-1)?.snapshot,
+				browser.command_id,
+			)?.settlement,
+			"settled",
+			"invalidation refetch returns the same canonical settled operation",
 		);
 		await noFrame(foreignSocket);
 
@@ -628,10 +874,36 @@ export async function exerciseBrowserTrackerDeliveryParity() {
 		const replay = await json(restarted.service.origin, "/api/v1/browser/work/commands", { method: "POST", headers: browserHeaders(restarted.service.origin), body: JSON.stringify(browserBody) });
 		assert.deepEqual(replay.body, browser, "restart duplicate replays the original durable browser outcome");
 		assert.deepEqual(queueCounts(home), { envelopes: 6, dispatchQueue: 0 });
-		return "real managed SQLite browser cookie/CSRF, bearer HTTP, MCP, current-assignee/runtime-reference parity, restart replay, canonical claim/ack callback, and scoped WebSocket invalidation converge on tracker_envelopes without legacy dispatch_queue";
+		const restartProjection = await json(
+			restarted.service.origin,
+			"/api/v1/projections/communication.operations",
+			{
+				headers: {
+					origin: restarted.service.origin,
+					cookie: `golem_control_plane_session=${browserSession}`,
+				},
+			},
+		);
+		assert.equal(restartProjection.status, 200);
+		assert.deepEqual(
+			restartProjection.body,
+			settledProjection,
+			"restart rematerializes the identical canonical dispatch projection",
+		);
+		assertSafeDispatchProjection(
+			restartProjection.body,
+			"restart projection",
+		);
+		return "real managed SQLite browser cookie/CSRF, bearer HTTP, MCP, safe pending-to-settled HTTP refetch, foreign isolation, duplicate ACK +0, and restart projection converge on canonical receipts/envelopes without legacy dispatch_queue";
 	} finally {
-		if (socket) socket.terminate();
-		if (foreignSocket) foreignSocket.terminate();
+		if (socket) {
+			socket.on("error", () => {});
+			socket.terminate();
+		}
+		if (foreignSocket) {
+			foreignSocket.on("error", () => {});
+			foreignSocket.terminate();
+		}
 		if (control) await control.service.close();
 		if (writer) await writer.close();
 		home.cleanup();

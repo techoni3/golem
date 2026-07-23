@@ -24,9 +24,12 @@ export {
 	createTicketDispatchService,
 	type TicketDispatchDisposition,
 	type TicketDispatchInput,
+	type TicketDispatchOperation,
+	type TicketDispatchOperationPort,
 	type TicketDispatchOutcome,
 	type TicketDispatchService,
 	type TicketDispatchSessionPort,
+	type TicketDispatchSettlement,
 	type TicketDispatchTicketPort,
 } from "./ticket-dispatch.js";
 export {

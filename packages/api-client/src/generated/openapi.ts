@@ -6685,7 +6685,7 @@ export interface operations {
                         readonly next_cursor: string | null;
                         /** @constant */
                         readonly stream: "communication.operations";
-                        readonly items: readonly {
+                        readonly items: readonly ({
                             readonly opaque_id: string;
                             /** @enum {string} */
                             readonly operation_kind: "chat" | "brief" | "interrupt" | "halt" | "control";
@@ -6695,7 +6695,22 @@ export interface operations {
                             readonly created_at: string;
                             /** Format: date-time */
                             readonly updated_at: string;
-                        }[];
+                        } | {
+                            readonly opaque_id: string;
+                            /** @constant */
+                            readonly operation_kind: "dispatch";
+                            readonly subject_opaque_id: string;
+                            /** @enum {string} */
+                            readonly disposition: "queued" | "pull_only" | "next_turn" | "ineligible" | "stale";
+                            /** @constant */
+                            readonly capability?: "delivery";
+                            /** @enum {string} */
+                            readonly remediation?: "await_delivery" | "await_next_turn" | "refresh_ticket";
+                            /** @enum {string} */
+                            readonly settlement?: "pending" | "delivered" | "settled" | "retrying" | "failed" | "expired" | "cancelled";
+                            /** Format: date-time */
+                            readonly created_at: string;
+                        })[];
                     });
                 };
             };

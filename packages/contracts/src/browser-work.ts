@@ -63,7 +63,7 @@ const BrowserWorkTreeTicketSchema = BrowserWorkTicketSchema.extend({
 	parent_opaque_id: BrowserOpaqueIdSchema.optional(),
 }).strict();
 
-export const BrowserWorkOperationSchema = z
+export const BrowserWorkManagementOperationSchema = z
 	.object({
 		opaque_id: BrowserOpaqueIdSchema,
 		operation_kind: z.enum(["chat", "brief", "interrupt", "halt", "control"]),
@@ -72,6 +72,42 @@ export const BrowserWorkOperationSchema = z
 		updated_at: BrowserTimestampSchema,
 	})
 	.strict();
+
+export const BrowserWorkDispatchOperationSchema = z
+	.object({
+		opaque_id: BrowserOpaqueIdSchema,
+		operation_kind: z.literal("dispatch"),
+		subject_opaque_id: BrowserOpaqueIdSchema,
+		disposition: z.enum([
+			"queued",
+			"pull_only",
+			"next_turn",
+			"ineligible",
+			"stale",
+		]),
+		capability: z.literal("delivery").optional(),
+		remediation: z
+			.enum(["await_delivery", "await_next_turn", "refresh_ticket"])
+			.optional(),
+		settlement: z
+			.enum([
+				"pending",
+				"delivered",
+				"settled",
+				"retrying",
+				"failed",
+				"expired",
+				"cancelled",
+			])
+			.optional(),
+		created_at: BrowserTimestampSchema,
+	})
+	.strict();
+
+export const BrowserWorkOperationSchema = z.union([
+	BrowserWorkManagementOperationSchema,
+	BrowserWorkDispatchOperationSchema,
+]);
 
 const BrowserWorkProjectionBaseSchema = z
 	.object({
@@ -96,7 +132,7 @@ export const BrowserWorkTreeProjectionSchema =
 export const BrowserWorkManagementProjectionSchema =
 	BrowserWorkProjectionBaseSchema.extend({
 		stream: z.literal("management.controls"),
-		items: z.array(BrowserWorkOperationSchema).max(100),
+		items: z.array(BrowserWorkManagementOperationSchema).max(100),
 	}).strict();
 
 export const BrowserWorkCommunicationProjectionSchema =

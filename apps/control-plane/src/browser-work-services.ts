@@ -1,14 +1,16 @@
 import {
 	BrowserWorkAssetResponseSchema,
 	BrowserWorkDetailResponseSchema,
-	BrowserWorkOperationSchema,
+	BrowserWorkDispatchOperationSchema,
+	BrowserWorkManagementOperationSchema,
 	BrowserWorkProjectionCursorSchema,
-	BrowserWorkProjectionResponseSchema,
-	BrowserWorkTicketSchema,
 	type BrowserWorkProjectionResponse,
+	BrowserWorkProjectionResponseSchema,
 	type BrowserWorkStreamSchema,
+	BrowserWorkTicketSchema,
 } from "@golem/contracts";
 import type {
+	TicketDispatchService,
 	TrackerCoreServices,
 	TrackerManagementServices,
 } from "@golem/tracker";
@@ -44,20 +46,67 @@ function ticketView(ticket: {
 	});
 }
 
-function operationView(operation: {
+function managementOperationView(operation: {
 	readonly id: string;
 	readonly kind: "chat" | "brief" | "interrupt" | "halt" | "control";
 	readonly status: "queued" | "ineligible" | "delivered";
 	readonly createdAt: string;
 	readonly updatedAt: string;
 }) {
-	return BrowserWorkOperationSchema.parse({
+	return BrowserWorkManagementOperationSchema.parse({
 		opaque_id: operation.id,
 		operation_kind: operation.kind,
 		status: operation.status,
 		created_at: operation.createdAt,
 		updated_at: operation.updatedAt,
 	});
+}
+
+function dispatchOperationView(operation: {
+	readonly id: string;
+	readonly ticketId: string;
+	readonly disposition:
+		| "queued"
+		| "pull_only"
+		| "next_turn"
+		| "ineligible"
+		| "stale";
+	readonly capability?: "delivery";
+	readonly remediation?:
+		| "await_delivery"
+		| "await_next_turn"
+		| "refresh_ticket";
+	readonly settlement?:
+		| "pending"
+		| "delivered"
+		| "settled"
+		| "retrying"
+		| "failed"
+		| "expired"
+		| "cancelled";
+	readonly createdAt: string;
+}) {
+	const parsed = BrowserWorkDispatchOperationSchema.safeParse({
+		opaque_id: operation.id,
+		operation_kind: "dispatch",
+		subject_opaque_id: operation.ticketId,
+		disposition: operation.disposition,
+		...(operation.capability ? { capability: operation.capability } : {}),
+		...(operation.remediation ? { remediation: operation.remediation } : {}),
+		...(operation.settlement ? { settlement: operation.settlement } : {}),
+		created_at: operation.createdAt,
+	});
+	return parsed.success ? parsed.data : undefined;
+}
+
+function descendingOperation(
+	left: { readonly opaque_id: string; readonly created_at: string },
+	right: { readonly opaque_id: string; readonly created_at: string },
+): number {
+	return (
+		right.created_at.localeCompare(left.created_at) ||
+		right.opaque_id.localeCompare(left.opaque_id)
+	);
 }
 
 function pageOf(cursor: string | undefined): number {
@@ -101,6 +150,7 @@ export interface BrowserWorkServices {
 export function createBrowserWorkServices(options: {
 	readonly core: TrackerCoreServices;
 	readonly management: TrackerManagementServices;
+	readonly ticketDispatch: TicketDispatchService;
 	readonly projectRevision: (projectId: string) => number;
 }): BrowserWorkServices {
 	function scopedTicket(projectId: string, ticketId: string) {
@@ -138,21 +188,28 @@ export function createBrowserWorkServices(options: {
 					})),
 				});
 			}
-			const operations = options.management.controls.list(projectId);
-			const page = boundedPage(
-				operations.filter((operation) =>
-					stream === "management.controls"
-						? operation.kind === "control"
-						: operation.kind !== "control",
-				),
-				cursor,
-			);
+			const managementOperations = options.management.controls.list(projectId);
+			const items =
+				stream === "management.controls"
+					? managementOperations
+							.filter((operation) => operation.kind === "control")
+							.map(managementOperationView)
+					: [
+							...managementOperations
+								.filter((operation) => operation.kind !== "control")
+								.map(managementOperationView),
+							...options.ticketDispatch
+								.operations(projectId)
+								.map(dispatchOperationView)
+								.filter((operation) => operation !== undefined),
+						].sort(descendingOperation);
+			const page = boundedPage(items, cursor);
 			return BrowserWorkProjectionResponseSchema.parse({
 				schema_version: "golem.browser-work-projection/v1",
 				stream,
 				resource_revision: resourceRevision,
 				next_cursor: page.nextCursor,
-				items: page.items.map(operationView),
+				items: page.items,
 			});
 		},
 		detail(projectId: string, ticketId: string) {

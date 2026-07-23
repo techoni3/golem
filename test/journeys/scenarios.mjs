@@ -270,7 +270,7 @@ export const scenarios = [
 		id: "browser-tracker-delivery-parity",
 		journey: "J4",
 		tier: "integration",
-		regression: "browser dispatch can bypass canonical ticket recipient/generation/fence truth, create a shadow queue, duplicate after restart, or claim settlement before a real callback",
+		regression: "browser dispatch can bypass canonical ticket recipient/generation/fence truth, create a shadow queue, duplicate after restart, claim settlement before a real callback, or leave scoped HTTP refetch without safe receipt/envelope truth",
 	}),
 	registerScenario({
 		id: "delivery-api-fence-recheck",

@@ -1,5 +1,6 @@
-import type { TrackerCoreWorkItem } from "./repositories/port.js";
+import type { TrackerDispatchOperationRecord } from "@golem/persistence";
 import type { DurableDeliveryService } from "./delivery.js";
+import type { TrackerCoreWorkItem } from "./repositories/port.js";
 import type { DeliveryEligibility, DeliveryEligibilityPort } from "./types.js";
 
 /** The only command-time facts a browser/bearer/MCP adapter may supply. */
@@ -33,7 +34,37 @@ export interface TicketDispatchOutcome {
 	readonly disposition: TicketDispatchDisposition;
 	readonly operation_id: string;
 	readonly capability?: "delivery";
-	readonly remediation?: "await_delivery" | "await_next_turn" | "refresh_ticket";
+	readonly remediation?:
+		| "await_delivery"
+		| "await_next_turn"
+		| "refresh_ticket";
+}
+
+export type TicketDispatchSettlement =
+	| "pending"
+	| "delivered"
+	| "settled"
+	| "retrying"
+	| "failed"
+	| "expired"
+	| "cancelled";
+
+/** Safe read-side dispatch facts; adapters cannot inspect the durable rows. */
+export interface TicketDispatchOperation {
+	readonly id: string;
+	readonly ticketId: string;
+	readonly disposition: TicketDispatchDisposition;
+	readonly capability?: "delivery";
+	readonly remediation?:
+		| "await_delivery"
+		| "await_next_turn"
+		| "refresh_ticket";
+	readonly settlement?: TicketDispatchSettlement;
+	readonly createdAt: string;
+}
+
+export interface TicketDispatchOperationPort {
+	list(projectId: string): readonly TrackerDispatchOperationRecord[];
 }
 
 export interface TicketDispatchTicketPort {
@@ -96,6 +127,98 @@ function outcome(
 	});
 }
 
+function object(value: unknown): Readonly<Record<string, unknown>> | undefined {
+	return value && typeof value === "object" && !Array.isArray(value)
+		? (value as Readonly<Record<string, unknown>>)
+		: undefined;
+}
+
+function exactKeys(
+	value: Readonly<Record<string, unknown>>,
+	keys: readonly string[],
+): boolean {
+	const actual = Object.keys(value).sort();
+	const expected = [...keys].sort();
+	return (
+		actual.length === expected.length &&
+		actual.every((key, index) => key === expected[index])
+	);
+}
+
+function parsedOutcome(
+	record: TrackerDispatchOperationRecord,
+): TicketDispatchOutcome | undefined {
+	const direct = object(record.result);
+	if (!direct) return undefined;
+	const candidate =
+		direct.kind === "dispatch"
+			? direct
+			: exactKeys(direct, ["resource_revision", "result"]) &&
+				  Number.isSafeInteger(direct.resource_revision) &&
+				  Number(direct.resource_revision) >= 0
+				? object(direct.result)
+				: undefined;
+	if (candidate?.kind !== "dispatch") return undefined;
+	if (
+		candidate.disposition !== "queued" &&
+		candidate.disposition !== "pull_only" &&
+		candidate.disposition !== "next_turn" &&
+		candidate.disposition !== "ineligible" &&
+		candidate.disposition !== "stale"
+	)
+		return undefined;
+	if (candidate.operation_id !== record.commandId) return undefined;
+
+	const expected = outcome(record.commandId, candidate.disposition);
+	const expectedRecord = expected as unknown as Readonly<
+		Record<string, unknown>
+	>;
+	if (!exactKeys(candidate, Object.keys(expectedRecord))) return undefined;
+	for (const [key, value] of Object.entries(expectedRecord))
+		if (candidate[key] !== value) return undefined;
+	return expected;
+}
+
+function settlement(
+	status: NonNullable<TrackerDispatchOperationRecord["envelopeStatus"]>,
+): TicketDispatchSettlement {
+	if (status === "pending" || status === "claimed") return "pending";
+	if (status === "delivered") return "delivered";
+	if (status === "acknowledged") return "settled";
+	if (status === "retrying") return "retrying";
+	if (status === "dead_letter") return "failed";
+	return status;
+}
+
+function operation(
+	projectId: string,
+	record: TrackerDispatchOperationRecord,
+): TicketDispatchOperation | undefined {
+	if (record.projectId !== projectId) return undefined;
+	const parsed = parsedOutcome(record);
+	if (!parsed) return undefined;
+	const queueable =
+		parsed.disposition === "queued" ||
+		parsed.disposition === "pull_only" ||
+		parsed.disposition === "next_turn";
+	if (
+		(queueable && record.envelopeStatus === undefined) ||
+		(!queueable && record.envelopeStatus !== undefined)
+	)
+		return undefined;
+	return Object.freeze({
+		id: record.commandId,
+		ticketId: record.ticketId,
+		disposition: parsed.disposition,
+		...(parsed.capability ? { capability: parsed.capability } : {}),
+		...(parsed.remediation ? { remediation: parsed.remediation } : {}),
+		...(record.envelopeStatus
+			? { settlement: settlement(record.envelopeStatus) }
+			: {}),
+		createdAt: record.committedAt,
+	});
+}
+
 /**
  * Canonical ticket delivery composition. It deliberately contains no HTTP,
  * MCP, browser, dashboard, or transport logic: adapters enter the enclosing
@@ -103,6 +226,7 @@ function outcome(
  */
 export interface TicketDispatchService {
 	dispatch(input: TicketDispatchInput): TicketDispatchOutcome;
+	operations(projectId: string): readonly TicketDispatchOperation[];
 }
 
 export function createTicketDispatchService(options: {
@@ -110,8 +234,19 @@ export function createTicketDispatchService(options: {
 	readonly sessions: TicketDispatchSessionPort;
 	readonly eligibility: DeliveryEligibilityPort;
 	readonly delivery: DurableDeliveryService;
+	readonly operations: TicketDispatchOperationPort;
 }): TicketDispatchService {
 	return Object.freeze({
+		operations(projectId: string): readonly TicketDispatchOperation[] {
+			return Object.freeze(
+				options.operations
+					.list(projectId)
+					.map((record) => operation(projectId, record))
+					.filter(
+						(value): value is TicketDispatchOperation => value !== undefined,
+					),
+			);
+		},
 		dispatch(input: TicketDispatchInput): TicketDispatchOutcome {
 			const ticket = options.tickets.get(input.projectId, input.ticketId);
 			if (
