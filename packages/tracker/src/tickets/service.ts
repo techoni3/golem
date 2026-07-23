@@ -5,6 +5,7 @@ import {
 } from "@golem/contracts";
 
 import {
+	candidateTrackerPhaseTransitions,
 	canonicalTrackerState,
 	initialTrackerPhase,
 	TrackerPhaseError,
@@ -311,6 +312,7 @@ export interface TrackerTicketService {
 		readonly phase?: string;
 		readonly assignee?: string;
 	}): readonly TrackerCoreWorkItem[];
+	legalTransitions(id: string): readonly string[];
 	search(query: string, projectId?: string): readonly TrackerCoreWorkItem[];
 	update(input: {
 		readonly id: string;
@@ -442,6 +444,36 @@ export function createTrackerTicketService(options: {
 		list(input: Parameters<TrackerTicketService["list"]>[0] = {}) {
 			return options.storage.listWorkItems(input);
 		},
+		legalTransitions(id: string) {
+			const ticket = requireTicket(id);
+			const evidence = options.storage.phaseEvidence(ticket.id);
+			const artifacts = Object.freeze({
+				...evidence,
+				// A browser can supply a reason with a blocked/parked request. All
+				// other evidence remains durable and server-owned.
+				reason: true,
+				verifiedOrSkipReason:
+					ticket.phase === "verified" || evidence.managerSkip,
+			});
+			return Object.freeze(
+				candidateTrackerPhaseTransitions(ticket.kind, ticket.phase).filter(
+					(phase) => {
+						try {
+							validateTrackerPhaseTransition({
+								kind: ticket.kind,
+								from: ticket.phase,
+								to: phase,
+								artifacts,
+							});
+							return true;
+						} catch (error) {
+							if (error instanceof TrackerPhaseError) return false;
+							throw error;
+						}
+					},
+				),
+			);
+		},
 		search(query: string, projectId?: string) {
 			return options.storage.searchWorkItems(
 				requireTrackerText(query, "search query"),
@@ -569,19 +601,24 @@ export function createTrackerTicketService(options: {
 				);
 			return updated;
 		},
-		recordDispatch(input: Parameters<TrackerTicketService["recordDispatch"]>[0]) {
-				const updated = options.storage.recordWorkItemDispatch({
-					id: requireTrackerText(input.id, "ticket id"),
-					expectedRevision: requireRevision(input.expectedRevision),
-					dispatchedTo: requireTrackerText(input.dispatchedTo, "dispatch recipient"),
-					...(input.assignee === undefined
-						? {}
-						: { assignee: requireTrackerText(input.assignee, "assignee") }),
-					mutation: createTrackerMutation(
-						options.clock,
-						requireTrackerActor(input.actor),
-					),
-				});
+		recordDispatch(
+			input: Parameters<TrackerTicketService["recordDispatch"]>[0],
+		) {
+			const updated = options.storage.recordWorkItemDispatch({
+				id: requireTrackerText(input.id, "ticket id"),
+				expectedRevision: requireRevision(input.expectedRevision),
+				dispatchedTo: requireTrackerText(
+					input.dispatchedTo,
+					"dispatch recipient",
+				),
+				...(input.assignee === undefined
+					? {}
+					: { assignee: requireTrackerText(input.assignee, "assignee") }),
+				mutation: createTrackerMutation(
+					options.clock,
+					requireTrackerActor(input.actor),
+				),
+			});
 			if (!updated)
 				throw new TrackerCoreError(
 					"tracker.conflict",

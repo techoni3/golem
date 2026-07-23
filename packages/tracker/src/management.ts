@@ -323,6 +323,10 @@ export interface TrackerManagementServices {
 			readonly ticketId: string;
 			readonly assetId: string;
 		}): { readonly asset: TrackerManagementAsset; readonly bytes: Uint8Array };
+		list(input: {
+			readonly projectId: string;
+			readonly ticketId: string;
+		}): readonly TrackerManagementAsset[];
 	};
 	readonly communications: {
 		create(input: {
@@ -721,6 +725,19 @@ export function createTrackerManagementServices(options: {
 						"asset integrity check failed",
 					);
 				return { asset, bytes: new Uint8Array(bytes) };
+			},
+			list(input) {
+				const projectId = ensureProject(input.projectId);
+				const ticketId = id(input.ticketId, "ticket id");
+				if (
+					options.tickets &&
+					options.tickets.get(ticketId)?.ticket.projectId !== projectId
+				)
+					throw new TrackerManagementError(
+						"management.forbidden",
+						"ticket is not in the requested project",
+					);
+				return options.storage.listAssets({ projectId, ticketId });
 			},
 		},
 		communications: {

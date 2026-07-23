@@ -145,6 +145,14 @@ export function initialTrackerPhase(kind: TrackerCoreWorkItemKind): string {
 	return machineFor(kind).initial;
 }
 
+/** Structural successors only; callers must still check durable evidence. */
+export function candidateTrackerPhaseTransitions(
+	kind: TrackerCoreWorkItemKind,
+	phase: string,
+): readonly string[] {
+	return Object.freeze([...(machineFor(kind).transitions[phase] ?? [])]);
+}
+
 export function canonicalTrackerState(
 	kind: TrackerCoreWorkItemKind,
 	phase: string,

@@ -601,6 +601,163 @@ export async function exerciseBrowserWorkCommandAuthority() {
 		assert.equal(writer.committedPublicationStorage().projectRevision(projectA), beforeDuplicate);
 		assert.equal(writer.committedPublicationStorage().outboxCount(projectA), outboxBeforeDuplicate);
 		const ticket = created.body.result.ticket;
+		const stream = await json(origin, "/api/v1/browser/work/commands", {
+			method: "POST",
+			headers: operatorHeaders,
+			body: JSON.stringify({
+				kind: "stream.create",
+				idempotency_key: "gol55:stream:create",
+				name: "Browser parity stream",
+				mode: "sequential",
+				description: "Canonical browser stream",
+			}),
+		});
+		assert.equal(stream.status, 200);
+		assert.equal(stream.body.result.kind, "stream");
+		const child = await json(origin, "/api/v1/browser/work/commands", {
+			method: "POST",
+			headers: operatorHeaders,
+			body: JSON.stringify({
+				kind: "ticket.create",
+				idempotency_key: "gol55:ticket:collaboration",
+				title: "Browser collaboration child",
+				body: "Safe bounded body",
+				labels: ["browser", "parity"],
+				parent_opaque_id: ticket.opaque_id,
+				stream_opaque_id: stream.body.result.stream.opaque_id,
+				wave: 11,
+			}),
+		});
+		assert.equal(child.status, 200);
+		assert.equal(child.body.result.ticket.parent_opaque_id, ticket.opaque_id);
+		assert.equal(child.body.result.ticket.wave, 11);
+		const comment = await json(origin, "/api/v1/browser/work/commands", {
+			method: "POST",
+			headers: operatorHeaders,
+			body: JSON.stringify({
+				kind: "comment.create",
+				idempotency_key: "gol55:comment:create",
+				opaque_id: ticket.opaque_id,
+				body: "Browser comment",
+			}),
+		});
+		assert.equal(comment.status, 200);
+		assert.equal(comment.body.result.kind, "comment");
+		const reply = await json(origin, "/api/v1/browser/work/commands", {
+			method: "POST",
+			headers: operatorHeaders,
+			body: JSON.stringify({
+				kind: "comment.create",
+				idempotency_key: "gol55:comment:reply",
+				opaque_id: ticket.opaque_id,
+				parent_comment_opaque_id: comment.body.result.comment.opaque_id,
+				body: "Browser reply",
+			}),
+		});
+		assert.equal(
+			reply.body.result.comment.parent_opaque_id,
+			comment.body.result.comment.opaque_id,
+		);
+		const link = await json(origin, "/api/v1/browser/work/commands", {
+			method: "POST",
+			headers: operatorHeaders,
+			body: JSON.stringify({
+				kind: "link.create",
+				idempotency_key: "gol55:link:create",
+				opaque_id: ticket.opaque_id,
+				target_opaque_id: child.body.result.ticket.opaque_id,
+				relation: "relates",
+			}),
+		});
+		assert.equal(link.status, 200);
+		assert.equal(link.body.result.kind, "link");
+		const role = control.management.roles.create({
+			projectId: projectA,
+			name: "Browser project role",
+			scope: "project",
+			actor: "actor_browser_alpha",
+		});
+		const assignment = await json(origin, "/api/v1/browser/work/commands", {
+			method: "POST",
+			headers: operatorHeaders,
+			body: JSON.stringify({
+				kind: "management.role.assign",
+				idempotency_key: "gol55:role:assign",
+				role_opaque_id: role.id,
+			}),
+		});
+		assert.equal(assignment.status, 200);
+		assert.equal(assignment.body.result.kind, "role_assignment");
+		const idea = await json(origin, "/api/v1/browser/work/commands", {
+			method: "POST",
+			headers: operatorHeaders,
+			body: JSON.stringify({
+				kind: "management.idea.create",
+				idempotency_key: "gol55:idea:create",
+				body: "Browser idea",
+			}),
+		});
+		assert.equal(idea.status, 200);
+		const promoted = await json(origin, "/api/v1/browser/work/commands", {
+			method: "POST",
+			headers: operatorHeaders,
+			body: JSON.stringify({
+				kind: "management.idea.promote",
+				idempotency_key: "gol55:idea:promote",
+				idea_opaque_id: idea.body.result.idea.opaque_id,
+			}),
+		});
+		assert.equal(promoted.body.result.idea.status, "promoted");
+		const assetRecord = control.management.assets.put({
+			projectId: projectA,
+			ticketId: ticket.opaque_id,
+			relativePath: "browser-parity.png",
+			mimeType: "image/png",
+			bytes: new Uint8Array([137, 80, 78, 71]),
+			actor: "actor_browser_alpha",
+		});
+		assert(
+			control.browserWork.detail(projectA, ticket.opaque_id),
+			"composed browser detail remains contract-valid",
+		);
+		const collaborationDetail = await json(
+			origin,
+			`/api/v1/browser/work/items/${ticket.opaque_id}`,
+			{ headers: headers(origin, control.alpha.session) },
+		);
+		assert.equal(
+			collaborationDetail.status,
+			200,
+			`collaboration detail: ${JSON.stringify(collaborationDetail.body)}`,
+		);
+		assert.equal(collaborationDetail.body.comments.length, 2);
+		assert.equal(collaborationDetail.body.links.length, 1);
+		assert(
+			collaborationDetail.body.children.some(
+				(candidate) =>
+					candidate.opaque_id === child.body.result.ticket.opaque_id,
+			),
+		);
+		assert(
+			collaborationDetail.body.assets.some(
+				(candidate) => candidate.opaque_id === assetRecord.id,
+			),
+		);
+		const managementProjection = await json(
+			origin,
+			"/api/v1/projections/management.controls",
+			{ headers: headers(origin, control.alpha.session) },
+		);
+		assert(
+			managementProjection.body.roles.some(
+				(candidate) => candidate.opaque_id === role.id,
+			),
+		);
+		assert(
+			managementProjection.body.ideas.some(
+				(candidate) => candidate.status === "promoted",
+			),
+		);
 		const update = await json(origin, "/api/v1/browser/work/commands", {
 			method: "POST",
 			headers: operatorHeaders,
@@ -608,7 +765,7 @@ export async function exerciseBrowserWorkCommandAuthority() {
 				kind: "ticket.update",
 				idempotency_key: "gol81:ticket:update",
 				opaque_id: ticket.opaque_id,
-				expected_revision: ticket.revision,
+				expected_revision: collaborationDetail.body.item.revision,
 				title: "updated",
 			}),
 		});
@@ -770,7 +927,7 @@ export async function exerciseBrowserWorkCommandAuthority() {
 			body: JSON.stringify({ ...createBody, idempotency_key: "gol81:expired" }),
 		});
 		assert.equal(expired.status, 401);
-		return "real cookie+CSRF browser commands invoke the durable gateway once, preserve CAS/idempotency classification, and return a non-disclosing canonical ineligible dispatch outcome when no assigned runtime recipient exists";
+		return "real cookie+CSRF browser commands cover ticket collaboration, streams, project roles, ideas, assets, CAS/idempotency authority, and a non-disclosing canonical dispatch outcome";
 	} finally {
 		if (control) await control.service.close();
 		if (writer) await writer.close();

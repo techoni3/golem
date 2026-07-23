@@ -651,6 +651,24 @@ export class TrackerManagementRepository
 		return row ? rowAsset(row) : undefined;
 	}
 
+	listAssets(input: {
+		readonly projectId: string;
+		readonly ticketId: string;
+	}): readonly TrackerManagementAsset[] {
+		return Object.freeze(
+			this.#store
+				.all<AssetRow>(
+					this.#store.queries
+						.selectFrom("management_assets")
+						.selectAll()
+						.where("project_id", "=", input.projectId)
+						.where("ticket_id", "=", input.ticketId)
+						.orderBy("created_at", "asc"),
+				)
+				.map(rowAsset),
+		);
+	}
+
 	createOperation(
 		input: Parameters<TrackerManagementStorageCapability["createOperation"]>[0],
 	): TrackerManagementOperation {

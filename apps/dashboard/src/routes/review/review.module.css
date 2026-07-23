@@ -79,6 +79,12 @@
 		gap: 0.2rem;
 		min-width: 0;
 	}
+	.operationList .actions {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: var(--g-space-2);
+	}
 	.operationList code,
 	.operationList span {
 		color: var(--g-text-muted);

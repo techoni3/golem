@@ -141,6 +141,25 @@ test("ticket assets are bounded, authorized, symlink-safe, and restart durable",
 		const ticket = opened.core.tickets.create({ projectId: "asset-project", kind: "work-item", title: "asset ticket", body: "asset", actor: "human:manager" });
 		const bytes = new TextEncoder().encode("safe asset");
 		const stored = opened.management.assets.put({ projectId: "asset-project", ticketId: ticket.id, relativePath: "proofs/fixture.txt", mimeType: "image/png", bytes, actor: "human:manager" });
+		assert.deepEqual(
+			opened.management.assets.list({
+				projectId: "asset-project",
+				ticketId: ticket.id,
+			}).map((asset) => asset.id),
+			[stored.id],
+			"asset metadata can be enumerated only within its canonical ticket scope",
+		);
+		assert.throws(
+			() =>
+				opened.management.assets.list({
+					projectId: "other-project",
+					ticketId: ticket.id,
+				}),
+			(error) =>
+				error instanceof TrackerManagementError &&
+				error.code === "management.forbidden",
+			"foreign project asset enumeration is refused",
+		);
 		assert.equal(opened.management.assets.read({ projectId: "asset-project", ticketId: ticket.id, assetId: stored.id }).bytes.byteLength, bytes.byteLength);
 		assert.throws(() => opened.management.assets.put({ projectId: "asset-project", ticketId: ticket.id, relativePath: "../escape", mimeType: "image/png", bytes, actor: "human:manager" }), (error) => error instanceof TrackerManagementError && error.code === "management.asset_invalid");
 		assert.throws(() => opened.management.assets.put({ projectId: "asset-project", ticketId: ticket.id, relativePath: "bad.txt", mimeType: "text/plain", bytes, actor: "human:manager" }), (error) => error instanceof TrackerManagementError && error.code === "management.asset_invalid");

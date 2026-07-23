@@ -225,6 +225,20 @@ export function useWorkDetail(opaqueId: string | undefined) {
 	});
 }
 
+export function useWorkAsset(
+	opaqueId: string | undefined,
+	assetId: string | undefined,
+) {
+	const { client, enabled } = useWorkData();
+	return useQuery({
+		queryKey: ["browser-work", "asset", opaqueId ?? "", assetId ?? ""],
+		enabled: enabled && opaqueId !== undefined && assetId !== undefined,
+		staleTime: Number.POSITIVE_INFINITY,
+		retry: false,
+		queryFn: () => client.browserWorkAsset(opaqueId ?? "", assetId ?? ""),
+	});
+}
+
 export function useWorkConnections(): ConnectionMap {
 	return useWorkData().connections;
 }
@@ -242,6 +256,17 @@ export function useWorkCommand() {
 			if ("opaque_id" in command)
 				void queryClient.invalidateQueries({
 					queryKey: workDetailKey(command.opaque_id),
+				});
+			if (command.kind === "stream.create")
+				void queryClient.invalidateQueries({
+					queryKey: ["browser-work", "detail"],
+				});
+			if (
+				command.kind === "ticket.create" &&
+				command.parent_opaque_id !== undefined
+			)
+				void queryClient.invalidateQueries({
+					queryKey: workDetailKey(command.parent_opaque_id),
 				});
 		},
 	});

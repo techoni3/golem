@@ -1311,6 +1311,26 @@ async function runWorkManagementDashboard() {
 			bearerToken: controlToken,
 			caller: { projectId, sessionId },
 		});
+		const seededRole = await bearer.request({
+			method: "POST",
+			path: "/api/v1/management/roles",
+			body: {
+				name: "Browser project operator",
+				definition: { purpose: "GOL-55 browser journey" },
+			},
+		});
+		assert.equal(seededRole.status, 201);
+		const seededAsset = await bearer.request({
+			method: "POST",
+			path: "/api/v1/management/assets",
+			body: {
+				ticket_id: seedData.ticket.id,
+				relative_path: "gol55-preview.png",
+				mime_type: "image/png",
+				content_base64: Buffer.from([137, 80, 78, 71]).toString("base64"),
+			},
+		});
+		assert.equal(seededAsset.status, 201);
 
 		chrome = await acquireChrome();
 		const context = await chrome.browser.newContext();
@@ -1348,6 +1368,11 @@ async function runWorkManagementDashboard() {
 		await composer.getByLabel("Ticket title").fill(
 			"GOL-55 browser-created work item",
 		);
+		await composer.getByLabel("Labels").fill("browser, parity");
+		await composer.getByLabel("Wave").fill("11");
+		await composer
+			.getByLabel("Body")
+			.fill("Browser-created context and acceptance evidence.");
 		await composer.getByRole("button", { name: "Create ticket" }).click();
 		await page.waitForURL(/\/tickets\/[A-Za-z][A-Za-z0-9_-]*$/u);
 		const createdId = new URL(page.url()).pathname.split("/").at(-1);
@@ -1425,6 +1450,74 @@ async function runWorkManagementDashboard() {
 			.waitFor();
 		await dialog.getByText("building", { exact: true }).waitFor();
 
+		const commentForm = dialog
+			.locator("form")
+			.filter({ hasText: "Add comment or reply" });
+		await commentForm
+			.getByRole("textbox", { name: "Comment", exact: true })
+			.fill("GOL-55 browser comment");
+		await commentForm.getByRole("button", { name: "Add comment" }).click();
+		await commentForm
+			.locator("[role='alert']")
+			.filter({ hasText: "Command completed" })
+			.waitFor();
+		await commentForm.getByLabel("Thread").click();
+		await page
+			.getByRole("option")
+			.filter({ hasText: "Reply to" })
+			.first()
+			.click();
+		await commentForm
+			.getByRole("textbox", { name: "Comment", exact: true })
+			.fill("GOL-55 browser reply");
+		await commentForm.getByRole("button", { name: "Add reply" }).click();
+		await commentForm
+			.locator("[role='alert']")
+			.filter({ hasText: "Command completed" })
+			.waitFor();
+
+		const linkForm = dialog.locator("form").filter({ hasText: "Link ticket" });
+		await linkForm.getByLabel("Target ticket ID").fill(seedData.ticket.id);
+		await linkForm.getByRole("button", { name: "Add link" }).click();
+		await linkForm
+			.locator("[role='alert']")
+			.filter({ hasText: "Command completed" })
+			.waitFor();
+		await dialog
+			.getByRole("link", { name: seedData.ticket.id, exact: true })
+			.waitFor();
+
+		const streamForm = dialog
+			.locator("form")
+			.filter({ hasText: "Create stream" });
+		await streamForm.getByLabel("Name").fill("GOL-55 browser stream");
+		await streamForm.getByRole("button", { name: "Create stream" }).click();
+		await streamForm
+			.locator("[role='alert']")
+			.filter({ hasText: "Command completed" })
+			.waitFor();
+		await dialog.getByText("GOL-55 browser stream", { exact: true }).waitFor();
+
+		const childComposer = dialog
+			.locator("details")
+			.filter({ hasText: "Create a child ticket" });
+		await childComposer.locator("summary").click();
+		await childComposer
+			.getByLabel("Ticket title")
+			.fill("GOL-55 browser child");
+		await childComposer.getByRole("button", { name: "Create ticket" }).click();
+		await page.waitForURL(
+			(url) =>
+				url.pathname.startsWith("/tickets/") &&
+				url.pathname.split("/").at(-1) !== createdId,
+		);
+		const childId = new URL(page.url()).pathname.split("/").at(-1);
+		assert(childId && childId !== createdId);
+		await page
+			.getByRole("dialog")
+			.getByText(`Parent: ${createdId}`, { exact: false })
+			.waitFor();
+
 		await page.goto(`${service.origin}/tickets/${seedData.ticket.id}`, {
 			waitUntil: "domcontentloaded",
 		});
@@ -1432,6 +1525,11 @@ async function runWorkManagementDashboard() {
 		await dispatchDialog
 			.getByRole("heading", { name: `Ticket ${seedData.ticket.id}` })
 			.waitFor();
+		const assetSection = dispatchDialog
+			.locator("section")
+			.filter({ hasText: "Safe assets" });
+		await assetSection.getByRole("button", { name: "Read asset" }).click();
+		await assetSection.getByRole("img").waitFor();
 		const dispatchSection = dispatchDialog
 			.locator("section")
 			.filter({ hasText: "Dispatch" });
@@ -1511,11 +1609,37 @@ async function runWorkManagementDashboard() {
 		await page
 			.getByRole("heading", { name: "Ideas", exact: true })
 			.waitFor();
-		assert.equal(
-			await page.getByText("Read-only unavailable", { exact: true }).count(),
-			2,
-			"unsupported roles and ideas remain explicit instead of falling back",
-		);
+		const roleRow = page
+			.locator("li")
+			.filter({ hasText: "Browser project operator" });
+		await roleRow.waitFor();
+		await roleRow
+			.getByRole("button", { name: "Assign project role" })
+			.click();
+		await page
+			.locator("[role='alert']")
+			.filter({ hasText: "Command completed" })
+			.last()
+			.waitFor();
+
+		const ideaForm = page.locator("form").filter({ hasText: "Capture an idea" });
+		await ideaForm.getByLabel("Idea").fill("GOL-55 browser promoted idea");
+		await ideaForm.getByRole("button", { name: "Add idea" }).click();
+		const promotedIdeaRow = page
+			.locator("li")
+			.filter({ hasText: "GOL-55 browser promoted idea" });
+		await promotedIdeaRow.waitFor();
+		await promotedIdeaRow.getByRole("button", { name: "Promote" }).click();
+		await promotedIdeaRow.getByText("promoted", { exact: true }).waitFor();
+
+		await ideaForm.getByLabel("Idea").fill("GOL-55 browser popped idea");
+		await ideaForm.getByRole("button", { name: "Add idea" }).click();
+		const poppedIdeaRow = page
+			.locator("li")
+			.filter({ hasText: "GOL-55 browser popped idea" });
+		await poppedIdeaRow.waitFor();
+		await poppedIdeaRow.getByRole("button", { name: "Pop" }).click();
+		await poppedIdeaRow.getByText("popped", { exact: true }).waitFor();
 
 		await page.getByRole("link", { name: "Specs", exact: true }).click();
 		await page.getByTestId("specs-ui").waitFor();
@@ -1626,7 +1750,7 @@ async function runWorkManagementDashboard() {
 		false,
 		"success retains no browser artifact",
 	);
-	return "compiled dashboard plus the GOL-75 control-plane fixture prove typed tracker create/update/conflict retention/transition/canonical dispatch, pending-to-settled communication, gate persistence, bounded spec relationships, explicit role/idea capability gaps, same-origin authority, and owned-resource cleanup";
+	return "compiled dashboard plus the GOL-75 control-plane fixture prove typed ticket body/labels/wave, comments/replies/links/children/streams, conflict retention, legal transition, scoped asset read, project-role assignment, gate/idea actions, canonical dispatch settlement, bounded spec relationships, same-origin authority, and owned-resource cleanup";
 }
 
 export async function exerciseWorkControlPlane() {

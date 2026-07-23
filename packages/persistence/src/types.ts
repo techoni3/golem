@@ -1315,6 +1315,10 @@ export interface TrackerManagementStorageCapability {
 		readonly projectId: string;
 		readonly ticketId: string;
 	}): TrackerManagementAsset | undefined;
+	listAssets(input: {
+		readonly projectId: string;
+		readonly ticketId: string;
+	}): readonly TrackerManagementAsset[];
 	createOperation(
 		input: Omit<
 			TrackerManagementOperation,
