@@ -166,14 +166,14 @@ function envelopePayload(home, ticketId) {
 	}
 }
 
-function envelopeRecipient(home, ticketId) {
+function envelopeRecipient(home, ticketId, idempotencyKey) {
 	const database = new Database(home.trackerDb, { readonly: true, fileMustExist: true });
 	try {
 		const row = database
 			.prepare(
-				"SELECT recipient_id, payload_json FROM tracker_envelopes WHERE kind = 'ticket_dispatch' ORDER BY created_at DESC, id DESC",
+				"SELECT recipient_id, payload_json FROM tracker_envelopes WHERE kind = 'ticket_dispatch' AND idempotency_key = ? ORDER BY created_at DESC, id DESC",
 			)
-			.all()
+			.all(idempotencyKey)
 			.find((candidate) => JSON.parse(candidate.payload_json).ticket_id === ticketId);
 		return row?.recipient_id;
 	} finally {
@@ -459,7 +459,11 @@ export async function exerciseBrowserTrackerDeliveryParity() {
 		);
 		assert.equal(runtimeReferenceDispatch.status, 200);
 		assert.equal(
-			envelopeRecipient(home, runtimeReferenceTicket.id),
+			envelopeRecipient(
+				home,
+				runtimeReferenceTicket.id,
+				"gol82:runtime-reference",
+			),
 			sessionId,
 			"runtimeReference cannot override the current assignee",
 		);
@@ -501,7 +505,11 @@ export async function exerciseBrowserTrackerDeliveryParity() {
 		);
 		assert.equal(currentAssignment.status, 201);
 		assert.equal(
-			envelopeRecipient(home, reassignedTicket.id),
+			envelopeRecipient(
+				home,
+				reassignedTicket.id,
+				"gol82:current-assignee",
+			),
 			reassignedSessionId,
 			"the current assignee supersedes historical dispatchedTo for the next delivery",
 		);
