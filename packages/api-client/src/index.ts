@@ -1,5 +1,11 @@
 import {
 	BrowserOpaqueIdSchema,
+	type BrowserSettingsCommandRequest,
+	BrowserSettingsCommandRequestSchema,
+	type BrowserSettingsCommandResponse,
+	BrowserSettingsCommandResponseSchema,
+	type BrowserSettingsSnapshot,
+	BrowserSettingsSnapshotSchema,
 	BrowserWorkAssetResponseSchema,
 	BrowserWorkCommandRequestSchema,
 	BrowserWorkCommandResponseSchema,
@@ -188,6 +194,11 @@ export type BrowserWorkAssetResponse = ReturnType<
 export type BrowserWorkCommandResponse = ReturnType<
 	typeof BrowserWorkCommandResponseSchema.parse
 >;
+export type {
+	BrowserSettingsCommandRequest,
+	BrowserSettingsCommandResponse,
+	BrowserSettingsSnapshot,
+};
 
 export class ControlPlaneClientError extends Error {
 	readonly status: number;
@@ -330,6 +341,28 @@ export function createBrowserControlPlaneClient(
 			});
 			return BrowserWorkCommandResponseSchema.parse(
 				requireData(result.data, result.response, "browser work command"),
+			);
+		},
+		async browserSettings() {
+			const result = await client.GET("/api/v1/browser/settings", {
+				headers: browserHeaders(),
+			});
+			return BrowserSettingsSnapshotSchema.parse(
+				requireData(result.data, result.response, "browser settings fetch"),
+			);
+		},
+		async browserSettingsCommand(command: BrowserSettingsCommandRequest) {
+			if (!csrfToken)
+				throw new Error(
+					"control-plane browser session has not been bootstrapped",
+				);
+			BrowserSettingsCommandRequestSchema.parse(command);
+			const result = await client.POST("/api/v1/browser/settings/commands", {
+				body: command,
+				headers: browserHeaders(),
+			});
+			return BrowserSettingsCommandResponseSchema.parse(
+				requireData(result.data, result.response, "browser settings command"),
 			);
 		},
 		async runtimeProjection(

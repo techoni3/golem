@@ -4,16 +4,16 @@ import path from "node:path";
 
 import websocket from "@fastify/websocket";
 import {
-	BrowserWorkStreamSchema,
 	type BrowserWorkStream,
+	BrowserWorkStreamSchema,
 } from "@golem/contracts";
 import type { CommittedPublicationStorage } from "@golem/persistence";
 import type {
 	CommandGateway,
+	TicketDispatchService,
 	TrackerCoreServices,
 	TrackerManagementServices,
 	TrackerServices,
-	TicketDispatchService,
 } from "@golem/tracker";
 import Fastify from "fastify";
 import { registerApiV1Routes } from "./api-v1.js";
@@ -22,6 +22,10 @@ import {
 	createFailClosedBrowserPrincipalResolver,
 	isExpectedHost,
 } from "./auth.js";
+import { registerBrowserSettingsRoutes } from "./browser-settings-routes.js";
+import type { BrowserSettingsServices } from "./browser-settings-services.js";
+import { registerBrowserWorkRoutes } from "./browser-work-routes.js";
+import type { BrowserWorkServices } from "./browser-work-services.js";
 import { CommittedPublicationDispatcher } from "./committed-publication.js";
 import {
 	createLegacyCompatibilitySource,
@@ -31,8 +35,6 @@ import {
 } from "./compatibility.js";
 import { fail, registerErrorEnvelope } from "./errors.js";
 import { registerManagementRoutes } from "./management-routes.js";
-import { registerBrowserWorkRoutes } from "./browser-work-routes.js";
-import type { BrowserWorkServices } from "./browser-work-services.js";
 import type {
 	BrowserWorkReplayPort,
 	ControlPlaneProjectionPort,
@@ -88,6 +90,8 @@ export interface ControlPlaneLifecycleOptions {
 	readonly committedPublications?: CommittedPublicationStorage;
 	/** Read-only GOL-81 adapter over composed tracker/management services. */
 	readonly browserWork?: BrowserWorkServices;
+	/** Bounded GOL-56 settings composition over existing package authorities. */
+	readonly browserSettings?: BrowserSettingsServices;
 }
 
 export interface StartedControlPlane {
@@ -196,6 +200,12 @@ export async function startControlPlane(
 				gateway: options.commandGateway,
 				ticketDispatch: options.ticketDispatch,
 			});
+		if (options.browserSettings)
+			registerBrowserSettingsRoutes({
+				app,
+				principal,
+				settings: options.browserSettings,
+			});
 		if (options.trackerCore) {
 			registerTrackerCoreCompatibilityRoutes({
 				app,
@@ -210,7 +220,9 @@ export async function startControlPlane(
 				principal,
 				core: options.trackerCore,
 				services: options.trackerServices,
-				...(options.ticketDispatch ? { ticketDispatch: options.ticketDispatch } : {}),
+				...(options.ticketDispatch
+					? { ticketDispatch: options.ticketDispatch }
+					: {}),
 				...(options.commandGateway ? { gateway: options.commandGateway } : {}),
 			});
 		if (options.management)

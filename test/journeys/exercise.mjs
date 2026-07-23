@@ -53,6 +53,7 @@ import {
 	exerciseBrowserControlAuthorityDispatch,
 	exerciseBrowserControlRestartResync,
 	exerciseRolesGatesIdeasUi,
+	exerciseSettingsProviderPresetParity,
 	exerciseTrackerDispatchUi,
 } from "../browser/work-control-plane.mjs";
 import { exercisePiNextTurnCrashReplay } from "./pi-next-turn-crash-replay.mjs";
@@ -79,6 +80,10 @@ const projectConcurrencyJourney = path.join(repositoryRoot, "test/projects/proje
 const controlPlaneProgram = path.join(repositoryRoot, "apps/control-plane/dist/main.js");
 const trackerCoreJourney = path.join(repositoryRoot, "test/tracker/tracker-core.test.mjs");
 const managementJourney = path.join(repositoryRoot, "test/management/management-services.test.mjs");
+const settingsServicesJourney = path.join(
+	repositoryRoot,
+	"test/settings/settings-services.test.mjs",
+);
 const codexDirectJourney = path.join(repositoryRoot, "test/codex-direct-adapter.test.mjs");
 const codexManagedJourney = path.join(repositoryRoot, "test/codex-managed-adapter.test.mjs");
 const runtimeProjectionJourney = path.join(repositoryRoot, "test/runtime/runtime-projections.test.mjs");
@@ -504,6 +509,29 @@ export async function exerciseDashboardDisconnectResync() {
 	// The browser journey proves the operator-visible resync. Keep this second
 	// named gate focused on the lower transport contract that makes it safe.
 	return exerciseRuntimeProjectionWsRestartResync();
+}
+
+export async function exerciseMigrationSettingsDryRunRollback() {
+	const result = spawnSync(
+		process.execPath,
+		[
+			"--test",
+			"--test-concurrency=1",
+			"--test-name-pattern",
+			"GOL-56 migration settings",
+			settingsServicesJourney,
+		],
+		{
+			cwd: repositoryRoot,
+			encoding: "utf8",
+			env: process.env,
+		},
+	);
+	if (result.status !== 0)
+		throw new Error(
+			`migration settings journey exited ${result.status}; stdout=${result.stdout}; stderr=${result.stderr}`,
+		);
+	return "typed settings dry-run returns one exact hash, applies the strong-only migration once, survives service restart by replaying its durable outcome, exposes applied backup truth, and rolls canonical state back";
 }
 
 export async function exerciseDashboardDownInboxReplay() {
@@ -1095,6 +1123,8 @@ export const exercises = Object.freeze({
 	"browser-control-restart-resync": exerciseBrowserControlRestartResync,
 	"tracker-dispatch-ui": exerciseTrackerDispatchUi,
 	"roles-gates-ideas-ui": exerciseRolesGatesIdeasUi,
+	"settings-provider-preset-parity": exerciseSettingsProviderPresetParity,
+	"migration-settings-dry-run-rollback": exerciseMigrationSettingsDryRunRollback,
 	"browser-work-opaque-projection": exerciseBrowserWorkOpaqueProjection,
 	"browser-work-command-authority": exerciseBrowserWorkCommandAuthority,
 	"delivery-api-fence-recheck": exerciseDeliveryApiFenceRecheck,
