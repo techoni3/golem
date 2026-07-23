@@ -4,6 +4,7 @@ import { WebSocketFrameV1Schema } from "@golem/contracts";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 
 import {
+	type ActorContext,
 	type BrowserPrincipalResolver,
 	hasRequestAuthorityOverride,
 	isExpectedHost,
@@ -13,6 +14,7 @@ import type {
 	ControlPlaneReplayListener,
 	ControlPlaneReplayPort,
 	ControlPlaneReplayResult,
+	ControlPlaneReplayScope,
 } from "./ports.js";
 import { type ControlPlaneStream, ProjectionParamsSchema } from "./schemas.js";
 
@@ -24,8 +26,8 @@ export interface ControlPlaneSocket {
 
 export class BoundedReplayWindow implements ControlPlaneReplayPort {
 	readonly #capacity: number;
-	readonly #entries = new Map<ControlPlaneStream, ControlPlaneReplayEntry[]>();
-	readonly #nextSequence = new Map<ControlPlaneStream, number>();
+	readonly #entries = new Map<string, ControlPlaneReplayEntry[]>();
+	readonly #nextSequence = new Map<string, number>();
 	readonly #listeners = new Set<ControlPlaneReplayListener>();
 
 	constructor(capacity = 32) {
@@ -36,8 +38,8 @@ export class BoundedReplayWindow implements ControlPlaneReplayPort {
 		this.#capacity = capacity;
 	}
 
-	snapshot(stream: ControlPlaneStream) {
-		const entries = this.#entries.get(stream) ?? [];
+	snapshot(stream: ControlPlaneStream, scope: ControlPlaneReplayScope = {}) {
+		const entries = this.#entries.get(scopeKey(stream, scope)) ?? [];
 		const latest = entries.at(-1);
 		return Object.freeze({
 			sequence: latest?.sequence ?? 0,
@@ -45,10 +47,14 @@ export class BoundedReplayWindow implements ControlPlaneReplayPort {
 		});
 	}
 
-	replay(stream: ControlPlaneStream, cursor: number): ControlPlaneReplayResult {
+	replay(
+		stream: ControlPlaneStream,
+		cursor: number,
+		scope: ControlPlaneReplayScope = {},
+	): ControlPlaneReplayResult {
 		if (!Number.isInteger(cursor) || cursor < 0)
 			return Object.freeze({ kind: "gap", reason: "cursor_gap" });
-		const entries = this.#entries.get(stream) ?? [];
+		const entries = this.#entries.get(scopeKey(stream, scope)) ?? [];
 		const oldest = entries[0]?.sequence;
 		const latest = entries.at(-1)?.sequence ?? 0;
 		if (cursor > latest)
@@ -65,27 +71,29 @@ export class BoundedReplayWindow implements ControlPlaneReplayPort {
 		stream: ControlPlaneStream,
 		resourceRevision: number,
 		delta: Record<string, unknown>,
+		scope: ControlPlaneReplayScope = {},
 	): ControlPlaneReplayEntry {
 		if (!Number.isInteger(resourceRevision) || resourceRevision < 0)
 			throw new Error(
 				"replay resource revision must be a non-negative integer",
 			);
-		const entries = this.#entries.get(stream) ?? [];
+		const key = scopeKey(stream, scope);
+		const entries = this.#entries.get(key) ?? [];
 		const prior = entries.at(-1);
 		if (prior && resourceRevision < prior.resourceRevision)
 			throw new Error(
 				"replay resource revision must not regress below the canonical prior revision",
 			);
 		const entry = Object.freeze({
-			sequence: this.#nextSequence.get(stream) ?? 1,
+			sequence: this.#nextSequence.get(key) ?? 1,
 			resourceRevision,
 			delta: Object.freeze({ ...delta }),
 		});
-		this.#nextSequence.set(stream, entry.sequence + 1);
+		this.#nextSequence.set(key, entry.sequence + 1);
 		entries.push(entry);
 		while (entries.length > this.#capacity) entries.shift();
-		this.#entries.set(stream, entries);
-		for (const listener of this.#listeners) listener(stream, entry);
+		this.#entries.set(key, entries);
+		for (const listener of this.#listeners) listener(stream, entry, scope);
 		return entry;
 	}
 
@@ -93,6 +101,24 @@ export class BoundedReplayWindow implements ControlPlaneReplayPort {
 		this.#listeners.add(listener);
 		return () => this.#listeners.delete(listener);
 	}
+}
+
+function scopeKey(
+	stream: ControlPlaneStream,
+	scope: ControlPlaneReplayScope,
+): string {
+	return `${stream}\u0000${scope.projectId ?? "global"}\u0000${scope.policyVersion ?? 1}`;
+}
+
+function scopeFor(
+	stream: ControlPlaneStream,
+	context: ActorContext,
+): ControlPlaneReplayScope {
+	return stream === "tracker.tree" ||
+		stream === "tracker.board" ||
+		stream === "communication.operations"
+		? { projectId: context.defaultProjectId, policyVersion: 1 }
+		: {};
 }
 
 function originFor(request: FastifyRequest): string {
@@ -122,14 +148,35 @@ export function registerWsReplay(options: {
 	readonly instanceId: string;
 	readonly principal: BrowserPrincipalResolver;
 	readonly replay: ControlPlaneReplayPort;
-	readonly read: (stream: ControlPlaneStream) => Record<string, unknown>;
-	readonly revision: (stream: ControlPlaneStream) => number;
+	readonly read: (
+		stream: ControlPlaneStream,
+		projectId?: string,
+	) => Record<string, unknown>;
+	readonly revision: (stream: ControlPlaneStream, projectId?: string) => number;
 	readonly sockets: Set<ControlPlaneSocket>;
 }): () => void {
-	const streams = new Map<ControlPlaneSocket, ControlPlaneStream>();
-	const unsubscribe = options.replay.subscribe((stream, entry) => {
+	const streams = new Map<
+		ControlPlaneSocket,
+		{
+			readonly stream: ControlPlaneStream;
+			readonly context: ActorContext;
+			readonly scope: ControlPlaneReplayScope;
+		}
+	>();
+	const unsubscribe = options.replay.subscribe((stream, entry, scope) => {
 		for (const socket of options.sockets) {
-			if (streams.get(socket) !== stream) continue;
+			const subscription = streams.get(socket);
+			if (!subscription || subscription.stream !== stream) continue;
+			if (scopeKey(stream, subscription.scope) !== scopeKey(stream, scope))
+				continue;
+			if (
+				scope.projectId &&
+				!options.principal.policy.allowsProject(
+					subscription.context,
+					scope.projectId,
+				)
+			)
+				continue;
 			try {
 				socket.send(
 					JSON.stringify(
@@ -179,43 +226,78 @@ export function registerWsReplay(options: {
 				return;
 			}
 			const stream = parsed.data.stream;
+			const scope = scopeFor(stream, context);
 			const suppliedInstance = url.searchParams.get("instance_id");
 			const cursorValue = url.searchParams.get("cursor");
+			const suppliedPolicy = url.searchParams.get("policy_version");
 			const snapshotUrl = `${originFor(request)}/api/v1/projections/${stream}`;
 			let messages: readonly ReturnType<typeof frame>[];
 			if (!suppliedInstance || cursorValue === null) {
-				const snapshot = options.replay.snapshot(stream);
+				const snapshot = options.replay.snapshot(stream, scope);
 				messages = [
 					frame(
 						options.instanceId,
 						stream,
 						snapshot.sequence,
-						options.revision(stream),
+						options.revision(stream, context.defaultProjectId),
 						{
 							kind: "snapshot",
 							cursor: String(snapshot.sequence),
-							payload: options.read(stream),
+							payload: options.read(stream, context.defaultProjectId),
 						},
 					),
 				];
 			} else if (suppliedInstance !== options.instanceId) {
 				messages = [
-					frame(options.instanceId, stream, 0, options.revision(stream), {
-						kind: "resync_required",
-						reason: "instance_changed",
-						snapshot_url: snapshotUrl,
-					}),
+					frame(
+						options.instanceId,
+						stream,
+						0,
+						options.revision(stream, context.defaultProjectId),
+						{
+							kind: "resync_required",
+							reason: "instance_changed",
+							snapshot_url: snapshotUrl,
+						},
+					),
+				];
+			} else if (
+				suppliedPolicy !== null &&
+				suppliedPolicy !== String(scope.policyVersion ?? 1)
+			) {
+				messages = [
+					frame(
+						options.instanceId,
+						stream,
+						0,
+						options.revision(stream, context.defaultProjectId),
+						{
+							kind: "resync_required",
+							reason: "policy_changed",
+							snapshot_url: snapshotUrl,
+						},
+					),
 				];
 			} else {
-				const result = options.replay.replay(stream, Number(cursorValue));
+				const result = options.replay.replay(
+					stream,
+					Number(cursorValue),
+					scope,
+				);
 				messages =
 					result.kind === "gap"
 						? [
-								frame(options.instanceId, stream, 0, options.revision(stream), {
-									kind: "resync_required",
-									reason: result.reason,
-									snapshot_url: snapshotUrl,
-								}),
+								frame(
+									options.instanceId,
+									stream,
+									0,
+									options.revision(stream, context.defaultProjectId),
+									{
+										kind: "resync_required",
+										reason: result.reason,
+										snapshot_url: snapshotUrl,
+									},
+								),
 							]
 						: result.entries.map((entry) =>
 								frame(
@@ -232,7 +314,7 @@ export function registerWsReplay(options: {
 							);
 			}
 			options.sockets.add(socket);
-			streams.set(socket, stream);
+			streams.set(socket, { stream, context, scope });
 			socket.once("close", () => {
 				options.sockets.delete(socket);
 				streams.delete(socket);

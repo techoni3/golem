@@ -78,7 +78,16 @@ that backs the `CommandGateway` (one terminal typed outcome per
 `command.idempotency_mismatch` on reuse with a differing payload). Typed core
 services use the legacy `tickets`, `comments`, `links`, `streams`, and `events`
 tables directly; no import or second work-item store exists. Fresh tracker
-files receive all tracker migrations automatically. Resource CAS and outbox
+files receive all tracker migrations automatically. `tracker/008-committed-publication-outbox`
+adds trigger-owned project/resource revisions and a leased committed-publication
+outbox for the allowlisted tracker, management, communication, asset, and
+delivery lifecycle rows. The trigger executes in the same SQLite transaction
+as the canonical domain write and GOL-79 receipt/outcome: stale, rejected, and
+rolled-back writes leave no row. Its records contain only opaque category,
+resource identity/revision, project revision, policy version, and timestamps;
+they never carry command/audit/prompt/cookie/CSRF/bearer/fence/path payloads.
+Claims order by project then canonical project revision, so equal timestamps
+cannot make a scoped consumer regress its HTTP revision cursor. Resource CAS and outbox
 evidence derive from canonical `events.id`. The private owner exposes typed
 delivery and tracker-core storage capabilities to control-plane composition,
 never a raw tracker connection. Persistence receives an injected clock. Outbox consumers claim a bounded batch with a lease, replay only expired

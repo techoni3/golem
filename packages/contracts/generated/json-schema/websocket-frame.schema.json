@@ -105,6 +105,7 @@
                 "instance_changed",
                 "cursor_gap",
                 "cursor_compacted",
+                "policy_changed",
                 "protocol_mismatch"
               ],
               "type": "string"

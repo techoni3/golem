@@ -135,18 +135,20 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 		clock,
 	});
 	const controlProjection = {
-		read: (stream: string) =>
+		read: (stream: string, _projectId?: string) =>
 			stream === "runtime.live" ||
 			stream === "runtime.history" ||
 			stream === "runtime.diagnostics"
 				? runtimeProjection.read(stream)
 				: {},
-		revision: (stream: string) =>
+		revision: (stream: string, projectId?: string) =>
 			stream === "runtime.live" ||
 			stream === "runtime.history" ||
 			stream === "runtime.diagnostics"
 				? runtimeProjection.revision(stream)
-				: 0,
+				: projectId
+					? owner.committedPublicationStorage().projectRevision(projectId)
+					: 0,
 	};
 	const outbox = new RuntimeOutboxDrainer({
 		writer: owner,
@@ -195,6 +197,7 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 			trackerCore,
 			trackerServices,
 			commandGateway,
+			committedPublications: owner.committedPublicationStorage(),
 			principalResolver,
 			...(replayWindowSize ? { replayWindowSize } : {}),
 			...testProjection,

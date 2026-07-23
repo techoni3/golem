@@ -699,6 +699,7 @@ export interface TrackerDeliveryEligibility {
 
 export interface TrackerDeliveryEnvelope {
 	readonly id: string;
+	readonly projectId: string;
 	readonly rootId: string;
 	readonly parentId?: string;
 	readonly idempotencyKey: string;
@@ -733,6 +734,7 @@ export interface ClaimedTrackerDeliveryEnvelope
 
 export interface TrackerBusEvent {
 	readonly sequence: number;
+	readonly projectId: string;
 	readonly id: string;
 	readonly deduplicationKey: string;
 	readonly topic: string;
@@ -1375,6 +1377,53 @@ export interface CommandGatewayStorage {
 }
 
 /**
+ * The committed publication boundary is deliberately narrower than the
+ * delivery bus.  It carries only allowlisted invalidation metadata; projection
+ * readers fetch authoritative state over HTTP after seeing it.
+ */
+export type CommittedPublicationCategory =
+	| "tracker"
+	| "management"
+	| "communication"
+	| "asset"
+	| "delivery";
+
+export interface CommittedPublicationRecord {
+	readonly id: string;
+	readonly projectId: string;
+	readonly category: CommittedPublicationCategory;
+	readonly resourceType: string;
+	readonly resourceId: string;
+	readonly resourceRevision: number;
+	readonly projectRevision: number;
+	readonly schemaVersion: "golem.committed-invalidation/v1";
+	readonly policyVersion: number;
+	readonly createdAt: string;
+}
+
+export interface ClaimedCommittedPublicationRecord
+	extends CommittedPublicationRecord {
+	readonly claimToken: string;
+}
+
+/** Durable, owner-held outbox used by the control-plane replay composer. */
+export interface CommittedPublicationStorage {
+	claim(input: {
+		readonly workerId: string;
+		readonly now: string;
+		readonly claimUntil: string;
+		readonly limit: number;
+	}): readonly ClaimedCommittedPublicationRecord[];
+	recover(now: string): number;
+	ack(input: {
+		readonly id: string;
+		readonly claimToken: string;
+		readonly publishedAt: string;
+	}): boolean;
+	projectRevision(projectId: string): number;
+}
+
+/**
  * The only writable persistence capability exported from this package. Raw
  * better-sqlite3/Kysely handles and the owner constructor remain module-private.
  */
@@ -1418,6 +1467,8 @@ export interface PersistenceWriteCapability {
 	managementStorage(): TrackerManagementStorageCapability;
 	/** Bundled receipt store + transaction boundary for the command gateway. */
 	commandGatewayStorage(): CommandGatewayStorage;
+	/** Committed, opaque invalidation rows; only the persistence owner may read them. */
+	committedPublicationStorage(): CommittedPublicationStorage;
 	/** Durable principal bindings/scopes for the control-plane auth composition. */
 	browserPrincipalStorage(): BrowserPrincipalStorage;
 	status(): PersistenceStatus;

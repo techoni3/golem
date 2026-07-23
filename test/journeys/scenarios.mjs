@@ -65,7 +65,7 @@ export const scenarios = [
 		id: "projection-ws-restart-resync",
 		journey: "J6",
 		tier: "integration",
-		regression: "authenticated runtime projection WebSocket snapshots, deltas, cursors, or restart resync diverge from the HTTP read model",
+		regression: "authenticated scoped projection WebSocket snapshots, opaque invalidations, cursors, compaction/policy/restart resync, or project revisions diverge from the HTTP read model",
 	}),
 	registerScenario({
 		id: "dashboard-runtime-lifecycle",
@@ -235,6 +235,12 @@ export const scenarios = [
 		journey: "J4",
 		tier: "integration",
 		regression: "a restarted control plane replays a durable command receipt with the byte-equivalent original outcome, a stale CAS leaves tracker/audit/outbox unchanged, and a reused idempotency key with a differing payload returns 409 command.idempotency_mismatch",
+	}),
+	registerScenario({
+		id: "committed-outbox-all-write-paths",
+		journey: "J6",
+		tier: "integration",
+		regression: "a committed tracker, management, asset, delivery, bearer, MCP, or core write can omit an opaque scoped invalidation, or a stale/rejected/rolled-back write can emit one",
 	}),
 	registerScenario({
 		id: "browser-principal-scope-authority",

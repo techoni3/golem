@@ -60,6 +60,8 @@ export interface TrackerClock {
 
 export interface CreateEnvelopeInput {
 	readonly id: string;
+	/** Resolver/API composed scope. Direct legacy callers become system-scoped. */
+	readonly projectId?: string;
 	readonly idempotencyKey: string;
 	readonly senderId: string;
 	readonly recipientId: string;
@@ -72,6 +74,7 @@ export interface CreateEnvelopeInput {
 
 export interface DeliveryEnvelope {
 	readonly id: string;
+	readonly projectId: string;
 	readonly rootId: string;
 	readonly parentId?: string;
 	readonly idempotencyKey: string;
@@ -124,6 +127,7 @@ export interface EnvelopeClaim {
 
 export interface BusEvent {
 	readonly sequence: number;
+	readonly projectId: string;
 	readonly id: string;
 	readonly deduplicationKey: string;
 	readonly topic: string;

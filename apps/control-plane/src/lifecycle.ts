@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import websocket from "@fastify/websocket";
+import type { CommittedPublicationStorage } from "@golem/persistence";
 import type {
 	CommandGateway,
 	TrackerCoreServices,
@@ -16,6 +17,7 @@ import {
 	createFailClosedBrowserPrincipalResolver,
 	isExpectedHost,
 } from "./auth.js";
+import { CommittedPublicationDispatcher } from "./committed-publication.js";
 import {
 	createLegacyCompatibilitySource,
 	type LegacyCompatibilityPort,
@@ -71,6 +73,8 @@ export interface ControlPlaneLifecycleOptions {
 	 * fixtures that pre-date the gateway.
 	 */
 	readonly commandGateway?: CommandGateway;
+	/** Persistence-owned committed invalidations; absent only in legacy fixtures. */
+	readonly committedPublications?: CommittedPublicationStorage;
 }
 
 export interface StartedControlPlane {
@@ -125,6 +129,7 @@ export async function startControlPlane(
 	let closed = false;
 	let closeTypedReplay: () => void = () => {};
 	let closeLegacyWebSocket: () => void = () => {};
+	let publicationTimer: ReturnType<typeof setInterval> | undefined;
 
 	try {
 		await app.register(websocket);
@@ -165,9 +170,7 @@ export async function startControlPlane(
 				app,
 				tracker: options.trackerCore.compatibility,
 				principal,
-				...(options.commandGateway
-					? { gateway: options.commandGateway }
-					: {}),
+				...(options.commandGateway ? { gateway: options.commandGateway } : {}),
 			});
 		}
 		if (options.trackerCore && options.trackerServices)
@@ -176,28 +179,37 @@ export async function startControlPlane(
 				principal,
 				core: options.trackerCore,
 				services: options.trackerServices,
-				...(options.commandGateway
-					? { gateway: options.commandGateway }
-					: {}),
+				...(options.commandGateway ? { gateway: options.commandGateway } : {}),
 			});
 		if (options.management)
 			registerManagementRoutes({
 				app,
 				principal,
 				management: options.management,
-				...(options.commandGateway
-					? { gateway: options.commandGateway }
-					: {}),
+				...(options.commandGateway ? { gateway: options.commandGateway } : {}),
 			});
 		closeTypedReplay = registerWsReplay({
 			app,
 			instanceId,
 			principal,
 			replay,
-			read: (stream: ControlPlaneStream) => projection.read(stream),
-			revision: (stream: ControlPlaneStream) => projection.revision(stream),
+			read: (stream: ControlPlaneStream, projectId?: string) =>
+				projection.read(stream, projectId),
+			revision: (stream: ControlPlaneStream, projectId?: string) =>
+				projection.revision(stream, projectId),
 			sockets,
 		});
+		if (options.committedPublications) {
+			const dispatcher = new CommittedPublicationDispatcher({
+				storage: options.committedPublications,
+				replay,
+				workerId: `control-plane-${process.pid}`,
+				now: () => new Date().toISOString(),
+			});
+			dispatcher.drain();
+			publicationTimer = setInterval(() => dispatcher.drain(), 25);
+			publicationTimer.unref();
+		}
 		closeLegacyWebSocket = registerLegacyWebSocket({
 			app,
 			source: legacyCompatibility,
@@ -218,6 +230,7 @@ export async function startControlPlane(
 			close: async () => {
 				if (closed) return;
 				closed = true;
+				if (publicationTimer) clearInterval(publicationTimer);
 				closeTypedReplay();
 				closeLegacyWebSocket();
 				for (const socket of sockets)
@@ -227,6 +240,7 @@ export async function startControlPlane(
 			},
 		});
 	} catch (error) {
+		if (publicationTimer) clearInterval(publicationTimer);
 		closeTypedReplay();
 		closeLegacyWebSocket();
 		lock.release();
