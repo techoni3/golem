@@ -24,11 +24,21 @@ canonical eligibility port to classify the endpoint, and creates exactly one
 `pull_only`, or `next_turn`. `dispatchedTo` is historical output and a runtime
 reference is validation-only; neither selects delivery. A legacy session hint
 can fill an otherwise absent assignee only after the same fail-closed scoped
-resolution. Missing, ambiguous, terminal, stale, and ineligible requests leave
-no envelope. The enclosing `CommandGateway` receipt/CAS transaction rolls the
-envelope and its committed GOL-80 invalidation back on conflict; acceptance is
-not settlement, which remains the later claim/prepare/ack/reply/fail/recovery
-path.
+resolution. The persistence-owned `deliveryEligibility()` seam retains every
+generation, highest-fence, lease, health/control, consumer/delivery, and
+supported-capability check while exposing those three queue classifications;
+routes never reconstruct a partial readiness rule. Terminal, missing,
+ambiguous, and ineligible requests leave no envelope. A ticket-CAS miss records
+the typed `stale` result in the durable GOL-79 receipt before it can replay; it
+also leaves no envelope. The enclosing receipt/CAS transaction rolls a later
+enqueue failure and its committed GOL-80 invalidation back. Acceptance is not
+settlement, which remains the later claim/prepare/ack/reply/fail/recovery path.
+
+The public bearer adapter is target-free. The dedicated MCP adapter path uses a
+separate MCP credential and may provide only a scoped legacy session alias plus
+`note`, `workspace`, and `when_idle`; the service carries those approved hints
+in the canonical envelope while current endpoint classification remains
+server-owned. Browser callers never receive that compatibility surface.
 
 `tracker/002-durable-delivery-bus` adds namespaced tables alongside an existing
 legacy tracker schema. `tracker/003-live-tracker-core` creates the canonical
