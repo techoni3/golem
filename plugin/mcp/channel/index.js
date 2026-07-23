@@ -32,8 +32,10 @@ import * as tracker from './tracker-client.js';
 import { bridgeEndpointForParent, managedCodexBinding, resolveCallerSessionId, sessionsForParent } from './identity.js';
 import { SESSION_ROLES, pushRoleBriefDirect, setSessionRole } from '../../lib/session-role.js';
 import { releaseEndpointLeases, renewEndpointLease, upsertSessionFact } from '../../lib/session-facts.js';
+import { assertLegacyWriterAllowed } from '../../lib/legacy-writer-guard.js';
 
 const VERSION = '0.1.0';
+assertLegacyWriterAllowed('legacy-channel-server');
 // Port selection (multi-CEO safe by default):
 //   - Default is 0 → kernel-assigned ephemeral port. This lets any number of
 //     channel servers coexist without EADDRINUSE — critical because Claude
@@ -139,9 +141,26 @@ function claudeChannelProviderStatus(env = process.env) {
   return { supported: true, reason: null };
 }
 
-function channelConsumerStatus(harness) {
+function channelConsumerStatus(harness, bridge = null) {
   if (harness === 'opencode') {
-    return { ready: true, reason: null, transport: 'opencode-bridge' };
+    // A bridge port proves only that the OpenCode process is alive. Canonical
+    // prompt delivery additionally needs a generation-scoped endpoint claim
+    // and owner fence; direct OpenCode launch currently exposes pull-only
+    // truth until that owner is composed. Never label that state channel-ready.
+    if (bridge?.delivery_mode === 'fenced_prompt_bridge' && bridge.delivery_ready === true) {
+      return { ready: true, reason: null, transport: 'opencode-fenced-bridge' };
+    }
+    // Rows written before delivery truth was added are existing legacy bridge
+    // contracts; retain their explicit compatibility path. New canonical rows
+    // always carry pull_only/false until an endpoint owner is composed.
+    if ((!bridge?.delivery_mode || bridge.delivery_mode === 'legacy_prompt_bridge') && bridge?.delivery_ready !== false) {
+      return { ready: true, reason: null, transport: 'opencode-legacy-bridge' };
+    }
+    return {
+      ready: false,
+      reason: bridge?.delivery_reason || 'opencode_canonical_pull_only',
+      transport: 'opencode-pull',
+    };
   }
   const provider = claudeChannelProviderStatus();
   if (!provider.supported) {
@@ -154,6 +173,9 @@ function channelConsumerStatus(harness) {
 }
 
 function channelReadinessError(reason) {
+  if (reason === 'endpoint_claim_required' || reason === 'opencode_canonical_pull_only') {
+    return 'OpenCode direct launch is pull-only until a canonical endpoint owner claims the current generation and supplies a delivery fence; refusing an unfenced prompt bridge delivery.';
+  }
   if (String(reason || '').startsWith('unsupported_')) {
     return 'Claude Code channel is ineligible under this provider configuration. Claude Channels require Anthropic authentication through claude.ai or a Console API key; unset Bedrock/Vertex/Foundry or non-default ANTHROPIC_BASE_URL configuration, then restart with --dangerously-load-development-channels plugin:golem@golem-workspace.';
   }
@@ -241,6 +263,7 @@ function readChannelsRegistry() {
 }
 
 function writeChannelsRegistry(reg) {
+  assertLegacyWriterAllowed('channels.json');
   const tmp = `${CHANNELS_REGISTRY}.tmp.${process.pid}`;
   fs.writeFileSync(tmp, JSON.stringify(reg, null, 2));
   fs.renameSync(tmp, CHANNELS_REGISTRY);
@@ -260,7 +283,7 @@ function registerChannel(port, { logMissing = true } = {}) {
   const bridge = bridgeEndpointForParent({ home: tracker.golemHome() });
   const siblings = sessionsForParent({ home: tracker.golemHome() });
   const harness = siblings.length || (bridge && bridge.session_id === SESSION_ID) ? 'opencode' : 'claudecode';
-  const consumer = channelConsumerStatus(harness);
+  const consumer = channelConsumerStatus(harness, bridge);
   if (!SESSION_ID && siblings.length === 0) {
     if (WATCH_OPENCODE_BRIDGES) {
       withChannelLock(() => {
@@ -384,6 +407,9 @@ function unregisterChannel() {
 function resolvedChannel(channel, name) {
   if (!channel) return null;
   if (channel.harness === 'opencode') {
+    if (channel.consumer_ready !== true || channel.delivery_ready === false) {
+      return { ok: false, error: `consult: ${channelReadinessError(channel.consumer_reason)}` };
+    }
     return {
       ok: true,
       session_id: channel.session_id,
@@ -1459,6 +1485,20 @@ async function pushEvent(kind, content, extraMeta = {}, targetSessionId = null) 
   const meta = { kind, ...extraMeta };
   const bridge = bridgeEndpointForParent({ home: tracker.golemHome() });
   if (bridge) {
+    const consumer = channelConsumerStatus('opencode', bridge);
+    if (!consumer.ready) {
+      const error = new Error(channelReadinessError(consumer.reason));
+      error.statusCode = 503;
+      throw error;
+    }
+    // The only ready canonical mode is a future owner-provided fenced bridge.
+    // Its record must carry the delivery authority; manufacturing ids/fences
+    // in this MCP would be an authority bypass.
+    if (bridge.delivery_mode === 'fenced_prompt_bridge') {
+      const error = new Error('OpenCode fenced delivery authority is not present on this channel request.');
+      error.statusCode = 503;
+      throw error;
+    }
     await postToOpencodeBridge(bridge, { session_id: targetSessionId || deriveSessionId(), kind, content, meta });
     return;
   }
@@ -1499,7 +1539,7 @@ const server = http.createServer(async (req, res) => {
         || bridgeEndpointForParent({ home: tracker.golemHome() })
         ? 'opencode'
         : 'claudecode';
-      const consumer = channelConsumerStatus(harness);
+      const consumer = channelConsumerStatus(harness, bridgeEndpointForParent({ home: tracker.golemHome() }));
       return sendJson(res, 200, {
         ok: true,
         version: VERSION,

@@ -16,6 +16,7 @@
 //   help         Show this message.
 
 import { spawn, spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync, renameSync, rmdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -33,6 +34,7 @@ import * as codexAdapter from '../lib/compiler/adapters/codex.js';
 import * as piAdapter from '../lib/compiler/adapters/pi.js';
 import { isHarnessEnabled, loadConfig, saveConfig } from '../lib/golem-config.js';
 import { CodexSupervisor, readCodexSupervisor } from '../lib/codex-supervisor.js';
+import { legacyWriterAuthority } from '../lib/legacy-writer-guard.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -653,38 +655,91 @@ async function cmdRole(args) {
 
 async function cmdDashboard(args) {
   if (args.includes('-h') || args.includes('--help')) {
-    log(`Usage: golem dashboard [--public] [dashboard-server options]
+    const canonical = legacyWriterAuthority().stage === 'C4';
+    log(`Usage: golem dashboard${canonical ? '' : ' [--public] [dashboard-server options]'}
 
-Run the legacy dashboard server in the foreground.
+Run the ${canonical ? 'typed canonical control plane' : 'legacy dashboard server'} in the foreground.
 
 Options:
-  --public   Bind the legacy dashboard to 0.0.0.0 (unsafe on untrusted networks)
+${canonical ? '  Canonical mode is authenticated and loopback-only.' : '  --public   Bind the legacy dashboard to 0.0.0.0 (unsafe on untrusted networks)'}
   -h, --help Show this help without starting a service.`);
     return;
   }
-  const serverEntry = resolve(DASHBOARD_DIR, 'server', 'index.js');
-  if (!existsSync(serverEntry)) {
-    fatal(1, `dashboard server entry missing: ${serverEntry}`);
+  const service = dashboardService(args);
+  if (!existsSync(service.entry)) {
+    fatal(1, `dashboard server entry missing: ${service.entry}`);
   }
   if (!existsSync(resolve(GOLEM_ROOT, 'node_modules'))) {
     fatal(1, 'root deps missing — npm install (from the repo root)');
   }
 
-  const publicFlag = args.includes('--public');
-  const env = { ...process.env };
-  if (publicFlag) {
-    env.HOST = '0.0.0.0';
+  if (service.publicFlag) {
     err('WARNING --public: dashboard binding 0.0.0.0 — reachable on your LAN with NO auth.');
     err('WARNING anyone on this network can drive sessions via /api/brief.');
   }
 
-  const passthru = args.filter((a) => a !== '--public');
-  const proc = spawn(process.execPath, [serverEntry, ...passthru], {
+  const proc = spawn(process.execPath, [service.entry, ...service.args], {
     cwd: GOLEM_ROOT,
     stdio: 'inherit',
-    env,
+    env: service.env,
   });
   proc.on('error', (e) => fatal(1, `failed to start dashboard: ${e.message}`));
+}
+
+function ensureControlPlaneTokenFile() {
+  const directory = join(golemHome(), 'control-plane');
+  const target = join(directory, 'service-token');
+  mkdirSync(directory, { recursive: true });
+  try {
+    const existing = readFileSync(target, 'utf8').trim();
+    if (existing) return target;
+  } catch { /* provision below */ }
+  try {
+    writeFileSync(target, `${randomBytes(32).toString('base64url')}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+  } catch (error) {
+    if (error?.code !== 'EEXIST') throw error;
+  }
+  const provisioned = readFileSync(target, 'utf8').trim();
+  if (!provisioned) throw new Error(`control-plane token file is empty: ${target}`);
+  return target;
+}
+
+function dashboardService(args = []) {
+  const authority = legacyWriterAuthority();
+  const publicFlag = args.includes('--public');
+  if (authority.stage === 'C4') {
+    if (publicFlag) fatal(2, '--public is not supported after C4; the authenticated control plane is loopback-only');
+    const unknown = args.filter((arg) => arg !== '-h' && arg !== '--help');
+    if (unknown.length) fatal(2, `canonical dashboard does not accept legacy server options: ${unknown.join(' ')}`);
+    const entry = resolve(GOLEM_ROOT, 'apps', 'control-plane', 'dist', 'main.js');
+    const staticRoot = resolve(DASHBOARD_DIR, 'dist', 'control-plane');
+    const tokenFile = ensureControlPlaneTokenFile();
+    return {
+      mode: 'canonical',
+      entry,
+      args: [],
+      publicFlag: false,
+      env: {
+        ...process.env,
+        GOLEM_HOME: golemHome(),
+        GOLEM_CONTROL_PLANE_PORT: process.env.PORT || String(DEFAULT_DASHBOARD_PORT),
+        GOLEM_CONTROL_PLANE_STATIC_ROOT: staticRoot,
+        GOLEM_CONTROL_PLANE_TOKEN_FILE: tokenFile,
+        GOLEM_BROWSER_LOCAL_OPERATOR_BINDING_ID: 'principal_local_operator',
+        GOLEM_CLI_ENTRY: resolve(GOLEM_ROOT, 'cli', 'golem.js'),
+      },
+    };
+  }
+  return {
+    mode: 'legacy',
+    entry: resolve(DASHBOARD_DIR, 'server', 'index.js'),
+    args: args.filter((arg) => arg !== '--public'),
+    publicFlag,
+    env: {
+      ...process.env,
+      ...(publicFlag ? { HOST: '0.0.0.0' } : {}),
+    },
+  };
 }
 
 function sleep(ms) {
@@ -748,20 +803,16 @@ async function stopDashboard() {
 
 /** Start the dashboard detached (survives this CLI process exiting) and wait for it to answer /api/health. */
 async function startDashboardDetached(args = []) {
-  const serverEntry = resolve(DASHBOARD_DIR, 'server', 'index.js');
-  const publicFlag = args.includes('--public');
-  const passthru = args.filter((a) => a !== '--public');
-  const env = { ...process.env };
-  if (publicFlag) env.HOST = '0.0.0.0';
+  const service = dashboardService(args);
   const logFile = dashboardLogPath();
   const outFd = openSync(logFile, 'a');
   const errFd = openSync(logFile, 'a');
   let exitInfo = null;
-  const child = spawn(process.execPath, [serverEntry, ...passthru], {
+  const child = spawn(process.execPath, [service.entry, ...service.args], {
     cwd: GOLEM_ROOT,
     stdio: ['ignore', outFd, errFd],
     detached: true,
-    env,
+    env: service.env,
   });
   child.on('exit', (code, signal) => {
     exitInfo = { code, signal };
@@ -783,8 +834,9 @@ async function startDashboardDetached(args = []) {
 }
 
 async function cmdDashboardRestart(args) {
-  if (!existsSync(resolve(DASHBOARD_DIR, 'server', 'index.js'))) {
-    fatal(1, `dashboard server entry missing: ${resolve(DASHBOARD_DIR, 'server', 'index.js')}`);
+  const service = dashboardService(args);
+  if (!existsSync(service.entry)) {
+    fatal(1, `dashboard server entry missing: ${service.entry}`);
   }
   if (!existsSync(resolve(GOLEM_ROOT, 'node_modules'))) {
     fatal(1, 'root deps missing — npm install (from the repo root)');
@@ -887,18 +939,36 @@ async function cmdMigrateHome(args) {
  * root CLI owns process execution; the compat package owns all legacy reads,
  * exact plan validation, backup, canonical writes, and rollback semantics.
  */
-function cmdMigrate(args) {
+async function cmdMigrate(args) {
   const entry = resolve(GOLEM_ROOT, 'packages', 'compat', 'bin', 'migration-plan.mjs');
   if (!existsSync(entry)) {
     fatal(1, 'migration CLI is unavailable in this installation; reinstall a build containing @golem/compat');
   }
+  const authorityChanging = args[0] === 'cutover-apply' || args[0] === 'cutover-rollback';
+  if (authorityChanging) await stopDashboard();
   const result = spawnSync(process.execPath, [entry, ...args], {
     cwd: GOLEM_ROOT,
     stdio: 'inherit',
     env: process.env,
   });
   if (result.error) fatal(1, `migration command failed to start: ${result.error.message}`);
-  if (typeof result.status === 'number' && result.status !== 0) process.exitCode = result.status;
+  if (typeof result.status === 'number' && result.status !== 0) {
+    process.exitCode = result.status;
+    const authority = legacyWriterAuthority();
+    if (authorityChanging && authority.stage === 'C3' && authority.write_policy === 'legacy_open') {
+      const restarted = await startDashboardDetached();
+      if (!restarted.ok) err(`dashboard restart after failed cutover command did not become healthy; log: ${restarted.logFile}`);
+    }
+    return;
+  }
+  if (authorityChanging) {
+    const restarted = await startDashboardDetached();
+    if (!restarted.ok) {
+      const tail = restarted.tail ? `\n${restarted.tail}` : '';
+      fatal(1, `authority changed but its dashboard did not restart; log: ${restarted.logFile}${tail}`);
+    }
+    log(`dashboard restarted on ${dashboardUrl()} (pid=${restarted.pid})`);
+  }
 }
 
 const ADAPTERS = { cc: ccAdapter, codex: codexAdapter, pi: piAdapter };
@@ -1563,10 +1633,14 @@ Run:
   sessions dedup [--apply]
                          Dry-run named-session duplicate cleanup; --apply marks
                          stale duplicate rows ended_at under sessions.json.lock.
-  migrate <plan|apply|status|rollback> --home <dir> [--plan-hash <sha256>] [--json]
+  migrate <plan|apply|status|rollback|cutover-plan|cutover-apply|cutover-status|cutover-soak|cutover-rollback>
+          --home <dir> [--plan-hash <sha256>] [--json]
                          Audit first, then apply only the exact plan hash. Apply
                          backs up sources, writes canonical state separately, and
                          emits a generated read-only compatibility projection.
+                         Cutover performs a second exact-hash preflight, one
+                         atomic C4 authority switch, soak evaluation, and an
+                         audited non-lossy rollback to C3.
   migrate-home         One-time move of ~/.config/golem -> ~/.golem (ADR-4).
                        Backs up first, stops the dashboard, moves, symlinks
                        the old path to the new one, restarts. Explicit only —
@@ -1669,15 +1743,24 @@ async function main() {
       await cmdDashboardRestart(rest);
       break;
     case 'codex-supervisor':
+      if (legacyWriterAuthority().stage === 'C4') {
+        fatal(2, 'codex-supervisor is retired after C4; use `golem codex` or explicitly roll back the canonical cutover');
+      }
       await cmdCodexSupervisor(rest);
       break;
     case 'codex':
       {
         const legacyArgs = explicitLegacyCodexArgs(rest);
-        // `golem codex` is an interactive TUI command. The typed foreground
-        // host consumes JSONL delivery records and cannot attach a terminal to
-        // Codex, so it must never be the default user-facing launch path.
-        await cmdCodex(legacyArgs ?? rest);
+        if (legacyWriterAuthority().stage === 'C4') {
+          if (legacyArgs) {
+            fatal(2, 'the legacy Codex supervisor is fenced after C4; run `golem migrate cutover-rollback --home <GOLEM_HOME>` before an explicit legacy launch');
+          }
+          if (!(await runTypedCli([cmd, ...rest]))) {
+            fatal(1, 'typed CLI build is unavailable; run `npm run build -w apps/cli`');
+          }
+        } else {
+          await cmdCodex(legacyArgs ?? rest);
+        }
       }
       break;
     case 'opencode':
@@ -1710,7 +1793,7 @@ async function main() {
       await cmdMigrateHome(rest);
       break;
     case 'migrate':
-      cmdMigrate(rest);
+      await cmdMigrate(rest);
       break;
     case 'sync':
       await cmdSync(rest);

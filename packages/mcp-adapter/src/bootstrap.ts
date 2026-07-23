@@ -1,3 +1,7 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import {
 	createFetchApiClient,
 	type TrustedCallerContext,
@@ -16,9 +20,26 @@ const callerProjectId =
 	process.env.GOLEM_MCP_CALLER_PROJECT_ID || process.env.GOLEM_PROJECT_ID;
 // Provenance is established by the server's durable `adapter: "mcp"` binding,
 // not by which compatible environment spelling supplied the credential.
+function localCredential(): string | undefined {
+	const configured = process.env.GOLEM_CONTROL_PLANE_TOKEN_FILE;
+	const home =
+		process.env.GOLEM_HOME ??
+		(process.env.XDG_CONFIG_HOME
+			? path.join(process.env.XDG_CONFIG_HOME, "golem")
+			: path.join(os.homedir(), ".golem"));
+	const target = configured?.trim()
+		? configured
+		: path.join(home, "control-plane", "service-token");
+	try {
+		return fs.readFileSync(target, "utf8").trim() || undefined;
+	} catch {
+		return undefined;
+	}
+}
 const mcpCredential =
 	process.env.GOLEM_CONTROL_PLANE_MCP_CREDENTIAL ||
-	process.env.GOLEM_CONTROL_PLANE_BEARER;
+	process.env.GOLEM_CONTROL_PLANE_BEARER ||
+	localCredential();
 const caller: TrustedCallerContext = callerSessionId
 	? callerProjectId
 		? { sessionId: callerSessionId, projectId: callerProjectId }
@@ -29,9 +50,7 @@ const caller: TrustedCallerContext = callerSessionId
 
 const running = await startMcpServer(
 	createFetchApiClient(controlPlaneUrl, {
-		...(mcpCredential
-			? { bearerToken: mcpCredential }
-			: {}),
+		...(mcpCredential ? { bearerToken: mcpCredential } : {}),
 		caller,
 	}),
 );

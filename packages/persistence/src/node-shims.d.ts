@@ -20,8 +20,14 @@ declare module "node:fs" {
 		openSync(target: string, flags: "wx", mode: number): number;
 		readFileSync(target: string, encoding: "utf8"): string;
 		readdirSync(target: string): readonly string[];
+		renameSync(source: string, target: string): void;
 		rmSync(target: string, options: { force: true }): void;
 		unlinkSync(target: string): void;
+		writeFileSync(
+			target: string,
+			value: string,
+			options: { encoding: "utf8"; mode: number; flag: "wx" },
+		): void;
 		writeFileSync(target: number, value: string): void;
 	};
 	export default fs;
@@ -31,7 +37,10 @@ declare module "node:path" {
 	const path: {
 		basename(target: string): string;
 		dirname(target: string): string;
+		isAbsolute(target: string): boolean;
 		join(...parts: readonly string[]): string;
+		resolve(...parts: readonly string[]): string;
+		readonly sep: string;
 	};
 	export default path;
 }

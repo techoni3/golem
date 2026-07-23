@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-07-23 @ GOL-56 typed settings controls — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-23 @ GOL-57 canonical C4 cutover — maintained via golem:docs-maintenance.
 
 ## Structure
 
@@ -11,6 +11,7 @@
 
 - Canonical flow is contracts → domain/runtime/tracker → control plane → generated client; compat/storage/UI/harness do not import inward.
 - One npm11 lock; `packages/persistence` is the sole SQLite writer, recovery owner, and migration owner.
+- C4 authority is one atomic `$GOLEM_HOME/control-plane/authority.json` pointer. `packages/persistence/src/authority.ts` selects `canonical/runtime.db` only at C4 while root `tracker.db` remains its GOL-20 authority; `packages/compat/src/cutover/` owns exact-hash preflight, checkpoint, resume, soak, and audited non-lossy rollback. Legacy JSON/channel/dashboard writers share `lib/legacy-writer-guard.js`. See `docs/architecture/cutover-runbook.md`.
 - Tracker owns durable delivery and typed work-item/phase/comment/link/stream services; exceptional close is server-composed.
 - `CommandGateway` atomically writes tracker/management mutations, GOL-79 receipts, invalidations, settlement, and direct-core effects. Replays are inert; changed keys return `409`; semantic changes publish once; scope filtering precedes WS; HTTP revisions are truth.
 - `TicketDispatchService` is the browser/bearer/MCP delivery seam. The current assignee must resolve fail-closed to an eligible active generation; GOL-79 queues `tracker_envelopes` as `ready`/`pull_only`/`next_turn`. Its read side joins project-scoped receipts, verified tickets, and canonical envelopes into safe dispatch operations; malformed or missing queue facts are omitted, and settlement never leaks targeting/claim/ack data. Terminal/ineligible writes create no envelope; stale CAS replays. Historical/runtime fields never select; only server-authenticated MCP exposes legacy alias/content, and durable binding—not credential spelling—defines provenance.
@@ -27,5 +28,5 @@
 ## Checks and gotchas
 
 - Tests use disposable homes; never mutate user state, shared ports, Docker, or renders. Loopback denial is `UNMET`.
-- `mcp/channel` is the GOL-29 render entrypoint; do not hand-edit renders or bypass boundaries.
+- `packages/mcp-adapter/dist/golem-mcp.mjs` is the C4 render entrypoint. `mcp/channel` is retained only for the explicit C3 rollback window and is writer-fenced at C4; do not hand-edit renders or bypass boundaries.
 - Node24 gates: build/typecheck, boundaries, named journeys, render, and `git diff --check`.

@@ -38,7 +38,9 @@ import * as pi from "../lib/compiler/adapters/pi.js";
 import * as typedCompat from "../lib/compiler/typed-compat.js";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const substrateRoot = path.join(repositoryRoot, "substrate");
+const substrateRoot = process.env.GOLEM_SUBSTRATE_ROOT
+	? path.resolve(process.env.GOLEM_SUBSTRATE_ROOT)
+	: path.join(repositoryRoot, "substrate");
 const packageVersion = JSON.parse(
 	readFileSync(path.join(repositoryRoot, "package.json"), "utf8"),
 ).version;
@@ -295,7 +297,6 @@ async function assertRelocatableArtifact(root) {
 		});
 		assert.deepEqual(api.requests[2]?.body, {
 			title: "real closure write",
-			project_id: "golem-38ab8a",
 		});
 		assert(api.requests.every((request) => request.authorization === "Bearer loopback-bearer-for-j1"), "artifact injects the loopback bearer on every request");
 		assert.equal(JSON.stringify([initialized, listed, read, invalidWrite, dispatch, write]).includes("loopback-bearer-for-j1"), false, "MCP summaries never serialize bearer credentials");
@@ -330,7 +331,7 @@ function assertPackedSyncTargets(root) {
 	const packedChannel = path.join(packedRoot, "mcp", "channel");
 	assert(existsSync(path.join(packedChannel, "index.js")), "packed release retains the current channel entrypoint");
 	assert(existsSync(path.join(packedChannel, "package-lock.json")), "packed release retains the current channel lock");
-	assert(existsSync(path.join(packedRoot, "packages", "mcp-adapter", "dist", "golem-mcp.mjs")), "packed release also carries the relocatable artifact candidate");
+	assert(existsSync(path.join(packedRoot, "packages", "mcp-adapter", "dist", "golem-mcp.mjs")), "packed release carries the active relocatable MCP artifact");
 	assert.equal(existsSync(path.join(packedRoot, "node_modules")), false, "packed release has no bundled dependency tree");
 
 	// The shipped CLI must resolve only through a real package install. In
@@ -388,10 +389,10 @@ function assertPackedSyncTargets(root) {
 	assert(existsSync(path.join(outputs.pi, "golem.ts")), "pi creates its concrete extension output");
 	for (const target of ["cc", "codex"]) {
 		const pluginRoot = target === "codex" ? path.join(outputs.codex, "plugins", "golem") : outputs.cc;
-		assert(existsSync(path.join(pluginRoot, "mcp", "channel", "index.js")), `${target} sync retains the legacy channel entrypoint`);
+		assert(existsSync(path.join(pluginRoot, "mcp", "channel", "index.js")), `${target} sync retains the rollback-only legacy channel entrypoint`);
 		assert(existsSync(path.join(pluginRoot, "mcp", "channel", "node_modules", "@modelcontextprotocol", "sdk")), `${target} sync retains the nested channel closure`);
-		assert(existsSync(path.join(pluginRoot, "mcp", "golem-mcp.mjs")), `${target} sync carries the relocatable artifact candidate`);
-		assert.match(readFileSync(path.join(pluginRoot, ".mcp.json"), "utf8"), /mcp\/channel\/index\.js/);
+		assert(existsSync(path.join(pluginRoot, "mcp", "golem-mcp.mjs")), `${target} sync carries the active relocatable artifact`);
+		assert.match(readFileSync(path.join(pluginRoot, ".mcp.json"), "utf8"), /mcp\/golem-mcp\.mjs/);
 	}
 
 	const opencodeOutput = invokeInstalled(["sync", "--target", "opencode"]);
@@ -620,9 +621,9 @@ export async function exerciseRenderMcpClosure(target) {
 		cc.syncMcpChannelDeps({ repoRoot: repositoryRoot, outDir: compatibilityOut });
 		assert(existsSync(path.join(compatibilityOut, "mcp", "channel", "index.js")), "typed cc plan preserves the current channel entrypoint");
 		assert(existsSync(path.join(compatibilityOut, "mcp", "channel", "node_modules", "@modelcontextprotocol", "sdk")), "typed cc plan preserves the nested closure");
-		assert(existsSync(path.join(compatibilityOut, "mcp", "golem-mcp.mjs")), "typed cc plan carries the relocatable artifact candidate");
+		assert(existsSync(path.join(compatibilityOut, "mcp", "golem-mcp.mjs")), "typed cc plan carries the active relocatable artifact");
 		const generatedMcpConfig = readFileSync(path.join(compatibilityOut, ".mcp.json"), "utf8");
-		assert.match(generatedMcpConfig, /mcp\/channel\/index\.js/);
+		assert.match(generatedMcpConfig, /mcp\/golem-mcp\.mjs/);
 		const pluginLock = inspectRender(path.join(repositoryRoot, "plugin"));
 		assert(pluginLock, "plugin records generator ownership in a typed render lock");
 		if (target !== "codex") {
@@ -737,7 +738,7 @@ export async function exerciseRenderMcpClosure(target) {
 		assert.equal(existsSync(recoveryPrior), false, "recovery consumes prior only after restoring or completing a marked swap");
 
 		await assertRelocatableArtifact(root);
-		return "typed production cc/marketplace/codex/opencode/pi manifests and a freshly installed packed CLI retain the live legacy channel closure while carrying a deferred artifact candidate; an independent retained 22-tool table proves public schemas/routes/defaults and trusted caller injection; normal/force lock recovery preserves owner bytes; the packed channel registers and cleans up its route; and a copied bearer-authenticated artifact initializes, lists, reads, rejects an invalid write, performs a real write, and shuts down without checkout dependencies";
+		return "typed production cc/marketplace/codex/opencode/pi manifests and a freshly installed packed CLI activate the relocatable typed MCP artifact while retaining a fenced rollback-only channel closure; an independent retained 22-tool table proves public schemas/routes/defaults and trusted caller injection; normal/force lock recovery preserves owner bytes; the rollback channel registers and cleans up its route in C3; and a copied bearer-authenticated artifact initializes, lists, reads, rejects an invalid write, performs a real write, and shuts down without checkout dependencies";
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

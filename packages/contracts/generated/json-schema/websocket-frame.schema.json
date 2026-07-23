@@ -147,6 +147,7 @@
         "projects",
         "tracker.tree",
         "tracker.board",
+        "management.controls",
         "communication.operations"
       ],
       "type": "string"

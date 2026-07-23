@@ -223,6 +223,10 @@ export async function runMigrationPlanReplay() {
 		assert.equal(stableAuditPlanJson(currentFirst).includes("fixture-secret-must-not-appear"), false, "config secret values must not appear in plan JSON");
 		assert.equal(stableAuditPlanJson(currentFirst).includes("channel-secret-value"), false, "state secret values must not appear in plan JSON");
 		assert(currentFirst.sources.some((source) => source.id === "tracker" && source.status === "present" && source.fingerprint && source.details?.format === "sqlite"), "real SQLite metadata must be fingerprinted and header-inspected without opening a writable database");
+		assert(
+			hasAction(currentFirst, "attach", "compat.tracker.retained_authority"),
+			"the independently authoritative tracker database is checkpointed and attached rather than sent through a nonexistent runtime importer",
+		);
 
 		const oldPlan = await auditLegacyHome(old);
 		const relocated = oldPlan.actions.find((entry) => entry.kind === "attach" && entry.reason === "compat.project.strong_registration");

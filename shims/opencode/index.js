@@ -36,6 +36,7 @@
 import { spawn, execFileSync } from "node:child_process";
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
+import { assertLegacyWriterAllowed, legacyWritesAllowed } from "../../lib/legacy-writer-guard.js";
 import { appendFileSync, mkdirSync, existsSync, readFileSync, writeFileSync, renameSync, rmdirSync, rmSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -265,6 +266,7 @@ function readJson(file, key) {
 }
 
 function writeJson(file, obj) {
+  assertLegacyWriterAllowed(`opencode:${file === BRIDGES_REGISTRY ? "opencode-bridges.json" : "sessions.json"}`);
   mkdirSync(dirname(file), { recursive: true });
   const tmp = `${file}.tmp.${process.pid}`;
   writeFileSync(tmp, JSON.stringify(obj, null, 2));
@@ -275,7 +277,7 @@ function registerBridge({ sessionID, cwd, status, port, name, model }) {
   if (!sessionID || !port) return false;
   try {
     const now = new Date().toISOString();
-    withFileLock(BRIDGES_LOCK, () => {
+    if (legacyWritesAllowed()) withFileLock(BRIDGES_LOCK, () => {
       const reg = readJson(BRIDGES_REGISTRY, "bridges");
       reg.bridges = reg.bridges.filter((b) => b.session_id !== sessionID);
       reg.bridges.push({
@@ -297,7 +299,7 @@ function registerBridge({ sessionID, cwd, status, port, name, model }) {
       writeJson(BRIDGES_REGISTRY, reg);
     });
     logLine("registered", `${sessionID} port=${port}`);
-    publishCanonical(sessionID, { cwd, status, name, model, port });
+    if (legacyWritesAllowed()) publishCanonical(sessionID, { cwd, status, name, model, port });
     return true;
   } catch (e) {
     logErr("bridge register", e);
@@ -327,7 +329,7 @@ function updateBridge({ sessionID, cwd, status, port, name, model, insert = true
   if (!sessionID || !port) return false;
   try {
     const now = new Date().toISOString();
-    withFileLock(BRIDGES_LOCK, () => {
+    if (legacyWritesAllowed()) withFileLock(BRIDGES_LOCK, () => {
       const reg = readJson(BRIDGES_REGISTRY, "bridges");
       let found = false;
       reg.bridges = reg.bridges.map((b) => {
@@ -365,7 +367,7 @@ function updateBridge({ sessionID, cwd, status, port, name, model, insert = true
       }
       writeJson(BRIDGES_REGISTRY, reg);
     });
-    publishCanonical(sessionID, { cwd, status, name, model, port });
+    if (legacyWritesAllowed()) publishCanonical(sessionID, { cwd, status, name, model, port });
     return true;
   } catch (e) {
     logErr("bridge update", e);
@@ -374,6 +376,7 @@ function updateBridge({ sessionID, cwd, status, port, name, model, insert = true
 }
 
 function unregisterBridges() {
+  if (!legacyWritesAllowed()) return;
   try {
     withFileLock(BRIDGES_LOCK, () => {
       const reg = readJson(BRIDGES_REGISTRY, "bridges");
@@ -401,6 +404,7 @@ function publishCanonical(sessionID, { cwd, status, name, model, port }) {
 
 function unregisterBridge(sessionID) {
   if (!sessionID) return;
+  if (!legacyWritesAllowed()) return;
   try {
     withFileLock(BRIDGES_LOCK, () => {
       const reg = readJson(BRIDGES_REGISTRY, "bridges");
@@ -427,6 +431,7 @@ function pruneSessionRows(rows, nowMs = Date.now()) {
 
 function updateSessionRegistry({ sessionID, cwd, status, name, model, insert = true, touchLastSeen = true }) {
   if (!sessionID) return false;
+  if (!legacyWritesAllowed()) return true;
   try {
     const now = new Date().toISOString();
     withFileLock(SESSIONS_LOCK, () => {
@@ -472,6 +477,7 @@ function updateSessionRegistry({ sessionID, cwd, status, name, model, insert = t
 }
 
 function markSessionRegistryEnded(sessionIDs) {
+  if (!legacyWritesAllowed()) return;
   const ids = new Set((Array.isArray(sessionIDs) ? sessionIDs : [sessionIDs]).filter(Boolean));
   if (!ids.size) return;
   try {
@@ -493,6 +499,7 @@ function markSessionRegistryEnded(sessionIDs) {
 }
 
 function markOwnedSessionRegistryEndedSync() {
+  if (!legacyWritesAllowed()) return;
   try {
     let ids = [];
     withFileLock(BRIDGES_LOCK, () => {

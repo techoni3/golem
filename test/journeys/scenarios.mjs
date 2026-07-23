@@ -309,6 +309,18 @@ export const scenarios = [
 		regression: "browser settings can apply an unreviewed or stale migration plan, skip canonical backups, or fail to expose rollback truth",
 	}),
 	registerScenario({
+		id: "canonical-cutover-crash-rollback",
+		journey: "J7",
+		tier: "release",
+		regression: "C4 can half-switch authority, lose post-cutover canonical facts, fail to resume after a crash, or make rollback destructive",
+	}),
+	registerScenario({
+		id: "legacy-writer-guard",
+		journey: "J7",
+		tier: "integration",
+		regression: "preflight can admit unsafe state or a retired JSON/channel/dashboard writer can mutate legacy authority after C4",
+	}),
+	registerScenario({
 		id: "delivery-api-fence-recheck",
 		journey: "J4",
 		tier: "integration",

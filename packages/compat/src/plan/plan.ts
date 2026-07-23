@@ -391,6 +391,52 @@ function configActions(document: JsonRecord | undefined): AuditAction[] {
 }
 
 /**
+ * GOL-20 keeps Tracker as an independent authority across C4. Its database is
+ * therefore checkpointed and attached, not imported into the runtime store.
+ * Sidecars are part of that same exact snapshot; orphaned sidecars remain a
+ * review gate because there is no authority database to attach.
+ */
+function trackerAuthorityActions(
+	sources: readonly AuditSource[],
+): AuditAction[] {
+	const tracker = sources.find(
+		(source) => source.id === "tracker" && source.status === "present",
+	);
+	const sidecars = sources.filter(
+		(source) =>
+			(source.id === "tracker-wal" || source.id === "tracker-shm") &&
+			source.status === "present",
+	);
+	if (!tracker)
+		return sidecars.length === 0
+			? []
+			: [
+					action(
+						"review",
+						"compat.tracker.orphaned_sidecar",
+						sidecars.map((source) => source.id),
+						[],
+						[],
+						{ retained_authority_present: false },
+					),
+				];
+	return [
+		action(
+			"attach",
+			"compat.tracker.retained_authority",
+			[tracker.id, ...sidecars.map((source) => source.id)],
+			["authority:tracker.db"],
+			[],
+			{
+				category: "database",
+				retained_authority: true,
+				sidecar_count: sidecars.length,
+			},
+		),
+	];
+}
+
+/**
  * A source is not evidence that it reached canonical storage.  Until a
  * source-specific typed importer and journey exist, its presence is an
  * explicit human decision point, never an inventory-only success.
@@ -399,9 +445,6 @@ function unsupportedStoreActions(
 	sources: readonly AuditSource[],
 ): AuditAction[] {
 	const unsupportedSources = new Set([
-		"tracker",
-		"tracker-wal",
-		"tracker-shm",
 		"channels",
 		"leases",
 		"opencode-bridges",
@@ -452,6 +495,7 @@ export function planLegacyMigration(
 		...projectActions(read.documents.projects),
 		...sessionActions(read.documents.sessions, read.documents.facts),
 		...configActions(read.documents.config),
+		...trackerAuthorityActions(sources),
 		...unsupportedStoreActions(sources),
 	].sort((left, right) => left.id.localeCompare(right.id));
 	const sourceManifestHash = hash(sources);

@@ -20,8 +20,11 @@ import { initDispatchDrainer } from './dispatch-queue.js';
 import { registerSubstrateRoutes } from './substrate.js';
 import { teamAssists } from './team-assist.js';
 import { golemHome, dashboardJsonPath, journalDirFor, sessionsJsonPath } from '../../lib/golem-home.js';
+import { assertLegacyWriterAllowed } from '../../lib/legacy-writer-guard.js';
 import { createRole, deleteRole, getRole, listRoleCards, roleChangeBrief, roleMission, setSessionRole, updateRoleMeta, writeRoleCard } from '../../lib/session-role.js';
 import { attachTrackerCore } from './tracker-core-attachment.js';
+
+assertLegacyWriterAllowed('legacy-dashboard-server');
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const WEB_SOURCE_ROOT = path.resolve(__dirname, '..', 'web');

@@ -3,6 +3,21 @@
  * private to control-plane composition; the only opener here is the narrow,
  * migration-neutral tracker attachment used after the legacy tracker opener.
  */
+
+export type {
+	ControlPlaneAuthority,
+	ControlPlaneAuthorityStage,
+	ControlPlaneAuthorityUpdate,
+	ControlPlaneWritePolicy,
+} from "./authority.js";
+export {
+	controlPlaneAuthorityPath,
+	controlPlaneAuthoritySchemaVersion,
+	defaultControlPlaneAuthority,
+	readControlPlaneAuthority,
+	resolveControlPlanePersistencePaths,
+	writeControlPlaneAuthority,
+} from "./authority.js";
 export { runtimeMigrations, trackerMigrations } from "./schema.js";
 export type { TrackerCoreCapabilityHandle } from "./tracker-core-capability.js";
 export { openTrackerCoreCapability } from "./tracker-core-capability.js";
