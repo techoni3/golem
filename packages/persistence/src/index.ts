@@ -111,6 +111,7 @@ export type {
 	TrackerCreateEnvelopeResult,
 	TrackerDeliveryEligibility,
 	TrackerDeliveryEnvelope,
+	TrackerDispatchOperationRecord,
 	TrackerJsonObject,
 	TrackerManagementAsset,
 	TrackerManagementAssignment,

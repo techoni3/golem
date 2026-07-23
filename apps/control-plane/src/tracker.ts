@@ -105,6 +105,7 @@ export function composeControlPlaneTicketDispatchService(options: {
 	readonly eligibility: DeliveryEligibilityPort;
 }): TicketDispatchService {
 	const sessions = options.writer.runtimeSessionStorage();
+	const tracker = options.writer.trackerStorage();
 	return createTicketDispatchService({
 		tickets: {
 			get(projectId, ticketId) {
@@ -127,6 +128,9 @@ export function composeControlPlaneTicketDispatchService(options: {
 		},
 		eligibility: options.eligibility,
 		delivery: options.services.delivery,
+		operations: {
+			list: (projectId) => tracker.listDispatchOperations(projectId),
+		},
 	});
 }
 

@@ -9,6 +9,7 @@ import type {
 	TrackerCreateEnvelopeResult,
 	TrackerDeliveryEligibility,
 	TrackerDeliveryEnvelope,
+	TrackerDispatchOperationRecord,
 	TrackerJsonObject,
 	TrackerPendingSubscriptionEvents,
 	TrackerStorageCapability,
@@ -227,6 +228,58 @@ export class TrackerRepository implements TrackerStorageCapability {
 
 	constructor(database: SqliteConnection) {
 		this.#database = database;
+	}
+
+	listDispatchOperations(
+		projectId: string,
+	): readonly TrackerDispatchOperationRecord[] {
+		interface DispatchOperationRow {
+			readonly command_id: string;
+			readonly project_id: string;
+			readonly ticket_id: string;
+			readonly result_json: string;
+			readonly envelope_status: EnvelopeStatus | null;
+			readonly committed_at: string;
+		}
+
+		return Object.freeze(
+			this.#database
+				.prepare<DispatchOperationRow>(
+					`SELECT
+						receipt.command_id,
+						receipt.project_id,
+						receipt.resource_id AS ticket_id,
+						receipt.result_json,
+						envelope.status AS envelope_status,
+						receipt.committed_at
+					FROM command_receipts AS receipt
+					INNER JOIN tickets AS ticket
+						ON ticket.id = receipt.resource_id
+						AND ticket.project_id = receipt.project_id
+					LEFT JOIN tracker_envelopes AS envelope
+						ON envelope.project_id = receipt.project_id
+						AND envelope.idempotency_key = receipt.idempotency_key
+						AND envelope.kind = 'ticket_dispatch'
+					WHERE receipt.project_id = ?
+						AND receipt.command_kind = 'dispatch'
+						AND receipt.resource_type = 'ticket'
+						AND receipt.outcome_status = 'completed'
+					ORDER BY receipt.committed_at DESC, receipt.command_id DESC`,
+				)
+				.all(projectId)
+				.map((row) =>
+					Object.freeze({
+						commandId: row.command_id,
+						projectId: row.project_id,
+						ticketId: row.ticket_id,
+						result: parseObject(row.result_json),
+						...(row.envelope_status
+							? { envelopeStatus: row.envelope_status }
+							: {}),
+						committedAt: row.committed_at,
+					}),
+				),
+		);
 	}
 
 	#audit(

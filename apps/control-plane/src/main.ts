@@ -126,6 +126,7 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 	const browserWork = createBrowserWorkServices({
 		core: trackerCore,
 		management,
+		ticketDispatch,
 		projectRevision: (projectId) =>
 			owner.committedPublicationStorage().projectRevision(projectId),
 	});
