@@ -1,0 +1,670 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Golem substrate settings decision lab</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root {
+      color-scheme: dark;
+      --page: #080b0e;
+      --page-grid: rgba(134, 160, 173, .035);
+      --shell: #0d1116;
+      --surface: #11171d;
+      --surface-2: #151d24;
+      --surface-3: #1b252d;
+      --line: #28343d;
+      --line-soft: #1d272e;
+      --text: #f1f4f2;
+      --text-2: #b7c1bd;
+      --text-3: #7f8d89;
+      --text-4: #56635f;
+      --green: #73db9d;
+      --green-soft: rgba(115, 219, 157, .1);
+      --green-line: rgba(115, 219, 157, .32);
+      --blue: #7cb8ff;
+      --blue-soft: rgba(124, 184, 255, .1);
+      --amber: #e6b956;
+      --amber-soft: rgba(230, 185, 86, .1);
+      --red: #ff7f78;
+      --red-soft: rgba(255, 127, 120, .1);
+      --violet: #b6a0ff;
+      --focus: #d9f29a;
+      --shadow: 0 24px 70px rgba(0,0,0,.34);
+      --ui: Inter, "Avenir Next", "Segoe UI", system-ui, sans-serif;
+      --mono: "SFMono-Regular", "Cascadia Code", ui-monospace, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--text);
+      background:
+        linear-gradient(var(--page-grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--page-grid) 1px, transparent 1px),
+        radial-gradient(900px 520px at 12% -5%, rgba(115,219,157,.09), transparent 68%),
+        radial-gradient(840px 520px at 90% 2%, rgba(124,184,255,.07), transparent 68%),
+        var(--page);
+      background-size: 34px 34px, 34px 34px, auto, auto, auto;
+      font: 14px/1.45 var(--ui);
+      -webkit-font-smoothing: antialiased;
+    }
+    button, select, textarea, input { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, select:focus-visible, textarea:focus-visible, input:focus-visible, [tabindex]:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 3px;
+    }
+    .mono { font-family: var(--mono); }
+    .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+
+    .hero {
+      max-width: 1540px;
+      margin: 0 auto;
+      padding: 44px clamp(18px, 4vw, 64px) 28px;
+    }
+    .eyebrow { color: var(--green); font: 680 10px/1 var(--mono); letter-spacing: .15em; text-transform: uppercase; }
+    h1 { max-width: 1000px; margin: 13px 0 0; font-size: clamp(38px, 5vw, 68px); line-height: .98; letter-spacing: -.055em; }
+    h1 span { color: var(--green); font-weight: 530; }
+    .decision { max-width: 1000px; margin: 19px 0 0; color: var(--text-2); font-size: clamp(15px, 1.4vw, 18px); line-height: 1.55; }
+    .contract { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 22px; }
+    .contract span { padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: rgba(17,23,29,.75); color: var(--text-3); font: 620 9px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+    .finding {
+      max-width: 1540px; margin: 0 auto 22px; padding: 0 clamp(18px, 4vw, 64px);
+    }
+    .finding-inner {
+      display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: start;
+      padding: 13px 15px; border: 1px solid rgba(230,185,86,.3); border-radius: 10px;
+      background: rgba(230,185,86,.07); color: var(--text-2); box-shadow: 0 10px 28px rgba(0,0,0,.12);
+    }
+    .finding-mark { color: var(--amber); font: 800 12px/1 var(--mono); }
+    .finding strong { color: var(--text); }
+    .finding code { color: var(--amber); font-family: var(--mono); }
+
+    .control-wrap { position: sticky; top: 0; z-index: 30; border-block: 1px solid var(--line); background: rgba(8,11,14,.88); backdrop-filter: blur(18px); }
+    .controls { max-width: 1540px; margin: 0 auto; padding: 10px clamp(12px, 4vw, 64px); display: flex; align-items: center; gap: 10px; }
+    .option-tabs { display: flex; gap: 5px; overflow-x: auto; scrollbar-width: thin; padding: 2px; }
+    .option-tab {
+      flex: 0 0 auto; display: flex; align-items: center; gap: 8px; min-height: 36px;
+      padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px;
+      background: var(--surface); color: var(--text-3); cursor: pointer;
+    }
+    .option-tab b { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; background: var(--surface-3); color: var(--text-2); font: 700 9px/1 var(--mono); }
+    .option-tab span { font-size: 11px; font-weight: 650; white-space: nowrap; }
+    .option-tab[aria-pressed="true"] { color: var(--text); border-color: var(--green-line); background: var(--green-soft); }
+    .option-tab[aria-pressed="true"] b { background: var(--green); color: #0b1710; }
+    .control-spacer { flex: 1; }
+    .select-field { display: flex; align-items: center; gap: 7px; height: 36px; padding: 0 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text-3); font: 600 9px/1 var(--mono); white-space: nowrap; }
+    .select-field select { border: 0; background: transparent; color: var(--text); outline: 0; font: 600 10px/1 var(--mono); }
+    .viewport-toggle { display: inline-flex; padding: 3px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+    .viewport-toggle button { border: 0; border-radius: 5px; padding: 6px 9px; background: transparent; color: var(--text-3); cursor: pointer; font: 650 9px/1 var(--mono); }
+    .viewport-toggle button[aria-pressed="true"] { color: var(--text); background: var(--surface-3); }
+
+    .lab { max-width: 1540px; margin: 0 auto; padding: 24px clamp(12px, 4vw, 64px) 90px; }
+    .option-context { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 14px; align-items: start; margin-bottom: 14px; }
+    .option-letter { display: grid; place-items: center; width: 42px; height: 42px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--green); font: 720 11px/1 var(--mono); }
+    .option-copy h2 { margin: 0; font-size: 20px; letter-spacing: -.02em; }
+    .option-copy p { margin: 5px 0 0; color: var(--text-3); font-size: 12.5px; }
+    .option-axis { color: var(--text-4); text-align: right; font: 620 9px/1.5 var(--mono); text-transform: uppercase; letter-spacing: .08em; }
+
+    .viewport { width: 100%; margin: 0 auto; transition: width .2s ease; }
+    body[data-viewport="mobile"] .viewport { width: min(100%, 410px); }
+    .mock-shell { min-height: 720px; border: 1px solid var(--line); border-radius: 14px; background: var(--shell); box-shadow: var(--shadow); overflow: hidden; }
+    .mock-topbar { height: 52px; display: flex; align-items: center; gap: 8px; padding: 0 14px; border-bottom: 1px solid var(--line-soft); background: #0b0f13; }
+    .mock-logo { width: 27px; height: 27px; display:grid; place-items:center; border-radius: 8px; background: var(--green); color:#08110c; font: 850 10px/1 var(--mono); }
+    .mock-brand { margin-right: 12px; font-weight: 750; letter-spacing: -.02em; }
+    .mock-nav { display: flex; gap: 4px; }
+    .mock-nav span { padding: 6px 8px; color: var(--text-4); font-size: 11px; border-radius: 6px; }
+    .mock-nav .active { color: var(--text); background: var(--surface-2); }
+    .mock-health { margin-left: auto; display:flex; align-items:center; gap:6px; color:var(--text-3); font:600 9px/1 var(--mono); }
+    .mock-health::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--green); box-shadow:0 0 0 3px var(--green-soft); }
+    .settings-canvas { min-height: 668px; padding: 19px; background: radial-gradient(800px 340px at 80% -20%, rgba(124,184,255,.035), transparent 65%); }
+    .page-head { display:flex; gap:14px; align-items:flex-start; justify-content:space-between; margin-bottom:16px; }
+    .page-head h3 { margin:0; font-size:20px; letter-spacing:-.03em; }
+    .page-head p { margin:4px 0 0; color:var(--text-3); font-size:11.5px; }
+    .actions { display:flex; gap:7px; align-items:center; flex-wrap:wrap; justify-content:flex-end; }
+    .btn { min-height:32px; padding:6px 10px; border:1px solid var(--line); border-radius:7px; background:var(--surface-2); color:var(--text-2); cursor:pointer; font-size:10.5px; font-weight:680; }
+    .btn:hover { color:var(--text); border-color:#40505b; }
+    .btn.primary { color:#08140d; border-color:var(--green); background:var(--green); }
+    .btn.warning { color:var(--amber); border-color:rgba(230,185,86,.35); background:var(--amber-soft); }
+    .btn.ghost { background:transparent; }
+    .btn.small { min-height:27px; padding:4px 8px; font-size:9.5px; }
+    .btn:disabled { opacity:.45; cursor:not-allowed; }
+
+    .panel { min-width:0; border:1px solid var(--line-soft); border-radius:10px; background:var(--surface); overflow:hidden; }
+    .panel-head { min-height:42px; display:flex; align-items:center; gap:8px; padding:9px 11px; border-bottom:1px solid var(--line-soft); }
+    .panel-head h4 { margin:0; font-size:11.5px; }
+    .panel-head p { margin:0 0 0 auto; color:var(--text-4); font:570 9px/1 var(--mono); }
+    .panel-body { padding:11px; }
+    .metric-row { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; margin-bottom:10px; }
+    .metric { padding:10px; border:1px solid var(--line-soft); border-radius:8px; background:var(--surface); }
+    .metric span { display:block; color:var(--text-4); font:630 8px/1 var(--mono); letter-spacing:.08em; text-transform:uppercase; }
+    .metric b { display:block; margin-top:7px; font-size:17px; letter-spacing:-.03em; }
+    .metric small { display:block; margin-top:3px; color:var(--text-3); font-size:9.5px; }
+    .metric.attention b { color:var(--amber); }
+
+    .status { display:inline-flex; align-items:center; gap:5px; min-height:21px; padding:3px 7px; border:1px solid var(--line); border-radius:999px; color:var(--text-3); background:var(--surface-2); font:630 8.5px/1 var(--mono); white-space:nowrap; }
+    .status::before { content:""; width:5px; height:5px; border-radius:50%; background:currentColor; }
+    .status.ok { color:var(--green); border-color:var(--green-line); background:var(--green-soft); }
+    .status.warn { color:var(--amber); border-color:rgba(230,185,86,.3); background:var(--amber-soft); }
+    .status.error { color:var(--red); border-color:rgba(255,127,120,.3); background:var(--red-soft); }
+    .status.info { color:var(--blue); border-color:rgba(124,184,255,.3); background:var(--blue-soft); }
+    .status.off { color:var(--text-4); border-style:dashed; }
+    .badge { display:inline-flex; align-items:center; min-height:20px; padding:3px 6px; border:1px solid var(--line); border-radius:5px; color:var(--text-3); font:610 8px/1 var(--mono); }
+    .path { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-3); font:560 9px/1.2 var(--mono); }
+    .section-label { color:var(--text-4); font:680 8px/1 var(--mono); letter-spacing:.1em; text-transform:uppercase; }
+    .notice { display:flex; gap:9px; align-items:flex-start; padding:9px 10px; border:1px solid rgba(230,185,86,.28); border-radius:8px; background:var(--amber-soft); color:var(--text-2); font-size:10.5px; }
+    .notice strong { color:var(--amber); }
+
+    .artifact-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+    .artifact-card { min-width:0; padding:10px; border:1px solid var(--line-soft); border-radius:8px; background:var(--surface-2); cursor:pointer; text-align:left; }
+    .artifact-card:hover, .artifact-card.selected { border-color:var(--green-line); background:var(--green-soft); }
+    .artifact-card-top { display:flex; gap:8px; align-items:center; }
+    .type-icon { display:grid; place-items:center; width:25px; height:25px; border:1px solid var(--line); border-radius:7px; background:var(--surface-3); color:var(--blue); font:720 9px/1 var(--mono); }
+    .artifact-card b { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10.5px; }
+    .artifact-card .path { margin-top:7px; }
+    .artifact-card-foot { display:flex; align-items:center; gap:5px; margin-top:8px; }
+    .artifact-card-foot .badge:last-child { margin-left:auto; }
+
+    .harness-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
+    .harness-card { min-width:0; padding:10px; border:1px solid var(--line-soft); border-radius:8px; background:var(--surface-2); }
+    .harness-name { display:flex; gap:7px; align-items:center; }
+    .harness-name b { font-size:11px; }
+    .harness-name .status { margin-left:auto; }
+    .harness-facts { display:grid; grid-template-columns:1fr auto; gap:5px 8px; margin-top:10px; color:var(--text-3); font:560 8.5px/1.3 var(--mono); }
+    .harness-facts span:nth-child(even) { color:var(--text-2); text-align:right; }
+    .harness-actions { display:flex; gap:5px; margin-top:9px; }
+
+    .editor { min-width:0; display:flex; flex-direction:column; border:1px solid var(--line-soft); border-radius:9px; background:#0d1217; overflow:hidden; }
+    .editor-head { display:flex; align-items:center; gap:8px; min-height:40px; padding:7px 9px; border-bottom:1px solid var(--line-soft); }
+    .editor-tabs { display:inline-flex; padding:2px; border:1px solid var(--line); border-radius:6px; background:var(--surface); }
+    .editor-tabs button { border:0; padding:4px 7px; border-radius:4px; background:transparent; color:var(--text-4); cursor:pointer; font:620 8px/1 var(--mono); }
+    .editor-tabs button[aria-pressed="true"] { color:var(--text); background:var(--surface-3); }
+    .editor-file { min-width:0; margin-right:auto; }
+    .editor-file b { display:block; font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .editor-file .path { margin-top:2px; max-width:420px; }
+    .editor textarea { width:100%; min-height:250px; resize:none; border:0; outline:0; padding:14px; background:#0b1014; color:#c9d4cf; font:11px/1.55 var(--mono); }
+    .preview { min-height:250px; padding:18px 20px; color:var(--text-2); font-size:11.5px; line-height:1.6; }
+    .preview h1 { margin:0 0 10px; font-size:19px; line-height:1.2; letter-spacing:-.03em; }
+    .preview h2 { margin:17px 0 7px; font-size:13px; }
+    .preview code { color:var(--blue); font-family:var(--mono); }
+    .preview ul { padding-left:18px; }
+    .preview blockquote { margin:12px 0; padding:8px 11px; border-left:2px solid var(--green); background:var(--green-soft); }
+    .editor-foot { display:flex; align-items:center; gap:7px; min-height:37px; padding:6px 9px; border-top:1px solid var(--line-soft); color:var(--text-4); font:570 8.5px/1 var(--mono); }
+    .editor-foot .actions { margin-left:auto; }
+
+    .matrix { width:100%; border-collapse:collapse; }
+    .matrix th, .matrix td { padding:8px 9px; border-bottom:1px solid var(--line-soft); text-align:left; }
+    .matrix th { color:var(--text-4); background:var(--surface-2); font:660 8px/1 var(--mono); letter-spacing:.08em; text-transform:uppercase; }
+    .matrix td { color:var(--text-2); font-size:9.5px; }
+    .matrix tr:last-child td { border-bottom:0; }
+
+    /* A — expanded current matrix */
+    .a-stack { display:grid; gap:10px; }
+    .a-library { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(320px,.75fr); gap:10px; }
+
+    /* B — library inspector */
+    .library-layout { display:grid; grid-template-columns:150px 240px minmax(0,1fr); min-height:590px; border:1px solid var(--line-soft); border-radius:10px; background:var(--surface); overflow:hidden; }
+    .library-nav { border-right:1px solid var(--line-soft); padding:10px 8px; background:#0d1217; }
+    .library-nav button { width:100%; display:flex; align-items:center; gap:7px; padding:7px 8px; border:0; border-radius:6px; background:transparent; color:var(--text-3); cursor:pointer; text-align:left; font-size:9.5px; }
+    .library-nav button.active { color:var(--text); background:var(--surface-3); }
+    .library-nav button span:last-child { margin-left:auto; color:var(--text-4); font-family:var(--mono); }
+    .scope-block { margin-top:16px; padding:8px; border:1px solid var(--line-soft); border-radius:7px; background:var(--surface); }
+    .scope-block b { display:block; margin-top:5px; font-size:9px; }
+    .file-list { border-right:1px solid var(--line-soft); background:var(--surface); }
+    .file-list-head { padding:10px; border-bottom:1px solid var(--line-soft); }
+    .search { width:100%; height:29px; border:1px solid var(--line); border-radius:6px; background:#0b1014; color:var(--text); padding:0 8px; font-size:9.5px; }
+    .file-row { width:100%; display:block; padding:9px 10px; border:0; border-bottom:1px solid var(--line-soft); background:transparent; color:var(--text-2); text-align:left; cursor:pointer; }
+    .file-row:hover, .file-row.active { background:var(--green-soft); }
+    .file-row b { display:block; font-size:9.5px; }
+    .file-row .path { margin-top:4px; }
+    .file-row-meta { display:flex; gap:5px; margin-top:6px; }
+    .library-main { min-width:0; padding:10px; display:flex; flex-direction:column; gap:8px; }
+    .projection-strip { display:flex; align-items:center; gap:6px; padding:8px 9px; border:1px solid var(--line-soft); border-radius:7px; background:var(--surface-2); overflow-x:auto; }
+    .projection-strip > span:first-child { margin-right:auto; color:var(--text-4); font:650 8px/1 var(--mono); text-transform:uppercase; }
+
+    /* C — publishing studio */
+    .studio-layout { display:grid; grid-template-columns:minmax(0,1fr) 285px; gap:10px; }
+    .change-banner { display:grid; grid-template-columns:auto 1fr auto; gap:10px; align-items:center; padding:12px; border:1px solid rgba(124,184,255,.28); border-radius:9px; background:var(--blue-soft); margin-bottom:10px; }
+    .change-count { display:grid; place-items:center; width:38px; height:38px; border-radius:9px; background:var(--blue); color:#09131d; font:800 13px/1 var(--mono); }
+    .change-banner b { display:block; font-size:11px; }
+    .change-banner p { margin:3px 0 0; color:var(--text-3); font-size:9.5px; }
+    .collection { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+    .collection-card { padding:11px; border:1px solid var(--line-soft); border-radius:8px; background:var(--surface); }
+    .collection-card-head { display:flex; align-items:center; gap:8px; }
+    .collection-card-head b { font-size:10.5px; }
+    .collection-card-head .badge { margin-left:auto; }
+    .collection-items { display:grid; gap:5px; margin-top:9px; }
+    .collection-item { display:flex; gap:7px; align-items:center; padding:6px 7px; border:1px solid var(--line-soft); border-radius:6px; background:var(--surface-2); color:var(--text-2); cursor:pointer; font-size:9px; }
+    .collection-item span:last-child { margin-left:auto; color:var(--text-4); font-family:var(--mono); }
+    .publish-rail { display:flex; flex-direction:column; gap:8px; }
+    .publish-target { padding:10px; border:1px solid var(--line-soft); border-radius:8px; background:var(--surface); }
+    .publish-target-head { display:flex; align-items:center; gap:7px; }
+    .publish-target-head .status { margin-left:auto; }
+    .bar { height:4px; margin-top:9px; border-radius:999px; background:var(--surface-3); overflow:hidden; }
+    .bar span { display:block; height:100%; border-radius:inherit; background:var(--green); }
+    .publish-target p { margin:7px 0 0; color:var(--text-3); font-size:9px; }
+
+    /* D — harness workbench */
+    .harness-tabs { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:7px; margin-bottom:10px; }
+    .harness-tab { padding:10px; border:1px solid var(--line-soft); border-radius:8px; background:var(--surface); cursor:pointer; text-align:left; }
+    .harness-tab.active { border-color:rgba(124,184,255,.35); background:var(--blue-soft); }
+    .harness-tab b { display:block; font-size:10.5px; }
+    .harness-tab .status { margin-top:7px; }
+    .workbench { display:grid; grid-template-columns:240px minmax(0,1fr); gap:10px; }
+    .target-summary { padding:12px; border:1px solid var(--line-soft); border-radius:9px; background:var(--surface); }
+    .target-summary h4 { margin:0; font-size:14px; }
+    .fact-list { display:grid; grid-template-columns:1fr auto; gap:8px; margin-top:13px; color:var(--text-3); font:570 9px/1 var(--mono); }
+    .fact-list span:nth-child(even) { color:var(--text-2); text-align:right; }
+    .target-tree { margin-top:13px; padding-top:11px; border-top:1px solid var(--line-soft); }
+    .tree-row { display:flex; align-items:center; gap:7px; padding:5px 0; color:var(--text-2); font-size:9px; }
+    .tree-row.indent { padding-left:15px; color:var(--text-3); }
+    .compare-pane { display:grid; grid-template-columns:1fr 1fr; border:1px solid var(--line-soft); border-radius:9px; overflow:hidden; background:var(--surface); }
+    .compare-col { min-width:0; }
+    .compare-col + .compare-col { border-left:1px solid var(--line-soft); }
+    .compare-head { display:flex; align-items:center; gap:7px; padding:9px 10px; border-bottom:1px solid var(--line-soft); background:var(--surface-2); }
+    .compare-head b { font-size:10px; }
+    .code { min-height:325px; padding:13px; white-space:pre-wrap; color:#abbab4; background:#0b1014; font:9.5px/1.55 var(--mono); overflow:auto; }
+    .generated { color:var(--text-4); }
+
+    /* E — changeset */
+    .changeset-layout { display:grid; grid-template-columns:280px minmax(0,1fr) 250px; gap:10px; }
+    .change-list { border:1px solid var(--line-soft); border-radius:9px; background:var(--surface); overflow:hidden; }
+    .change-list-head { padding:10px; border-bottom:1px solid var(--line-soft); }
+    .change-row { display:grid; grid-template-columns:auto 1fr auto; gap:8px; align-items:start; padding:9px 10px; border-bottom:1px solid var(--line-soft); cursor:pointer; }
+    .change-row:last-child { border-bottom:0; }
+    .change-row.active { background:var(--green-soft); }
+    .change-row input { accent-color:var(--green); }
+    .change-row b { display:block; font-size:9.5px; }
+    .change-row .path { margin-top:4px; }
+    .diff { border:1px solid var(--line-soft); border-radius:9px; background:#0b1014; overflow:hidden; }
+    .diff-head { display:flex; align-items:center; gap:7px; padding:9px 10px; border-bottom:1px solid var(--line-soft); background:var(--surface-2); }
+    .diff-body { min-height:360px; padding:12px 0; font:9.5px/1.55 var(--mono); }
+    .diff-line { display:grid; grid-template-columns:30px 1fr; padding:1px 10px; color:var(--text-3); }
+    .diff-line.add { color:#b8e9c9; background:rgba(115,219,157,.08); }
+    .diff-line.del { color:#f3b2ae; background:rgba(255,127,120,.07); }
+    .review-rail { display:flex; flex-direction:column; gap:8px; }
+    .checklist { padding:11px; border:1px solid var(--line-soft); border-radius:9px; background:var(--surface); }
+    .check-row { display:flex; align-items:flex-start; gap:8px; padding:7px 0; border-bottom:1px solid var(--line-soft); color:var(--text-2); font-size:9.5px; }
+    .check-row:last-child { border-bottom:0; }
+    .check-mark { display:grid; place-items:center; width:16px; height:16px; border-radius:50%; background:var(--green-soft); color:var(--green); font:750 8px/1 var(--mono); }
+
+    /* F — operations hub */
+    .hub-grid { display:grid; grid-template-columns:minmax(0,1fr) 320px; gap:10px; }
+    .attention-stack { display:grid; gap:8px; }
+    .attention-card { display:grid; grid-template-columns:auto 1fr auto; gap:9px; align-items:start; padding:11px; border:1px solid var(--line-soft); border-radius:9px; background:var(--surface); }
+    .attention-icon { display:grid; place-items:center; width:28px; height:28px; border-radius:8px; background:var(--amber-soft); color:var(--amber); font:800 10px/1 var(--mono); }
+    .attention-card b { display:block; font-size:10.5px; }
+    .attention-card p { margin:4px 0 0; color:var(--text-3); font-size:9.5px; }
+    .quick-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:10px; }
+    .quick { padding:12px; border:1px solid var(--line-soft); border-radius:9px; background:var(--surface); cursor:pointer; text-align:left; }
+    .quick strong { display:block; margin-top:10px; font-size:10px; }
+    .quick span { display:block; margin-top:4px; color:var(--text-3); font-size:9px; }
+    .activity { padding:11px; border:1px solid var(--line-soft); border-radius:9px; background:var(--surface); }
+    .activity-row { display:grid; grid-template-columns:auto 1fr; gap:8px; padding:8px 0; border-bottom:1px solid var(--line-soft); }
+    .activity-row:last-child { border-bottom:0; }
+    .activity-dot { width:7px; height:7px; margin-top:4px; border-radius:50%; background:var(--green); }
+    .activity-row b { display:block; font-size:9px; }
+    .activity-row span { display:block; margin-top:3px; color:var(--text-4); font:560 8px/1.3 var(--mono); }
+
+    .tradeoffs { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); margin-top:14px; border:1px solid var(--line); border-radius:10px; background:rgba(13,17,22,.8); overflow:hidden; }
+    .tradeoff { min-width:0; padding:13px 14px; border-right:1px solid var(--line-soft); }
+    .tradeoff:last-child { border-right:0; }
+    .tradeoff b { display:block; margin-bottom:5px; color:var(--text-3); font:680 8px/1 var(--mono); letter-spacing:.1em; text-transform:uppercase; }
+    .tradeoff span { color:var(--text-2); font-size:10.5px; line-height:1.45; }
+    .tradeoff.benefit b { color:var(--green); }
+    .tradeoff.risk b { color:var(--amber); }
+
+    .overlay { position:fixed; inset:0; z-index:80; display:none; place-items:center; padding:18px; background:rgba(4,6,8,.75); backdrop-filter:blur(8px); }
+    .overlay.open { display:grid; }
+    .dialog { width:min(720px,100%); max-height:min(780px,92vh); overflow:auto; border:1px solid var(--line); border-radius:13px; background:var(--shell); box-shadow:0 34px 90px rgba(0,0,0,.55); }
+    .dialog-head { display:flex; align-items:flex-start; gap:12px; padding:16px; border-bottom:1px solid var(--line-soft); }
+    .dialog-head h2 { margin:0; font-size:16px; }
+    .dialog-head p { margin:4px 0 0; color:var(--text-3); font-size:10.5px; }
+    .dialog-close { margin-left:auto; width:31px; height:31px; border:1px solid var(--line); border-radius:7px; background:var(--surface-2); color:var(--text-3); cursor:pointer; }
+    .dialog-body { padding:16px; }
+    .sync-target { display:grid; grid-template-columns:auto 1fr auto; gap:10px; align-items:center; padding:10px; border:1px solid var(--line-soft); border-radius:8px; background:var(--surface); }
+    .sync-target + .sync-target { margin-top:7px; }
+    .sync-target input { accent-color:var(--green); }
+    .sync-target b { display:block; font-size:10.5px; }
+    .sync-target span { display:block; margin-top:3px; color:var(--text-4); font:560 8.5px/1 var(--mono); }
+    .dialog-summary { margin-top:12px; padding:11px; border:1px solid var(--line-soft); border-radius:8px; background:#0b1014; color:var(--text-3); font:570 9px/1.55 var(--mono); }
+    .dialog-actions { display:flex; justify-content:flex-end; gap:7px; padding:12px 16px; border-top:1px solid var(--line-soft); }
+    .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .field { display:grid; gap:5px; }
+    .field.full { grid-column:1/-1; }
+    .field label { color:var(--text-4); font:650 8px/1 var(--mono); text-transform:uppercase; letter-spacing:.08em; }
+    .field input, .field select, .field textarea { width:100%; border:1px solid var(--line); border-radius:7px; background:#0b1014; color:var(--text); padding:8px; font-size:10.5px; }
+    .field textarea { min-height:120px; font-family:var(--mono); }
+    .toast { position:fixed; z-index:100; left:50%; bottom:24px; transform:translate(-50%,18px); opacity:0; pointer-events:none; padding:9px 12px; border:1px solid var(--green-line); border-radius:8px; background:#13231a; color:var(--green); box-shadow:var(--shadow); font:650 10px/1 var(--mono); transition:.16s ease; }
+    .toast.show { opacity:1; transform:translate(-50%,0); }
+
+    body[data-viewport="mobile"] .mock-nav span:not(.active), body[data-viewport="mobile"] .mock-health { display:none; }
+    body[data-viewport="mobile"] .settings-canvas { padding:13px; }
+    body[data-viewport="mobile"] .page-head { display:grid; }
+    body[data-viewport="mobile"] .actions { justify-content:flex-start; }
+    body[data-viewport="mobile"] .metric-row { grid-template-columns:1fr 1fr; }
+    body[data-viewport="mobile"] .artifact-grid, body[data-viewport="mobile"] .harness-grid, body[data-viewport="mobile"] .collection, body[data-viewport="mobile"] .quick-grid { grid-template-columns:1fr; }
+    body[data-viewport="mobile"] .a-library, body[data-viewport="mobile"] .studio-layout, body[data-viewport="mobile"] .workbench, body[data-viewport="mobile"] .hub-grid { grid-template-columns:1fr; }
+    body[data-viewport="mobile"] .library-layout { display:block; }
+    body[data-viewport="mobile"] .library-nav { display:flex; gap:5px; overflow-x:auto; border-right:0; border-bottom:1px solid var(--line-soft); }
+    body[data-viewport="mobile"] .library-nav button { width:auto; flex:0 0 auto; }
+    body[data-viewport="mobile"] .library-nav .scope-block { display:none; }
+    body[data-viewport="mobile"] .file-list { border-right:0; border-bottom:1px solid var(--line-soft); max-height:180px; overflow:auto; }
+    body[data-viewport="mobile"] .harness-tabs { grid-template-columns:1fr 1fr; }
+    body[data-viewport="mobile"] .compare-pane { grid-template-columns:1fr; }
+    body[data-viewport="mobile"] .compare-col + .compare-col { border-left:0; border-top:1px solid var(--line-soft); }
+    body[data-viewport="mobile"] .changeset-layout { grid-template-columns:1fr; }
+    body[data-viewport="mobile"] .change-list { max-height:200px; overflow:auto; }
+    body[data-viewport="mobile"] .tradeoffs { grid-template-columns:1fr; }
+    body[data-viewport="mobile"] .tradeoff { border-right:0; border-bottom:1px solid var(--line-soft); }
+    body[data-viewport="mobile"] .tradeoff:last-child { border-bottom:0; }
+    body[data-viewport="mobile"] .option-axis { display:none; }
+
+    @media (max-width: 900px) {
+      .controls { flex-wrap:wrap; }
+      .option-tabs { order:2; width:100%; }
+      .control-spacer { display:none; }
+      .library-layout { grid-template-columns:130px 200px minmax(0,1fr); }
+      .harness-grid { grid-template-columns:1fr 1fr; }
+      .changeset-layout { grid-template-columns:230px minmax(0,1fr); }
+      .review-rail { grid-column:1/-1; display:grid; grid-template-columns:1fr 1fr; }
+    }
+    @media (max-width: 620px) {
+      .finding-inner { grid-template-columns:1fr; }
+      .option-context { grid-template-columns:auto 1fr; }
+      .option-axis { grid-column:2; text-align:left; }
+      .form-grid { grid-template-columns:1fr; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior:auto !important; transition:none !important; animation:none !important; }
+    }
+  </style>
+</head>
+<body data-viewport="desktop">
+  <header class="hero">
+    <div class="eyebrow">Golem · Settings IA decision lab</div>
+    <h1>Turn substrate into a <span>managed instruction system.</span></h1>
+    <p class="decision">Choose how Settings should organize canonical authoring, generated harness projections, connection health, and deliberate sync—without hiding where markdown lives or what “Sync” will actually change.</p>
+    <div class="contract" aria-label="Comparison invariants">
+      <span>canonical source · substrate/</span><span>markdown edit + preview</span><span>global + project scope</span><span>generated targets read-only</span><span>Claude · Codex · OpenCode · Pi</span><span>preview before sync</span>
+    </div>
+  </header>
+
+  <section class="finding" aria-label="Current-state finding">
+    <div class="finding-inner"><span class="finding-mark">!</span><div><strong>The current Settings page is stale.</strong> Its server catalog only contains <code>claudecode</code> and <code>opencode</code>, although the CLI/compiler already render <code>codex</code> and <code>pi</code>. Today, “Sync Now” loops that two-target legacy catalog, writes global renders, merges OpenCode config when enabled, and silently skips disabled targets.</div></div>
+  </section>
+
+  <div class="control-wrap">
+    <div class="controls">
+      <nav class="option-tabs" id="option-tabs" aria-label="Design options"></nav>
+      <div class="control-spacer"></div>
+      <label class="select-field">Scenario
+        <select id="scenario">
+          <option value="drift">Codex missing + drift</option>
+          <option value="editing">Two edits pending</option>
+          <option value="failure">Sync failure</option>
+        </select>
+      </label>
+      <div class="viewport-toggle" aria-label="Preview width">
+        <button type="button" data-viewport="desktop" aria-pressed="true">Desktop</button>
+        <button type="button" data-viewport="mobile" aria-pressed="false">Mobile</button>
+      </div>
+    </div>
+  </div>
+
+  <main class="lab">
+    <div class="option-context">
+      <div class="option-letter" id="option-letter">A</div>
+      <div class="option-copy"><h2 id="option-name"></h2><p id="option-thesis"></p></div>
+      <div class="option-axis" id="option-axis"></div>
+    </div>
+    <div class="viewport">
+      <section class="mock-shell" aria-live="polite">
+        <div class="mock-topbar"><div class="mock-logo">GO</div><div class="mock-brand">golem</div><div class="mock-nav"><span>Dashboard</span><span>Projects</span><span>Agents</span><span class="active">Settings</span></div><div class="mock-health">control plane online</div></div>
+        <div class="settings-canvas" id="stage"></div>
+      </section>
+    </div>
+    <section class="tradeoffs" id="tradeoffs" aria-label="Active option trade-offs"></section>
+  </main>
+
+  <div class="overlay" id="overlay" aria-hidden="true">
+    <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+      <header class="dialog-head"><div><h2 id="dialog-title"></h2><p id="dialog-subtitle"></p></div><button class="dialog-close" id="dialog-close" type="button" aria-label="Close dialog">×</button></header>
+      <div class="dialog-body" id="dialog-body"></div>
+      <footer class="dialog-actions" id="dialog-actions"></footer>
+    </section>
+  </div>
+  <div class="toast" id="toast" role="status"></div>
+
+  <script>
+    (function () {
+      "use strict";
+
+      var options = [
+        { id:"expanded", letter:"A", name:"Expanded matrix", thesis:"Keep the current vertical Settings rhythm, but add a real artifact library, explicit harness dimensions, and a safe sync review.", axis:"Familiar · scan-first · low migration", benefit:"Closest to today’s page, so users retain orientation while missing authoring and harness details become first-class.", cost:"Editing remains secondary to status cards and the matrix; long content requires scrolling between regions.", risk:"The page can become a long control panel as more artifact types and projects appear." },
+        { id:"library", letter:"B", name:"Library + inspector", thesis:"Treat substrate as a navigable content library: taxonomy, files, editor/preview, and projection status in one persistent workspace.", axis:"Artifact-first · dense · direct", benefit:"Fastest path from finding an instruction to editing it, with source path and generated destinations always visible.", cost:"Three-pane density assumes a desktop power-user mindset and needs careful mobile collapse.", risk:"Harness operations can feel like metadata beside the editor rather than a major system action." },
+        { id:"studio", letter:"C", name:"Publishing studio", thesis:"Organize authoring around collections and a publish rail, making canonical changes feel like deliberate releases to harness targets.", axis:"Content-first · calm · publish metaphor", benefit:"Approachable hierarchy and strong separation between saved source changes and rendered publication.", cost:"One extra conceptual layer—save versus publish—adds steps for quick single-file corrections.", risk:"The publishing metaphor may imply remote deployment even though renders are local filesystem outputs." },
+        { id:"workbench", letter:"D", name:"Harness workbench", thesis:"Start from Claude, Codex, OpenCode, or Pi; show exactly what each target receives and compare canonical source with its render.", axis:"Harness-first · projection confidence", benefit:"Best diagnosis surface for today’s Codex omission and for understanding uneven harness capabilities.", cost:"Cross-cutting content such as one skill rendered to four targets is fragmented across harness tabs.", risk:"Users may accidentally think harness projections are editable sources unless read-only boundaries are unmistakable." },
+        { id:"changeset", letter:"E", name:"Changeset review", thesis:"Stage instruction edits into a reviewable change set, validate them, then sync selected harnesses as one auditable operation.", axis:"Safety-first · git-like · deliberate", benefit:"Strongest error prevention and confidence for multi-file changes, deletions, renames, and broad syncs.", cost:"Heavier workflow for small edits; the system needs draft/change-set persistence and conflict handling.", risk:"Git vocabulary may intimidate non-technical users even if the underlying safety model is excellent." },
+        { id:"hub", letter:"F", name:"Operations hub", thesis:"Lead with what needs attention—missing targets, drift, failed syncs—then expose library and editor through focused actions.", axis:"Health-first · guided · low cognitive load", benefit:"Best everyday landing page: broken or stale instruction delivery is immediately actionable without reading a matrix.", cost:"Deep browsing and bulk editing live one step behind the operational overview.", risk:"Healthy systems can make the page feel sparse, while power users may miss the persistent library context." }
+      ];
+
+      var artifacts = [
+        { id:"agents", type:"Instructions", name:"AGENTS.md", path:"substrate/instructions/AGENTS.md", count:1, mark:"IN", status:"clean" },
+        { id:"managing", type:"Skills", name:"managing", path:"substrate/skills/managing/SKILL.md", count:17, mark:"SK", status:"edited" },
+        { id:"tracker", type:"Skills", name:"tracker bundle", path:"substrate/skills/tracker/", count:8, mark:"SK", status:"clean" },
+        { id:"worker", type:"Agents", name:"worker", path:"substrate/agents/worker.md", count:3, mark:"AG", status:"clean" },
+        { id:"manager", type:"Roles", name:"manager", path:"substrate/roles/manager.md", count:5, mark:"RO", status:"edited" },
+        { id:"hooks", type:"Automation", name:"lifecycle hooks", path:"substrate/hooks/hooks.json", count:7, mark:"HK", status:"clean" },
+        { id:"mcp", type:"Integrations", name:"MCP definition", path:"substrate/mcp.json", count:2, mark:"MC", status:"clean" }
+      ];
+
+      var harnesses = [
+        { id:"claude", name:"Claude Code", version:"2.1.x", enabled:true, adapter:"available", render:"in sync", runtime:"healthy" },
+        { id:"codex", name:"Codex", version:"0.48", enabled:true, adapter:"available", render:"not indexed", runtime:"healthy" },
+        { id:"opencode", name:"OpenCode", version:"1.1.25", enabled:false, adapter:"available", render:"disabled", runtime:"not running" },
+        { id:"pi", name:"Pi", version:"0.31", enabled:true, adapter:"available", render:"drifted", runtime:"pull only" }
+      ];
+
+      var markdown = {
+        agents: "# Golem — root workspace\n\nThis directory is the golem root: the source repo for the plugin, dashboard, tracker, and CLI.\n\n## Work choreography\n\nFeature-sized work defaults through a live `manager` role session when available.\n\n## Parallel work = worktrees\n\nUse a worktree only when a dispatch explicitly names one.",
+        managing: "---\nname: managing\ndescription: Intake, routing, verification, reconcile, and closure.\n---\n\n# Managing\n\nOwn the control loop. Ground requests, route work, and require mechanical evidence before closure.\n\n> Managers coordinate implementation; they do not silently become the builder.",
+        tracker: "---\nname: tracker\ndescription: Tracker phases, streams, subscriptions, and dispatch contracts.\n---\n\n# Tracker\n\nThe tracker is the source of truth. Use durable subscriptions for long waits and explicit phase evidence for transitions.",
+        worker: "# Worker\n\nImplement one bounded ticket, preserve unrelated changes, verify the journey, and return a four-part closing brief.",
+        manager: "# Role: manager\n\nMission: Own intake, routing, verification, reconcile, and closure.\n\nLeads with: `golem:managing`, `golem:tracker`, `golem:verify-done`.\n\nBoundaries: never skip dispatchability checks; never advance without evidence.",
+        hooks: "{\n  \"SessionStart\": [\"session-register.sh\", \"tracker-context.sh\"],\n  \"PostToolUse\": [\"journal-route.sh\"],\n  \"Stop\": [\"notify.sh\", \"passive-delta.sh\"]\n}",
+        mcp: "{\n  \"mcpServers\": {\n    \"golem\": { \"command\": \"node\", \"args\": [\"mcp/channel/index.js\"] }\n  }\n}"
+      };
+
+      var state = { option:"expanded", scenario:"drift", viewport:"desktop", artifact:"managing", preview:false, draft:null };
+      var lastFocus = null;
+      var toastTimer = null;
+
+      function escapeHtml(value) { return String(value).replace(/[&<>\"]/g, function (c) { return ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c]; }); }
+      function currentArtifact() { return artifacts.find(function (a) { return a.id === state.artifact; }) || artifacts[0]; }
+      function scenarioHarness(row) {
+        var next = Object.assign({}, row);
+        if (state.scenario === "editing") {
+          if (row.id === "codex") next.render = "3 changes";
+          if (row.id === "pi") next.render = "2 changes";
+        }
+        if (state.scenario === "failure") {
+          if (row.id === "opencode") { next.enabled = true; next.render = "validation failed"; }
+          if (row.id === "codex") next.render = "stale";
+        }
+        return next;
+      }
+      function tone(value) {
+        if (/sync|healthy|available|saved|clean/i.test(value)) return "ok";
+        if (/fail|error|missing/i.test(value)) return "error";
+        if (/drift|change|stale|not indexed/i.test(value)) return "warn";
+        if (/pull/i.test(value)) return "info";
+        return "off";
+      }
+      function status(value) { return "<span class='status " + tone(value) + "'>" + escapeHtml(value) + "</span>"; }
+      function artifactStatus(a) {
+        var edited = state.scenario === "editing" && (a.id === "managing" || a.id === "manager");
+        if (edited) return "edited";
+        if (state.scenario === "failure" && a.id === "hooks") return "invalid";
+        return a.status === "edited" && state.scenario !== "editing" ? "clean" : a.status;
+      }
+      function pageHead(title, subtitle, extra) {
+        return "<div class='page-head'><div><h3>" + title + "</h3><p>" + subtitle + "</p></div><div class='actions'>" + (extra || "") + "<button class='btn ghost' type='button' data-edit>Edit selected</button><button class='btn' type='button' data-add>Add item</button><button class='btn primary' type='button' data-sync>Review &amp; sync</button></div></div>";
+      }
+      function metrics() {
+        var attention = state.scenario === "failure" ? 3 : state.scenario === "editing" ? 2 : 2;
+        return "<div class='metric-row'><div class='metric'><span>Canonical items</span><b>37</b><small>7 collections</small></div><div class='metric'><span>Harness targets</span><b>4</b><small>2 runtime healthy</small></div><div class='metric attention'><span>Needs attention</span><b>" + attention + "</b><small>catalog · drift · validation</small></div><div class='metric'><span>Last complete sync</span><b>18m</b><small>Claude Code only</small></div></div>";
+      }
+      function artifactCards(limit) {
+        return "<div class='artifact-grid'>" + artifacts.slice(0, limit || artifacts.length).map(function (a) {
+          return "<button type='button' class='artifact-card " + (a.id === state.artifact ? "selected" : "") + "' data-artifact='" + a.id + "'><span class='artifact-card-top'><span class='type-icon'>" + a.mark + "</span><b>" + a.name + "</b></span><span class='path'>" + a.path + "</span><span class='artifact-card-foot'>" + status(artifactStatus(a)) + "<span class='badge'>" + a.type + "</span></span></button>";
+        }).join("") + "</div>";
+      }
+      function harnessCards() {
+        return "<div class='harness-grid'>" + harnesses.map(function (base) {
+          var h = scenarioHarness(base);
+          return "<article class='harness-card'><div class='harness-name'><b>" + h.name + "</b>" + status(h.enabled ? "enabled" : "disabled") + "</div><div class='harness-facts'><span>Adapter</span><span>" + h.adapter + "</span><span>Installed</span><span>" + h.version + "</span><span>Render</span><span>" + h.render + "</span><span>Runtime</span><span>" + h.runtime + "</span></div><div class='harness-actions'><button class='btn small' type='button' data-target='" + h.id + "'>Inspect</button><button class='btn small ghost' type='button' " + (!h.enabled ? "disabled" : "") + " data-sync>Sync target</button></div></article>";
+        }).join("") + "</div>";
+      }
+      function previewMarkdown(text) {
+        var lines = text.split("\n"), html = [], list = false;
+        lines.forEach(function (line) {
+          if (/^# /.test(line)) { if(list){html.push("</ul>");list=false;} html.push("<h1>"+escapeHtml(line.slice(2))+"</h1>"); }
+          else if (/^## /.test(line)) { if(list){html.push("</ul>");list=false;} html.push("<h2>"+escapeHtml(line.slice(3))+"</h2>"); }
+          else if (/^- /.test(line)) { if(!list){html.push("<ul>");list=true;} html.push("<li>"+escapeHtml(line.slice(2)).replace(/`([^`]+)`/g,"<code>$1</code>")+"</li>"); }
+          else if (/^> /.test(line)) { if(list){html.push("</ul>");list=false;} html.push("<blockquote>"+escapeHtml(line.slice(2))+"</blockquote>"); }
+          else if (line.trim() && line !== "---") { if(list){html.push("</ul>");list=false;} html.push("<p>"+escapeHtml(line).replace(/`([^`]+)`/g,"<code>$1</code>")+"</p>"); }
+        });
+        if(list) html.push("</ul>");
+        return html.join("");
+      }
+      function editor() {
+        var a = currentArtifact(), value = state.draft == null ? markdown[a.id] : state.draft;
+        return "<section class='editor'><div class='editor-head'><div class='editor-file'><b>" + a.name + "</b><div class='path'>" + a.path + " · canonical source</div></div><div class='editor-tabs'><button type='button' data-editor-mode='edit' aria-pressed='" + (!state.preview) + "'>Edit</button><button type='button' data-editor-mode='preview' aria-pressed='" + state.preview + "'>Preview</button></div></div>" + (state.preview ? "<div class='preview'>" + previewMarkdown(value) + "</div>" : "<textarea id='markdown-editor' spellcheck='false' aria-label='Markdown editor'>" + escapeHtml(value) + "</textarea>") + "<div class='editor-foot'><span>UTF-8 · Markdown · autosave off</span><div class='actions'><button class='btn small ghost' type='button' data-reset>Discard</button><button class='btn small' type='button' data-save>Save source</button></div></div></section>";
+      }
+      function syncMatrix() {
+        var rows = ["Instructions","Skills","Agents","Roles","Automation","Integrations"];
+        return "<table class='matrix'><thead><tr><th>Artifact</th>" + harnesses.map(function(h){return "<th>"+h.name+"</th>";}).join("") + "</tr></thead><tbody>" + rows.map(function(row,i){return "<tr><td>"+row+"</td>"+harnesses.map(function(h){var sh=scenarioHarness(h); var label=!sh.enabled?"disabled":(h.id==="codex"&&state.scenario==="drift"?"not indexed":(i===4&&h.id==="pi"?"unsupported":sh.render)); return "<td>"+status(label)+"</td>";}).join("")+"</tr>";}).join("") + "</tbody></table>";
+      }
+      function codexNotice() {
+        if (state.scenario === "editing") return "<div class='notice'><strong>2 source edits</strong><span>Nothing has been rendered yet. Review the change set before choosing target harnesses.</span></div>";
+        if (state.scenario === "failure") return "<div class='notice'><strong>Sync partially failed</strong><span>OpenCode config validation rejected the generated fragment; its previous config was restored.</span></div>";
+        return "<div class='notice'><strong>Catalog mismatch</strong><span>Codex and Pi adapters exist in the compiler, but this legacy Settings catalog only indexes Claude Code and OpenCode.</span></div>";
+      }
+
+      function renderExpanded() {
+        return pageHead("Substrate", "Manage canonical instructions, roles, agent cards, skills, automation, and harness renders.") + codexNotice() + "<div style='height:10px'></div>" + metrics() + "<div class='a-stack'><section class='panel'><div class='panel-head'><h4>Instruction library</h4><p>substrate/ · 37 items</p></div><div class='panel-body'>" + artifactCards(6) + "</div></section><div class='a-library'><section class='panel'><div class='panel-head'><h4>Harness connections</h4><p>availability ≠ enabled ≠ healthy</p></div><div class='panel-body'>" + harnessCards() + "</div></section>" + editor() + "</div><section class='panel'><div class='panel-head'><h4>Render coverage</h4><p>preview before sync</p></div>" + syncMatrix() + "</section></div>";
+      }
+      function renderLibrary() {
+        var a=currentArtifact();
+        return pageHead("Instruction library", "Browse the canonical substrate tree and inspect every harness projection.", "<button class='btn ghost' type='button'>⌘K Search</button>") + codexNotice() + "<div style='height:10px'></div><div class='library-layout'><nav class='library-nav' aria-label='Artifact categories'>" + ["All|37","Instructions|1","Skills|17","Agents|3","Roles|5","Automation|9","Integrations|2"].map(function(x,i){var p=x.split("|");return "<button type='button' class='"+(i===0?"active":"")+"'><span>"+p[0]+"</span><span>"+p[1]+"</span></button>";}).join("") + "<div class='scope-block'><span class='section-label'>Scope</span><b>Global substrate</b><div class='path' style='margin-top:4px'>/golem/substrate</div></div></nav><section class='file-list'><div class='file-list-head'><input class='search' aria-label='Filter artifacts' placeholder='Filter files…'></div>" + artifacts.map(function(f){return "<button class='file-row "+(f.id===a.id?"active":"")+"' type='button' data-artifact='"+f.id+"'><b>"+f.name+"</b><div class='path'>"+f.path+"</div><div class='file-row-meta'>"+status(artifactStatus(f))+"<span class='badge'>"+f.type+"</span></div></button>";}).join("") + "</section><main class='library-main'>" + editor() + "<div class='projection-strip'><span>Rendered projections</span>" + harnesses.map(function(h){var sh=scenarioHarness(h); return status(h.name+" · "+sh.render);}).join("") + "</div></main></div>";
+      }
+      function renderStudio() {
+        var groups=[{name:"Foundation",items:["AGENTS.md","MCP definition"]},{name:"Work choreography",items:["managing","tracker bundle","worker"]},{name:"Team roles",items:["manager","builder","planner"]},{name:"Automation",items:["lifecycle hooks","journal route"]}];
+        return pageHead("Substrate studio", "Author reusable instruction collections, then publish them to selected harnesses.", "<button class='btn ghost' type='button'>History</button>") + "<div class='studio-layout'><main><div class='change-banner'><div class='change-count'>"+(state.scenario==="editing"?"2":"!")+"</div><div><b>"+(state.scenario==="editing"?"Two saved source changes are ready to publish":"Instruction delivery needs review")+"</b><p>Canonical files are safe. Generated harness outputs remain unchanged until publish.</p></div><button class='btn' type='button' data-sync>Review publication</button></div><div class='collection'>" + groups.map(function(g){return "<section class='collection-card'><div class='collection-card-head'><span class='type-icon'>◇</span><b>"+g.name+"</b><span class='badge'>"+g.items.length+"</span></div><div class='collection-items'>"+g.items.map(function(n){var a=artifacts.find(function(x){return x.name===n;})||artifacts[1];return "<button type='button' class='collection-item' data-artifact='"+a.id+"'><span>"+n+"</span><span>open →</span></button>";}).join("")+"</div></section>";}).join("") + "</div><div style='height:10px'></div>"+editor()+"</main><aside class='publish-rail'><section class='panel'><div class='panel-head'><h4>Publish targets</h4><p>3 enabled</p></div><div class='panel-body' style='display:grid;gap:7px'>" + harnesses.map(function(h){var sh=scenarioHarness(h);var width=!sh.enabled?0:/sync|healthy/.test(sh.render)?100:55;return "<div class='publish-target'><div class='publish-target-head'><b>"+h.name+"</b>"+status(sh.render)+"</div><div class='bar'><span style='width:"+width+"%'></span></div><p>"+(sh.enabled?"Adapter "+sh.adapter+" · "+sh.version:"Disabled by configuration")+"</p></div>";}).join("") + "</div></section>"+codexNotice()+"</aside></div>";
+      }
+      function renderWorkbench() {
+        var active="codex", target=scenarioHarness(harnesses.find(function(h){return h.id===active;}));
+        var source=markdown[currentArtifact().id];
+        return pageHead("Harness workbench", "Inspect capabilities and compare canonical substrate with each generated target.", "<button class='btn ghost' type='button'>Capability map</button>") + "<div class='harness-tabs'>" + harnesses.map(function(h){var sh=scenarioHarness(h);return "<button class='harness-tab "+(h.id===active?"active":"")+"' type='button' data-target='"+h.id+"'><b>"+h.name+"</b>"+status(sh.render)+"</button>";}).join("") + "</div><div class='workbench'><aside class='target-summary'><h4>"+target.name+"</h4><div class='fact-list'><span>Adapter</span><span>"+target.adapter+"</span><span>Installed</span><span>"+target.version+"</span><span>Enabled</span><span>yes</span><span>Runtime</span><span>"+target.runtime+"</span><span>Render</span><span>"+target.render+"</span></div><div class='target-tree'><span class='section-label'>Receives</span><div class='tree-row'>▾ plugins/golem</div><div class='tree-row indent'>skills/ · 17</div><div class='tree-row indent'>hooks/ · lifecycle</div><div class='tree-row indent'>.mcp.json</div><div class='tree-row indent'>capabilities.json</div><div class='tree-row'>▸ .agents marketplace</div></div><div class='actions' style='justify-content:flex-start;margin-top:12px'><button class='btn' type='button' data-sync>Sync Codex</button><button class='btn ghost' type='button'>Open render</button></div></aside><section class='compare-pane'><div class='compare-col'><div class='compare-head'><b>Canonical source</b><span class='status ok'>editable</span></div><div class='code'>"+escapeHtml(source)+"</div></div><div class='compare-col'><div class='compare-head'><b>Codex projection</b>"+status(target.render)+"</div><div class='code generated'># GENERATED from "+currentArtifact().path+"\n# edit the canonical source, not this file\n\n"+escapeHtml(source)+"</div></div></section></div>";
+      }
+      function renderChangeset() {
+        var changeRows=[{id:"managing",op:"M",name:"managing/SKILL.md"},{id:"manager",op:"M",name:"roles/manager.md"},{id:"hooks",op:"!",name:"hooks/hooks.json"}];
+        return pageHead("Instruction changes", "Review canonical edits as one validated change set before rendering any harness output.", "<button class='btn ghost' type='button'>New change set</button>") + codexNotice() + "<div style='height:10px'></div><div class='changeset-layout'><section class='change-list'><div class='change-list-head'><span class='section-label'>Change set · 2 selected</span></div>" + changeRows.map(function(c,i){return "<label class='change-row "+(c.id===state.artifact?"active":"")+"'><input type='checkbox' "+(i<2?"checked":"")+"><span><b>"+c.name+"</b><span class='path'>substrate/"+c.name+"</span></span><span class='badge'>"+c.op+"</span></label>";}).join("") + "</section><section class='diff'><div class='diff-head'><b>substrate/skills/managing/SKILL.md</b><span class='status ok'>valid markdown</span></div><div class='diff-body'><div class='diff-line'><span>18</span><span># Managing</span></div><div class='diff-line del'><span>19</span><span>- Own intake and routing.</span></div><div class='diff-line add'><span>19</span><span>+ Own intake, routing, verification, reconcile, and closure.</span></div><div class='diff-line add'><span>20</span><span>+ Require mechanical evidence before advancing work.</span></div><div class='diff-line'><span>21</span><span></span></div><div class='diff-line'><span>22</span><span>## Boundaries</span></div><div class='diff-line add'><span>23</span><span>+ Generated harness files are never edited directly.</span></div></div></section><aside class='review-rail'><section class='checklist'><span class='section-label'>Preflight</span><div class='check-row'><span class='check-mark'>✓</span><span>Frontmatter and Markdown valid</span></div><div class='check-row'><span class='check-mark'>✓</span><span>Referenced skills exist</span></div><div class='check-row'><span class='check-mark'>✓</span><span>No generated file edited</span></div><div class='check-row'><span class='check-mark'>!</span><span>Codex dashboard target catalog missing</span></div></section><section class='checklist'><span class='section-label'>Render plan</span><div class='check-row'><span class='check-mark'>3</span><span>Harnesses selected</span></div><div class='check-row'><span class='check-mark'>12</span><span>Files written</span></div><div class='check-row'><span class='check-mark'>2</span><span>Obsolete files pruned</span></div><button class='btn primary' style='width:100%;margin-top:10px' type='button' data-sync>Review &amp; sync</button></section></aside></div>";
+      }
+      function renderHub() {
+        var cards = state.scenario === "failure" ? [{m:"!",t:"OpenCode sync failed",p:"Config validation rejected the generated fragment; previous config restored.",a:"Inspect error"},{m:"!",t:"Codex render is stale",p:"Three canonical files changed after the last Codex render.",a:"Review sync"},{m:"?",t:"Pi runtime is pull-only",p:"This is a capability fact, not a broken connection.",a:"View limits"}] : [{m:"!",t:"Codex missing from Settings catalog",p:"The adapter and CLI target exist, but the dashboard only indexes Claude Code and OpenCode.",a:"Repair catalog"},{m:"↻",t:"Pi render drifted",p:"Two canonical skills changed since the last Pi render.",a:"Review sync"},{m:"✎",t:"Role editing lives under Agents",p:"Move role authoring into the canonical Settings library.",a:"Open roles"}];
+        return pageHead("Instruction operations", "Keep substrate healthy, discoverable, and consistently rendered across harnesses.", "<button class='btn ghost' type='button'>View library</button>") + metrics() + "<div class='hub-grid'><main><section class='panel'><div class='panel-head'><h4>Needs attention</h4><p>highest confidence impact first</p></div><div class='panel-body'><div class='attention-stack'>" + cards.map(function(c,i){return "<article class='attention-card'><div class='attention-icon'>"+c.m+"</div><div><b>"+c.t+"</b><p>"+c.p+"</p></div><button class='btn small " +(i===0?"warning":"")+"' type='button' "+(i===1?"data-sync":"")+">"+c.a+"</button></article>";}).join("") + "</div></div></section><div class='quick-grid'><button class='quick' type='button' data-add><span class='type-icon'>＋</span><strong>Add instruction</strong><span>Skill, agent, role, hook, or support file</span></button><button class='quick' type='button' data-artifact='managing'><span class='type-icon'>✎</span><strong>Edit substrate</strong><span>Open the library at the last changed file</span></button><button class='quick' type='button' data-sync><span class='type-icon'>↻</span><strong>Review sync</strong><span>Preview writes and choose harness targets</span></button></div><div style='height:10px'></div>"+editor()+"</main><aside><section class='activity'><div class='panel-head' style='margin:-11px -11px 0'><h4>Recent instruction activity</h4></div><div class='activity-row'><span class='activity-dot'></span><div><b>manager role updated</b><span>substrate source · 6m ago</span></div></div><div class='activity-row'><span class='activity-dot' style='background:var(--blue)'></span><div><b>Claude Code render completed</b><span>28 unchanged · 18m ago</span></div></div><div class='activity-row'><span class='activity-dot' style='background:var(--amber)'></span><div><b>Codex catalog mismatch detected</b><span>dashboard status · 19m ago</span></div></div><div class='activity-row'><span class='activity-dot' style='background:var(--text-4)'></span><div><b>OpenCode disabled</b><span>configuration · 2d ago</span></div></div></section><div style='height:10px'></div><section class='panel'><div class='panel-head'><h4>Harness health</h4></div><div class='panel-body' style='display:grid;gap:7px'>" + harnesses.map(function(h){var sh=scenarioHarness(h);return "<div style='display:flex;align-items:center;gap:7px'><b style='font-size:9.5px'>"+h.name+"</b><span style='margin-left:auto'>"+status(sh.runtime)+"</span></div>";}).join("") + "</div></section></aside></div>";
+      }
+
+      var renderers = { expanded:renderExpanded, library:renderLibrary, studio:renderStudio, workbench:renderWorkbench, changeset:renderChangeset, hub:renderHub };
+
+      function renderTabs() {
+        document.getElementById("option-tabs").innerHTML = options.map(function (o) {
+          return "<button type='button' class='option-tab' data-option='"+o.id+"' aria-pressed='"+(o.id===state.option)+"'><b>"+o.letter+"</b><span>"+o.name+"</span></button>";
+        }).join("");
+      }
+      function persist() {
+        try { localStorage.setItem("golem-substrate-settings-lab-v1", JSON.stringify(state)); } catch (e) {}
+        history.replaceState(null,"","#option="+encodeURIComponent(state.option)+"&scenario="+encodeURIComponent(state.scenario)+"&viewport="+encodeURIComponent(state.viewport));
+      }
+      function restore() {
+        try { var saved=JSON.parse(localStorage.getItem("golem-substrate-settings-lab-v1")||"null"); if(saved&&typeof saved==="object") state=Object.assign(state,saved); } catch(e) {}
+        var p=new URLSearchParams(location.hash.replace(/^#/,""));
+        if(options.some(function(o){return o.id===p.get("option");})) state.option=p.get("option");
+        if(["drift","editing","failure"].indexOf(p.get("scenario"))>=0) state.scenario=p.get("scenario");
+        if(["desktop","mobile"].indexOf(p.get("viewport"))>=0) state.viewport=p.get("viewport");
+      }
+      function render() {
+        var o=options.find(function(x){return x.id===state.option;})||options[0];
+        document.body.dataset.viewport=state.viewport;
+        document.getElementById("option-letter").textContent=o.letter;
+        document.getElementById("option-name").textContent=o.name;
+        document.getElementById("option-thesis").textContent=o.thesis;
+        document.getElementById("option-axis").textContent=o.axis;
+        document.getElementById("stage").innerHTML=renderers[o.id]();
+        document.getElementById("tradeoffs").innerHTML="<div class='tradeoff benefit'><b>Benefit</b><span>"+o.benefit+"</span></div><div class='tradeoff'><b>Cost</b><span>"+o.cost+"</span></div><div class='tradeoff risk'><b>Risk</b><span>"+o.risk+"</span></div>";
+        document.getElementById("scenario").value=state.scenario;
+        renderTabs();
+        document.querySelectorAll("[data-viewport]").forEach(function(b){b.setAttribute("aria-pressed",String(b.dataset.viewport===state.viewport));});
+        persist();
+      }
+      function showToast(message) {
+        var el=document.getElementById("toast"); clearTimeout(toastTimer); el.textContent=message; el.classList.add("show"); toastTimer=setTimeout(function(){el.classList.remove("show");},1900);
+      }
+      function openDialog(kind) {
+        lastFocus=document.activeElement;
+        var title=document.getElementById("dialog-title"), sub=document.getElementById("dialog-subtitle"), body=document.getElementById("dialog-body"), actions=document.getElementById("dialog-actions");
+        if(kind==="edit") {
+          var artifact=currentArtifact(), source=state.draft===null?markdown[artifact.id]:state.draft;
+          title.textContent="Edit " + artifact.name; sub.textContent=artifact.path + " · canonical substrate source";
+          body.innerHTML="<div class='form-grid'><div class='field full'><label>Markdown</label><textarea id='dialog-editor'>"+escapeHtml(source)+"</textarea></div><div class='field full'><label>Rendered preview</label><div class='preview'>"+previewMarkdown(source)+"</div></div></div>";
+          actions.innerHTML="<button class='btn ghost' type='button' data-close>Cancel</button><button class='btn primary' type='button' data-save-dialog>Save canonical source</button>";
+        } else if(kind==="add") {
+          title.textContent="Add substrate item"; sub.textContent="Create a canonical Markdown or configuration source. Generated harness outputs are never created here.";
+          body.innerHTML="<div class='form-grid'><div class='field'><label>Type</label><select><option>Skill</option><option>Agent</option><option>Role</option><option>Instruction</option><option>Hook</option><option>Integration</option></select></div><div class='field'><label>Name</label><input value='release-coordinator'></div><div class='field full'><label>Canonical path</label><input class='mono' value='substrate/skills/release-coordinator/SKILL.md'></div><div class='field full'><label>Starter Markdown</label><textarea># Release coordinator\n\nDescribe when this instruction should be loaded and what contract it owns.</textarea></div></div>";
+          actions.innerHTML="<button class='btn ghost' type='button' data-close>Cancel</button><button class='btn primary' type='button' data-create>Create source</button>";
+        } else {
+          title.textContent="Review substrate sync"; sub.textContent="This renders canonical sources to selected harness outputs. It does not edit source files or restart running sessions.";
+          body.innerHTML=harnesses.map(function(h){var sh=scenarioHarness(h); return "<label class='sync-target'><input type='checkbox' "+(sh.enabled?"checked":"disabled")+"><span><b>"+h.name+"</b><span>Adapter "+sh.adapter+" · installed "+sh.version+" · runtime "+sh.runtime+"</span></span>"+status(sh.render)+"</label>";}).join("")+"<div class='dialog-summary'>PLAN\n  validate 2 changed canonical files\n  write 12 generated files\n  prune 2 obsolete generated files\n  preserve disabled OpenCode target\n  no runtime session restart\n\nCURRENT BUTTON GAP\n  legacy Settings would only attempt claudecode + opencode</div>";
+          actions.innerHTML="<button class='btn ghost' type='button' data-close>Cancel</button><button class='btn primary' type='button' data-run-sync>Sync 3 targets</button>";
+        }
+        var overlay=document.getElementById("overlay"); overlay.classList.add("open"); overlay.setAttribute("aria-hidden","false"); document.getElementById("dialog-close").focus();
+      }
+      function closeDialog() { var overlay=document.getElementById("overlay"); overlay.classList.remove("open"); overlay.setAttribute("aria-hidden","true"); if(lastFocus&&lastFocus.focus) lastFocus.focus(); }
+
+      restore(); render();
+
+      document.addEventListener("click",function(event){
+        var option=event.target.closest("[data-option]"); if(option){state.option=option.dataset.option;render();return;}
+        var viewport=event.target.closest("button[data-viewport]"); if(viewport){state.viewport=viewport.dataset.viewport;render();return;}
+        var artifact=event.target.closest("[data-artifact]"); if(artifact){state.artifact=artifact.dataset.artifact;state.draft=null;render();return;}
+        var mode=event.target.closest("[data-editor-mode]"); if(mode){state.preview=mode.dataset.editorMode==="preview";render();return;}
+        if(event.target.closest("[data-sync]")){openDialog("sync");return;}
+        if(event.target.closest("[data-add]")){openDialog("add");return;}
+        if(event.target.closest("[data-edit]")){openDialog("edit");return;}
+        if(event.target.closest("[data-save]")){var ta=document.getElementById("markdown-editor");if(ta)state.draft=ta.value;showToast("Canonical source saved in the lab");return;}
+        if(event.target.closest("[data-reset]")){state.draft=null;render();showToast("Draft discarded");return;}
+        if(event.target.closest("[data-run-sync]")){closeDialog();showToast("Mock sync complete · 3 targets");return;}
+        if(event.target.closest("[data-create]")){closeDialog();showToast("Mock substrate item created");return;}
+        if(event.target.closest("[data-save-dialog]")){var dialogEditor=document.getElementById("dialog-editor");if(dialogEditor)state.draft=dialogEditor.value;closeDialog();render();showToast("Canonical source saved in the lab");return;}
+        if(event.target.closest("[data-close]")){closeDialog();return;}
+      });
+      document.addEventListener("input",function(event){ if(event.target.id==="markdown-editor") state.draft=event.target.value; });
+      document.getElementById("scenario").addEventListener("change",function(event){state.scenario=event.target.value;render();});
+      document.getElementById("dialog-close").addEventListener("click",closeDialog);
+      document.getElementById("overlay").addEventListener("click",function(event){if(event.target===event.currentTarget)closeDialog();});
+      document.addEventListener("keydown",function(event){
+        if(event.key==="Escape"&&document.getElementById("overlay").classList.contains("open")){event.preventDefault();closeDialog();return;}
+        if(event.key==="ArrowRight"||event.key==="ArrowLeft"){
+          var tab=event.target.closest("[data-option]"); if(!tab)return; var i=options.findIndex(function(o){return o.id===state.option;}); i=(i+(event.key==="ArrowRight"?1:-1)+options.length)%options.length; state.option=options[i].id; render(); document.querySelector("[data-option='"+state.option+"']").focus();
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
