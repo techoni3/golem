@@ -45,9 +45,7 @@ function materializeHookFixture() {
   const libDir = path.join(root, 'lib');
   fs.mkdirSync(hooksDir, { recursive: true });
   fs.mkdirSync(libDir, { recursive: true });
-  for (const name of ['hook.mjs', 'direct-lifecycle.mjs']) {
-    fs.copyFileSync(path.join(repo, 'shims/codex', name), path.join(hooksDir, name));
-  }
+  fs.copyFileSync(path.join(repo, 'shims/codex/hook.mjs'), path.join(hooksDir, 'hook.mjs'));
   for (const name of ['golem-home.js', 'project-id.js', 'session-facts.js', 'session-registry.js', 'session-role.js']) {
     fs.copyFileSync(path.join(repo, 'lib', name), path.join(libDir, name));
   }

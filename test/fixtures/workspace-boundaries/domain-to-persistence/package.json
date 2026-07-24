@@ -1,7 +1,0 @@
-{
-  "name": "@golem/domain",
-  "expectedBoundaryRule": "domain-to-persistence",
-  "dependencies": {
-    "@golem/persistence": "0.0.0-fixture"
-  }
-}

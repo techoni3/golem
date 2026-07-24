@@ -1,62 +1,45 @@
 # Release readiness checklist
 
-Candidate: `@laveesingh/golem` 5.1.1, GOL-59/GOL-60 rebuild gate.
-Certified toolchain: Node.js 24.18.x, npm 11.16.x, TypeScript 7.0.2 with
-private codegen TypeScript 5.9.3.
+Verified 2026-07-13 for `@laveesingh/golem` 5.0.16 on Node.js 22.22.3 and npm
+10.9.8. This is a verification record, not a publication or tag.
 
-This is a reproducible verification record, not a publication or tag. A release
-is eligible only when every required command below exits zero and the generated
-GOL-60 report records no required parity gap.
+## Verdict
 
-## Package contract
+**Release-ready.** The isolated test, production dashboard, browser, packed
+install/render, and native-harness matrix passes. The public support boundaries
+are in the README support matrix.
 
-- The positive tarball allowlist contains compiled release ESM, CLI/runtime
-  helpers, static dashboard, substrate/manifests/shims, the relocatable MCP
-  artifact, documentation, and licenses.
-- Private workspace source/symlinks, TypeScript, OpenAPI codegen, dev tools,
-  Playwright, `mcp/channel`, nested `node_modules`, and checkout paths are
-  absent.
-- Postinstall validates Node, artifact checksums, exact
-  `better-sqlite3@12.11.1`, and an in-memory query. It remains stopped and does
-  not create Golem state.
-- Setup, harness render/install, service control, data migration/cutover,
-  package update, and rollback are explicit operations.
+## Mechanical checklist
 
-## Mechanical gate
+- [x] `npm test` — exit 0; session facts/endpoint leases (16 assertions), Codex
+  native 0.144.1 and bundled MCP, Pi Tier B/pickup and TrackerDB lease journeys,
+  OpenCode shim/passive delivery, compiler enforcement, and channel tracker
+  journey all passed.
+- [x] `npm run dashboard:build` — exit 0; Vite transformed 3,699 modules and
+  produced the local production bundle.
+- [x] `npm run test:dashboard:browser` — exit 0; isolated ephemeral Chrome and
+  a dynamically allocated dashboard port passed the seeded journey, including
+  dispatch, sanitization, modal accessibility, session facts, and all 76 dist
+  assets free of runtime CDN/Babel references.
+- [x] `npm run test:release` — exit 0; a fresh tarball was installed under a
+  temporary HOME/GOLEM_HOME/XDG_CONFIG_HOME, then Claude Code, marketplace,
+  OpenCode, Codex, and Pi renders completed on isolated port 17421.
+- [x] `npm pack --dry-run --json` — 249 files; LICENSE, README, PRIVACY,
+  SECURITY, CONTRIBUTING, dashboard production output, and CLI entry point are
+  present.
+- [x] Repository scans — no `/Users/...` developer paths in public source/docs,
+  no runtime CDN/Babel references in `dashboard/dist`, no common private-key,
+  AWS, GitHub-token, or OpenAI-key signatures, and `git diff --check` passed.
 
-```sh
-npm ci
-npm run build
-npm run check
-npm run api:check
-npm run verify:package
-npm run verify:render
-npm run test:journey -- --scenario install-update-rollback
-npm run docs:check
-npm pack --dry-run
-golem sync --check --all
-git diff --check
-```
+## Environment and residual non-blockers
 
-The final J1–J8 orchestration additionally runs:
-
-```sh
-npm run test:acceptance -- --matrix J1,J2,J3,J4,J5,J6,J7,J8 --artifact packed
-npm run test:browser -- --project acceptance
-npm run test:legacy-baseline
-npm run parity:report -- --require-zero-gaps
-```
-
-Evidence records exact commands, exit codes, decisive scenario counts/logs,
-artifact SHA-256, Node/addon/SQLite/platform versions, failure-only sanitized
-browser artifacts, and residual risks. Tests use disposable homes, caches,
-ports, databases, configs, services, and renders.
-
-## Support boundaries
-
-Cold macOS arm64 and x64 jobs must independently load the exact native addon
-and exercise SQLite WAL/restart/integrity. Air-gapped native installation is
-unsupported unless the matching prebuild or compiler toolchain is already
-cached. A missing harness binary, credential, daemon, model, or verified
-consumption path is reported as unavailable/unqualified; it is never converted
-into a fabricated pass.
+- Claude Code 2.1.207, OpenCode 1.17.18, and Codex CLI 0.144.1 were present.
+- Pi was not installed, so the portable Tier B adapter and production pickup
+  contract were exercised by the isolated journey rather than a native Pi CLI.
+- Substrate lint emitted three existing orphan-skill warnings for
+  `get-consult`, `journaling`, and `provide-consult`; enforcement and tests
+  still passed.
+- The working tree and this report commit pass `git diff --check`. Running it
+  across the complete umbrella range reports trailing spaces embedded in
+  generated Vite vendor assets; these are build output, not source or a
+  release-behavior failure.

@@ -53,7 +53,7 @@ try {
   const hooks = JSON.parse(fs.readFileSync(path.join(plugin, 'hooks/hooks.json'))).hooks;
   assert.deepEqual(Object.keys(hooks), ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PreCompact', 'PostCompact', 'SubagentStop', 'Stop']);
   const mcp = JSON.parse(fs.readFileSync(path.join(plugin, '.mcp.json')));
-  assert.deepEqual(mcp.golem, { command: 'node', args: ['mcp/golem-mcp.mjs'], cwd: '.' });
+  assert.deepEqual(mcp.golem, { command: 'node', args: ['mcp/channel/index.js'], cwd: '.' });
   assert.doesNotMatch(JSON.stringify(mcp), /PLUGIN_ROOT/);
   await mcpInitialize(mcp.golem, plugin);
   const projectRoot = path.join(temp, 'codex-project');

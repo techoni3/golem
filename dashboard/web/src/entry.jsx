@@ -62,10 +62,4 @@ await import('./tweaks.jsx');
 await import('./drawer-ceo.jsx');
 await import('./native-session-drawer.jsx');
 await import('./ideas-drawer.jsx');
-const legacyApplication = await import('./app.jsx');
-
-// The typed shell imports this named component through its narrow compatibility
-// adapter. Standalone legacy delivery still reaches this entrypoint directly.
-export const LegacyDashboardApp = legacyApplication.LegacyDashboardApp;
-export const LegacyDashboardPageBody = legacyApplication.LegacyDashboardPageBody;
-export const LegacyDashboardOverlays = legacyApplication.LegacyDashboardOverlays;
+await import('./app.jsx');

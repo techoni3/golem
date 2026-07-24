@@ -4,7 +4,6 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { readEndpointLeases, readSessionFacts } from './session-facts.js';
-import { assertLegacyWriterAllowed, legacyWritesAllowed } from './legacy-writer-guard.js';
 
 export const BUILTIN_ROLES = Object.freeze([
   { name: 'manager', color: '#f59e0b', glyph: 'MG', builtin: true },
@@ -121,7 +120,6 @@ function readRolesIndexRaw() {
 }
 
 function writeRolesIndex(roles) {
-  assertLegacyWriterAllowed('roles/index.json');
   fs.mkdirSync(rolesOverlayDir(), { recursive: true });
   const target = rolesIndexPath();
   const tmp = `${target}.tmp.${process.pid}`;
@@ -131,7 +129,6 @@ function writeRolesIndex(roles) {
 }
 
 export function migrateSessionRoles({ actor = 'system:role-migration' } = {}) {
-  assertLegacyWriterAllowed('sessions.json:role-migration');
   const file = sessionsJsonPath();
   const now = new Date().toISOString();
   let changed = false;
@@ -176,10 +173,8 @@ export function readRoleRegistry() {
     for (const builtin of BUILTIN_ROLES) if (!byName.has(builtin.name)) byName.set(builtin.name, normalizeRoleMeta(builtin));
   }
   const roles = [...byName.values()].sort((a, b) => Number(b.builtin) - Number(a.builtin) || a.name.localeCompare(b.name));
-  if (legacyWritesAllowed()) {
-    writeRolesIndex(roles);
-    migrateSessionRoles();
-  }
+  writeRolesIndex(roles);
+  migrateSessionRoles();
   roleRegistryCache = roles;
   return roles.map((r) => ({ ...r }));
 }
@@ -199,7 +194,6 @@ export function getRole(name) {
 }
 
 export function createRole({ name, color, glyph, body } = {}) {
-  assertLegacyWriterAllowed('roles/index.json');
   const meta = normalizeRoleMeta({ name, color, glyph, builtin: false });
   const roles = readRoleRegistry();
   if (roles.some((r) => r.name === meta.name)) throw new Error(`role already exists: ${meta.name}`);
@@ -214,7 +208,6 @@ function assignedSessionsForRole(role) {
 }
 
 export function deleteRole(name, { force = false } = {}) {
-  assertLegacyWriterAllowed('roles/index.json');
   const normalized = normalizeRoleName(name);
   const roles = readRoleRegistry();
   const role = roles.find((r) => r.name === normalized);
@@ -236,7 +229,6 @@ export function deleteRole(name, { force = false } = {}) {
 }
 
 export function updateRoleMeta(name, patch = {}) {
-  assertLegacyWriterAllowed('roles/index.json');
   const normalized = normalizeRoleName(name);
   const roles = readRoleRegistry();
   const idx = roles.findIndex((r) => r.name === normalized);
@@ -272,7 +264,6 @@ export function listRoleCards() {
 }
 
 export function writeRoleCard(role, body) {
-  assertLegacyWriterAllowed('roles/*.md');
   const normalized = normalizeRole(role);
   if (!normalized) throw new Error('role is required');
   const text = String(body ?? '').trimEnd();
@@ -473,7 +464,6 @@ function roleTargetForSession(reg, sessionId) {
 }
 
 export function setSessionRole(sessionId, role, { by } = {}) {
-  assertLegacyWriterAllowed('sessions.json:role');
   if (!sessionId) throw new Error('session id is required');
   validateBy(by);
   const nextRole = normalizeRole(role);
@@ -526,7 +516,6 @@ function readChannels() {
 }
 
 export async function pushRoleBriefDirect(sessionId, role, row = {}) {
-  assertLegacyWriterAllowed('channels.json:role-brief');
   const content = roleChangeBrief(role, { session_id: sessionId, ...row });
   if (!sessionId || !content) return { ok: false, skipped: true };
   const ch = readChannels().find((c) => c.session_id === sessionId && pidAlive(c.pid));

@@ -1,6 +1,0 @@
-{
-  "version": 1,
-  "channels": [
-    { "canonical_id": "codex-current-1", "owner_token": "channel-secret-value" }
-  ]
-}

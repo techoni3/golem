@@ -8,16 +8,13 @@ try {
   execFileSync(process.execPath, [path.join(repo, 'cli/golem.js'), 'sync', '--target', 'pi'], { cwd: repo, env });
   assert.equal(fs.existsSync(path.join(env.HOME, '.pi')), false); const root = path.join(env.GOLEM_HOME, 'renders', 'pi');
   const caps = JSON.parse(fs.readFileSync(path.join(root, 'capabilities.json'))); assert.equal(caps.tier, 'B'); assert.equal(caps.push_delivery, false); assert.equal(caps.node, '>=22.19');
-  const executable = path.join(root, 'golem.mjs');
-  assert.ok(!fs.readFileSync(executable, 'utf8').includes(repo), 'extension is portable');
-  const bindingDir = path.join(env.GOLEM_HOME, 'pi-adapter', 'bindings'); fs.mkdirSync(bindingDir, { recursive: true }); fs.writeFileSync(path.join(bindingDir, 'pi-session-uuid.json'), JSON.stringify({ project_id: 'prj_00000000-0000-4000-8000-000000000051', session_id: 'ses_00000000-0000-4000-8000-000000000051', generation_id: 'gen_00000000-0000-4000-8000-000000000051', endpoint_id: 'ep_00000000-0000-4000-8000-000000000051', owner_fence: '1', producer_instance_id: 'prod_00000000-0000-4000-8000-000000000051' }));
+  assert.ok(!fs.readFileSync(path.join(root, 'golem.ts'), 'utf8').includes(repo), 'extension is portable');
+  const executable = path.join(root, 'golem.mjs'); fs.copyFileSync(path.join(root, 'golem.ts'), executable);
   const handlers = {}; const extension = (await import(`file://${executable}`)).default; process.env.GOLEM_HOME = env.GOLEM_HOME; extension({ on: (name, handler) => { handlers[name] = handler; } });
   let name = 'spike'; const ctx = { cwd: repo, isIdle: () => true, sessionManager: { getSessionId: () => 'pi-session-uuid', getSessionFile: () => '/tmp/pi-session.jsonl', getSessionName: () => name } };
-  handlers.session_start({ reason: 'new' }, ctx); name = 'renamed'; handlers.session_info_changed({ name }, ctx); handlers.tool_call({ toolName: 'bash', toolCallId: 'tool-1' }, ctx);
+  handlers.session_start({ reason: 'resume' }, ctx); name = 'renamed'; handlers.session_info_changed({ name }, ctx); handlers.tool_call({ toolName: 'bash', toolCallId: 'tool-1' }, ctx);
   assert.equal(JSON.parse(fs.readFileSync(path.join(env.GOLEM_HOME, 'session-facts.json'))).facts[0].observations.tool_name, 'bash'); handlers.agent_settled({}, ctx);
   const fact = JSON.parse(fs.readFileSync(path.join(env.GOLEM_HOME, 'session-facts.json'))).facts[0]; assert.equal(fact.canonical_id, 'pi-session-uuid'); assert.equal(fact.name, 'renamed'); assert.equal(fact.status, 'idle');
-  const runtimeSignals = fs.readdirSync(path.join(env.GOLEM_HOME, 'pi-adapter', 'runtime-events', 'pending')).map((name) => JSON.parse(fs.readFileSync(path.join(env.GOLEM_HOME, 'pi-adapter', 'runtime-events', 'pending', name), 'utf8'))).sort((left, right) => left.producer_sequence - right.producer_sequence);
-  assert.deepEqual(runtimeSignals.slice(0, 3).map((signal) => signal.event_kind), ['session.started', 'endpoint.claimed', 'capabilities.reported']); assert.equal(runtimeSignals[0].payload.generation.generation_id, 'gen_00000000-0000-4000-8000-000000000051'); assert.equal(runtimeSignals[1].payload.endpoint.delivery_mode, 'next_turn'); assert.equal(runtimeSignals[2].payload.capabilities[0].reason_code, 'real_user_turn_required'); assert.equal(JSON.stringify(runtimeSignals).includes('push'), false);
   const inboxDir = path.join(env.GOLEM_HOME, 'pi-inbox', 'pi-session-uuid');
   // Production drainer accepts a Pi dispatch durably as queued/next-turn even
   // though the target has no push channel.
@@ -30,10 +27,9 @@ try {
   // Every acknowledged enqueue owns a distinct linked file; a second producer
   // cannot write an inode that the consumer has renamed/unlinked.
   const concurrent = enqueuePiBrief('pi-session-uuid', 'concurrent', {}, { home: env.GOLEM_HOME, file: path.join(env.GOLEM_HOME, 'session-facts.json'), messageId: 'q2' }); assert.equal(concurrent.queued, true); assert.equal(fs.readdirSync(path.join(inboxDir, 'pending')).length, 2);
-  const canonicalInbox = path.join(env.GOLEM_HOME, 'pi-next-turn', 'ses_00000000-0000-4000-8000-000000000051', 'gen_00000000-0000-4000-8000-000000000051'); fs.mkdirSync(path.join(canonicalInbox, 'pending'), { recursive: true }); fs.writeFileSync(path.join(canonicalInbox, 'pending', 'canonical-q1.json'), JSON.stringify({ schema_version: 'golem.pi-next-turn/v1', deliveryId: 'canonical-q1', claimToken: 'canonical-claim', text: 'canonical next-turn brief', binding: { project_id: 'prj_00000000-0000-4000-8000-000000000051', session_id: 'ses_00000000-0000-4000-8000-000000000051', generation_id: 'gen_00000000-0000-4000-8000-000000000051', endpoint_id: 'ep_00000000-0000-4000-8000-000000000051', owner_fence: '1' }, created_at: new Date().toISOString() }));
   fs.mkdirSync(path.join(inboxDir, 'processing'), { recursive: true }); fs.renameSync(path.join(inboxDir, 'pending', 'q2.json'), path.join(inboxDir, 'processing', 'q2.json'));
-  const transformed = handlers.input({ text: 'next turn' }, ctx); assert.match(transformed.text, /production queued brief/); assert.match(transformed.text, /canonical next-turn brief/); assert.equal(fs.readdirSync(path.join(inboxDir, 'processing')).length, 2, 'crash before agent_start remains retryable'); assert.equal(fs.existsSync(path.join(inboxDir, 'acks')), false); assert.ok(fs.existsSync(path.join(canonicalInbox, 'processing', 'canonical-q1.json')));
-  handlers.agent_start({}, ctx); assert.equal(fs.readdirSync(path.join(inboxDir, 'acks')).length, 2); assert.ok(fs.existsSync(path.join(canonicalInbox, 'acks', 'canonical-q1.json'))); assert.ok(fs.existsSync(path.join(canonicalInbox, 'acks', 'canonical-q1.json.lease.json')));
+  assert.match(handlers.input({ text: 'next turn' }, ctx).text, /production queued brief/); assert.equal(fs.readdirSync(path.join(inboxDir, 'processing')).length, 2, 'crash before agent_start remains retryable'); assert.equal(fs.existsSync(path.join(inboxDir, 'acks')), false);
+  handlers.agent_start({}, ctx); assert.equal(fs.readdirSync(path.join(inboxDir, 'acks')).length, 2);
   fs.writeFileSync(path.join(inboxDir, 'acks', 'malformed.json'), '{');
   await drainer.tick(); assert.equal(commentsDelivered, false); assert.ok(fs.existsSync(path.join(inboxDir, 'acks', '.claims'))); assert.ok(fs.existsSync(path.join(inboxDir, 'acks', 'malformed')));
   await drainer.tick(); drainer.close(); assert.equal(queueStatus, 'delivered'); assert.equal(envelopeDelivered, true); assert.equal(commentsDelivered, true); assert.equal(passiveDelivered, true);

@@ -23,7 +23,7 @@ import { z } from 'zod';
 import { projectIdFor } from '../../lib/project-id.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
-const DASHBOARD_SERVER = path.resolve(__dirname, '../../dashboard/server/index.js');
+const DASHBOARD_SERVER = path.resolve(__dirname, '../../../dashboard/server/index.js');
 const CHANNEL_DIR = process.env.GOLEM_CHANNEL_SOURCE ? path.resolve(process.env.GOLEM_CHANNEL_SOURCE) : __dirname;
 const CHANNEL_SERVER = path.join(CHANNEL_DIR, 'index.js');
 const CHANNEL_ROOT = path.resolve(CHANNEL_DIR, '../..');

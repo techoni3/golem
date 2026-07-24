@@ -1,5 +1,0 @@
-# Generated Vite bundles retain template-string whitespace in embedded
-# grammars/shaders. Do not classify that generator output as authored-source
-# trailing whitespace; keep normal whitespace checks active everywhere else.
-dashboard/dist/** whitespace=-trailing-space
-dist/release/** whitespace=-trailing-space

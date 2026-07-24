@@ -1,1 +1,0 @@
-import "@golem/openapi-codegen";

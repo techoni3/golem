@@ -20,26 +20,18 @@ import { initDispatchDrainer } from './dispatch-queue.js';
 import { registerSubstrateRoutes } from './substrate.js';
 import { teamAssists } from './team-assist.js';
 import { golemHome, dashboardJsonPath, journalDirFor, sessionsJsonPath } from '../../lib/golem-home.js';
-import { assertLegacyWriterAllowed } from '../../lib/legacy-writer-guard.js';
 import { createRole, deleteRole, getRole, listRoleCards, roleChangeBrief, roleMission, setSessionRole, updateRoleMeta, writeRoleCard } from '../../lib/session-role.js';
-import { attachTrackerCore } from './tracker-core-attachment.js';
-
-assertLegacyWriterAllowed('legacy-dashboard-server');
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const WEB_SOURCE_ROOT = path.resolve(__dirname, '..', 'web');
-const WEB_DIST_ROOT = process.env.GOLEM_LEGACY_STATIC_ROOT
-  ? path.resolve(process.env.GOLEM_LEGACY_STATIC_ROOT)
-  : path.resolve(__dirname, '..', 'dist');
+const WEB_DIST_ROOT = path.resolve(__dirname, '..', 'dist');
 const WEB_ROOT = fs.existsSync(path.join(WEB_DIST_ROOT, 'index.html')) ? WEB_DIST_ROOT : WEB_SOURCE_ROOT;
 // The tracker genre templates live OUTSIDE dashboard/, in the substrate
 // source tree at substrate/skills/tracker/templates/ (TKT-0574 — plugin/ is
 // now a generated render of substrate/, not the SoT). Resolve the repo root
 // two levels up from this file (dashboard/server/index.js → dashboard/ →
 // repo root) and point at that dir. Used by GET /api/templates.
-const REPO_ROOT = process.env.GOLEM_PACKAGE_ROOT
-  ? path.resolve(process.env.GOLEM_PACKAGE_ROOT)
-  : path.resolve(__dirname, '..', '..');
+const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const TEMPLATES_DIR = path.join(REPO_ROOT, 'substrate', 'skills', 'tracker', 'templates');
 
 // Legacy markdown tracker columns (kept in /api/meta for API stability; the UI
@@ -481,13 +473,10 @@ async function main() {
   const chat = createChat();
   chat.start();
 
-  // Open the legacy tracker first. It remains the schema/migration authority;
-  // the typed capability is attached afterwards through a tracker-only,
-  // migration-neutral connection before any routes are registered.
-  const trackerClock = Object.freeze({ now: () => new Date().toISOString() });
-  const trackerPath = process.env.GOLEM_TRACKER_DB || path.join(golemHome(), 'tracker.db');
-  const tracker = openTrackerDb(trackerPath);
-  const trackerCoreAttachment = attachTrackerCore(tracker, trackerPath, trackerClock);
+  // WS2: the dashboard is the SINGLE WRITER of the tracker DB. Open it once
+  // here (it auto-inits / migrates). GOLEM_TRACKER_DB override flows through
+  // openTrackerDb → defaultDbPath. Closed in shutdown() below.
+  const tracker = openTrackerDb();
   tracker.recomputeAllCommentDispatchStates();
 
   // Load the dashboard state (projects, plans, milestones, channels). State
@@ -619,7 +608,9 @@ async function main() {
   }
 
   function hasAuthenticatedHealthyChannel(session) {
-    return session.channel_present === true && session.endpoint_health === 'healthy';
+    return session.channel_present === true
+      && session.endpoint_health === 'healthy'
+      && session.delivery_reason !== 'not_ready';
   }
 
   function enrichSessionRows(rows, channels = []) {
@@ -2487,7 +2478,6 @@ async function main() {
       chat.stop();
       await state.close();
       tracker.close();
-      await trackerCoreAttachment.close();
       await fastify.close();
     } finally {
       process.exit(0);

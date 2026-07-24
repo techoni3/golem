@@ -1,13 +1,34 @@
 // Root App — routing + global shell.
 
-// The typed dashboard shell imports these two leaf seams independently.  The
-// compatibility island never mounts this App: it owns the URL/history and
-// supplies the selected route plus one close callback.  Keeping the page and
-// drawer exports here preserves the current product components without giving
-// them a second shell, router listener, or overlay owner.
-export function LegacyDashboardPageBody({ route, onNavigate, onTicketPageClose }) {
+function App() {
   useStore();
+  // Route state is driven by window.Router (path-based). The router pushes
+  // history on navigation (so Back traverses pages) and dispatches `route-change`
+  // on every change; popstate fires on Back/Forward. Both keep this state in
+  // sync with the URL. Replaces the old hash+replaceState model that never
+  // pushed, so Back used to exit the SPA.
+  const [route, setRoute] = React.useState(() => window.Router.parseLocation());
   const state = window.Store.getState();
+
+  React.useEffect(() => {
+    const sync = () => setRoute(window.Router.parseLocation());
+    window.addEventListener('popstate', sync);
+    window.addEventListener('route-change', sync);
+    return () => {
+      window.removeEventListener('popstate', sync);
+      window.removeEventListener('route-change', sync);
+    };
+  }, []);
+
+  // TKT-0206: the ideas count is now tracked in the Sidebar component
+  // (it renders the Ideas link with the count badge). The IdeasDrawer
+  // also reads /api/ideas to populate its list; both refresh on the
+  // shared 'ideas:changed' event.
+
+  // setRoute navigates (push) — real links + in-app nav both go through this.
+  // Callers that want replace semantics (filter typing) call window.Router.go
+  // directly with {replace:true}.
+  const navigate = (r) => window.Router.go(r);
 
   let page;
   if (!state.ready) {
@@ -21,88 +42,63 @@ export function LegacyDashboardPageBody({ route, onNavigate, onTicketPageClose }
         </div>
       </div>
     );
-  } else if (route.kind === 'dashboard') page = <Dashboard setRoute={onNavigate}/>;
-  else if (route.kind === 'tracker') page = <TrackerBoard route={route} setRoute={onNavigate} view={route.view}/>;
+  } else if (route.kind === 'dashboard') page = <Dashboard setRoute={navigate}/>;
+  else if (route.kind === 'tracker') page = <TrackerBoard route={route} setRoute={navigate} view={route.view}/>;
   else if (route.kind === 'specs') page = <SpecsPage/>;
-  else if (route.kind === 'projects') page = <ProjectsPage setRoute={onNavigate}/>;
-  else if (route.kind === 'agents') page = <AgentsPage setRoute={onNavigate}/>;
+  else if (route.kind === 'projects') page = <ProjectsPage setRoute={navigate}/>;
+  else if (route.kind === 'agents') page = <AgentsPage setRoute={navigate}/>;
   else if (route.kind === 'logs') page = <LogsPage/>;
   else if (route.kind === 'settings') page = <SettingsPage/>;
   else if (route.kind === 'project') page = (
-    <ProjectView projectId={route.id} tab={route.tab} showArchived={route.showArchived} q={route.q} setRoute={onNavigate}/>
+    <ProjectView projectId={route.id} tab={route.tab} showArchived={route.showArchived} q={route.q} setRoute={navigate}/>
   );
   else if (route.kind === 'ticket') page = (
     // Standalone ticket page (TKT-0154): reuses TicketDrawer in page variant so
     // the full interactive detail (body, annotations, field controls, dispatch,
     // comments) lives at /tickets/<id> — deep-linkable, refresh-safe.
     <TicketDrawer variant="page" open={true} ticketId={route.id}
-      onClose={onTicketPageClose}/>
+      onClose={() => window.history.back()}/>
   );
-  else page = <Dashboard setRoute={onNavigate}/>;
-
-  return page;
-}
-
-export function LegacyDashboardOverlays({ overlays, onClose }) {
-  return (
-    <>
-      <CeoChatDrawer
-        open={!!overlays.chat}
-        sessionId={overlays.chat}
-        onClose={() => onClose('chat')}/>
-      <NativeSessionDrawer
-        open={!!overlays.ns}
-        sessionId={overlays.ns}
-        onClose={() => onClose('ns')}/>
-      <CommunicationDrawer
-        open={!!overlays.communication}
-        onClose={() => onClose('communication')}/>
-      <CreateTicketDrawer
-        open={!!overlays.compose}
-        preselectProject={overlays.composeProject || ''}
-        preselectKind={overlays.composeKind || ''}
-        preselectParent={overlays.composeParent || ''}
-        onClose={() => onClose('compose')}/>
-      <TicketDrawer
-        open={!!overlays.ticket}
-        ticketId={overlays.ticket}
-        onClose={() => onClose('ticket')}/>
-      <IdeasDrawer
-        open={!!overlays.ideas}
-        onClose={() => onClose('ideas')}/>
-    </>
-  );
-}
-
-export function LegacyDashboardApp() {
-  useStore();
-  const [route, setRoute] = React.useState(() => window.Router.parseLocation());
-
-  React.useEffect(() => {
-    const sync = () => setRoute(window.Router.parseLocation());
-    window.addEventListener('popstate', sync);
-    window.addEventListener('route-change', sync);
-    return () => {
-      window.removeEventListener('popstate', sync);
-      window.removeEventListener('route-change', sync);
-    };
-  }, []);
-
-  const navigate = (next) => window.Router.go(next);
+  else page = <Dashboard setRoute={navigate}/>;
 
   return (
     <div className="app">
       <Sidebar route={route} setRoute={navigate}/>
       <div className="main">
         <Topbar route={route} setRoute={navigate}/>
-        <LegacyDashboardPageBody
-          onNavigate={navigate}
-          onTicketPageClose={() => window.history.back()}
-          route={route}/>
+        {page}
       </div>
-      <LegacyDashboardOverlays
-        onClose={(name) => window.Router.closeOverlay(name)}
-        overlays={route.overlays}/>
+      {/* Drawers are URL overlays (TKT-0153): App owns their open state, derived
+          from route.overlays (?ticket=, ?compose=1&project=, ?chat=, ?ns=).
+          Openers call Router.open* (push a history entry); close calls
+          Router.closeOverlay (history.back), so Back closes each drawer. */}
+      <CeoChatDrawer
+        open={!!route.overlays.chat}
+        sessionId={route.overlays.chat}
+        onClose={() => window.Router.closeOverlay('chat')}/>
+       <NativeSessionDrawer
+         open={!!route.overlays.ns}
+         sessionId={route.overlays.ns}
+         onClose={() => window.Router.closeOverlay('ns')}/>
+       <CommunicationDrawer
+         open={!!route.overlays.communication}
+         onClose={() => window.Router.closeOverlay('communication')}/>
+       <CreateTicketDrawer
+        open={!!route.overlays.compose}
+        preselectProject={route.overlays.composeProject || ''}
+        preselectKind={route.overlays.composeKind || ''}
+        preselectParent={route.overlays.composeParent || ''}
+        onClose={() => window.Router.closeOverlay('compose')}/>
+      <TicketDrawer
+        open={!!route.overlays.ticket}
+        ticketId={route.overlays.ticket}
+        onClose={() => window.Router.closeOverlay('ticket')}/>
+      {/* TKT-0206: global ideas stack — URL overlay (?ideas=1) with the
+          same shell pattern as the other drawers. The anchor is in the
+          sidebar (the user wanted it embedded, not floating). */}
+      <IdeasDrawer
+        open={!!route.overlays.ideas}
+        onClose={() => window.Router.closeOverlay('ideas')}/>
     </div>
   );
 }
@@ -118,9 +114,6 @@ function mount() {
     return setTimeout(mount, 30);
   }
   const root = window.ReactDOMClient.createRoot(document.getElementById('root'));
-  root.render(window.React.createElement(LegacyDashboardApp));
+  root.render(window.React.createElement(App));
 }
-// GOL-38 imports the current application as a compatibility island. Its typed
-// host owns the root and feeds the legacy Store a normalized projection, while
-// direct legacy boot keeps its existing standalone behavior until cutover.
-if (!window.__GOLEM_TYPED_SHELL__) mount();
+mount();

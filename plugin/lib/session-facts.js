@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { endpointLeasesJsonPath, sessionFactsJsonPath } from './golem-home.js';
-import { assertLegacyWriterAllowed } from './legacy-writer-guard.js';
 
 export const SESSION_FACTS_VERSION = 1;
 export const ENDPOINT_LEASES_VERSION = 1;
@@ -48,7 +47,6 @@ export function readSessionFacts({ file = sessionFactsJsonPath() } = {}) {
 // Immutable canonical identity/continuation ownership wins over later locators.
 // Mutable observations advance only by revision, then observed_at.
 export function upsertSessionFact(input, { file = sessionFactsJsonPath(), now = Date.now() } = {}) {
-  assertLegacyWriterAllowed('session-facts.json');
   if (!input?.canonical_id || !input?.harness || !input?.locator?.raw_session_id) throw new Error('canonical_id, harness and locator.raw_session_id are required');
   return withRegistryLock(file, () => {
     const registry = read(file, 'facts', SESSION_FACTS_VERSION);
@@ -98,7 +96,6 @@ export function markSessionFactsEnded(canonicalIds, {
   file = sessionFactsJsonPath(),
   now = Date.now(),
 } = {}) {
-  assertLegacyWriterAllowed('session-facts.json');
   const ids = new Set((Array.isArray(canonicalIds) ? canonicalIds : [canonicalIds]).filter(Boolean));
   if (!ids.size) return [];
   return withRegistryLock(file, () => {
@@ -132,7 +129,6 @@ export function supersedePriorCodexFacts({
   file = sessionFactsJsonPath(),
   now = Date.now(),
 } = {}) {
-  assertLegacyWriterAllowed('session-facts.json');
   if (!projectPath) return [];
   const keep = new Set([...keepCanonicalIds, ...protectCanonicalIds].filter(Boolean));
   return withRegistryLock(file, () => {
@@ -164,7 +160,6 @@ export function readEndpointLeases({ file = endpointLeasesJsonPath(), now = Date
   return includeExpired ? leases : leases.filter((lease) => ms(lease.expires_at) > now);
 }
 export function renewEndpointLease(input, { file = endpointLeasesJsonPath(), now = Date.now(), ttlMs = DEFAULT_LEASE_TTL_MS } = {}) {
-  assertLegacyWriterAllowed('endpoint-leases.json');
   if (!input?.canonical_id || !input?.host || !input?.port || !input?.owner_token) throw new Error('canonical_id, host, port and owner_token are required');
   return withRegistryLock(file, () => {
     const registry = read(file, 'leases', ENDPOINT_LEASES_VERSION);
@@ -176,7 +171,6 @@ export function renewEndpointLease(input, { file = endpointLeasesJsonPath(), now
   });
 }
 export function releaseEndpointLeases(ownerToken, { file = endpointLeasesJsonPath(), canonicalId = null } = {}) {
-  assertLegacyWriterAllowed('endpoint-leases.json');
   return withRegistryLock(file, () => {
     const registry = read(file, 'leases', ENDPOINT_LEASES_VERSION);
     registry.leases = registry.leases.filter((lease) => lease.owner_token !== ownerToken || (canonicalId && lease.canonical_id !== canonicalId));

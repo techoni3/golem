@@ -2,7 +2,10 @@
   "mcpServers": {
     "golem": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/golem-mcp.mjs"]
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/channel/index.js"],
+      "env": {
+        "NODE_PATH": "${CLAUDE_PLUGIN_ROOT}/mcp/channel/node_modules"
+      }
     }
   }
 }

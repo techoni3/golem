@@ -1,9 +1,6 @@
 # Runtime / generated state
 journal/
 node_modules/
-*.tsbuildinfo
-apps/**/dist/
-packages/**/dist/
 
 # Local-only Claude Code overrides (always per-developer)
 .claude/settings.local.json

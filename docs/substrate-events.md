@@ -62,11 +62,7 @@ Useful subscriptions:
 Claude Code hooks and the opencode shim both normalize into the same script stdin shape: `session_id`, `cwd`, `harness`, optional tool fields, and raw payload. Codex's adapter records only documented hook fields through the canonical locked session-fact writer and marks delivery `pull` with `push: false`; it never parses unstable transcripts. `SubagentStop` records the child observation without changing the parent session's status. The scripts derive project identity from the cwd, write the hook journal, and forward to the bus. Adapters must remain non-blocking and fail-open.
 
 GOL-473–477 add a distinct, Golem-owned Codex App Server path for managed
-headless sessions. The default `golem codex` host persists its JSONL ingress
-through Tracker and serially claims it only after its consumer loop establishes
-endpoint readiness; duplicate envelope ids cannot create a second App Server
-turn. The private TUI bridge is an explicit `golem codex --legacy` compatibility
-path. `lib/codex-supervisor.js` writes the durable thread/process
+headless sessions and the private `golem codex` TUI. `lib/codex-supervisor.js` writes the durable thread/process
 recovery map, then starts a required Golem MCP child with a supervisor-owned
 canonical actor binding. Once the pinned App Server handshake, MCP status
 check, authenticated loopback typed `/brief` adapter, and idle thread are all

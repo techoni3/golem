@@ -74,8 +74,8 @@ intent.
 | Harness | Tier | Shipped contract |
 | --- | --- | --- |
 | Claude Code | Tier A | Rendered plugin with agents, skills, hooks, MCP tools, lifecycle facts, and addressed push for sessions launched as channel consumers. A plain `claude` session can use tracker tools and pull work but does not consume pushed channel notifications. |
-| OpenCode | Tier A lifecycle; pull-only direct delivery | Rendered agents, skills, and instructions plus a managed MCP entry and runtime shim. A normal `golem opencode` launch establishes canonical lifecycle through a private local control plane; it does not advertise push until a generation-scoped endpoint owner supplies a delivery fence. |
-| Codex CLI | Tier B for an ordinary TUI; Tier A for Golem-managed App Server modes | Rendered skills, documented lifecycle hooks (including observation of native `SubagentStop`), marketplace metadata, and a bundled MCP server. The adapter does not render Golem AGENTS.md or worker/reviewer/researcher definitions. An ordinary `codex` TUI remains explicit pull only and is never reported as pushed. The default `golem codex` managed host receives durable ticket/control envelopes only after its consumer is ready; the private TUI bridge is explicit `--legacy` compatibility. |
+| OpenCode | Tier A | Rendered agents, skills, and instructions plus a managed MCP entry and runtime shim. While the OpenCode process and shim bridge are live, addressed work is injected with the OpenCode SDK. |
+| Codex CLI | Tier B for an ordinary TUI; Tier A for Golem-managed App Server modes | Rendered skills, documented lifecycle hooks (including observation of native `SubagentStop`), marketplace metadata, and a bundled MCP server. The adapter does not render Golem AGENTS.md or worker/reviewer/researcher definitions. An ordinary `codex` TUI remains explicit pull only and is never reported as pushed. A version-gated headless supervisor and private `golem codex` TUI bridge receive durable ticket/control envelopes only while their bound MCP is active and canonical thread is idle. |
 | Pi | Tier B | Portable rendered extension, lifecycle facts, and durable next-input pickup. Queued work is added to the next real user input and acknowledged when agent processing starts. There is no advertised live-idle push. |
 | Gemini CLI | Unsupported | No adapter or release contract is shipped. |
 
@@ -87,8 +87,9 @@ authority, and are not included in the npm package.
 
 ## Prerequisites
 
-- Node.js 24.18.x and npm 11.16.x for the CLI, dashboard, package checks, and
-  supported harness paths.
+- Node.js 20 or newer and npm for the CLI, dashboard, Claude Code, OpenCode,
+  and Codex paths.
+- Node.js 22.19 or newer for Pi.
 - At least one supported harness installed separately.
 - Git for a source checkout and normal contribution workflows.
 - A local machine where loopback ports can be opened. The dashboard defaults to
@@ -121,15 +122,10 @@ npm link
 golem help
 ```
 
-`npm ci` uses one root lock and runs a validation-only postinstall: release
-checksums and `better-sqlite3@12.11.1` are checked, but no service starts and no
-home, render, nested install, migration, or code generation is created.
-`npm link` exposes this checkout's `cli/golem.js`; without linking, run
+`npm ci` runs the package postinstall, which restores the channel MCP's locked
+production dependencies. `npm link` exposes this checkout's `cli/golem.js` as
+the global `golem` command. Without linking, run commands from the checkout as
 `node cli/golem.js <command>`.
-
-The active rendered MCP is the relocatable
-`packages/mcp-adapter/dist/golem-mcp.mjs` artifact. It bundles its SDK/client
-closure and runs without workspace or render-local `node_modules`.
 
 ## Quick start
 
@@ -284,12 +280,7 @@ checkout. The config merge updates `mcp.golem`, but appends the Golem skill and
 plugin entries rather than pruning old ones. After moving an installation, edit
 `opencode.jsonc`: remove obsolete Golem paths from `skills.paths` and obsolete
 Golem `file://` entries from `plugin`, then re-run sync and restart OpenCode.
-The shim creates a live loopback bridge. A normal `golem opencode` launch owns
-a private authenticated control plane for its native child and materializes its
-canonical project/session lifecycle without rewriting OpenCode configuration.
-That direct path is deliberately pull-only until a generation-scoped endpoint
-owner supplies a delivery id and fence; an unfenced bridge request is rejected
-before the OpenCode SDK boundary.
+The shim creates the live loopback bridge used for Tier A addressed delivery.
 `golemc` launches Claude Code, not OpenCode.
 
 ### Ordinary Codex CLI: Tier B, pull only
@@ -359,25 +350,27 @@ replay a recovery-pending envelope; create a new explicit dispatch after
 reviewing the supervisor record. A Codex version or schema fingerprint change
 is a hard stop until the contract is reviewed and the Codex journeys pass.
 
-### Managed Codex host: Tier A
+### Managed Codex TUI: Tier A
 
-The default managed path runs the foreground, control-plane-owned host from the
-project directory:
+For a normal interactive terminal that shares the exact tracker-delivery
+thread, run this from the project directory:
 
 ```sh
-golem codex --session <canonical-id> --cwd <project-path>
+golem codex
 ```
 
-It binds the requested canonical session, persists each host ingress through
-the durable Tracker service, and serially claims ready envelopes for the pinned
-App Server. The endpoint is never advertised ready before that consumer loop is
-running; duplicate envelope ids cannot create a second `turn/start`. Managed
-Codex accepts only typed registry options—native Codex passthrough is rejected
-instead of being silently ignored.
-
-The older private TUI bridge remains a deliberate compatibility escape only:
-`golem codex --legacy -- [native-codex-args]`. It is not selected by
-`--session`, `--`, or any ordinary managed invocation.
+It creates a canonical session, runs a pinned App Server on stdio, and launches
+the normal Codex TUI through one private Unix-socket WebSocket bridge. The TUI
+remains the sole App Server client: it owns model, sandbox, approvals, and
+normal turns; Golem verifies its bound MCP only after TUI initialization and
+injects a durable tracker turn only when that canonical thread is idle. A
+dashboard dispatch with `when_idle` stays queued while a human turn is active.
+Use `--session <canonical-id>` or `--cwd <path>` for advanced targeting, and
+place ordinary Codex arguments after `--`. A stored explicit session resumes
+its recorded thread through native `codex resume`; it is never silently
+replaced. Do not pass `--remote` or `-C`/`--cd`; Golem reserves the bridge and
+canonical working directory. TUI exit, SIGTERM, or App Server loss removes the
+lease, App Server, and socket; Ctrl-C belongs to the TUI's active turn.
 
 ### Pi: Tier B, next-input pickup
 
@@ -391,7 +384,7 @@ Load it without changing the Pi profile, using the `$GOLEM_DIR` resolved at the
 start of this section:
 
 ```sh
-pi -e "$GOLEM_DIR/renders/pi/golem.mjs"
+pi -e "$GOLEM_DIR/renders/pi/golem.ts"
 ```
 
 The extension uses Pi's canonical `ctx.sessionManager.getSessionId()` identity.
@@ -462,19 +455,12 @@ current operational source for bind, restart, API, and tracker behavior.
 
 ## CLI reference
 
-`golem help` is generated from the typed registry; compatibility commands remain
-served by the root entry point while harness resolution uses one parser and
-metadata table.
+`golem help` prints built-in usage, but its sync-target summary currently omits
+Codex and Pi. The table below follows the command dispatch and target list in the
+packaged source rather than treating that summary as exhaustive.
 
 | Command | Purpose |
 | --- | --- |
-| `golem codex [--session <id>] [--cwd <dir>]` | Run the managed Codex host; native arguments require the explicit `--legacy --` compatibility escape. |
-| `golem opencode [preset]` / `golem claude [preset]` | Resolve canonical harness presets; unqualified adapters fail before spawn. |
-| `golem @preset` | Resolve a globally named preset through the same registry. |
-| `golem` | Open the compact TTY preset picker; non-TTY invocations print help without prompting. |
-| `golem presets list\|set\|remove\|favorite …` | Review or explicitly save launcher presets; mutations require `--apply`. |
-| `golem completions [bash\|zsh\|fish] [--apply]` | Generate registry-derived shell completions in a Golem-owned file. |
-| `golem aliases install\|uninstall [--apply]` | Preview or manage optional non-native aliases without modifying shell RC files. |
 | `golem dashboard [--public]` | Start the dashboard in the foreground. |
 | `golem dashboard:restart [--public]` | Stop the registered dashboard and start a detached replacement. |
 | `golem status [--json]` | Probe dashboard health and print its URL. |
@@ -484,14 +470,6 @@ metadata table.
 | `golem sessions dedup [--apply]` | Group rows by non-empty name and keep the freshest live row, or the freshest ended row when none are live. Dry-run by default; `--apply` marks every other un-ended duplicate ended. Unnamed rows are untouched. |
 | `golem migrate-home` | Explicitly back up and move the resolved legacy/XDG config path (normally `~/.config/golem`) to `~/.golem`, leave a compatibility symlink, and restart the dashboard. |
 | `golem help` | Print usage. |
-
-`--dry-run`, `--explain`, `--json`, `--model`, `--backend`, `--preset`, and
-`--cwd` are shared harness options. Exact native arguments after `--` are
-preserved. There is intentionally no `golem launch` command.
-
-The historical `golemc` and `golemx` shortcuts are one-hop deprecation shims to
-`golem claude` and `golem opencode`. They cannot recurse and never shadow the
-native harness binaries.
 
 Useful render forms:
 
@@ -562,11 +540,9 @@ own worktree into main; the coordinating session reconciles it.
 ### Delivery modes
 
 Delivery is a capability, not a generic promise. Claude Code channel consumers
-support addressed push. An OpenCode bridge can do so only when a canonical
-endpoint owner provides the current generation's delivery id and fence; normal
-direct OpenCode launch is pull-only. Codex requires explicit MCP pull. Pi uses
-a durable next-input inbox. The dashboard records queued, delivered, and
-acknowledged states according to those distinct contracts.
+and live OpenCode bridges support addressed push. Codex requires explicit MCP
+pull. Pi uses a durable next-input inbox. The dashboard records queued,
+delivered, and acknowledged states according to those distinct contracts.
 
 ## Architecture and data flow
 
@@ -745,7 +721,6 @@ dashboard restart, or other shared-state commands from a parallel worktree.
 | `substrate/` | Source of truth for roles, agents, skills, instructions, hooks, and plugin metadata. |
 | `plugin/` | Generated Claude Code render; do not hand-edit. |
 | `cli/golem.js` | Thin command entry point. |
-| `apps/cli/src/` | Typed Commander registry, deterministic formatters/errors, and harness resolution boundary. |
 | `lib/` | State resolution, compiler, adapters, roles, lint, identity, and runtime helpers. |
 | `dashboard/server/` | Fastify REST/WebSocket service and sole SQLite tracker owner. |
 | `dashboard/web/` | React source for the dashboard. |
