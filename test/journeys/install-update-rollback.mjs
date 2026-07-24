@@ -97,15 +97,21 @@ export async function exerciseInstallUpdateRollback() {
 			extractDirectory,
 		])
 			mkdirSync(directory, { recursive: true });
-		const originalName = npm(
-			["pack", "--silent", "--pack-destination", packDirectory],
-			repositoryRoot,
-			environment,
-		).stdout
-			.trim()
-			.split("\n")
-			.at(-1);
-		const original = path.join(packDirectory, originalName);
+		const suppliedTarball = process.env.GOLEM_ACCEPTANCE_TARBALL
+			? path.resolve(process.env.GOLEM_ACCEPTANCE_TARBALL)
+			: undefined;
+		const originalName = suppliedTarball
+			? path.basename(suppliedTarball)
+			: npm(
+					["pack", "--silent", "--pack-destination", packDirectory],
+					repositoryRoot,
+					environment,
+				).stdout
+					.trim()
+					.split("\n")
+					.at(-1);
+		const original =
+			suppliedTarball ?? path.join(packDirectory, originalName);
 		npm(["init", "-y"], installDirectory, environment);
 		npm(
 			[

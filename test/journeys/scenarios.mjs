@@ -106,13 +106,13 @@ export const scenarios = [
 	}),
 	registerScenario({
 		id: "launcher-launchability-delivery-split",
-		journey: "J7",
+		journey: "J5",
 		tier: "pr",
 		regression: "a launchable process is rejected by unqualified delivery evidence or an unqualified delivery path is advertised as push-ready",
 	}),
 	registerScenario({
 		id: "compact-launch-dry-run-matrix",
-		journey: "J7",
+		journey: "J5",
 		tier: "pr",
 		regression: "the built resolver/CLI bridge disagrees with launchability and delivery truth or leaks credential/path state",
 	}),
