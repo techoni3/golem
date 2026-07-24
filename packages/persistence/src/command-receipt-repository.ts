@@ -1,4 +1,4 @@
-import { type Kysely } from "kysely";
+import type { Kysely } from "kysely";
 
 import type { SqliteConnection, TrackerTables } from "./internals.js";
 import { SyncKyselyTrackerStore } from "./kysely-sync.js";
@@ -50,7 +50,8 @@ function rowReceipt(row: CommandReceiptRow): CommandReceiptRecord {
 		resource_id: row.resource_id,
 		correlation_id: row.correlation_id,
 		fingerprint: row.fingerprint,
-		outcome_status: row.outcome_status as CommandReceiptRecord["outcome_status"],
+		outcome_status:
+			row.outcome_status as CommandReceiptRecord["outcome_status"],
 		...(row.reason_code ? { reason_code: row.reason_code } : {}),
 		...(row.operation_id ? { operation_id: row.operation_id } : {}),
 		result: parsed,
@@ -117,11 +118,10 @@ export class CommandReceiptRepository implements CommandReceiptStorage {
 
 	gateway(): CommandGatewayStorage {
 		const receipts: CommandReceiptStorage = this;
-		const storage = this;
+
 		return Object.freeze({
 			receipts,
-			transaction: <Result>(fn: () => Result): Result =>
-				storage.transaction(fn),
+			transaction: <Result>(fn: () => Result): Result => this.transaction(fn),
 		});
 	}
 }

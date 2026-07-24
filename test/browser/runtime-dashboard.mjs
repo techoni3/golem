@@ -2,12 +2,17 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createTemporaryHome } from "@golem/testkit";
+import {
+	createTemporaryHome,
+	spawnGrouped,
+	stopProcessGroup,
+	waitFor,
+} from "@golem/testkit";
 
 import { acquireChrome } from "../../dashboard/scripts/_chrome.mjs";
 import {
 	BoundedReplayWindow,
-	createBrowserSessionAuthority,
+	createBrowserPrincipalResolver,
 	startControlPlane,
 } from "../../apps/control-plane/dist/index.js";
 import { openControlPlanePersistence } from "../../apps/control-plane/dist/persistence.js";
@@ -18,11 +23,17 @@ import {
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const staticDirectory = path.join(repositoryRoot, "dashboard/dist/control-plane");
+const serviceProgram = path.join(
+	repositoryRoot,
+	"apps/control-plane/dist/main.js",
+);
 const token = "golem-runtime-dashboard-browser-token-000000000000";
 const projectId = "prj_00000000-0000-4000-8000-000000000054";
 const sessionId = "ses_00000000-0000-4000-8000-000000000054";
 const endedGenerationId = "gen_00000000-0000-4000-8000-000000000054";
 const liveGenerationId = "gen_00000000-0000-4000-8000-000000000055";
+const projectName =
+	"Dashboard browser project with a deliberately long canonical display name for responsive containment";
 
 function runtimeSignal(eventId, sequence, eventKind, generationId, payload = {}) {
 	return {
@@ -66,7 +77,7 @@ function projectionAdapter(projection) {
 function seed(owner) {
 	owner.runtimeProjectStorage().observe({
 		projectId,
-		name: "Dashboard browser project",
+		name: projectName,
 		location: {
 			locationId: "loc_00000000-0000-4000-8000-000000000054",
 			canonicalPath: "/tmp/runtime-dashboard-browser",
@@ -91,7 +102,7 @@ function seed(owner) {
 			metadata: {
 				model: "gpt-5",
 				name: "Dashboard browser session",
-				project_name: "Dashboard browser project",
+				project_name: projectName,
 				role: "explorer",
 			},
 		})).disposition,
@@ -112,7 +123,7 @@ function seed(owner) {
 			metadata: {
 				model: "gpt-5",
 				name: "Dashboard browser session",
-				project_name: "Dashboard browser project",
+				project_name: projectName,
 				role: "explorer",
 			},
 		})).disposition,
@@ -177,23 +188,112 @@ function seed(owner) {
 	return { endpointIdentity: identity, sessions };
 }
 
-async function start({ browserSessions, home, port, projection, replay }) {
+async function start({ home, port, principalResolver, projection, replay }) {
 	return startControlPlane({
 		token,
 		stateDirectory: path.join(home.root, "control-plane"),
 		staticDirectory,
 		...(port === undefined ? {} : { port }),
-		browserSessions,
+		principalResolver,
 		projection: projectionAdapter(projection),
 		runtimeProjection: projection,
 		replay,
 	});
 }
 
+function runtimePrincipal(owner, bindingId) {
+	const storage = owner.browserPrincipalStorage();
+	storage.provision({
+		id: bindingId,
+		actorId: "act_gol58_runtime_operator",
+		role: "operator",
+		defaultProjectId: projectId,
+		scopeProjectIds: [projectId],
+	});
+	return createBrowserPrincipalResolver({
+		storage,
+		localOperatorBindingId: bindingId,
+	});
+}
+
+function parseReady(output) {
+	for (const line of output.split("\n")) {
+		try {
+			const message = JSON.parse(line);
+			if (message.type === "ready" && typeof message.origin === "string")
+				return message;
+		} catch {
+			// Bounded service diagnostics are reported only if readiness fails.
+		}
+	}
+	return undefined;
+}
+
 function portOf(origin) {
 	const port = Number(new URL(origin).port);
 	assert(Number.isInteger(port) && port > 0, "control plane exposes a stable loopback port");
 	return port;
+}
+
+export async function createRuntimeDashboardHarness(
+	prefix = "golem-dashboard-polish-",
+) {
+	const home = createTemporaryHome(prefix);
+	let owner;
+	let processGroup;
+	try {
+		owner = openControlPlanePersistence(
+			{
+				runtimePath: path.join(home.golemHome, "runtime.db"),
+				trackerPath: path.join(home.golemHome, "tracker.db"),
+				lockPath: path.join(
+					home.golemHome,
+					"control-plane",
+					"persistence.owner.lock",
+				),
+			},
+			{ ownerId: `${prefix.replaceAll(/[^a-z0-9]/giu, "-")}owner` },
+		);
+		seed(owner);
+		await owner.close();
+		owner = undefined;
+		processGroup = spawnGrouped(process.execPath, [serviceProgram], {
+			cwd: repositoryRoot,
+			env: {
+				...home.env,
+				GOLEM_BROWSER_LOCAL_OPERATOR_BINDING_ID: "bnd_gol58_browser_operator",
+				GOLEM_CONTROL_PLANE_PORT: "0",
+				GOLEM_CONTROL_PLANE_REPLAY_WINDOW: "8",
+				GOLEM_CONTROL_PLANE_STATIC_ROOT: staticDirectory,
+				GOLEM_CONTROL_PLANE_TOKEN: token,
+			},
+		});
+		const ready = await waitFor(() => {
+			const message = parseReady(processGroup.stdout());
+			if (message) return message;
+			if (
+				processGroup.child.exitCode !== null ||
+				processGroup.child.signalCode !== null
+			)
+				throw new Error(
+					`dashboard control plane exited before readiness; stdout=${processGroup.stdout()}; stderr=${processGroup.stderr()}`,
+				);
+			return undefined;
+		}, "dashboard control-plane readiness");
+		return {
+			origin: ready.origin,
+			async close() {
+				if (processGroup) await stopProcessGroup(processGroup);
+				processGroup = undefined;
+				home.cleanup();
+			},
+		};
+	} catch (error) {
+		if (processGroup) await stopProcessGroup(processGroup);
+		if (owner) await owner.close();
+		home.cleanup();
+		throw error;
+	}
 }
 
 export async function exerciseRuntimeDashboard() {
@@ -207,10 +307,13 @@ export async function exerciseRuntimeDashboard() {
 			{ ownerId: "gol54-runtime-dashboard-owner" },
 		);
 		const { endpointIdentity, sessions } = seed(owner);
+		const principalResolver = runtimePrincipal(
+			owner,
+			"bnd_gol58_runtime_operator",
+		);
 		const projection = createRuntimeProjectionService({ storage: owner.runtimeProjectionStorage() });
 		const replay = new BoundedReplayWindow(8);
-		const browserSessions = createBrowserSessionAuthority();
-		service = await start({ browserSessions, home, projection, replay });
+		service = await start({ home, principalResolver, projection, replay });
 		const origin = service.origin;
 		const servicePort = portOf(origin);
 		chrome = await acquireChrome();
@@ -244,10 +347,49 @@ export async function exerciseRuntimeDashboard() {
 				true,
 				"runtime PassportCard is bounded instead of stretching with roster count",
 			);
+			const sessionSearch = page.getByRole("searchbox", {
+				name: "Find a session",
+			});
+			await sessionSearch.fill("no-canonical-session-matches-this-filter");
+			await page.getByText("No live sessions", { exact: true }).waitFor();
+			await sessionSearch.fill("");
+			await page
+				.getByRole("button", {
+					name: "Open Dashboard browser session session details",
+				})
+				.waitFor();
 			const beforeRead = projection.query("runtime.live").items[0]?.actor_activity_at;
 			await page.reload({ waitUntil: "domcontentloaded" });
 			await page.getByRole("button", { name: "Open Dashboard browser session session details" }).waitFor();
 			assert.equal(projection.query("runtime.live").items[0]?.actor_activity_at, beforeRead, "reading or reloading the dashboard does not mutate actor activity");
+			const foreignProjectRead = await page.evaluate(async () => {
+				const response = await fetch(
+					"/api/v1/runtime/live?project_id=prj_00000000-0000-4000-8000-000000000999",
+				);
+				return {
+					status: response.status,
+					body: await response.json(),
+				};
+			});
+			assert.equal(
+				foreignProjectRead.status,
+				404,
+				"runtime project filters remain bounded by the durable principal scope",
+			);
+			assert.equal(
+				foreignProjectRead.body.code,
+				"runtime.not_found",
+				"out-of-scope runtime filters are non-disclosing",
+			);
+			const expectedForeignFailure = failedRequests.findIndex((entry) =>
+				entry.includes("000000000999"),
+			);
+			assert.notEqual(
+				expectedForeignFailure,
+				-1,
+				"the browser observed the expected scoped 404 response",
+			);
+			failedRequests.splice(expectedForeignFailure, 1);
 
 			await page.getByRole("button", { name: "Open Dashboard browser session session details" }).click();
 			await page.getByRole("dialog", { name: "Dashboard browser session details" }).waitFor();
@@ -257,12 +399,42 @@ export async function exerciseRuntimeDashboard() {
 			await page.getByText("Consumer ready", { exact: true }).waitFor();
 			await page.keyboard.press("Escape");
 			await page.getByRole("dialog", { name: "Dashboard browser session details" }).waitFor({ state: "hidden" });
+			assert.equal(
+				await page
+					.getByRole("button", {
+						name: "Open Dashboard browser session session details",
+					})
+					.evaluate((element) => document.activeElement === element),
+				true,
+				"closing the session drawer restores focus to the invoking card surface",
+			);
 
 			await page.getByRole("link", { name: "Projects" }).click();
 			await page.getByRole("heading", { name: "Projects" }).waitFor();
 			await page.getByRole("link", { name: /Dashboard browser project/ }).click();
 			await page.getByRole("heading", { name: `Project ${projectId}` }).waitFor();
-			assert.equal(await page.getByTestId("passport-card").count(), 1, "project detail reuses the same one-card generation identity");
+			try {
+				await page
+					.getByRole("button", {
+						name: "Open Dashboard browser session session details",
+					})
+					.waitFor();
+			} catch (error) {
+				const http = await page.evaluate(async (id) => {
+					const response = await fetch(
+						`/api/v1/runtime/live?project_id=${encodeURIComponent(id)}`,
+					);
+					return { status: response.status, body: await response.text() };
+				}, projectId);
+				throw new Error(
+					`project detail did not load; http=${JSON.stringify(http)}; body=${JSON.stringify(await page.locator("body").innerText())}; cause=${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+			const projectCardCount = await page.getByTestId("passport-card").count();
+			if (projectCardCount !== 1)
+				throw new Error(
+					`project detail expected one generation; direct=${JSON.stringify(projection.query("runtime.live", { projectId }))}; body=${JSON.stringify(await page.locator("body").innerText())}`,
+				);
 
 			await page.getByRole("link", { name: "History" }).click();
 			await page.getByRole("heading", { name: "History" }).waitFor();
@@ -286,6 +458,19 @@ export async function exerciseRuntimeDashboard() {
 			const revisionBeforeRestart = projection.query("runtime.live").resource_revision;
 			await service.close();
 			service = undefined;
+			await page.waitForFunction(
+				() =>
+					document
+						.querySelector("[data-testid='runtime-connection']")
+						?.getAttribute("data-state") === "disconnected",
+				undefined,
+				{ timeout: 8_000 },
+			);
+			assert.equal(
+				await page.getByTestId("passport-card").count(),
+				1,
+				"a disconnected stream retains the last canonical snapshot",
+			);
 			assert.equal(
 				sessions.apply(runtimeSignal("evt_00000000-0000-4000-8000-000000000060", 5, "session.activity", liveGenerationId, { activity_kind: "work" })).disposition,
 				"accepted",
@@ -298,19 +483,45 @@ export async function exerciseRuntimeDashboard() {
 			);
 			const revisionAfterRestart = projection.query("runtime.live").resource_revision;
 			assert.ok(revisionAfterRestart > revisionBeforeRestart, "fixture has a newer authoritative revision for restart resync");
-			service = await start({ browserSessions, home, port: servicePort, projection, replay });
+			service = await start({
+				home,
+				port: servicePort,
+				principalResolver,
+				projection,
+				replay,
+			});
 			await page.getByText(`Canonical revision ${revisionAfterRestart}`, { exact: true }).waitFor({ timeout: 8_000 });
 			await page.waitForFunction(() => document.querySelector("[data-testid='runtime-connection']")?.getAttribute("data-state") === "connected", undefined, { timeout: 8_000 });
 			assert.equal(await page.getByTestId("passport-card").count(), 1, "restart resync replaces the snapshot without duplicating the live card");
 			assert.deepEqual(browserErrors, [], "typed runtime routes produce no browser console or page errors");
 			assert.deepEqual(failedRequests, [], "typed runtime routes issue no failed application requests");
 
-			for (const [width, height] of [[360, 800], [768, 900], [1280, 900]]) {
+			for (const [width, height] of [
+				[360, 800],
+				[768, 900],
+				[1280, 900],
+				[1600, 1000],
+			]) {
 				await page.setViewportSize({ width, height });
 				const layout = await page.evaluate(() => ({ documentWidth: document.documentElement.scrollWidth, viewportWidth: window.innerWidth }));
 				assert.equal(layout.documentWidth <= layout.viewportWidth, true, `runtime dashboard avoids horizontal overflow at ${width}px`);
 				await page.getByRole("link", { name: "Sessions" }).focus();
 				assert.equal(await page.getByRole("link", { name: "Sessions" }).evaluate((element) => document.activeElement === element), true, `runtime navigation remains keyboard-reachable at ${width}px`);
+				if (width === 360)
+					assert.equal(
+						await page.getByTestId("passport-card").evaluate((card) => {
+							const content = card.querySelector(
+								"[class*='passportContent']",
+							);
+							return content
+								? getComputedStyle(content).gridTemplateColumns
+										.trim()
+										.split(/\s+/u).length
+								: 0;
+						}),
+						1,
+						"runtime PassportCard collapses to one column at 360px",
+					);
 			}
 		} finally {
 			await context.close();
@@ -322,4 +533,8 @@ export async function exerciseRuntimeDashboard() {
 		if (owner) await owner.close();
 		home.cleanup();
 	}
+}
+
+export async function exerciseDashboardStateMatrix() {
+	return exerciseRuntimeDashboard();
 }

@@ -86,6 +86,7 @@ export function Button({
 	return (
 		<AriaButton
 			{...props}
+			aria-busy={loading || undefined}
 			className={classes(styles.button, buttonClass[variant])}
 			isDisabled={isDisabled || loading}
 		>
@@ -318,10 +319,12 @@ export function Switch({
 }
 
 export function OperatorTabs({
+	ariaLabel = "Dashboard sections",
 	selectedKey,
 	onSelectionChange,
 	tabs,
 }: {
+	ariaLabel?: string;
 	onSelectionChange: (key: string) => void;
 	selectedKey: string;
 	tabs: readonly { id: string; label: string; panel: React.ReactNode }[];
@@ -332,7 +335,7 @@ export function OperatorTabs({
 			onSelectionChange={(key) => onSelectionChange(String(key))}
 			selectedKey={selectedKey}
 		>
-			<TabList aria-label="Design lab sections" className={styles.tabList}>
+			<TabList aria-label={ariaLabel} className={styles.tabList}>
 				{tabs.map((tab) => (
 					<Tab id={tab.id} key={tab.id}>
 						{tab.label}
@@ -589,7 +592,11 @@ export function StatePanel({
 				? "warning"
 				: "neutral";
 	return (
-		<section className={classes(styles.statePanel, toneClass[tone])}>
+		<section
+			aria-live={kind === "error" ? "assertive" : "polite"}
+			className={classes(styles.statePanel, toneClass[tone])}
+			role={kind === "error" ? "alert" : "status"}
+		>
 			<strong>{title}</strong>
 			<p>{description}</p>
 		</section>

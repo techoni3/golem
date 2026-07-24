@@ -1,6 +1,6 @@
 import {
-	BrowserWorkProjectionResponseSchema,
 	BrowserWorkProjectionQuerySchema,
+	BrowserWorkProjectionResponseSchema,
 	BrowserWorkStreamSchema,
 	RuntimeSignalV1Schema,
 } from "@golem/contracts";
@@ -8,10 +8,13 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
 import {
+	type ActorContext,
 	type BrowserPrincipalResolver,
+	hasRequestAuthorityHeaderOrBodyOverride,
 	hasRequestAuthorityOverride,
 	isExpectedOrigin,
 } from "./auth.js";
+import type { BrowserWorkServices } from "./browser-work-services.js";
 import type { LegacyCompatibilityPublisher } from "./compatibility.js";
 import { fail, sendValidated } from "./errors.js";
 import { controlPlaneOpenApiDocument } from "./openapi.js";
@@ -38,7 +41,6 @@ import {
 	RuntimeProjectionQuerySchema,
 	RuntimeProjectionResponseSchema,
 } from "./schemas.js";
-import type { BrowserWorkServices } from "./browser-work-services.js";
 
 function jsonSchema(value: z.ZodType): Record<string, unknown> {
 	return z.toJSONSchema(value, {
@@ -50,14 +52,15 @@ function jsonSchema(value: z.ZodType): Record<string, unknown> {
 	}) as Record<string, unknown>;
 }
 
-function requirePrincipal(
+function resolvePrincipal(
 	request: FastifyRequest,
 	reply: FastifyReply,
 	principal: BrowserPrincipalResolver,
 	action: "read" | "mutate",
 	allowBrowser: boolean,
-): boolean {
-	if (hasRequestAuthorityOverride(request)) {
+	authorityOverride = hasRequestAuthorityOverride(request),
+): ActorContext | undefined {
+	if (authorityOverride) {
 		fail(
 			request,
 			reply,
@@ -65,7 +68,7 @@ function requirePrincipal(
 			"browser.forbidden",
 			"request authority is server-owned",
 		);
-		return false;
+		return undefined;
 	}
 	const context = principal.resolve(request, {
 		action,
@@ -80,7 +83,7 @@ function requirePrincipal(
 			"browser.auth.required",
 			"an authenticated principal binding is required",
 		);
-		return false;
+		return undefined;
 	}
 	if (!principal.policy.allows(context, action)) {
 		fail(
@@ -89,6 +92,47 @@ function requirePrincipal(
 			403,
 			"browser.forbidden",
 			"the authenticated principal is not authorized",
+		);
+		return undefined;
+	}
+	return context;
+}
+
+function requirePrincipal(
+	request: FastifyRequest,
+	reply: FastifyReply,
+	principal: BrowserPrincipalResolver,
+	action: "read" | "mutate",
+	allowBrowser: boolean,
+): boolean {
+	return (
+		resolvePrincipal(request, reply, principal, action, allowBrowser) !==
+		undefined
+	);
+}
+
+function requireRuntimeProjectionRead(
+	request: FastifyRequest,
+	reply: FastifyReply,
+	principal: BrowserPrincipalResolver,
+	projectId: string | undefined,
+): boolean {
+	const context = resolvePrincipal(
+		request,
+		reply,
+		principal,
+		"read",
+		true,
+		hasRequestAuthorityHeaderOrBodyOverride(request),
+	);
+	if (!context) return false;
+	if (projectId && !principal.policy.allowsProject(context, projectId)) {
+		fail(
+			request,
+			reply,
+			404,
+			"runtime.not_found",
+			"the requested runtime projection is unavailable",
 		);
 		return false;
 	}
@@ -155,7 +199,6 @@ export function registerValidatedRoutes(options: {
 			},
 		},
 		async (request, reply) => {
-			if (!requireBrowserRead(request, reply, options.principal)) return;
 			if (!options.runtimeProjection)
 				return fail(
 					request,
@@ -190,6 +233,15 @@ export function registerValidatedRoutes(options: {
 					"request.invalid",
 					"runtime projection query is invalid",
 				);
+			if (
+				!requireRuntimeProjectionRead(
+					request,
+					reply,
+					options.principal,
+					queryResult.data.project_id,
+				)
+			)
+				return;
 			try {
 				const payload = options.runtimeProjection.query(runtimeStream, {
 					...(queryResult.data.project_id
@@ -337,7 +389,9 @@ export function registerValidatedRoutes(options: {
 					"request.invalid",
 					"projection stream is invalid",
 				);
-			const browserStream = BrowserWorkStreamSchema.safeParse(parsed.data.stream);
+			const browserStream = BrowserWorkStreamSchema.safeParse(
+				parsed.data.stream,
+			);
 			if (browserStream.success && options.browserWork) {
 				const query = BrowserWorkProjectionQuerySchema.safeParse(request.query);
 				if (!query.success)

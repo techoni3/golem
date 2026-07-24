@@ -1822,9 +1822,6 @@ async function runSettingsControlsDashboard() {
 		fs.cpSync(path.join(repositoryRoot, "substrate"), cleanSubstrate, {
 			recursive: true,
 		});
-		fs.rmSync(path.join(cleanSubstrate, "roles", "standalone.md"), {
-			force: true,
-		});
 		fs.rmSync(path.join(cleanSubstrate, "skills", "night-shift"), {
 			recursive: true,
 			force: true,

@@ -4,21 +4,21 @@ import type {
 	RuntimeSessionStorage,
 } from "@golem/persistence";
 import {
+	type CommandGateway,
 	createCommandGateway,
 	createTicketDispatchService,
 	createTrackerCoreServices,
 	createTrackerManagementServices,
 	createTrackerServices,
-	type CommandGateway,
 	type DeliveryEligibilityPort,
+	type TicketDispatchService,
 	type TrackerClock,
 	type TrackerCoreActorContext,
+	TrackerCoreError,
 	type TrackerCoreServices,
 	type TrackerManagementIdentityPort,
 	type TrackerManagementServices,
 	type TrackerServices,
-	type TicketDispatchService,
-	TrackerCoreError,
 } from "@golem/tracker";
 
 /**
@@ -75,7 +75,8 @@ export function composeControlPlaneEndpointEligibility(options: {
 				now: options.clock.now(),
 			});
 			const endpoint = eligibility.endpoint;
-			if (eligibility.disposition === "ineligible" || !endpoint) return undefined;
+			if (eligibility.disposition === "ineligible" || !endpoint)
+				return undefined;
 			return Object.freeze({
 				recipientId,
 				generationId: endpoint.generationId,
@@ -116,7 +117,10 @@ export function composeControlPlaneTicketDispatchService(options: {
 				try {
 					return options.core.tickets.recordDispatch(input);
 				} catch (error) {
-					if (error instanceof TrackerCoreError && error.code === "tracker.conflict")
+					if (
+						error instanceof TrackerCoreError &&
+						error.code === "tracker.conflict"
+					)
 						return undefined;
 					throw error;
 				}

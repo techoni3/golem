@@ -963,12 +963,15 @@ export class TrackerCoreRepository implements TrackerCoreStorageCapability {
 	}): TrackerCoreWorkItem | undefined {
 		return this.#store.transaction(() => {
 			const current = this.getWorkItem(input.id);
-			if (!current || current.revision !== input.expectedRevision) return undefined;
+			if (!current || current.revision !== input.expectedRevision)
+				return undefined;
 			const changed = this.#store.run(
 				this.#store.queries
 					.updateTable("tickets")
 					.set({
-						...(input.assignee === undefined ? {} : { assignee: input.assignee }),
+						...(input.assignee === undefined
+							? {}
+							: { assignee: input.assignee }),
 						dispatched_to: input.dispatchedTo,
 						dispatched_at: input.mutation.now,
 						updated_at: input.mutation.now,

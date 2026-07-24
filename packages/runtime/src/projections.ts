@@ -271,11 +271,10 @@ export class RuntimeProjectionService implements RuntimeProjectionPort {
 		const terminal = stream === "runtime.history";
 		const items = this.#storage.sessions(query.projectId).flatMap((session) =>
 			session.generations
-				.filter(
-					(generation) =>
-						terminal
-							? terminalStates.has(generation.state)
-							: !terminalStates.has(generation.state),
+				.filter((generation) =>
+					terminal
+						? terminalStates.has(generation.state)
+						: !terminalStates.has(generation.state),
 				)
 				.filter(
 					(generation) => !query.state || generation.state === query.state,

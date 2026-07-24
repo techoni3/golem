@@ -366,7 +366,8 @@ export const ContractFixtures = {
 			resource_type: "ticket",
 			resource_id: "TKT-0001",
 			correlation_id: "correlation-1",
-			fingerprint: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+			fingerprint:
+				"sha256:0000000000000000000000000000000000000000000000000000000000000000",
 			outcome: {
 				schema_version: "golem.api-command-outcome/v1",
 				command_id: ids.command,
@@ -384,7 +385,8 @@ export const ContractFixtures = {
 			resource_type: "ticket",
 			resource_id: "TKT-0001",
 			correlation_id: "correlation-1",
-			fingerprint: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+			fingerprint:
+				"sha256:0000000000000000000000000000000000000000000000000000000000000000",
 			outcome: {
 				schema_version: "golem.api-command-outcome/v1",
 				command_id: ids.command,

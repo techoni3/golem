@@ -177,7 +177,9 @@ export function createDurableDeliveryService(options: {
 		return Object.freeze({
 			envelope,
 			prepare() {
-				const current = options.eligibility.resolve(envelope.endpoint.generationId);
+				const current = options.eligibility.resolve(
+					envelope.endpoint.generationId,
+				);
 				if (endpointMatches(envelope.endpoint, current)) {
 					prepared = true;
 					return Object.freeze({ kind: "deliver" as const, envelope });

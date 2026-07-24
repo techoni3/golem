@@ -1,11 +1,11 @@
-import type {
-	ClaimedCommittedPublicationRecord,
-	CommittedPublicationStorage,
-} from "@golem/persistence";
 import {
 	BrowserWorkInvalidationSchema,
 	type BrowserWorkStream,
 } from "@golem/contracts";
+import type {
+	ClaimedCommittedPublicationRecord,
+	CommittedPublicationStorage,
+} from "@golem/persistence";
 
 import type { BrowserWorkReplayPort, ControlPlaneReplayPort } from "./ports.js";
 import type { ControlPlaneStream } from "./schemas.js";
@@ -24,7 +24,8 @@ function browserStreamFor(
 	record: ClaimedCommittedPublicationRecord,
 ): BrowserWorkStream {
 	const invalidation = browserInvalidationFor(record);
-	if (invalidation.category === "communication") return "communication.operations";
+	if (invalidation.category === "communication")
+		return "communication.operations";
 	if (invalidation.category === "management") return "management.controls";
 	return record.resourceType.startsWith("tracker.")
 		? "tracker.tree"

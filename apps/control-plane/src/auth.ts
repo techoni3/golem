@@ -287,6 +287,17 @@ export function hasRequestAuthorityHeaderOrQueryOverride(
 	);
 }
 
+/** Use only after a route has strictly validated its query schema and owns a
+ * scoped resource selector such as runtime `project_id`. */
+export function hasRequestAuthorityHeaderOrBodyOverride(
+	request: FastifyRequest,
+): boolean {
+	return (
+		hasRequestAuthorityHeaderOverride(request) ||
+		hasAuthorityOverride(request.body)
+	);
+}
+
 export function hasRequestAuthorityOverride(request: FastifyRequest): boolean {
 	return (
 		hasRequestAuthorityHeaderOrQueryOverride(request) ||

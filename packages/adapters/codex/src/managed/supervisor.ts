@@ -262,14 +262,14 @@ export class ManagedCodexSupervisor {
 			...(this.#options.env === undefined ? {} : { env: this.#options.env }),
 			onNotification: (message) =>
 				this.#handleNotification(message as Readonly<Record<string, unknown>>),
-				onExit: () => {
-					this.#started = false;
-					if (!this.#stopping)
-						void this.#emitTerminal().catch(() => {
-							// The endpoint health fact below remains useful even if the
-							// terminal lifecycle write is temporarily unavailable.
-						});
-					void this.#options.endpoints.reportHealth?.({
+			onExit: () => {
+				this.#started = false;
+				if (!this.#stopping)
+					void this.#emitTerminal().catch(() => {
+						// The endpoint health fact below remains useful even if the
+						// terminal lifecycle write is temporarily unavailable.
+					});
+				void this.#options.endpoints.reportHealth?.({
 					endpointId: binding.endpointId,
 					generationId: binding.generationId,
 					ownerInstanceId: binding.ownerInstanceId,

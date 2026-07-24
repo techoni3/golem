@@ -431,7 +431,12 @@ export const toolCatalog: readonly McpToolDefinition[] = [
 		request: (input) => ({
 			method: "PATCH",
 			path: `/api/v1/tracker/tickets/${encodeURIComponent(String(input.id))}/comments/${encodeURIComponent(String(input.comment_id))}`,
-			body: defined({ body: input.body, tag: input.tag, status: input.status, idempotency_key: input.idempotency_key }),
+			body: defined({
+				body: input.body,
+				tag: input.tag,
+				status: input.status,
+				idempotency_key: input.idempotency_key,
+			}),
 		}),
 	}),
 	definition({

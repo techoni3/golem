@@ -1,6 +1,5 @@
 import { Drawer, StatusBadge } from "@golem/ui";
-import * as React from "react";
-
+import styles from "./runtime.module.css";
 import {
 	activityAt,
 	endpoints,
@@ -9,12 +8,11 @@ import {
 	model,
 	observedAt,
 	projectName,
+	type RuntimeItem,
 	role,
 	sessionName,
 	text,
-	type RuntimeItem,
 } from "./types.js";
-import styles from "./runtime.module.css";
 
 function compactJson(value: unknown): string {
 	try {
@@ -115,8 +113,14 @@ function DetailList({ item }: { readonly item: RuntimeItem }) {
 				)}
 				{endpoint?.capabilities.length ? (
 					<ul className={styles.capabilityList}>
-						{endpoint.capabilities.map((capability, index) => (
-							<li key={`${String(capability.capability)}-${index}`}>
+						{endpoint.capabilities.map((capability) => (
+							<li
+								key={[
+									text(capability.capability),
+									text(capability.qualification),
+									text(capability.readiness),
+								].join(":")}
+							>
 								<strong>{text(capability.capability)}</strong>
 								<span>
 									{text(capability.qualification)} ·{" "}

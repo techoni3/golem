@@ -10,7 +10,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as React from "react";
 import {
 	BrowserRouter,
-	Link,
+	NavLink,
 	Route,
 	Routes,
 	useLocation,
@@ -266,9 +266,9 @@ function Shell() {
 			</header>
 			<nav aria-label="Dashboard" className={styles.typedNavigation}>
 				{navigation.map(([label, to]) => (
-					<Link key={to} to={to}>
+					<NavLink end={to === "/"} key={to} to={to}>
 						{label}
-					</Link>
+					</NavLink>
 				))}
 			</nav>
 			<main className={styles.main} id="dashboard-content" tabIndex={-1}>

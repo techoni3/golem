@@ -10,6 +10,7 @@ function isThemePreference(value: string | null): value is ThemePreference {
 }
 
 function systemTheme(): ResolvedTheme {
+	if (typeof window === "undefined") return "light";
 	return window.matchMedia("(prefers-color-scheme: dark)").matches
 		? "dark"
 		: "light";
@@ -17,23 +18,30 @@ function systemTheme(): ResolvedTheme {
 
 export function readThemePreference(): ThemePreference {
 	if (typeof window === "undefined") return "system";
-	const stored = window.localStorage.getItem(themeStorageKey);
-	return isThemePreference(stored) ? stored : "system";
+	try {
+		const stored = window.localStorage.getItem(themeStorageKey);
+		return isThemePreference(stored) ? stored : "system";
+	} catch {
+		return "system";
+	}
 }
 
 export function applyThemePreference(
 	preference: ThemePreference,
 ): ResolvedTheme {
 	const resolved = preference === "system" ? systemTheme() : preference;
-	document.documentElement.dataset.theme = resolved;
-	document.documentElement.dataset.themePreference = preference;
-	document.documentElement.style.colorScheme = resolved;
+	if (typeof document !== "undefined") {
+		document.documentElement.dataset.theme = resolved;
+		document.documentElement.dataset.themePreference = preference;
+		document.documentElement.style.colorScheme = resolved;
+	}
 	return resolved;
 }
 
 export const themeBootstrapScript = `(() => {
   const key = ${JSON.stringify(themeStorageKey)};
-  const stored = window.localStorage.getItem(key);
+  let stored = null;
+  try { stored = window.localStorage.getItem(key); } catch {}
   const preference = stored === "light" || stored === "dark" || stored === "system" ? stored : "system";
   const resolved = preference === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : preference === "system" ? "light" : preference;
   document.documentElement.dataset.theme = resolved;
@@ -59,13 +67,29 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
 	React.useEffect(() => {
 		const media = window.matchMedia("(prefers-color-scheme: dark)");
 		const sync = () => setResolvedTheme(applyThemePreference(preference));
+		const syncStorage = (event: StorageEvent) => {
+			if (event.key !== themeStorageKey) return;
+			const next = isThemePreference(event.newValue)
+				? event.newValue
+				: "system";
+			setPreferenceState(next);
+		};
 		sync();
 		media.addEventListener("change", sync);
-		return () => media.removeEventListener("change", sync);
+		window.addEventListener("storage", syncStorage);
+		return () => {
+			media.removeEventListener("change", sync);
+			window.removeEventListener("storage", syncStorage);
+		};
 	}, [preference]);
 
 	const setPreference = React.useCallback((next: ThemePreference) => {
-		window.localStorage.setItem(themeStorageKey, next);
+		try {
+			window.localStorage.setItem(themeStorageKey, next);
+		} catch {
+			// Sandboxed or privacy-restricted browsers still receive the in-memory
+			// preference for this document.
+		}
 		setPreferenceState(next);
 	}, []);
 
