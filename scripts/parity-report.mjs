@@ -12,6 +12,11 @@ const readJson = (name) =>
 const acceptance = readJson("acceptance-results.json");
 const browser = readJson("browser-results.json");
 const legacy = readJson("legacy-results.json");
+const browserProjects = browser.projects.map((project) =>
+	typeof project === "string"
+		? project
+		: `${project.name} ${project.status.toLowerCase()}`,
+);
 const parity = JSON.parse(
 	fs.readFileSync(
 		path.join(root, "docs", "architecture", "parity-manifest.json"),
@@ -126,7 +131,7 @@ const lines = [
 	"",
 	"## Browser and compatibility gates",
 	"",
-	`- Browser acceptance: **${browser.status}** — ${browser.projects.join(", ")}.`,
+	`- Browser acceptance: **${browser.status}** — ${browserProjects.join(", ")}.`,
 	`- Legacy rollback baseline: **${legacy.status}** — ${legacy.scenario_count} real-boundary scenarios.`,
 	"",
 	"## GOL-12 behavior mapping",
@@ -175,7 +180,7 @@ if (gaps.length) {
 }
 fs.writeFileSync(
 	path.join(evidenceDirectory, "acceptance-report.md"),
-	`${lines.join("\n")}\n`,
+	`${lines.join("\n").trimEnd()}\n`,
 );
 
 process.stdout.write(

@@ -1,0 +1,434 @@
+{
+  "schema_version": "golem.parity-report/v1",
+  "overall": "PASS",
+  "zero_gaps": true,
+  "gaps": [],
+  "artifact": {
+    "kind": "packed",
+    "filename": "laveesingh-golem-5.1.1.tgz",
+    "sha256": "a452a612bc09f6b0c082bd51e968563a09dbf1c8903b85b2ffd2d444fc835cf4",
+    "files": 338,
+    "package": "@laveesingh/golem",
+    "version": "5.1.1"
+  },
+  "entry_gate": {
+    "status": "PASS",
+    "checkout_hidden": true,
+    "postinstall_stopped": true,
+    "render_targets": [
+      "cc",
+      "cc-marketplace",
+      "codex",
+      "opencode",
+      "pi"
+    ],
+    "node": "v24.18.0",
+    "npm": "11.16.0",
+    "abi": "137",
+    "platform": "darwin/arm64",
+    "better_sqlite3": "12.11.1",
+    "sqlite": "3.53.2",
+    "openapi_fetch": "0.17.0",
+    "wal_restart_integrity": "PASS",
+    "install_flags": [
+      "--omit=dev",
+      "--foreground-scripts",
+      "--no-audit",
+      "--no-fund"
+    ],
+    "topology": {
+      "status": "PASS",
+      "typescript": {
+        "root": "7.0.2",
+        "codegen": "5.9.3",
+        "openapi_typescript": "7.13.0"
+      },
+      "openapi_fetch": "0.17.0",
+      "better_sqlite3": "12.11.1",
+      "api_check": "PASS",
+      "docs_check": "PASS"
+    }
+  },
+  "matrices": [
+    {
+      "id": "J1",
+      "status": "PASS",
+      "scenarios": [
+        "install-update-rollback",
+        "dashboard-down-inbox-replay"
+      ]
+    },
+    {
+      "id": "J2",
+      "status": "PASS",
+      "scenarios": [
+        "cross-harness-session-lifecycle",
+        "project-identity-git-worktree-relocation"
+      ]
+    },
+    {
+      "id": "J3",
+      "status": "PASS",
+      "scenarios": [
+        "materializer-crash-matrix",
+        "codex-managed-delivery-crash-matrix"
+      ]
+    },
+    {
+      "id": "J4",
+      "status": "PASS",
+      "scenarios": [
+        "claude-lifecycle-channel-recovery",
+        "tracker-http-mcp-parity",
+        "delivery-api-fence-recheck"
+      ]
+    },
+    {
+      "id": "J5",
+      "status": "PASS",
+      "scenarios": [
+        "compact-launcher-matrix",
+        "launcher-launchability-delivery-split",
+        "opencode-provider-coexistence"
+      ]
+    },
+    {
+      "id": "J6",
+      "status": "PASS",
+      "scenarios": [
+        "projection-ws-restart-resync",
+        "committed-outbox-all-write-paths",
+        "roles-gates-ideas-controls"
+      ]
+    },
+    {
+      "id": "J7",
+      "status": "PASS",
+      "scenarios": [
+        "canonical-cutover-crash-rollback",
+        "migration-apply-crash-rollback"
+      ]
+    },
+    {
+      "id": "J8",
+      "status": "PASS",
+      "scenarios": [
+        "dashboard-runtime-lifecycle"
+      ]
+    }
+  ],
+  "browser": {
+    "schema_version": "golem.acceptance-browser/v1",
+    "status": "PASS",
+    "project": "acceptance",
+    "headless": true,
+    "projects": [
+      {
+        "name": "accessibility-responsive-themes",
+        "status": "PASS"
+      },
+      {
+        "name": "dashboard-state-matrix",
+        "status": "PASS"
+      },
+      {
+        "name": "work-control-plane",
+        "status": "PASS"
+      }
+    ],
+    "accessibility_violations": {
+      "serious": 0,
+      "critical": 0
+    }
+  },
+  "legacy": {
+    "schema_version": "golem.acceptance-legacy/v1",
+    "status": "PASS",
+    "command": "node test/parity/legacy-baseline.mjs",
+    "exit_code": 0,
+    "scenario_count": 3,
+    "decisive_log": "legacy parity baseline passed (3 real-boundary scenarios)"
+  },
+  "requirements": [
+    {
+      "id": "GOL12-B01",
+      "text": "A strict TypeScript-first architecture defines shared domain contracts across adapters, runtime, persistence, control plane, CLI, and web UI.",
+      "evidence": [
+        "ENTRY",
+        "J6"
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "GOL12-B02",
+      "text": "Harness adapters translate Claude Code, Codex, OpenCode, Pi, and supported backend/model capabilities into versioned canonical contracts.",
+      "evidence": [
+        "J2",
+        "J4",
+        "J5"
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "GOL12-B03",
+      "text": "One durable control-plane model owns identity, generations, endpoint fencing, lifecycle, activity semantics, readiness, and diagnostics.",
+      "evidence": [
+        "J2",
+        "J3"
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "GOL12-B04",
+      "text": "Registration, lifecycle changes, crash recovery, and projections behave deterministically across supported harnesses.",
+      "evidence": [
+        "J2",
+        "J3",
+        "J4"
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "GOL12-B05",
+      "text": "The compact launcher has deterministic precedence, presets, capability validation, concise output, diagnostics, and non-recursive invocation.",
+      "evidence": [
+        "J5"
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "GOL12-B06",
+      "text": "Dashboard, sessions, tracker, controls, CLI, and diagnostics consume typed APIs and materialized views.",
+      "evidence": [
+        "J4",
+        "J6"
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "GOL12-B07",
+      "text": "The dashboard has an accessible design system, bounded responsive layouts, and light/dark/system themes.",
+      "evidence": [
+        "J8",
+        "BROWSER"
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "GOL12-B08",
+      "text": "Existing data and integrations have dry-run migration, compatibility, observable cutover, and nondestructive rollback.",
+      "evidence": [
+        "J7",
+        "LEGACY"
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "GOL12-B09",
+      "text": "Delivery is staged behind parity and migration gates and each wave remains runnable.",
+      "evidence": [
+        "J1",
+        "J7",
+        "LEGACY"
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "GOL12-B10",
+      "text": "Verification uses real SQLite, processes, services, concurrency, reordering, duplicate delivery, crashes, restart, migration, launch UX, and UI states.",
+      "evidence": [
+        "J1",
+        "J2",
+        "J3",
+        "J4",
+        "J5",
+        "J6",
+        "J7",
+        "J8"
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "GOL12-B11",
+      "text": "Repository structure, decisions, contributor workflow, generated boundaries, and invariants are documented.",
+      "evidence": [
+        "ENTRY"
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "GOL12-B12",
+      "text": "Deep design documents, ADRs, component/data-flow, migration, and dependency-ordered implementation planning exist.",
+      "evidence": [
+        "ENTRY"
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "GOL12-B13",
+      "text": "Builder briefs retain parent, ADR, predecessor, acceptance, workspace, and non-goal context.",
+      "evidence": [
+        "TRACKER"
+      ],
+      "status": "PASS"
+    },
+    {
+      "id": "GOL12-B14",
+      "text": "The replacement demonstrates retained parity, GOL-6 lifecycle consistency, and GOL-11 launcher truth.",
+      "evidence": [
+        "J1",
+        "J2",
+        "J3",
+        "J4",
+        "J5",
+        "J6",
+        "J7",
+        "J8",
+        "BROWSER",
+        "LEGACY"
+      ],
+      "status": "PASS"
+    }
+  ],
+  "parity": [
+    {
+      "id": "dashboard-lifecycle",
+      "status": "PASS",
+      "evidence": "J6",
+      "disposition": "retained",
+      "cutover_gate": "Temporary-home health and dashboard projection journey."
+    },
+    {
+      "id": "managed-codex",
+      "status": "PASS",
+      "evidence": "J4",
+      "disposition": "retained",
+      "cutover_gate": "Version/fingerprint fail-closed, restart, duplicate-envelope, and TUI-thread journey."
+    },
+    {
+      "id": "ordinary-codex",
+      "status": "PASS",
+      "evidence": "J4",
+      "disposition": "retained",
+      "cutover_gate": "Render, registration, and pull-only capability journey."
+    },
+    {
+      "id": "claude-plugin-render",
+      "status": "PASS",
+      "evidence": "J1",
+      "disposition": "retained",
+      "cutover_gate": "Temporary render, tamper, refresh, and rollback journey."
+    },
+    {
+      "id": "claude-channel",
+      "status": "PASS",
+      "evidence": "J4",
+      "disposition": "retained",
+      "cutover_gate": "Authenticated channel and model-consumption qualification journey."
+    },
+    {
+      "id": "opencode-bridge",
+      "status": "PASS",
+      "evidence": "J4",
+      "disposition": "retained",
+      "cutover_gate": "Config validation, resume/child identity, retry, deletion, and source-independent render journey."
+    },
+    {
+      "id": "pi-next-turn",
+      "status": "PASS",
+      "evidence": "J4",
+      "disposition": "retained",
+      "cutover_gate": "Inbox replay, acknowledgement, dead-letter, and next-turn journey."
+    },
+    {
+      "id": "project-discovery",
+      "status": "PASS",
+      "evidence": "J2",
+      "disposition": "retained",
+      "cutover_gate": "Nested Git, common-dir worktree, relocation, and forbidden-root journey."
+    },
+    {
+      "id": "session-facts",
+      "status": "PASS",
+      "evidence": "J2",
+      "disposition": "retained",
+      "cutover_gate": "Generation, ordering, stale-event, and endpoint-fence journey."
+    },
+    {
+      "id": "journal-and-spool",
+      "status": "PASS",
+      "evidence": "J1",
+      "disposition": "retained",
+      "cutover_gate": "Inbox rename, replay-once, and quarantine journey."
+    },
+    {
+      "id": "tracker",
+      "status": "PASS",
+      "evidence": "J4",
+      "disposition": "retained",
+      "cutover_gate": "Real SQLite tracker migration and phase/idempotency journey."
+    },
+    {
+      "id": "dispatch-and-envelopes",
+      "status": "PASS",
+      "evidence": "J4",
+      "disposition": "retained",
+      "cutover_gate": "Busy/waiting/pull/next-turn, retry, ack deadline, and owner-fence journey."
+    },
+    {
+      "id": "bus-and-passive-deltas",
+      "status": "PASS",
+      "evidence": "J3",
+      "disposition": "retained",
+      "cutover_gate": "UUID dedupe, cursor ordering, offline replay, and passive-consumption journey."
+    },
+    {
+      "id": "roles-gates-ideas-diagnostics",
+      "status": "PASS",
+      "evidence": "J6",
+      "disposition": "retained",
+      "cutover_gate": "Role activation, human-gate audit, idea promotion, and redaction journey."
+    },
+    {
+      "id": "launcher-and-compatibility-aliases",
+      "status": "PASS",
+      "evidence": "J5",
+      "disposition": "compatibility",
+      "cutover_gate": "Preset precedence, dry-run redaction, direct-mode truth, and qualified Claude/Ollama consumption journey."
+    }
+  ],
+  "retirements": [
+    {
+      "id": "removed-v3-cli",
+      "status": "retire",
+      "reason": "install, cleanup, reinstall, session, project, dispatch, and ack are absent current v3 commands."
+    },
+    {
+      "id": "legacy-registry-authority",
+      "status": "compatibility-only",
+      "reason": "JSON registries remain import/export inputs until C4 and must not become canonical authority."
+    },
+    {
+      "id": "old-agent-ws",
+      "status": "retire",
+      "reason": "agents-update, tickets-update, agent-detail, and orchestrator-update are removed v3 projection messages."
+    }
+  ],
+  "residual_risks": [
+    {
+      "id": "air-gapped-native",
+      "blocking": false,
+      "disposition": "Unsupported unless the correct native prebuild or cached compiler toolchain is present."
+    },
+    {
+      "id": "external-credential-qualification",
+      "blocking": false,
+      "disposition": "No credentialed capability is fabricated; absent binaries, models, daemons, or consumption evidence remain unavailable or pull-only/not-ready before spawn."
+    },
+    {
+      "id": "x64-host",
+      "blocking": false,
+      "disposition": "The same candidate has real x64 Node/addon/SQLite evidence under Rosetta; an independent physical x64 runner remains release-infrastructure hardening."
+    }
+  ]
+}

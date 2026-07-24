@@ -1,0 +1,24 @@
+{
+  "schema_version": "golem.acceptance-browser/v1",
+  "status": "PASS",
+  "project": "acceptance",
+  "headless": true,
+  "projects": [
+    {
+      "name": "accessibility-responsive-themes",
+      "status": "PASS"
+    },
+    {
+      "name": "dashboard-state-matrix",
+      "status": "PASS"
+    },
+    {
+      "name": "work-control-plane",
+      "status": "PASS"
+    }
+  ],
+  "accessibility_violations": {
+    "serious": 0,
+    "critical": 0
+  }
+}

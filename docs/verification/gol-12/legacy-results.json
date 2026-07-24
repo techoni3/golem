@@ -1,0 +1,8 @@
+{
+  "schema_version": "golem.acceptance-legacy/v1",
+  "status": "PASS",
+  "command": "node test/parity/legacy-baseline.mjs",
+  "exit_code": 0,
+  "scenario_count": 3,
+  "decisive_log": "legacy parity baseline passed (3 real-boundary scenarios)"
+}
