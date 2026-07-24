@@ -1,0 +1,18 @@
+{
+  "schema": "golem.release/v1",
+  "package": "@laveesingh/golem",
+  "version": "5.1.1",
+  "node": ">=24.18.0",
+  "native": {
+    "better-sqlite3": "12.11.1"
+  },
+  "artifacts": {
+    "golem-cli.mjs": "613bcee69c5dac65c0d70d8db794f5bb5d0a3d85a816252eebdda6501e358ae3",
+    "control-plane.mjs": "789078863b04500e62f8170a5917fabbaab841e9b757982515b295003afd55a4",
+    "managed-codex-host.mjs": "a3138bcd6bd2efe41c70c2d7cf6fe8fc492c45f816a0e4c457edeffecbaaa39e",
+    "migration-plan.mjs": "41ee16a9c47ae7d3e058f1e1977b76dd11005a6e08f5bbf448063579fbb0a907",
+    "legacy-dashboard.mjs": "bdccb140ce188adf3b72316122b682df16b70b7c7fa4e2d33874c64e5958747d",
+    "pi-extension.mjs": "ef48875ff8f589b7eb13bd51483b60389c43fdd8d0f1ee787b342973bccaf7c2",
+    "golem-mcp.mjs": "1f787343f7cd0d3ac6dca6f88d8fbd1de166bab6bcfa021118d8492ba593992a"
+  }
+}

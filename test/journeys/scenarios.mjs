@@ -2,6 +2,13 @@ import { registerScenario } from "@golem/testkit";
 
 export const scenarios = [
 	registerScenario({
+		id: "install-update-rollback",
+		journey: "J1",
+		tier: "integration",
+		regression:
+			"a packed install depends on the checkout, auto-starts, loses user data/renders during update, or cannot recover atomically from a failed update",
+	}),
+	registerScenario({
 		id: "codex-direct-seamless-integration",
 		journey: "J2",
 		tier: "integration",

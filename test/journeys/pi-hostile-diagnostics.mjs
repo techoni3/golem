@@ -51,7 +51,6 @@ export async function exercisePiHostileDiagnostics() {
 		});
 		const renderRoot = path.join(home, "renders", "pi");
 		const extensionPath = path.join(renderRoot, "golem.mjs");
-		fs.copyFileSync(path.join(renderRoot, "golem.ts"), extensionPath);
 		const bindings = path.join(home, "pi-adapter", "bindings");
 		fs.mkdirSync(bindings, { recursive: true });
 		fs.writeFileSync(path.join(bindings, "pi-safe-session.json"), JSON.stringify(binding));

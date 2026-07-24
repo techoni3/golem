@@ -28,14 +28,18 @@ assertLegacyWriterAllowed('legacy-dashboard-server');
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const WEB_SOURCE_ROOT = path.resolve(__dirname, '..', 'web');
-const WEB_DIST_ROOT = path.resolve(__dirname, '..', 'dist');
+const WEB_DIST_ROOT = process.env.GOLEM_LEGACY_STATIC_ROOT
+  ? path.resolve(process.env.GOLEM_LEGACY_STATIC_ROOT)
+  : path.resolve(__dirname, '..', 'dist');
 const WEB_ROOT = fs.existsSync(path.join(WEB_DIST_ROOT, 'index.html')) ? WEB_DIST_ROOT : WEB_SOURCE_ROOT;
 // The tracker genre templates live OUTSIDE dashboard/, in the substrate
 // source tree at substrate/skills/tracker/templates/ (TKT-0574 — plugin/ is
 // now a generated render of substrate/, not the SoT). Resolve the repo root
 // two levels up from this file (dashboard/server/index.js → dashboard/ →
 // repo root) and point at that dir. Used by GET /api/templates.
-const REPO_ROOT = path.resolve(__dirname, '..', '..');
+const REPO_ROOT = process.env.GOLEM_PACKAGE_ROOT
+  ? path.resolve(process.env.GOLEM_PACKAGE_ROOT)
+  : path.resolve(__dirname, '..', '..');
 const TEMPLATES_DIR = path.join(REPO_ROOT, 'substrate', 'skills', 'tracker', 'templates');
 
 // Legacy markdown tracker columns (kept in /api/meta for API stability; the UI

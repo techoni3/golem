@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	openCodeManagedProviderRegion,
@@ -80,6 +80,11 @@ const backends = new Set([
 ]);
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
+const packageRoot =
+	basename(moduleDirectory) === "release" &&
+	basename(dirname(moduleDirectory)) === "dist"
+		? resolve(moduleDirectory, "../..")
+		: resolve(moduleDirectory, "../../..");
 
 interface ManagedOpenCodeIngress {
 	readonly projectId: string;
@@ -98,9 +103,15 @@ class OpenCodeControlPlaneError extends Error {
 	}
 }
 
-function controlPlaneArtifact(relative: string): string | undefined {
-	const candidate = resolve(moduleDirectory, relative);
-	return existsSync(candidate) ? candidate : undefined;
+function packageArtifact(
+	releasePath: string,
+	checkoutPath: string,
+): string | undefined {
+	for (const relative of [releasePath, checkoutPath]) {
+		const candidate = resolve(packageRoot, relative);
+		if (existsSync(candidate)) return candidate;
+	}
+	return undefined;
 }
 
 function stopChild(child: ReturnType<typeof spawn>): Promise<void> {
@@ -139,9 +150,13 @@ function stopChild(child: ReturnType<typeof spawn>): Promise<void> {
 async function startManagedOpenCodeIngress(
 	projectPath: string,
 ): Promise<ManagedOpenCodeIngress> {
-	const main = controlPlaneArtifact("../../../apps/control-plane/dist/main.js");
-	const staticDirectory = controlPlaneArtifact(
-		"../../../dashboard/dist/control-plane",
+	const main = packageArtifact(
+		"dist/release/control-plane.mjs",
+		"apps/control-plane/dist/main.js",
+	);
+	const staticDirectory = packageArtifact(
+		"dashboard/dist/control-plane",
+		"dashboard/dist/control-plane",
 	);
 	if (!main || !staticDirectory) throw new OpenCodeControlPlaneError();
 	const projectId = openCodeRuntimeProjectId(projectPath);
@@ -498,8 +513,9 @@ async function launchManagedCodex(
 	io: CliIo,
 ): Promise<number | undefined> {
 	if (input.command !== "codex" || input.dryRun || input.json) return undefined;
-	const host = controlPlaneArtifact(
-		"../../../apps/control-plane/dist/managed-codex-host.js",
+	const host = packageArtifact(
+		"dist/release/managed-codex-host.mjs",
+		"apps/control-plane/dist/managed-codex-host.js",
 	);
 	if (!host) {
 		errorOutput(

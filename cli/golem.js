@@ -42,6 +42,11 @@ const GOLEM_ROOT = resolve(__dirname, '..');
 const DASHBOARD_DIR = resolve(GOLEM_ROOT, 'dashboard');
 const DEFAULT_DASHBOARD_PORT = 7420;
 
+function releaseArtifact(name, fallback) {
+  const packaged = resolve(GOLEM_ROOT, 'dist', 'release', name);
+  return existsSync(packaged) ? packaged : resolve(GOLEM_ROOT, ...fallback);
+}
+
 function dashboardUrl() {
   if (process.env.GOLEM_DASHBOARD_URL) return process.env.GOLEM_DASHBOARD_URL.replace(/\/$/, '');
   const port = process.env.PORT || String(DEFAULT_DASHBOARD_PORT);
@@ -711,7 +716,7 @@ function dashboardService(args = []) {
     if (publicFlag) fatal(2, '--public is not supported after C4; the authenticated control plane is loopback-only');
     const unknown = args.filter((arg) => arg !== '-h' && arg !== '--help');
     if (unknown.length) fatal(2, `canonical dashboard does not accept legacy server options: ${unknown.join(' ')}`);
-    const entry = resolve(GOLEM_ROOT, 'apps', 'control-plane', 'dist', 'main.js');
+    const entry = releaseArtifact('control-plane.mjs', ['apps', 'control-plane', 'dist', 'main.js']);
     const staticRoot = resolve(DASHBOARD_DIR, 'dist', 'control-plane');
     const tokenFile = ensureControlPlaneTokenFile();
     return {
@@ -732,12 +737,14 @@ function dashboardService(args = []) {
   }
   return {
     mode: 'legacy',
-    entry: resolve(DASHBOARD_DIR, 'server', 'index.js'),
+    entry: releaseArtifact('legacy-dashboard.mjs', ['dashboard', 'server', 'index.js']),
     args: args.filter((arg) => arg !== '--public'),
     publicFlag,
     env: {
       ...process.env,
       ...(publicFlag ? { HOST: '0.0.0.0' } : {}),
+      GOLEM_PACKAGE_ROOT: GOLEM_ROOT,
+      GOLEM_LEGACY_STATIC_ROOT: resolve(DASHBOARD_DIR, 'dist'),
     },
   };
 }
@@ -940,7 +947,7 @@ async function cmdMigrateHome(args) {
  * exact plan validation, backup, canonical writes, and rollback semantics.
  */
 async function cmdMigrate(args) {
-  const entry = resolve(GOLEM_ROOT, 'packages', 'compat', 'bin', 'migration-plan.mjs');
+  const entry = releaseArtifact('migration-plan.mjs', ['packages', 'compat', 'bin', 'migration-plan.mjs']);
   if (!existsSync(entry)) {
     fatal(1, 'migration CLI is unavailable in this installation; reinstall a build containing @golem/compat');
   }
@@ -1693,7 +1700,7 @@ function cmdRemoved(name) {
  * native Codex implementation and its exit behaviour unchanged.
  */
 async function runTypedCli(args) {
-  const entry = resolve(GOLEM_ROOT, 'dist', 'apps', 'cli', 'golem.js');
+  const entry = releaseArtifact('golem-cli.mjs', ['dist', 'apps', 'cli', 'golem.js']);
   if (!existsSync(entry)) return false;
   const typed = await import(pathToFileURL(entry).href);
   const code = await typed.runCli(args);

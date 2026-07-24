@@ -8,8 +8,8 @@ try {
   execFileSync(process.execPath, [path.join(repo, 'cli/golem.js'), 'sync', '--target', 'pi'], { cwd: repo, env });
   assert.equal(fs.existsSync(path.join(env.HOME, '.pi')), false); const root = path.join(env.GOLEM_HOME, 'renders', 'pi');
   const caps = JSON.parse(fs.readFileSync(path.join(root, 'capabilities.json'))); assert.equal(caps.tier, 'B'); assert.equal(caps.push_delivery, false); assert.equal(caps.node, '>=22.19');
-  assert.ok(!fs.readFileSync(path.join(root, 'golem.ts'), 'utf8').includes(repo), 'extension is portable');
-  const executable = path.join(root, 'golem.mjs'); fs.copyFileSync(path.join(root, 'golem.ts'), executable);
+  const executable = path.join(root, 'golem.mjs');
+  assert.ok(!fs.readFileSync(executable, 'utf8').includes(repo), 'extension is portable');
   const bindingDir = path.join(env.GOLEM_HOME, 'pi-adapter', 'bindings'); fs.mkdirSync(bindingDir, { recursive: true }); fs.writeFileSync(path.join(bindingDir, 'pi-session-uuid.json'), JSON.stringify({ project_id: 'prj_00000000-0000-4000-8000-000000000051', session_id: 'ses_00000000-0000-4000-8000-000000000051', generation_id: 'gen_00000000-0000-4000-8000-000000000051', endpoint_id: 'ep_00000000-0000-4000-8000-000000000051', owner_fence: '1', producer_instance_id: 'prod_00000000-0000-4000-8000-000000000051' }));
   const handlers = {}; const extension = (await import(`file://${executable}`)).default; process.env.GOLEM_HOME = env.GOLEM_HOME; extension({ on: (name, handler) => { handlers[name] = handler; } });
   let name = 'spike'; const ctx = { cwd: repo, isIdle: () => true, sessionManager: { getSessionId: () => 'pi-session-uuid', getSessionFile: () => '/tmp/pi-session.jsonl', getSessionName: () => name } };

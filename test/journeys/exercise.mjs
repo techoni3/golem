@@ -67,6 +67,7 @@ import {
 	exerciseLauncherSignalCleanup,
 	exerciseNativeSpawnSafety,
 } from "./native-spawn-safety.mjs";
+import { exerciseInstallUpdateRollback } from "./install-update-rollback.mjs";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright-core");
@@ -1148,4 +1149,5 @@ export const exercises = Object.freeze({
 	"projection-ws-restart-resync": exerciseCommittedProjectionWsRestartResync,
 	"dashboard-runtime-lifecycle": exerciseDashboardRuntimeLifecycle,
 	"dashboard-disconnect-resync": exerciseDashboardDisconnectResync,
+	"install-update-rollback": exerciseInstallUpdateRollback,
 });

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { openCodeManagedProviderRegion, openCodeProviderCapabilities, openCodeRuntimeProjectId, probeOpenCodeProviders, setupOpenCodeConfig, } from "@golem/adapter-opencode";
 import { executeLaunch, LauncherExecutionError, LauncherResolutionError, launchPlanBridge, parseJsoncConfig, resolveLaunch, } from "@golem/launcher";
@@ -22,6 +22,10 @@ const backends = new Set([
     "native",
 ]);
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
+const packageRoot = basename(moduleDirectory) === "release" &&
+    basename(dirname(moduleDirectory)) === "dist"
+    ? resolve(moduleDirectory, "../..")
+    : resolve(moduleDirectory, "../../..");
 class OpenCodeControlPlaneError extends Error {
     code;
     constructor() {
@@ -30,9 +34,13 @@ class OpenCodeControlPlaneError extends Error {
         this.code = "adapter.opencode.control_plane.unavailable";
     }
 }
-function controlPlaneArtifact(relative) {
-    const candidate = resolve(moduleDirectory, relative);
-    return existsSync(candidate) ? candidate : undefined;
+function packageArtifact(releasePath, checkoutPath) {
+    for (const relative of [releasePath, checkoutPath]) {
+        const candidate = resolve(packageRoot, relative);
+        if (existsSync(candidate))
+            return candidate;
+    }
+    return undefined;
 }
 function stopChild(child) {
     if (child.exitCode !== null || child.signalCode !== null)
@@ -70,8 +78,8 @@ function stopChild(child) {
  * the standard, sanitized launcher environment.
  */
 async function startManagedOpenCodeIngress(projectPath) {
-    const main = controlPlaneArtifact("../../../apps/control-plane/dist/main.js");
-    const staticDirectory = controlPlaneArtifact("../../../dashboard/dist/control-plane");
+    const main = packageArtifact("dist/release/control-plane.mjs", "apps/control-plane/dist/main.js");
+    const staticDirectory = packageArtifact("dashboard/dist/control-plane", "dashboard/dist/control-plane");
     if (!main || !staticDirectory)
         throw new OpenCodeControlPlaneError();
     const projectId = openCodeRuntimeProjectId(projectPath);
@@ -386,7 +394,7 @@ async function launchOpenCode(result, input, io) {
 async function launchManagedCodex(result, input, io) {
     if (input.command !== "codex" || input.dryRun || input.json)
         return undefined;
-    const host = controlPlaneArtifact("../../../apps/control-plane/dist/managed-codex-host.js");
+    const host = packageArtifact("dist/release/managed-codex-host.mjs", "apps/control-plane/dist/managed-codex-host.js");
     if (!host) {
         errorOutput(io, "adapter.codex.managed.host_unavailable: managed Codex was not launched");
         return CLI_EXIT_CODES.runtime;

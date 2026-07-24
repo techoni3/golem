@@ -1,1 +1,0 @@
-var r=Math.abs,n=Math.atan2,i=Math.cos,h=Math.max,v=Math.min,M=Math.sin,o=Math.sqrt,c=1e-12,s=Math.PI,t=s/2,u=2*s;function e(a){return a>1?0:a<-1?s:Math.acos(a)}function f(a){return a>=1?t:a<=-1?-t:Math.asin(a)}export{i as a,h as c,M as d,o as f,n as i,v as l,e as n,c as o,u as p,f as r,t as s,r as t,s as u};

@@ -87,9 +87,8 @@ authority, and are not included in the npm package.
 
 ## Prerequisites
 
-- Node.js 20 or newer and npm for the CLI, dashboard, Claude Code, OpenCode,
-  and Codex paths.
-- Node.js 22.19 or newer for Pi.
+- Node.js 24.18.x and npm 11.16.x for the CLI, dashboard, package checks, and
+  supported harness paths.
 - At least one supported harness installed separately.
 - Git for a source checkout and normal contribution workflows.
 - A local machine where loopback ports can be opened. The dashboard defaults to
@@ -122,15 +121,15 @@ npm link
 golem help
 ```
 
-`npm ci` runs the package postinstall, which restores the channel MCP's locked
-production dependencies. `npm link` exposes this checkout's `cli/golem.js` as
-the global `golem` command. Without linking, run commands from the checkout as
+`npm ci` uses one root lock and runs a validation-only postinstall: release
+checksums and `better-sqlite3@12.11.1` are checked, but no service starts and no
+home, render, nested install, migration, or code generation is created.
+`npm link` exposes this checkout's `cli/golem.js`; without linking, run
 `node cli/golem.js <command>`.
 
-The relocatable MCP artifact is built and pack-verified alongside this current
-channel closure. It is a future cutover candidate; rendered `.mcp.json` keeps
-starting `mcp/channel/index.js` until the later lifecycle-adapter journey proves
-registration, addressed delivery, and uncorrelated reply parity.
+The active rendered MCP is the relocatable
+`packages/mcp-adapter/dist/golem-mcp.mjs` artifact. It bundles its SDK/client
+closure and runs without workspace or render-local `node_modules`.
 
 ## Quick start
 
@@ -392,7 +391,7 @@ Load it without changing the Pi profile, using the `$GOLEM_DIR` resolved at the
 start of this section:
 
 ```sh
-pi -e "$GOLEM_DIR/renders/pi/golem.ts"
+pi -e "$GOLEM_DIR/renders/pi/golem.mjs"
 ```
 
 The extension uses Pi's canonical `ctx.sessionManager.getSessionId()` identity.

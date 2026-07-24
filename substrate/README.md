@@ -31,9 +31,9 @@ sub-agents, and the golem channel MCP.
 - **Channel MCP** (`golem`) → `ack` / `respond` tools + an SSE `/events` stream
   the dashboard subscribes to, **plus the tracker tools** and the
   **session-to-session consult tools** (see below).
-- **Relocatable MCP artifact** → generated and pack-verified beside the channel
-  as a future cutover candidate; `.mcp.json` still selects the legacy channel
-  until lifecycle registration and delivery parity have an adapter owner.
+- **Relocatable MCP artifact** → `.mcp.json` selects the generated
+  `mcp/golem-mcp.mjs` C4 artifact. It contains its SDK/client closure and has no
+  render-local `node_modules`.
 - **Consult tools** (on the same `golem` MCP) → `consult_request`, `consult_reply`,
   `consult_status`. One live session asks ANOTHER for a fresh pair of eyes on a
   hard problem (a second opinion, not delegation) over the channel transport —
@@ -67,10 +67,11 @@ claude plugin install golem@golem-workspace --scope user
 Or interactively inside a session: `/plugin marketplace add
 ~/.golem/renders/cc-marketplace` then `/plugin install golem@golem-workspace`.
 
-The npm package installs the channel server's locked production dependencies
-automatically. Source contributors can restore them with `npm ci --prefix
-mcp/channel`; `golem sync --target cc` copies those dependencies into the
-render so the plugin does not depend on the source checkout at runtime.
+The npm package postinstall validates release checksums and the native SQLite
+load only. It never starts a service or performs a nested install.
+`golem sync --target cc` copies the single relocatable MCP artifact, so the
+plugin does not depend on the source checkout or a render-local dependency
+tree.
 
 Verify: `claude plugin list` (look for `golem@golem-workspace` enabled) and
 `claude plugin validate ~/.golem/renders/cc-plugin`.
@@ -200,9 +201,7 @@ plugin/
   skills/tracker/SKILL.md      # golem:tracker — tracker is the source of truth for work
   skills/get-consult/SKILL.md  # golem:get-consult — ask a peer session for a fresh pair of eyes
   skills/provide-consult/SKILL.md # golem:provide-consult — answer a peer's consult
-  mcp/channel/index.js         # golem channel MCP — ack/respond + tracker + consult tools, /consult routes
-  mcp/channel/tracker-client.js# HTTP client of the dashboard tracker REST API
-  mcp/channel/node_modules/    # bundled deps (@modelcontextprotocol/sdk)
+  mcp/golem-mcp.mjs            # relocatable typed MCP — bundled SDK/client closure
   .mcp.json                    # wires the channel MCP via ${CLAUDE_PLUGIN_ROOT}
 ```
 
@@ -233,8 +232,7 @@ Project mappings:
 
 - **MCP path variable:** `${CLAUDE_PLUGIN_ROOT}` is documented as supported in
   in-plugin `.mcp.json` (Plugins reference → Environment variables), so the
-  channel is wired rather than skipped. `NODE_PATH` points at the bundled
-  `node_modules` so the SDK resolves from the plugin cache copy.
+  typed artifact is wired without `NODE_PATH` or nested dependencies.
 - **Session pid:** the SessionStart hook payload carries no session pid, and
   `$PPID` in a hook is the immediate shell, not the claude session. `sessions.json`
   is keyed by `session_id`; `hook_ppid` is recorded best-effort only.

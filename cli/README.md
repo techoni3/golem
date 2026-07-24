@@ -4,7 +4,19 @@ Minimal Node CLI for the golem v4 harness. (The v3 bash CLI was retired in v4.)
 
 ## Install
 
-From the repo root:
+Production (Node 24.18+):
+
+```bash
+npm install -g @laveesingh/golem
+golem help
+```
+
+The package postinstall validates the release checksums and
+`better-sqlite3@12.11.1`; it never starts a service, writes `GOLEM_HOME`, runs
+code generation, or performs a nested npm install. Render integrations
+explicitly after installation.
+
+From a source checkout:
 
 ```bash
 npm link        # makes `golem` available globally
@@ -30,13 +42,38 @@ npx golem <command>
 
 The typed registry lives in `apps/cli/src/registry.ts` and generates parser
 metadata and help. `cli/golem.js` remains the compatibility entry point and
-delegates only the new harness resolution surface to its compiled registry.
+loads the relocatable `dist/release/golem-cli.mjs` artifact in an installed
+package (with the workspace build as a checkout fallback).
 There is intentionally no `golem launch` command.
 
 `golemc` and `golemx` remain one-hop compatibility shims for `golem claude`
-and `golem opencode`; they print a deprecation/remediation line and refuse a
-second compatibility hop. They never replace native `claude`, `opencode`, or
+and `golem opencode`. They never replace native `claude`, `opencode`, or
 `codex` commands.
+
+## Install, update, and rollback
+
+Installation and version selection stay npm-owned; Golem never mutates its own
+package from postinstall:
+
+```bash
+npm install -g @laveesingh/golem
+golem sync --target cc
+golem sync --target cc-marketplace
+
+npm install -g @laveesingh/golem@<next-version>
+golem sync --target cc
+golem sync --target cc-marketplace
+
+npm install -g @laveesingh/golem@<previous-version>
+golem sync --target cc --force
+golem sync --target cc-marketplace --force
+```
+
+Run `golem migrate plan` and use its exact plan hash before a legacy-data apply
+or C4 cutover. Package rollback changes executable/render bytes; it never
+silently rewrites canonical SQLite data. The dashboard Settings page owns
+preview-hashed, explicit LaunchAgent install/status/start/stop/update/rollback
+operations.
 
 ## Removed v3 commands
 

@@ -3098,9 +3098,9 @@ var require_data = __commonJS({
   }
 });
 
-// ../../node_modules/ajv/node_modules/fast-uri/lib/utils.js
+// ../../node_modules/fast-uri/lib/utils.js
 var require_utils = __commonJS({
-  "../../node_modules/ajv/node_modules/fast-uri/lib/utils.js"(exports, module) {
+  "../../node_modules/fast-uri/lib/utils.js"(exports, module) {
     "use strict";
     var isUUID = RegExp.prototype.test.bind(/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/iu);
     var isIPv4 = RegExp.prototype.test.bind(/^(?:(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)$/u);
@@ -3411,9 +3411,9 @@ var require_utils = __commonJS({
   }
 });
 
-// ../../node_modules/ajv/node_modules/fast-uri/lib/schemes.js
+// ../../node_modules/fast-uri/lib/schemes.js
 var require_schemes = __commonJS({
-  "../../node_modules/ajv/node_modules/fast-uri/lib/schemes.js"(exports, module) {
+  "../../node_modules/fast-uri/lib/schemes.js"(exports, module) {
     "use strict";
     var { isUUID } = require_utils();
     var URN_REG = /([\da-z][\d\-a-z]{0,31}):((?:[\w!$'()*+,\-.:;=@]|%[\da-f]{2})+)/iu;
@@ -3621,9 +3621,9 @@ var require_schemes = __commonJS({
   }
 });
 
-// ../../node_modules/ajv/node_modules/fast-uri/index.js
+// ../../node_modules/fast-uri/index.js
 var require_fast_uri = __commonJS({
-  "../../node_modules/ajv/node_modules/fast-uri/index.js"(exports, module) {
+  "../../node_modules/fast-uri/index.js"(exports, module) {
     "use strict";
     var { normalizeIPv6, removeDotSegments, recomposeAuthority, normalizePercentEncoding, normalizePathEncoding, escapePreservingEscapes, reescapeHostDelimiters, isIPv4, nonSimpleDomain } = require_utils();
     var { SCHEMES, getSchemeHandler } = require_schemes();
@@ -3764,6 +3764,7 @@ var require_fast_uri = __commonJS({
       return uriTokens.join("");
     }
     var URI_PARSE = /^(?:([^#/:?]+):)?(?:\/\/((?:([^#/?@]*)@)?(\[[^#/?\]]+\]|[^#/:?]*)(?::(\d*))?))?([^#?]*)(?:\?([^#]*))?(?:#((?:.|[\n\r])*))?/u;
+    var AUTHORITY_PREFIX = /^(?:[^#/:?]+:)?\/\/([^/?#]*)/;
     function getParseError(parsed, matches) {
       if (matches[2] !== void 0 && parsed.path && parsed.path[0] !== "/") {
         return 'URI path must start with "/" when authority is present.';
@@ -3792,6 +3793,11 @@ var require_fast_uri = __commonJS({
         } else {
           uri = "//" + uri;
         }
+      }
+      const authorityMatch = uri.match(AUTHORITY_PREFIX);
+      if (authorityMatch !== null && authorityMatch[1].indexOf("\\") !== -1) {
+        parsed.error = "URI authority must not contain a literal backslash.";
+        malformedAuthorityOrPort = true;
       }
       const matches = uri.match(URI_PARSE);
       if (matches) {
@@ -6567,9 +6573,9 @@ var require_ajv = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv-formats/dist/formats.js
+// ../../node_modules/ajv-formats/dist/formats.js
 var require_formats = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv-formats/dist/formats.js"(exports) {
+  "../../node_modules/ajv-formats/dist/formats.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.formatNames = exports.fastFormats = exports.fullFormats = void 0;
@@ -6770,9 +6776,9 @@ var require_formats = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv-formats/dist/limit.js
+// ../../node_modules/ajv-formats/dist/limit.js
 var require_limit = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv-formats/dist/limit.js"(exports) {
+  "../../node_modules/ajv-formats/dist/limit.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.formatLimitDefinition = void 0;
@@ -6842,9 +6848,9 @@ var require_limit = __commonJS({
   }
 });
 
-// ../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv-formats/dist/index.js
+// ../../node_modules/ajv-formats/dist/index.js
 var require_dist = __commonJS({
-  "../../node_modules/@modelcontextprotocol/sdk/node_modules/ajv-formats/dist/index.js"(exports, module) {
+  "../../node_modules/ajv-formats/dist/index.js"(exports, module) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var formats_1 = require_formats();
@@ -27236,7 +27242,12 @@ var toolCatalog = [
     request: (input) => ({
       method: "PATCH",
       path: `/api/v1/tracker/tickets/${encodeURIComponent(String(input.id))}/comments/${encodeURIComponent(String(input.comment_id))}`,
-      body: defined({ body: input.body, tag: input.tag, status: input.status, idempotency_key: input.idempotency_key })
+      body: defined({
+        body: input.body,
+        tag: input.tag,
+        status: input.status,
+        idempotency_key: input.idempotency_key
+      })
     })
   }),
   definition({

@@ -1,16 +1,18 @@
 # REPO-MAP.md
-> Last verified: 2026-07-23 @ GOL-57 canonical C4 cutover — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-24 @ GOL-59 packaged release boundary — maintained via golem:docs-maintenance.
 
 ## Structure
 
 - `apps/cli/src/` owns typed grammar and UX; writes require `--apply`; completions/aliases never edit shell RC files.
 - `packages/` contains domain, client, testkit, UI, and adapters; transports consume canonical ports without storage.
 - `apps/control-plane/` composes hosts; `dashboard/web` is legacy. API/client/MCP are storage-free; `substrate/` renders plugin assets.
+- `scripts/build-release-artifacts.mjs` folds private workspace code into `dist/release/`; the public tarball ships those compiled artifacts, static dashboard bytes, runtime helpers, substrate, shims, and licenses—never workspace source or symlinks.
 
 ## Invariants and flow
 
 - Canonical flow is contracts → domain/runtime/tracker → control plane → generated client; compat/storage/UI/harness do not import inward.
 - One npm11 lock; `packages/persistence` is the sole SQLite writer, recovery owner, and migration owner.
+- The contributor graph uses root TypeScript 7.0.2. Only the private `tools/openapi-codegen` workspace owns TypeScript 5.9.3 plus `openapi-typescript` 7.13.0; neither compiler nor the generator ships. Production keeps `openapi-fetch` and exact `better-sqlite3` 12.11.1.
 - C4 authority is one atomic `$GOLEM_HOME/control-plane/authority.json` pointer. `packages/persistence/src/authority.ts` selects `canonical/runtime.db` only at C4 while root `tracker.db` remains its GOL-20 authority; `packages/compat/src/cutover/` owns exact-hash preflight, checkpoint, resume, soak, and audited non-lossy rollback. Legacy JSON/channel/dashboard writers share `lib/legacy-writer-guard.js`. See `docs/architecture/cutover-runbook.md`.
 - Tracker owns durable delivery and typed work-item/phase/comment/link/stream services; exceptional close is server-composed.
 - `CommandGateway` atomically writes tracker/management mutations, GOL-79 receipts, invalidations, settlement, and direct-core effects. Replays are inert; changed keys return `409`; semantic changes publish once; scope filtering precedes WS; HTTP revisions are truth.
@@ -28,5 +30,5 @@
 ## Checks and gotchas
 
 - Tests use disposable homes; never mutate user state, shared ports, Docker, or renders. Loopback denial is `UNMET`.
-- `packages/mcp-adapter/dist/golem-mcp.mjs` is the C4 render entrypoint. `mcp/channel` is retained only for the explicit C3 rollback window and is writer-fenced at C4; do not hand-edit renders or bypass boundaries.
+- `packages/mcp-adapter/dist/golem-mcp.mjs` is the C4 render entrypoint. It bundles its SDK/client closure, so npm postinstall only validates checksums/native load and never performs a nested install or starts a service. `mcp/channel` remains source-checkout C3 evidence but is absent from the public package/render. Do not hand-edit renders or bypass boundaries.
 - Node24 gates: build/typecheck, boundaries, named journeys, render, and `git diff --check`.

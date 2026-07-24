@@ -1968,7 +1968,7 @@ async function runSettingsControlsDashboard() {
 		await page.getByText(/Render pi was compiled/u).waitFor();
 		await piRow.getByText("clean", { exact: true }).waitFor();
 		assert.equal(
-			fs.existsSync(path.join(home.golemHome, "renders", "pi", "golem.ts")),
+			fs.existsSync(path.join(home.golemHome, "renders", "pi", "golem.mjs")),
 			true,
 			"confirmed browser render invokes the real compiler",
 		);

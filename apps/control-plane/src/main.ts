@@ -199,7 +199,12 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 			owner.committedPublicationStorage().projectRevision(projectId),
 	});
 	const modulePath = fileURLToPath(import.meta.url);
-	const workspaceRoot = path.resolve(path.dirname(modulePath), "../../..");
+	const moduleDirectory = path.dirname(modulePath);
+	const workspaceRoot =
+		path.basename(moduleDirectory) === "release" &&
+		path.basename(path.dirname(moduleDirectory)) === "dist"
+			? path.resolve(moduleDirectory, "../..")
+			: path.resolve(moduleDirectory, "../../..");
 	const cliEntry = path.resolve(
 		process.env.GOLEM_CLI_ENTRY ?? path.join(workspaceRoot, "cli", "golem.js"),
 	);
