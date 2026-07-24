@@ -7573,6 +7573,14 @@ export interface operations {
                             readonly backup_available: boolean;
                             readonly rollback_available: boolean;
                         };
+                        readonly cutover: {
+                            /** @enum {string} */
+                            readonly status: "not_ready" | "ready" | "blocked" | "quiesced" | "checkpointed" | "soaking" | "stable" | "rollback_required" | "rolled_back" | "failed";
+                            readonly plan_hash?: string;
+                            readonly canonical_revision: number;
+                            readonly failed_gates: readonly string[];
+                            readonly rollback_available: boolean;
+                        };
                         readonly unknown_config_keys_preserved: boolean;
                         readonly unknown_config_key_count: number;
                         readonly audit: readonly {
@@ -7772,6 +7780,29 @@ export interface operations {
                     readonly idempotency_key: string;
                     /** @constant */
                     readonly kind: "migration.rollback";
+                    /** @constant */
+                    readonly confirm: true;
+                } | {
+                    readonly idempotency_key: string;
+                    /** @constant */
+                    readonly kind: "cutover.preview";
+                } | {
+                    readonly idempotency_key: string;
+                    readonly plan_hash: string;
+                    /** @constant */
+                    readonly confirm: true;
+                    /** @constant */
+                    readonly kind: "cutover.apply";
+                } | {
+                    readonly idempotency_key: string;
+                    /** @constant */
+                    readonly kind: "cutover.soak";
+                    /** @constant */
+                    readonly confirm: true;
+                } | {
+                    readonly idempotency_key: string;
+                    /** @constant */
+                    readonly kind: "cutover.rollback";
                     /** @constant */
                     readonly confirm: true;
                 };

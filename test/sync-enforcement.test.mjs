@@ -30,7 +30,7 @@ function seedFixture(name) {
   write(path.join(root, 'hooks', 'session-register.sh'), '#!/usr/bin/env bash\nexit 0\n');
   write(path.join(root, 'roles', 'manager.md'), '# Role: manager\nMission: Own intake, routing, and closure across active work in the tracker.\nLeads with: golem:tracker\nBoundaries: never author or decompose specs; stay scoped.\nHand-offs: hand off clearly.\n');
   write(path.join(root, 'roles', 'planner.md'), '# Role: planner\nMission: Turn ambiguity into executable tracker work and hand the readiness gate to the manager.\nLeads with: golem:tracker\nBoundaries: never dispatch build tickets; stay scoped.\nHand-offs: hand off clearly.\n');
-  for (const role of ['builder', 'explorer']) {
+  for (const role of ['builder', 'explorer', 'standalone']) {
     write(path.join(root, 'roles', `${role}.md`), `# Role: ${role}\nMission: ${role} mission.\nLeads with: golem:tracker\nBoundaries: stay scoped.\nHand-offs: hand off clearly.\n`);
   }
   write(path.join(root, 'skills', 'tracker', 'SKILL.md'), '---\nname: tracker\ndescription: Track assigned work through the golem tracker.\n---\n# tracker\n');

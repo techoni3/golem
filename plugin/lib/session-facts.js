@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { endpointLeasesJsonPath, sessionFactsJsonPath } from './golem-home.js';
+import { assertLegacyWriterAllowed } from './legacy-writer-guard.js';
 
 export const SESSION_FACTS_VERSION = 1;
 export const ENDPOINT_LEASES_VERSION = 1;
@@ -47,6 +48,7 @@ export function readSessionFacts({ file = sessionFactsJsonPath() } = {}) {
 // Immutable canonical identity/continuation ownership wins over later locators.
 // Mutable observations advance only by revision, then observed_at.
 export function upsertSessionFact(input, { file = sessionFactsJsonPath(), now = Date.now() } = {}) {
+  assertLegacyWriterAllowed('session-facts.json');
   if (!input?.canonical_id || !input?.harness || !input?.locator?.raw_session_id) throw new Error('canonical_id, harness and locator.raw_session_id are required');
   return withRegistryLock(file, () => {
     const registry = read(file, 'facts', SESSION_FACTS_VERSION);
@@ -56,6 +58,10 @@ export function upsertSessionFact(input, { file = sessionFactsJsonPath(), now = 
     const observedAt = input.observed_at || iso(now);
     const advances = !previous || incomingRevision > Number(previous.revision || 0)
       || (incomingRevision === Number(previous.revision || 0) && ms(observedAt) >= ms(previous.observed_at));
+    // Live observations clear an earlier retirement so a resumed/cleared session
+    // can reappear under the same canonical id without a second card.
+    const clearingTerminal = advances && input.status && !['dead', 'stopped', 'failed', 'superseded'].includes(String(input.status).toLowerCase())
+      && input.ended_at == null;
     const fact = previous ? {
       ...previous,
       ...(advances ? input : {}),
@@ -65,10 +71,91 @@ export function upsertSessionFact(input, { file = sessionFactsJsonPath(), now = 
       locator: advances ? input.locator : previous.locator,
       revision: advances ? incomingRevision : previous.revision,
       observed_at: advances ? observedAt : previous.observed_at,
+      ...(clearingTerminal ? { ended_at: null } : {}),
     } : { ...input, continuation_key: input.continuation_key ?? null, revision: incomingRevision, observed_at: observedAt };
     if (index >= 0) registry.facts[index] = fact; else registry.facts.push(fact);
     atomicWrite(file, registry);
     return fact;
+  });
+}
+
+const SESSION_FACT_TERMINAL_STATUSES = new Set(['dead', 'stopped', 'failed', 'superseded']);
+
+/** True when a fact was explicitly retired (not bare turn-stop `ended`). */
+export function isSessionFactTerminal(fact) {
+  if (!fact) return false;
+  if (fact.ended_at) return true;
+  return SESSION_FACT_TERMINAL_STATUSES.has(String(fact.status || '').toLowerCase());
+}
+
+/**
+ * Retire existing facts by canonical_id. Does not create rows.
+ * Sets status + ended_at; bumps revision so the retirement advances.
+ */
+export function markSessionFactsEnded(canonicalIds, {
+  status = 'superseded',
+  endedAt = iso(),
+  file = sessionFactsJsonPath(),
+  now = Date.now(),
+} = {}) {
+  assertLegacyWriterAllowed('session-facts.json');
+  const ids = new Set((Array.isArray(canonicalIds) ? canonicalIds : [canonicalIds]).filter(Boolean));
+  if (!ids.size) return [];
+  return withRegistryLock(file, () => {
+    const registry = read(file, 'facts', SESSION_FACTS_VERSION);
+    const marked = [];
+    const observedAt = iso(now);
+    registry.facts = registry.facts.map((fact) => {
+      if (!ids.has(fact?.canonical_id) || isSessionFactTerminal(fact)) return fact;
+      marked.push(fact.canonical_id);
+      return {
+        ...fact,
+        status,
+        ended_at: endedAt,
+        revision: Number(fact.revision || 0) + 1,
+        observed_at: observedAt,
+      };
+    });
+    if (marked.length) atomicWrite(file, registry);
+    return marked;
+  });
+}
+
+/**
+ * End prior Codex facts for the same project path, keeping keepCanonicalIds.
+ * Only retires facts that are still non-terminal.
+ */
+export function supersedePriorCodexFacts({
+  projectPath,
+  keepCanonicalIds = [],
+  protectCanonicalIds = [],
+  file = sessionFactsJsonPath(),
+  now = Date.now(),
+} = {}) {
+  assertLegacyWriterAllowed('session-facts.json');
+  if (!projectPath) return [];
+  const keep = new Set([...keepCanonicalIds, ...protectCanonicalIds].filter(Boolean));
+  return withRegistryLock(file, () => {
+    const registry = read(file, 'facts', SESSION_FACTS_VERSION);
+    const marked = [];
+    const observedAt = iso(now);
+    const endedAt = observedAt;
+    registry.facts = registry.facts.map((fact) => {
+      if (fact?.harness !== 'codex') return fact;
+      if (keep.has(fact.canonical_id)) return fact;
+      if (isSessionFactTerminal(fact)) return fact;
+      if (fact.project_path !== projectPath) return fact;
+      marked.push(fact.canonical_id);
+      return {
+        ...fact,
+        status: 'superseded',
+        ended_at: endedAt,
+        revision: Number(fact.revision || 0) + 1,
+        observed_at: observedAt,
+      };
+    });
+    if (marked.length) atomicWrite(file, registry);
+    return marked;
   });
 }
 
@@ -77,6 +164,7 @@ export function readEndpointLeases({ file = endpointLeasesJsonPath(), now = Date
   return includeExpired ? leases : leases.filter((lease) => ms(lease.expires_at) > now);
 }
 export function renewEndpointLease(input, { file = endpointLeasesJsonPath(), now = Date.now(), ttlMs = DEFAULT_LEASE_TTL_MS } = {}) {
+  assertLegacyWriterAllowed('endpoint-leases.json');
   if (!input?.canonical_id || !input?.host || !input?.port || !input?.owner_token) throw new Error('canonical_id, host, port and owner_token are required');
   return withRegistryLock(file, () => {
     const registry = read(file, 'leases', ENDPOINT_LEASES_VERSION);
@@ -88,6 +176,7 @@ export function renewEndpointLease(input, { file = endpointLeasesJsonPath(), now
   });
 }
 export function releaseEndpointLeases(ownerToken, { file = endpointLeasesJsonPath(), canonicalId = null } = {}) {
+  assertLegacyWriterAllowed('endpoint-leases.json');
   return withRegistryLock(file, () => {
     const registry = read(file, 'leases', ENDPOINT_LEASES_VERSION);
     registry.leases = registry.leases.filter((lease) => lease.owner_token !== ownerToken || (canonicalId && lease.canonical_id !== canonicalId));

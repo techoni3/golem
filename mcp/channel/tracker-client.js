@@ -200,16 +200,21 @@ function principalCredential() {
 }
 
 async function request(method, pathname, { params, body, verbatimError = false } = {}) {
-  const url = buildUrl(pathname, withoutAuthority(params));
+  const credential = principalCredential();
+  // Typed authenticated routes derive actor/project authority from the bound
+  // principal and must not accept model-supplied authority. The rollback-only
+  // C3 dashboard has no principal resolver, so its legacy client must retain
+  // the explicit project/actor fields required by that local REST contract.
+  const transportValue = (value) => credential ? withoutAuthority(value) : value;
+  const url = buildUrl(pathname, transportValue(params));
   const init = {
     method,
     headers: { 'X-Sender': 'cli' },
   };
-  const credential = principalCredential();
   if (credential) init.headers.Authorization = `Bearer ${credential}`;
   if (body !== undefined) {
     init.headers['Content-Type'] = 'application/json';
-    init.body = JSON.stringify(withoutAuthority(body));
+    init.body = JSON.stringify(transportValue(body));
   }
 
   let res;
@@ -248,7 +253,7 @@ async function request(method, pathname, { params, body, verbatimError = false }
 
 /** GET /api/tickets?project&state&assignee&kind&stream&includeArchived */
 export function listTickets(params = {}) {
-  return request('GET', '/api/tickets', { params: withoutAuthority(params) });
+  return request('GET', '/api/tickets', { params });
 }
 
 /** GET /api/tickets/:id */

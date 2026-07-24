@@ -32,8 +32,10 @@ import * as tracker from './tracker-client.js';
 import { bridgeEndpointForParent, managedCodexBinding, resolveCallerSessionId, sessionsForParent } from './identity.js';
 import { SESSION_ROLES, pushRoleBriefDirect, setSessionRole } from '../../lib/session-role.js';
 import { releaseEndpointLeases, renewEndpointLease, upsertSessionFact } from '../../lib/session-facts.js';
+import { assertLegacyWriterAllowed } from '../../lib/legacy-writer-guard.js';
 
 const VERSION = '0.1.0';
+assertLegacyWriterAllowed('legacy-channel-server');
 // Port selection (multi-CEO safe by default):
 //   - Default is 0 → kernel-assigned ephemeral port. This lets any number of
 //     channel servers coexist without EADDRINUSE — critical because Claude
@@ -261,6 +263,7 @@ function readChannelsRegistry() {
 }
 
 function writeChannelsRegistry(reg) {
+  assertLegacyWriterAllowed('channels.json');
   const tmp = `${CHANNELS_REGISTRY}.tmp.${process.pid}`;
   fs.writeFileSync(tmp, JSON.stringify(reg, null, 2));
   fs.renameSync(tmp, CHANNELS_REGISTRY);

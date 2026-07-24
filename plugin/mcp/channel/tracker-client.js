@@ -173,19 +173,48 @@ function buildUrl(pathname, params) {
  * Core fetch wrapper. On a non-2xx response, throws an Error carrying the
  * server's parsed `{error}` (when present) plus the HTTP status; on 2xx returns
  * the parsed JSON body (or null for an empty body). Uses the global fetch
- * (Node 18+/20+). X-Sender is set for parity with the channel server's gating —
- * the /api/* routes do NOT check it, but it is harmless.
+ * (Node 18+/20+). The supervised MCP host may inject one opaque principal
+ * credential; callers never serialize actor/session/project authority.
  */
-async function request(method, pathname, { params, body, verbatimError = false, caller_session_id = null } = {}) {
-  const url = buildUrl(pathname, params);
+const authorityFields = new Set([
+  'actor', 'created_by', 'author', 'role', 'project', 'project_id',
+  'session', 'session_id', 'bearer', 'authorization', 'owner', 'owner_id',
+  'owner_fence', 'fence', 'approval', 'storage', 'principal', 'scope',
+  'token', 'credential', 'api_key',
+  'sender_id', 'worker_id',
+]);
+
+function withoutAuthority(value) {
+  if (Array.isArray(value)) return value.map(withoutAuthority);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !authorityFields.has(key.toLowerCase()))
+      .map(([key, nested]) => [key, withoutAuthority(nested)]),
+  );
+}
+
+function principalCredential() {
+  const credential = process.env.GOLEM_CONTROL_PLANE_PRINCIPAL_CREDENTIAL;
+  return typeof credential === 'string' && credential.trim() ? credential : null;
+}
+
+async function request(method, pathname, { params, body, verbatimError = false } = {}) {
+  const credential = principalCredential();
+  // Typed authenticated routes derive actor/project authority from the bound
+  // principal and must not accept model-supplied authority. The rollback-only
+  // C3 dashboard has no principal resolver, so its legacy client must retain
+  // the explicit project/actor fields required by that local REST contract.
+  const transportValue = (value) => credential ? withoutAuthority(value) : value;
+  const url = buildUrl(pathname, transportValue(params));
   const init = {
     method,
     headers: { 'X-Sender': 'cli' },
   };
-  if (caller_session_id) init.headers['X-Golem-Caller-Session'] = caller_session_id;
+  if (credential) init.headers.Authorization = `Bearer ${credential}`;
   if (body !== undefined) {
     init.headers['Content-Type'] = 'application/json';
-    init.body = JSON.stringify(body);
+    init.body = JSON.stringify(transportValue(body));
   }
 
   let res;
@@ -283,7 +312,7 @@ export function dispatchTicket(id, { session_id, note, when_idle, workspace, sen
 
 /** GET /api/streams?project */
 export function listStreams(project) {
-  return request('GET', '/api/streams', { params: project ? { project } : {} });
+  return request('GET', '/api/streams', { params: {} });
 }
 
 /** POST /api/streams {project_id,name,mode?,description?} */
@@ -326,12 +355,12 @@ export function deliverControlMessage({ session_id, sender_id, project_id, kind,
 /** Correlated channel lifecycle updates. The dashboard validates target identity. */
 export function acknowledgeEnvelope(id, body) {
   if (!id) throw new Error('acknowledgeEnvelope: id is required');
-  return request('POST', `/api/message-envelopes/${encodeURIComponent(id)}/ack`, { body, caller_session_id: body?.target_session_id });
+  return request('POST', `/api/message-envelopes/${encodeURIComponent(id)}/ack`, { body });
 }
 
 export function replyEnvelope(id, body) {
   if (!id) throw new Error('replyEnvelope: id is required');
-  return request('POST', `/api/message-envelopes/${encodeURIComponent(id)}/reply`, { body, caller_session_id: body?.target_session_id });
+  return request('POST', `/api/message-envelopes/${encodeURIComponent(id)}/reply`, { body });
 }
 
 export function subscribeBus({ session_id, topic, classes } = {}) {

@@ -4,12 +4,14 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { readEndpointLeases, readSessionFacts } from './session-facts.js';
+import { assertLegacyWriterAllowed, legacyWritesAllowed } from './legacy-writer-guard.js';
 
 export const BUILTIN_ROLES = Object.freeze([
   { name: 'manager', color: '#f59e0b', glyph: 'MG', builtin: true },
   { name: 'planner', color: '#a78bfa', glyph: 'PL', builtin: true },
   { name: 'builder', color: '#4ade80', glyph: 'BU', builtin: true },
   { name: 'explorer', color: '#38bdf8', glyph: 'EX', builtin: true },
+  { name: 'standalone', color: '#f97316', glyph: 'SA', builtin: true },
 ]);
 export const ROLE_MIGRATIONS = Object.freeze({ general: 'manager', researcher: 'explorer', 'ui-tester': 'explorer' });
 export const SESSION_ROLES = new Proxy([], {
@@ -119,6 +121,7 @@ function readRolesIndexRaw() {
 }
 
 function writeRolesIndex(roles) {
+  assertLegacyWriterAllowed('roles/index.json');
   fs.mkdirSync(rolesOverlayDir(), { recursive: true });
   const target = rolesIndexPath();
   const tmp = `${target}.tmp.${process.pid}`;
@@ -128,6 +131,7 @@ function writeRolesIndex(roles) {
 }
 
 export function migrateSessionRoles({ actor = 'system:role-migration' } = {}) {
+  assertLegacyWriterAllowed('sessions.json:role-migration');
   const file = sessionsJsonPath();
   const now = new Date().toISOString();
   let changed = false;
@@ -172,8 +176,10 @@ export function readRoleRegistry() {
     for (const builtin of BUILTIN_ROLES) if (!byName.has(builtin.name)) byName.set(builtin.name, normalizeRoleMeta(builtin));
   }
   const roles = [...byName.values()].sort((a, b) => Number(b.builtin) - Number(a.builtin) || a.name.localeCompare(b.name));
-  writeRolesIndex(roles);
-  migrateSessionRoles();
+  if (legacyWritesAllowed()) {
+    writeRolesIndex(roles);
+    migrateSessionRoles();
+  }
   roleRegistryCache = roles;
   return roles.map((r) => ({ ...r }));
 }
@@ -193,6 +199,7 @@ export function getRole(name) {
 }
 
 export function createRole({ name, color, glyph, body } = {}) {
+  assertLegacyWriterAllowed('roles/index.json');
   const meta = normalizeRoleMeta({ name, color, glyph, builtin: false });
   const roles = readRoleRegistry();
   if (roles.some((r) => r.name === meta.name)) throw new Error(`role already exists: ${meta.name}`);
@@ -207,6 +214,7 @@ function assignedSessionsForRole(role) {
 }
 
 export function deleteRole(name, { force = false } = {}) {
+  assertLegacyWriterAllowed('roles/index.json');
   const normalized = normalizeRoleName(name);
   const roles = readRoleRegistry();
   const role = roles.find((r) => r.name === normalized);
@@ -228,6 +236,7 @@ export function deleteRole(name, { force = false } = {}) {
 }
 
 export function updateRoleMeta(name, patch = {}) {
+  assertLegacyWriterAllowed('roles/index.json');
   const normalized = normalizeRoleName(name);
   const roles = readRoleRegistry();
   const idx = roles.findIndex((r) => r.name === normalized);
@@ -263,6 +272,7 @@ export function listRoleCards() {
 }
 
 export function writeRoleCard(role, body) {
+  assertLegacyWriterAllowed('roles/*.md');
   const normalized = normalizeRole(role);
   if (!normalized) throw new Error('role is required');
   const text = String(body ?? '').trimEnd();
@@ -437,7 +447,17 @@ function roleTargetForSession(reg, sessionId) {
     }
   }
 
+  // Only materialize a sessions.json row when identity evidence already exists
+  // (fact, live/known channel, or lease). Never invent rows for unknown ids —
+  // that resurfaced zombie Codex cards and extended their recency TTL.
+  if (!canonicalFact && !channel && !canonicalLease && !parent) {
+    throw new Error(`session not found: ${sessionId}`);
+  }
+
   const projectPath = parent?.project_path || canonicalFact?.project_path || channel?.project_path || channel?.cwd || null;
+  // Preserve fact observation time for last_seen_at so role assign cannot
+  // refresh zombie recency windows.
+  const observed = canonicalFact?.observed_at || null;
   const row = {
     session_id: canonicalId,
     hook_ppid: channel?.pid ? Number(channel.pid) : null,
@@ -445,14 +465,15 @@ function roleTargetForSession(reg, sessionId) {
     project_path: projectPath,
     harness: canonicalFact?.harness || canonicalLease?.harness || channel?.harness || undefined,
     name: parent?.name || canonicalFact?.name || channel?.name || null,
-    boot_time: new Date().toISOString(),
-    last_seen_at: new Date().toISOString(),
+    boot_time: observed || new Date().toISOString(),
+    last_seen_at: observed || null,
   };
   reg.sessions.push(row);
   return { index: reg.sessions.length - 1, row, canonical_id: canonicalId, parent, channel, fact: canonicalFact, lease: canonicalLease, created: true };
 }
 
 export function setSessionRole(sessionId, role, { by } = {}) {
+  assertLegacyWriterAllowed('sessions.json:role');
   if (!sessionId) throw new Error('session id is required');
   validateBy(by);
   const nextRole = normalizeRole(role);
@@ -471,7 +492,8 @@ export function setSessionRole(sessionId, role, { by } = {}) {
       project_path: base.project_path || target.parent?.project_path || target.fact?.project_path || target.channel?.project_path || target.channel?.cwd || null,
       harness: base.harness || target.fact?.harness || target.lease?.harness || target.channel?.harness,
       name: base.name || target.parent?.name || target.fact?.name || target.channel?.name || null,
-      last_seen_at: base.last_seen_at || now,
+      // Role writes must never refresh last_seen_at (zombie TTL / recency).
+      last_seen_at: base.last_seen_at ?? target.fact?.observed_at ?? null,
       role: nextRole,
       role_updated_at: now,
       role_updated_by: by,
@@ -504,6 +526,7 @@ function readChannels() {
 }
 
 export async function pushRoleBriefDirect(sessionId, role, row = {}) {
+  assertLegacyWriterAllowed('channels.json:role-brief');
   const content = roleChangeBrief(role, { session_id: sessionId, ...row });
   if (!sessionId || !content) return { ok: false, skipped: true };
   const ch = readChannels().find((c) => c.session_id === sessionId && pidAlive(c.pid));

@@ -795,6 +795,105 @@ function SettingsContent({
 			</section>
 
 			<section className={styles.card}>
+				<div className={styles.cardHeader}>
+					<div>
+						<h2>Canonical C4 cutover</h2>
+						<p>
+							One exact-hash switch fences legacy writers, selects canonical
+							runtime state, and retains an audited rollback.
+						</p>
+					</div>
+					<StatusBadge
+						label={snapshot.cutover.status}
+						tone={statusTone(snapshot.cutover.status)}
+					/>
+				</div>
+				<Facts
+					rows={[
+						["Canonical revision", snapshot.cutover.canonical_revision],
+						["Failed gates", snapshot.cutover.failed_gates.length],
+						[
+							"Rollback",
+							snapshot.cutover.rollback_available ? "Available" : "Not active",
+						],
+					]}
+				/>
+				{snapshot.cutover.failed_gates.length ? (
+					<InlineAlert tone="warning">
+						C4 remains blocked: {snapshot.cutover.failed_gates.join(", ")}.
+						Resolve the named server gates and preview again.
+					</InlineAlert>
+				) : null}
+				<div className={styles.actions}>
+					{!["soaking", "stable", "rollback_required"].includes(
+						snapshot.cutover.status,
+					) ? (
+						<Button
+							isDisabled={command.isPending}
+							onPress={() =>
+								void preview(
+									{
+										kind: "cutover.preview",
+										idempotency_key: idempotencyKey("cutover-preview"),
+									},
+									(hash) => ({
+										kind: "cutover.apply",
+										plan_hash: hash,
+										confirm: true,
+										idempotency_key: idempotencyKey("cutover-apply"),
+									}),
+									"Apply canonical C4 cutover",
+									"Recheck the exact preflight, checkpoint both authorities, fence legacy writers, and atomically enter the soak window.",
+									snapshot.cutover.failed_gates.length > 0,
+								)
+							}
+							variant="primary"
+						>
+							Preview C4 cutover
+						</Button>
+					) : null}
+					{snapshot.cutover.status === "soaking" ? (
+						<Button
+							onPress={() =>
+								confirmRollback(
+									"Complete cutover soak",
+									"Recheck health, parity, backlog, and owner uniqueness before marking C4 stable.",
+									{
+										kind: "cutover.soak",
+										confirm: true,
+										idempotency_key: idempotencyKey("cutover-soak"),
+									},
+									["cutover:soak"],
+								)
+							}
+							variant="secondary"
+						>
+							Complete soak
+						</Button>
+					) : null}
+					{snapshot.cutover.rollback_available ? (
+						<Button
+							onPress={() =>
+								confirmRollback(
+									"Roll back canonical cutover",
+									"Audit and preserve canonical facts, then atomically restore the C3 authority pointer.",
+									{
+										kind: "cutover.rollback",
+										confirm: true,
+										idempotency_key: idempotencyKey("cutover-rollback"),
+									},
+									["cutover:authority", "cutover:rollback-audit"],
+								)
+							}
+							variant="danger"
+						>
+							Roll back C4
+						</Button>
+					) : null}
+				</div>
+			</section>
+
+			<section className={styles.card}>
 				<h2>Settings audit</h2>
 				{snapshot.audit.length ? (
 					<ol className={styles.audit}>

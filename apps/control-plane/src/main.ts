@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-
+import { resolveControlPlanePersistencePaths } from "@golem/persistence";
 import {
 	createRuntimeMaterializer,
 	createRuntimeProjectionService,
@@ -44,7 +44,8 @@ const stateDirectory = golemHome
 	: undefined;
 const staticDirectory = process.env.GOLEM_CONTROL_PLANE_STATIC_ROOT;
 const browserLocalOperatorBindingId =
-	process.env.GOLEM_BROWSER_LOCAL_OPERATOR_BINDING_ID;
+	process.env.GOLEM_BROWSER_LOCAL_OPERATOR_BINDING_ID ??
+	"principal_local_operator";
 const replayWindowValue = Number(process.env.GOLEM_CONTROL_PLANE_REPLAY_WINDOW);
 const replayWindowSize =
 	Number.isInteger(replayWindowValue) && replayWindowValue >= 1
@@ -96,15 +97,68 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 	);
 	process.exitCode = 64;
 } else {
+	const persistence = resolveControlPlanePersistencePaths(golemHome);
 	const owner = openControlPlanePersistence({
-		runtimePath: path.join(golemHome, "runtime.db"),
-		trackerPath: path.join(golemHome, "tracker.db"),
+		runtimePath: persistence.runtimePath,
+		trackerPath: persistence.trackerPath,
+		...(persistence.lockPath ? { lockPath: persistence.lockPath } : {}),
 	});
 	const clock = {
 		now: () => new Date().toISOString(),
 		after: (milliseconds: number) =>
 			new Date(Date.now() + milliseconds).toISOString(),
 	};
+	const principals = owner.browserPrincipalStorage();
+	const projectIds = [
+		...new Set([
+			...owner
+				.runtimeProjectionStorage()
+				.projects()
+				.map((project) => project.projectId),
+			...owner
+				.trackerCoreStorage()
+				.listWorkItems()
+				.map((ticket) => ticket.projectId),
+		]),
+	].sort();
+	if (projectIds.length === 0) projectIds.push("golem-local");
+	const defaultProjectId = projectIds[0] ?? "golem-local";
+	const timestamp = clock.now();
+	const hasBoundToken = principals.resolveCredential({
+		adapter: "bearer",
+		credential: token,
+		now: timestamp,
+	});
+	if (!hasBoundToken) {
+		try {
+			principals.provision({
+				id: browserLocalOperatorBindingId,
+				actorId: "human:local-operator",
+				role: "operator",
+				defaultProjectId,
+				scopeProjectIds: projectIds,
+			});
+		} catch {
+			// A stable binding survives service restarts. Credential resolution
+			// below still fails closed if this was any error other than an
+			// already-provisioned binding.
+		}
+	}
+	for (const adapter of ["bearer", "mcp", "internal"] as const) {
+		if (
+			principals.resolveCredential({
+				adapter,
+				credential: token,
+				now: timestamp,
+			})
+		)
+			continue;
+		principals.bindCredential({
+			bindingId: browserLocalOperatorBindingId,
+			adapter,
+			credential: token,
+		});
+	}
 	const trackerCore = composeControlPlaneTrackerCoreServices({
 		writer: owner,
 		clock,
@@ -171,19 +225,25 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 					GOLEM_CONTROL_PLANE_PORT: process.env.GOLEM_CONTROL_PLANE_PORT,
 				}
 			: {}),
-		...(browserLocalOperatorBindingId
-			? {
-					GOLEM_BROWSER_LOCAL_OPERATOR_BINDING_ID:
-						browserLocalOperatorBindingId,
-				}
-			: {}),
+		GOLEM_BROWSER_LOCAL_OPERATOR_BINDING_ID: browserLocalOperatorBindingId,
 	};
+	let cutoverScheduler: RuntimeEngineScheduler | undefined;
+	let cutoverStop: (() => Promise<void>) | undefined;
 	const browserSettings = createBrowserSettingsServices({
 		home: golemHome,
 		runtimeProjection: owner.runtimeProjectionStorage(),
 		cliEntry,
 		openCodeConfigPath,
 		environment: process.env,
+		beforeCutover: async () => {
+			await cutoverScheduler?.stop();
+		},
+		afterCutover: () => {
+			const timer = setTimeout(() => {
+				void cutoverStop?.();
+			}, 250);
+			timer.unref();
+		},
 		service: {
 			directory: launchAgentDirectory,
 			uid: process.getuid?.() ?? 0,
@@ -199,10 +259,8 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 		},
 	});
 	const principalResolver = createBrowserPrincipalResolver({
-		storage: owner.browserPrincipalStorage(),
-		...(browserLocalOperatorBindingId
-			? { localOperatorBindingId: browserLocalOperatorBindingId }
-			: {}),
+		storage: principals,
+		localOperatorBindingId: browserLocalOperatorBindingId,
 	});
 	// Native adapter lifecycle signals are materialized through the same typed
 	// session service as every other runtime producer; the ingress itself never
@@ -260,6 +318,7 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 		outbox,
 		writer: owner,
 	});
+	cutoverScheduler = scheduler;
 	try {
 		await scheduler.start();
 	} catch (error) {
@@ -299,6 +358,40 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 	process.stdout.write(
 		`${JSON.stringify({ type: "ready", origin: service.origin, instance_id: service.instanceId })}\n`,
 	);
+	const dashboardRecordPath = path.join(golemHome, "dashboard.json");
+	try {
+		fs.mkdirSync(path.dirname(dashboardRecordPath), {
+			recursive: true,
+			mode: 0o700,
+		});
+		const temporary = `${dashboardRecordPath}.${process.pid}.tmp`;
+		fs.writeFileSync(
+			temporary,
+			`${JSON.stringify(
+				{
+					schema_version: "golem.dashboard-discovery/v1",
+					generated: true,
+					authoritative: false,
+					mode: persistence.authority.stage === "C4" ? "canonical" : "dark",
+					canonical_revision: persistence.authority.canonical_revision ?? 0,
+					authority_revision: persistence.authority.revision,
+					url: service.origin.replace("127.0.0.1", "dashboard.golem.localhost"),
+					host: "127.0.0.1",
+					port: Number(new URL(service.origin).port),
+					pid: process.pid,
+					instance_id: service.instanceId,
+					started_at: clock.now(),
+				},
+				null,
+				2,
+			)}\n`,
+			{ encoding: "utf8", mode: 0o600 },
+		);
+		fs.renameSync(temporary, dashboardRecordPath);
+	} catch {
+		// Discovery is generated compatibility state. Health remains the
+		// authority if a read-only home prevents this optional projection.
+	}
 	let stopping = false;
 	const stop = async () => {
 		if (stopping) return;
@@ -307,6 +400,7 @@ if (!token || !golemHome || !stateDirectory || !staticDirectory) {
 		await service.close();
 		await owner.close();
 	};
+	cutoverStop = stop;
 	process.once("SIGINT", () => void stop());
 	process.once("SIGTERM", () => void stop());
 }

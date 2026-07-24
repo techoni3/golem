@@ -27,6 +27,10 @@ import { exerciseControlPlaneShell } from "../control-plane/control-plane-shell.
 import { exerciseRuntimeDashboard } from "../browser/runtime-dashboard.mjs";
 import { runMigrationPlanReplay } from "../migration/replay.mjs";
 import { runMigrationApplyReplay } from "../migration/apply-replay.mjs";
+import {
+	runCanonicalCutoverCrashRollback,
+	runLegacyWriterGuard,
+} from "../cutover/replay.mjs";
 import { exerciseRenderMcpClosure } from "../render-mcp-closure.mjs";
 import { runOpenCodeComposedJourney } from "../adapter/opencode-composed-journey.mjs";
 import { runOpenCodeNormalLaunchJourney } from "../adapter/opencode-normal-launch-journey.mjs";
@@ -1125,6 +1129,8 @@ export const exercises = Object.freeze({
 	"roles-gates-ideas-ui": exerciseRolesGatesIdeasUi,
 	"settings-provider-preset-parity": exerciseSettingsProviderPresetParity,
 	"migration-settings-dry-run-rollback": exerciseMigrationSettingsDryRunRollback,
+	"canonical-cutover-crash-rollback": runCanonicalCutoverCrashRollback,
+	"legacy-writer-guard": runLegacyWriterGuard,
 	"browser-work-opaque-projection": exerciseBrowserWorkOpaqueProjection,
 	"browser-work-command-authority": exerciseBrowserWorkCommandAuthority,
 	"delivery-api-fence-recheck": exerciseDeliveryApiFenceRecheck,

@@ -86,6 +86,37 @@ const migrationStatusOutputSchema = z
 	})
 	.passthrough()
 	.nullable();
+const cutoverGateOutputSchema = z
+	.object({
+		code: z.string().min(1).max(128),
+		passed: z.boolean(),
+	})
+	.passthrough();
+const cutoverPlanOutputSchema = z
+	.object({
+		schema_version: z.literal("golem.canonical-cutover-plan/v1"),
+		plan_hash: z.string().regex(/^[a-f0-9]{64}$/u),
+		eligible: z.boolean(),
+		canonical_revision: z.number().int().nonnegative(),
+		gates: z.array(cutoverGateOutputSchema).max(32),
+	})
+	.passthrough();
+const cutoverStatusOutputSchema = z
+	.object({
+		schema_version: z.literal("golem.canonical-cutover-state/v1"),
+		plan_hash: z.string().regex(/^[a-f0-9]{64}$/u),
+		phase: z.enum([
+			"quiesced",
+			"checkpointed",
+			"soaking",
+			"stable",
+			"rollback_required",
+			"rolled_back",
+		]),
+		canonical_revision: z.number().int().nonnegative(),
+	})
+	.passthrough()
+	.nullable();
 
 type SettingsErrorCode =
 	| "browser.settings.invalid"
@@ -164,6 +195,12 @@ export interface BrowserSettingsServicesOptions {
 	readonly service?: SettingsServiceControl;
 	readonly environment?: NodeJS.ProcessEnv;
 	readonly now?: () => string;
+	/** Main composition freezes runtime scheduling before the external C4
+	 * state machine checkpoints an otherwise live owner. */
+	readonly beforeCutover?: () => Promise<void>;
+	/** The current process owns the pre-switch database handles; after the
+	 * response is durable it must exit so the next owner resolves the pointer. */
+	readonly afterCutover?: () => void;
 }
 
 function canonical(value: unknown): unknown {
@@ -1061,7 +1098,16 @@ class BrowserSettingsServicesImpl implements BrowserSettingsServices {
 	}
 
 	#runMigration(
-		command: "plan" | "apply" | "status" | "rollback",
+		command:
+			| "plan"
+			| "apply"
+			| "status"
+			| "rollback"
+			| "cutover-plan"
+			| "cutover-apply"
+			| "cutover-status"
+			| "cutover-soak"
+			| "cutover-rollback",
 		planHash?: string,
 	): unknown {
 		const result = spawnSync(
@@ -1085,7 +1131,7 @@ class BrowserSettingsServicesImpl implements BrowserSettingsServices {
 		if (result.status !== 0 || result.error) {
 			const diagnostic = result.stderr.trim();
 			if (
-				/^(migration\.(?:not_applied|plan_hash_mismatch|review_required|source_changed)):/u.test(
+				/^(?:(?:migration\.(?:not_applied|plan_hash_mismatch|review_required|source_changed))|(?:cutover\.(?:plan_hash_required|plan_hash_mismatch|preflight_failed|source_changed|state_invalid|not_active))):/u.test(
 					diagnostic,
 				)
 			)
@@ -1184,6 +1230,72 @@ class BrowserSettingsServicesImpl implements BrowserSettingsServices {
 		};
 	}
 
+	#cutoverPlanOutput(): z.infer<typeof cutoverPlanOutputSchema> {
+		const parsed = cutoverPlanOutputSchema.safeParse(
+			this.#runMigration("cutover-plan"),
+		);
+		if (!parsed.success)
+			throw new BrowserSettingsServiceError(
+				"browser.settings.unavailable",
+				503,
+			);
+		return parsed.data;
+	}
+
+	#cutoverStatusOutput(): z.infer<typeof cutoverStatusOutputSchema> {
+		const parsed = cutoverStatusOutputSchema.safeParse(
+			this.#runMigration("cutover-status"),
+		);
+		if (!parsed.success)
+			throw new BrowserSettingsServiceError(
+				"browser.settings.unavailable",
+				503,
+			);
+		return parsed.data;
+	}
+
+	async #cutoverView(): Promise<BrowserSettingsSnapshot["cutover"]> {
+		try {
+			const plan = this.#cutoverPlanOutput();
+			const status = this.#cutoverStatusOutput();
+			const failed = plan.gates
+				.filter((gate) => !gate.passed)
+				.map((gate) => gate.code);
+			return {
+				status:
+					status?.phase ??
+					(plan.eligible
+						? "ready"
+						: failed.includes("cutover.migration_applied")
+							? "not_ready"
+							: "blocked"),
+				plan_hash: `sha256:${plan.plan_hash}`,
+				canonical_revision: plan.canonical_revision,
+				failed_gates: failed,
+				rollback_available: status !== null && status.phase !== "rolled_back",
+			};
+		} catch {
+			return {
+				status: "failed",
+				canonical_revision: 0,
+				failed_gates: [],
+				rollback_available: false,
+			};
+		}
+	}
+
+	async #cutoverPlan() {
+		const plan = this.#cutoverPlanOutput();
+		return {
+			plan,
+			hash: `sha256:${plan.plan_hash}` as `sha256:${string}`,
+			failed: plan.gates.filter((gate) => !gate.passed),
+			affected: plan.gates
+				.map((gate) => `cutover:gate:${gate.code}`)
+				.slice(0, 500),
+		};
+	}
+
 	async snapshot(): Promise<BrowserSettingsSnapshot> {
 		const document = (() => {
 			try {
@@ -1256,7 +1368,10 @@ class BrowserSettingsServicesImpl implements BrowserSettingsServices {
 				),
 			};
 		});
-		const migration = await this.#migrationView();
+		const [migration, cutover] = await Promise.all([
+			this.#migrationView(),
+			this.#cutoverView(),
+		]);
 		return BrowserSettingsSnapshotSchema.parse({
 			schema_version: "golem.browser-settings/v1",
 			revision: this.#state.revision,
@@ -1359,6 +1474,7 @@ class BrowserSettingsServicesImpl implements BrowserSettingsServices {
 				};
 			}),
 			migration,
+			cutover,
 			unknown_config_keys_preserved: document !== undefined,
 			unknown_config_key_count: document
 				? Object.keys(document.userOwned).length
@@ -1640,6 +1756,74 @@ class BrowserSettingsServicesImpl implements BrowserSettingsServices {
 					summary: "Legacy migration was restored from its canonical backup.",
 					changed: true,
 					affected: ["migration:canonical-state"],
+					rollback_available: false,
+					snapshot_revision: nextRevision,
+				});
+			}
+			case "cutover.preview": {
+				const plan = await this.#cutoverPlan();
+				return BrowserSettingsCommandResultSchema.parse({
+					command_kind: input.kind,
+					outcome: "previewed",
+					summary: plan.plan.eligible
+						? "Canonical C4 cutover is ready for exact-hash confirmation."
+						: `Canonical C4 cutover is blocked by ${plan.failed.length} preflight gate(s).`,
+					plan_hash: plan.hash,
+					changed: true,
+					affected: plan.affected,
+					rollback_available: false,
+					snapshot_revision: nextRevision,
+				});
+			}
+			case "cutover.apply": {
+				const plan = await this.#cutoverPlan();
+				if (plan.hash !== input.plan_hash || !plan.plan.eligible)
+					throw new BrowserSettingsServiceError(
+						"browser.settings.conflict",
+						409,
+					);
+				await this.#options.beforeCutover?.();
+				this.#runMigration("cutover-apply", plan.plan.plan_hash);
+				this.#options.afterCutover?.();
+				return BrowserSettingsCommandResultSchema.parse({
+					command_kind: input.kind,
+					outcome: "applied",
+					summary:
+						"Canonical C4 authority was switched atomically and entered its soak window.",
+					changed: true,
+					affected: [
+						"cutover:authority",
+						"cutover:legacy-writers",
+						"cutover:compatibility-export",
+					],
+					rollback_available: true,
+					snapshot_revision: nextRevision,
+				});
+			}
+			case "cutover.soak": {
+				this.#runMigration("cutover-soak");
+				return BrowserSettingsCommandResultSchema.parse({
+					command_kind: input.kind,
+					outcome: "applied",
+					summary:
+						"Canonical cutover soak gates passed and the C4 authority is stable.",
+					changed: true,
+					affected: ["cutover:soak"],
+					rollback_available: true,
+					snapshot_revision: nextRevision,
+				});
+			}
+			case "cutover.rollback": {
+				await this.#options.beforeCutover?.();
+				this.#runMigration("cutover-rollback");
+				this.#options.afterCutover?.();
+				return BrowserSettingsCommandResultSchema.parse({
+					command_kind: input.kind,
+					outcome: "rolled_back",
+					summary:
+						"Canonical facts were audited and the single authority pointer returned to C3.",
+					changed: true,
+					affected: ["cutover:authority", "cutover:rollback-audit"],
 					rollback_available: false,
 					snapshot_revision: nextRevision,
 				});

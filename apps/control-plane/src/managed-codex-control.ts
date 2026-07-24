@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import path from "node:path";
 
 import type { ManagedCodexSupervisor } from "@golem/adapter-codex";
 import type { RuntimeSignalV1 } from "@golem/contracts";
+import { resolveControlPlanePersistencePaths } from "@golem/persistence";
 import {
 	createEndpointService,
 	createProjectService,
@@ -86,9 +86,11 @@ export async function startManagedCodexControl(
 	const requestedSessionId = options.sessionId?.trim();
 	if (options.sessionId !== undefined && !requestedSessionId)
 		throw new Error("adapter.codex.managed.session_required");
+	const persistence = resolveControlPlanePersistencePaths(options.golemHome);
 	const owner = openControlPlanePersistence({
-		runtimePath: path.join(options.golemHome, "runtime.db"),
-		trackerPath: path.join(options.golemHome, "tracker.db"),
+		runtimePath: persistence.runtimePath,
+		trackerPath: persistence.trackerPath,
+		...(persistence.lockPath ? { lockPath: persistence.lockPath } : {}),
 	});
 	let supervisor: ManagedCodexSupervisor | undefined;
 	let consumerStarted = false;

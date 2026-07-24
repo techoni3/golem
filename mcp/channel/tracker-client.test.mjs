@@ -334,8 +334,11 @@ async function main() {
   }] }));
   await sleep(3_500);
   const beforeInitDispatchable = await client.listDispatchable('trialroomai');
-  check('unique project name resolves while pre-initialization CC stays non-dispatchable',
-    Array.isArray(beforeInitDispatchable) && !beforeInitDispatchable.some((row) => row.session_id === uninitializedCcId),
+  const beforeInitRow = beforeInitDispatchable.find((row) => row.session_id === uninitializedCcId);
+  check('unique project name resolves while pre-initialization CC stays visibly non-ready',
+    Array.isArray(beforeInitDispatchable)
+      && beforeInitRow?.delivery_ready === false
+      && beforeInitRow?.reachable === false,
     JSON.stringify(beforeInitDispatchable));
   const ambiguousProject = await fetch(`${doc.url}/api/sessions/dispatchable?project=${encodeURIComponent('duplicate-human-name')}`);
   const ambiguousProjectText = await ambiguousProject.text();
@@ -790,9 +793,13 @@ async function main() {
   ] }));
   await sleep(3_500);
   const readinessFilteredDispatchables = await client.listDispatchable('trialroomai');
-  check('dashboard dispatchability keeps supported CC and excludes unsupported-provider CC',
-    readinessFilteredDispatchables.some((row) => row.session_id === ccFallbackId)
-      && !readinessFilteredDispatchables.some((row) => row.session_id === unsupportedCcId),
+  const supportedDispatchable = readinessFilteredDispatchables.find((row) => row.session_id === ccFallbackId);
+  const unsupportedDispatchable = readinessFilteredDispatchables.find((row) => row.session_id === unsupportedCcId);
+  check('dashboard dispatchability keeps supported CC and annotates unsupported-provider CC as non-ready',
+    supportedDispatchable?.delivery_ready === true
+      && supportedDispatchable?.reachable === true
+      && unsupportedDispatchable?.delivery_ready === false
+      && unsupportedDispatchable?.reachable === false,
     JSON.stringify(readinessFilteredDispatchables));
 
   const unsupportedConsult = await callTool('consult_request', {

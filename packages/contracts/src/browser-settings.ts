@@ -149,6 +149,27 @@ export const BrowserSettingsMigrationSchema = z
 	})
 	.strict();
 
+export const BrowserSettingsCutoverSchema = z
+	.object({
+		status: z.enum([
+			"not_ready",
+			"ready",
+			"blocked",
+			"quiesced",
+			"checkpointed",
+			"soaking",
+			"stable",
+			"rollback_required",
+			"rolled_back",
+			"failed",
+		]),
+		plan_hash: BrowserSettingsPlanHashSchema.optional(),
+		canonical_revision: z.number().int().nonnegative(),
+		failed_gates: z.array(z.string().min(1).max(128)).max(32),
+		rollback_available: z.boolean(),
+	})
+	.strict();
+
 export const BrowserSettingsAuditSchema = z
 	.object({
 		command_id: z.string().min(1).max(128),
@@ -169,6 +190,7 @@ export const BrowserSettingsSnapshotSchema = z
 		providers: z.array(BrowserSettingsProviderSchemaView).max(3),
 		presets: z.array(BrowserSettingsPresetSchema).max(100),
 		migration: BrowserSettingsMigrationSchema,
+		cutover: BrowserSettingsCutoverSchema,
 		unknown_config_keys_preserved: z.boolean(),
 		unknown_config_key_count: z.number().int().nonnegative().max(10_000),
 		audit: z.array(BrowserSettingsAuditSchema).max(50),
@@ -259,6 +281,22 @@ export const BrowserSettingsCommandRequestSchema = z.discriminatedUnion(
 			.strict(),
 		BrowserSettingsCommandBaseSchema.extend({
 			kind: z.literal("migration.rollback"),
+			confirm: z.literal(true),
+		}).strict(),
+		BrowserSettingsCommandBaseSchema.extend({
+			kind: z.literal("cutover.preview"),
+		}).strict(),
+		BrowserSettingsCommandBaseSchema.merge(BrowserSettingsConfirmedSchema)
+			.extend({
+				kind: z.literal("cutover.apply"),
+			})
+			.strict(),
+		BrowserSettingsCommandBaseSchema.extend({
+			kind: z.literal("cutover.soak"),
+			confirm: z.literal(true),
+		}).strict(),
+		BrowserSettingsCommandBaseSchema.extend({
+			kind: z.literal("cutover.rollback"),
 			confirm: z.literal(true),
 		}).strict(),
 	],
