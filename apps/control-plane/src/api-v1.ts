@@ -37,11 +37,16 @@ function value(request: FastifyRequest): JsonRecord {
 	return record(request.body);
 }
 
-function rejectForgedIdentity(input: JsonRecord): string | undefined {
+function rejectForgedIdentity(
+	input: JsonRecord,
+	allowed: readonly string[] = [],
+): string | undefined {
 	return Object.keys(input).some((key) =>
-		/^(?:actor|created_?by|role|project(?:_?id)?|session(?:_?id)?|bearer|authorization|owner(?:_?fence|_?id)?|fence|approval|storage|principal|scope|sender_?id|worker_?id)$/iu.test(
-			key,
-		),
+		allowed.includes(key)
+			? false
+			: /^(?:actor|created_?by|role|project(?:_?id)?|session(?:_?id)?|bearer|authorization|owner(?:_?fence|_?id)?|fence|approval|storage|principal|scope|sender_?id|worker_?id)$/iu.test(
+					key,
+				),
 	)
 		? "request authority is server-owned"
 		: undefined;
@@ -171,8 +176,13 @@ export function registerApiV1Routes(options: {
 	const guard = (
 		request: FastifyRequest,
 		reply: FastifyReply,
+		allowBodyCompatibilityHint = false,
 	): Caller | undefined => {
-		if (hasRequestAuthorityOverride(request)) {
+		if (
+			allowBodyCompatibilityHint
+				? hasRequestAuthorityHeaderOrQueryOverride(request)
+				: hasRequestAuthorityOverride(request)
+		) {
 			fail(
 				request,
 				reply,
@@ -218,9 +228,10 @@ export function registerApiV1Routes(options: {
 		request: FastifyRequest,
 		reply: FastifyReply,
 		_callerValue: Caller,
+		allowed: readonly string[] = [],
 	): JsonRecord | undefined => {
 		const input = value(request);
-		const forged = rejectForgedIdentity(input);
+		const forged = rejectForgedIdentity(input, allowed);
 		if (forged) {
 			fail(request, reply, 403, "caller.identity.spoofed", forged);
 			return undefined;
@@ -1142,9 +1153,9 @@ export function registerApiV1Routes(options: {
 	});
 
 	options.app.post("/api/v1/delivery/envelopes", async (request, reply) => {
-		const callerValue = guard(request, reply);
+		const callerValue = guard(request, reply, true);
 		if (!callerValue) return;
-		const input = withIdentity(request, reply, callerValue);
+		const input = withIdentity(request, reply, callerValue, ["sender_id"]);
 		if (!input) return;
 		try {
 			if (
@@ -1180,9 +1191,9 @@ export function registerApiV1Routes(options: {
 	});
 
 	options.app.post("/api/v1/delivery/claims", async (request, reply) => {
-		const callerValue = guard(request, reply);
+		const callerValue = guard(request, reply, true);
 		if (!callerValue) return;
-		const input = withIdentity(request, reply, callerValue);
+		const input = withIdentity(request, reply, callerValue, ["worker_id"]);
 		if (!input) return;
 		try {
 			if (

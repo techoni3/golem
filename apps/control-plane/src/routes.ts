@@ -11,6 +11,7 @@ import {
 	type ActorContext,
 	type BrowserPrincipalResolver,
 	hasRequestAuthorityHeaderOrBodyOverride,
+	hasRequestAuthorityHeaderOverride,
 	hasRequestAuthorityOverride,
 	isExpectedOrigin,
 } from "./auth.js";
@@ -156,6 +157,15 @@ function requireBrowserRead(
 	principal: BrowserPrincipalResolver,
 ): boolean {
 	return requirePrincipal(request, reply, principal, "read", true);
+}
+
+function runtimeSignalProjectId(
+	signal: z.infer<typeof RuntimeSignalV1Schema>,
+): string {
+	const payload = signal.payload;
+	if ("project" in payload) return payload.project.project_id;
+	if ("generation" in payload) return payload.generation.project_id;
+	return payload.endpoint.generation.project_id;
 }
 
 export function registerValidatedRoutes(options: {
@@ -478,8 +488,15 @@ export function registerValidatedRoutes(options: {
 			},
 		},
 		async (request, reply) => {
-			if (!requirePrincipal(request, reply, options.principal, "mutate", false))
-				return;
+			const context = resolvePrincipal(
+				request,
+				reply,
+				options.principal,
+				"mutate",
+				false,
+				hasRequestAuthorityHeaderOverride(request),
+			);
+			if (!context) return;
 			if (!options.runtimeIngress)
 				return fail(
 					request,
@@ -496,6 +513,19 @@ export function registerValidatedRoutes(options: {
 					400,
 					"request.invalid",
 					"runtime signal is invalid or uses an unsupported schema version",
+				);
+			if (
+				!options.principal.policy.allowsProject(
+					context,
+					runtimeSignalProjectId(parsed.data),
+				)
+			)
+				return fail(
+					request,
+					reply,
+					404,
+					"runtime.not_found",
+					"the runtime target is unavailable",
 				);
 			const receipt = options.runtimeIngress.ingest(parsed.data);
 			return sendValidated(

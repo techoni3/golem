@@ -35032,7 +35032,6 @@ var ManagedCodexSupervisor = class {
   #capabilitySequence = 0;
   #started = false;
   #terminalEmission;
-  #stopping = false;
   constructor(options) {
     this.#options = options;
     this.#qualification = qualifyManagedCodex({
@@ -35083,7 +35082,6 @@ var ManagedCodexSupervisor = class {
         qualification: this.#qualification
       };
     }
-    this.#stopping = false;
     const binding = this.#options.binding;
     await this.#emit("session.started", {
       model: this.#qualification.model
@@ -35108,9 +35106,6 @@ var ManagedCodexSupervisor = class {
       onNotification: (message) => this.#handleNotification(message),
       onExit: () => {
         this.#started = false;
-        if (!this.#stopping)
-          void this.#emitTerminal().catch(() => {
-          });
         void this.#options.endpoints.reportHealth?.({
           endpointId: binding.endpointId,
           generationId: binding.generationId,
@@ -35361,7 +35356,6 @@ var ManagedCodexSupervisor = class {
   }
   async stop(options = {}) {
     const binding = this.#options.binding;
-    this.#stopping = true;
     try {
       if (options.release !== false)
         await this.#emitTerminal();

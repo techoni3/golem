@@ -11464,9 +11464,9 @@ function record(value2) {
 function value(request) {
   return record(request.body);
 }
-function rejectForgedIdentity(input) {
+function rejectForgedIdentity(input, allowed = []) {
   return Object.keys(input).some(
-    (key) => /^(?:actor|created_?by|role|project(?:_?id)?|session(?:_?id)?|bearer|authorization|owner(?:_?fence|_?id)?|fence|approval|storage|principal|scope|sender_?id|worker_?id)$/iu.test(
+    (key) => allowed.includes(key) ? false : /^(?:actor|created_?by|role|project(?:_?id)?|session(?:_?id)?|bearer|authorization|owner(?:_?fence|_?id)?|fence|approval|storage|principal|scope|sender_?id|worker_?id)$/iu.test(
       key
     )
   ) ? "request authority is server-owned" : void 0;
@@ -11538,8 +11538,8 @@ function registerApiV1Routes(options) {
   const busEvents = [];
   const gateway = options.gateway;
   const ticketDispatch = options.ticketDispatch;
-  const guard = (request, reply) => {
-    if (hasRequestAuthorityOverride(request)) {
+  const guard = (request, reply, allowBodyCompatibilityHint = false) => {
+    if (allowBodyCompatibilityHint ? hasRequestAuthorityHeaderOrQueryOverride(request) : hasRequestAuthorityOverride(request)) {
       fail(
         request,
         reply,
@@ -11581,9 +11581,9 @@ function registerApiV1Routes(options) {
       principal: context
     });
   };
-  const withIdentity = (request, reply, _callerValue) => {
+  const withIdentity = (request, reply, _callerValue, allowed = []) => {
     const input = value(request);
-    const forged = rejectForgedIdentity(input);
+    const forged = rejectForgedIdentity(input, allowed);
     if (forged) {
       fail(request, reply, 403, "caller.identity.spoofed", forged);
       return void 0;
@@ -12293,9 +12293,9 @@ function registerApiV1Routes(options) {
     );
   });
   options.app.post("/api/v1/delivery/envelopes", async (request, reply) => {
-    const callerValue = guard(request, reply);
+    const callerValue = guard(request, reply, true);
     if (!callerValue) return;
-    const input = withIdentity(request, reply, callerValue);
+    const input = withIdentity(request, reply, callerValue, ["sender_id"]);
     if (!input) return;
     try {
       if (typeof input.sender_id === "string" && input.sender_id !== callerValue.actor)
@@ -12323,9 +12323,9 @@ function registerApiV1Routes(options) {
     }
   });
   options.app.post("/api/v1/delivery/claims", async (request, reply) => {
-    const callerValue = guard(request, reply);
+    const callerValue = guard(request, reply, true);
     if (!callerValue) return;
-    const input = withIdentity(request, reply, callerValue);
+    const input = withIdentity(request, reply, callerValue, ["worker_id"]);
     if (!input) return;
     try {
       if (typeof input.worker_id === "string" && input.worker_id !== callerValue.actor)
@@ -15391,7 +15391,7 @@ function jsonSchema3(value2) {
   });
 }
 function authorized(request, reply, principal) {
-  if (hasRequestAuthorityOverride(request)) {
+  if (hasRequestAuthorityHeaderOrQueryOverride(request)) {
     fail(
       request,
       reply,
@@ -15453,6 +15453,15 @@ function body(request) {
     throw new TrackerManagementError(
       "management.invalid",
       "request body must be an object"
+    );
+  if (Object.keys(parsed.data).some(
+    (key) => /^(?:actor|created_?by|project(?:_?id)?|bearer|authorization|token|credential|api_?key|owner(?:_?fence|_?id)?|fence|storage|principal|sender_?id|worker_?id)$/iu.test(
+      key
+    )
+  ))
+    throw new TrackerManagementError(
+      "management.forbidden",
+      "request authority is server-owned"
     );
   return parsed.data;
 }
@@ -17021,6 +17030,12 @@ function requireBearer(request, reply, principal) {
 function requireBrowserRead(request, reply, principal) {
   return requirePrincipal(request, reply, principal, "read", true);
 }
+function runtimeSignalProjectId(signal) {
+  const payload2 = signal.payload;
+  if ("project" in payload2) return payload2.project.project_id;
+  if ("generation" in payload2) return payload2.generation.project_id;
+  return payload2.endpoint.generation.project_id;
+}
 function registerValidatedRoutes(options) {
   const responseSchemas = {
     400: ApiErrorResponseJsonSchema,
@@ -17296,8 +17311,15 @@ function registerValidatedRoutes(options) {
       }
     },
     async (request, reply) => {
-      if (!requirePrincipal(request, reply, options.principal, "mutate", false))
-        return;
+      const context = resolvePrincipal(
+        request,
+        reply,
+        options.principal,
+        "mutate",
+        false,
+        hasRequestAuthorityHeaderOverride(request)
+      );
+      if (!context) return;
       if (!options.runtimeIngress)
         return fail(
           request,
@@ -17314,6 +17336,17 @@ function registerValidatedRoutes(options) {
           400,
           "request.invalid",
           "runtime signal is invalid or uses an unsupported schema version"
+        );
+      if (!options.principal.policy.allowsProject(
+        context,
+        runtimeSignalProjectId(parsed.data)
+      ))
+        return fail(
+          request,
+          reply,
+          404,
+          "runtime.not_found",
+          "the runtime target is unavailable"
         );
       const receipt = options.runtimeIngress.ingest(parsed.data);
       return sendValidated(

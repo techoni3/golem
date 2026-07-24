@@ -159,7 +159,6 @@ export class ManagedCodexSupervisor {
 	#capabilitySequence = 0;
 	#started = false;
 	#terminalEmission: Promise<void> | undefined;
-	#stopping = false;
 
 	constructor(options: ManagedCodexSupervisorOptions) {
 		this.#options = options;
@@ -230,7 +229,6 @@ export class ManagedCodexSupervisor {
 				qualification: this.#qualification,
 			};
 		}
-		this.#stopping = false;
 		const binding = this.#options.binding;
 		// Endpoint fencing is defined over a canonical generation. Materialize the
 		// deterministic lifecycle identity before claiming the native endpoint so
@@ -264,11 +262,6 @@ export class ManagedCodexSupervisor {
 				this.#handleNotification(message as Readonly<Record<string, unknown>>),
 			onExit: () => {
 				this.#started = false;
-				if (!this.#stopping)
-					void this.#emitTerminal().catch(() => {
-						// The endpoint health fact below remains useful even if the
-						// terminal lifecycle write is temporarily unavailable.
-					});
 				void this.#options.endpoints.reportHealth?.({
 					endpointId: binding.endpointId,
 					generationId: binding.generationId,
@@ -573,7 +566,6 @@ export class ManagedCodexSupervisor {
 
 	async stop(options: { readonly release?: boolean } = {}): Promise<void> {
 		const binding = this.#options.binding;
-		this.#stopping = true;
 		try {
 			// release:false models a supervisor hand-off: the same canonical
 			// generation is intentionally retained for its replacement. A normal

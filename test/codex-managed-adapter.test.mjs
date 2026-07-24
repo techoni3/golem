@@ -26,6 +26,7 @@ import {
 	createSessionService,
 } from "@golem/runtime";
 import { createTemporaryHome } from "@golem/testkit";
+import { provisionBearerPrincipal } from "./fixtures/control-plane-principal.mjs";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
 const fixture = path.join(repositoryRoot, "test/fixtures/codex-managed-app-server.mjs");
@@ -45,6 +46,26 @@ function createClock(initial = "2026-07-21T00:00:00.000Z") {
 
 function id(prefix) {
 	return `${prefix}_${randomUUID()}`;
+}
+
+function writeCanonicalAuthority(home) {
+	const directory = path.join(home, "control-plane");
+	fs.mkdirSync(directory, { recursive: true });
+	fs.writeFileSync(
+		path.join(directory, "authority.json"),
+		`${JSON.stringify(
+			{
+				schema_version: "golem.control-plane-authority/v1",
+				stage: "C4",
+				write_policy: "canonical_only",
+				revision: 1,
+				canonical_revision: 1,
+				updated_at: "2026-07-21T00:00:00.000Z",
+			},
+			null,
+			2,
+		)}\n`,
+	);
 }
 
 /**
@@ -87,12 +108,20 @@ test("J3 managed Codex control-plane delivery survives send-before-ack recovery"
 				clock,
 			}),
 		});
+		const principalResolver = provisionBearerPrincipal(owner, {
+			token: home.token,
+			projectId: "prj_gol50_fixture",
+			actorId: "ses_gol50_fixture",
+			bindingId: "principal_gol50_fixture",
+			clock: { now: () => Date.parse(clock.now()) },
+		});
 		service = await startControlPlane({
 			token: home.token,
 			stateDirectory: path.join(home.root, "control-plane"),
 			staticDirectory,
 			trackerCore: composeControlPlaneTrackerCoreServices({ writer: owner, clock }),
 			trackerServices: tracker,
+			principalResolver,
 		});
 		const ready = await fetch(`${service.origin}/api/v1/health/ready`, {
 			headers: { authorization: `Bearer ${home.token}` },
@@ -412,9 +441,10 @@ test("J3 managed Codex control-plane delivery survives send-before-ack recovery"
 						cwd: repositoryRoot,
 					},
 					{ generationId: binding.generationId, cwd: repositoryRoot },
-				),
+			),
 			/tui_binding_mismatch/,
 		);
+		writeCanonicalAuthority(home.root);
 		const cli = spawnSync(
 			process.execPath,
 			[
@@ -436,6 +466,7 @@ test("J3 managed Codex control-plane delivery survives send-before-ack recovery"
 		assert.equal(cliFailure.error.code, "adapter.codex.managed.qualification_required");
 		assert.equal(cli.stdout.includes("ollama_local"), false, "policy diagnostic does not echo hostile selector");
 		const productionHome = path.join(home.root, "production-home");
+		writeCanonicalAuthority(productionHome);
 		const productionTurnLog = path.join(home.root, "production-turns.log");
 		const productionTurnState = path.join(home.root, "production-turns.json");
 		const production = spawn(

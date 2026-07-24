@@ -14,6 +14,7 @@ import {
 import { createTemporaryHome, waitFor } from "@golem/testkit";
 import { startControlPlane } from "../../apps/control-plane/dist/index.js";
 import { openControlPlanePersistence } from "../../apps/control-plane/dist/persistence.js";
+import { provisionBearerPrincipal } from "../fixtures/control-plane-principal.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const producerFixture = path.join(repositoryRoot, "test/runtime/inbox-producer.mjs");
@@ -73,6 +74,12 @@ test("J1 dashboard-down producers replay only after the service starts", async (
 		assert.equal(fs.existsSync(home.runtimeDb), false, "absent service producers never open runtime SQLite");
 
 		owner = openControlPlanePersistence({ runtimePath: home.runtimeDb, trackerPath: home.trackerDb });
+		const principalResolver = provisionBearerPrincipal(owner, {
+			token: home.token,
+			projectId: id("prj", 1),
+			actorId: id("actor", 1),
+			bindingId: id("principal", 1),
+		});
 		const runtime = createRuntimeMaterializer({ home: home.root, writer: owner });
 		const outbox = new RuntimeOutboxDrainer({
 			writer: owner,
@@ -91,6 +98,7 @@ test("J1 dashboard-down producers replay only after the service starts", async (
 				staticDirectory,
 				runtimeIngress: runtime.inbox,
 				runtimeHealth: scheduler,
+				principalResolver,
 			});
 			const health = await fetch(`${service.origin}/api/v1/health/ready`, { headers: { authorization: `Bearer ${home.token}` } });
 			assert.equal(health.status, 200, "started service exposes bounded runtime health");

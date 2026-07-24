@@ -415,10 +415,27 @@ async function launchManagedCodex(result, input, io) {
                 : {}),
         },
     });
-    const exited = await new Promise((resolveExit) => {
-        child.once("error", () => resolveExit({ code: CLI_EXIT_CODES.runtime }));
-        child.once("exit", (code) => resolveExit({ code }));
-    });
+    const forwardInterrupt = () => {
+        if (child.exitCode === null)
+            child.kill("SIGINT");
+    };
+    const forwardTerminate = () => {
+        if (child.exitCode === null)
+            child.kill("SIGTERM");
+    };
+    process.on("SIGINT", forwardInterrupt);
+    process.on("SIGTERM", forwardTerminate);
+    let exited;
+    try {
+        exited = await new Promise((resolveExit) => {
+            child.once("error", () => resolveExit({ code: CLI_EXIT_CODES.runtime }));
+            child.once("exit", (code) => resolveExit({ code }));
+        });
+    }
+    finally {
+        process.off("SIGINT", forwardInterrupt);
+        process.off("SIGTERM", forwardTerminate);
+    }
     const exitCode = exited.code ?? CLI_EXIT_CODES.runtime;
     if (exitCode === CLI_EXIT_CODES.ok)
         recordRecentPreset(result.preset.name);

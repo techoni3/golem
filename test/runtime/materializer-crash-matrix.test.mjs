@@ -14,6 +14,7 @@ import {
 import { createTemporaryHome, waitFor } from "@golem/testkit";
 import { startControlPlane } from "../../apps/control-plane/dist/index.js";
 import { openControlPlanePersistence } from "../../apps/control-plane/dist/persistence.js";
+import { provisionBearerPrincipal } from "../fixtures/control-plane-principal.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const childFixture = path.join(repositoryRoot, "test/runtime/materializer-child.mjs");
@@ -190,6 +191,12 @@ test("J3 durable inbox materializer crash/concurrency/outbox matrix", async (t) 
 		const staticDirectory = path.join(home.root, "control-plane-static");
 		fs.mkdirSync(staticDirectory, { recursive: true, mode: 0o700 });
 		fs.writeFileSync(path.join(staticDirectory, "index.html"), "<!doctype html><title>runtime J3</title>");
+		const principalResolver = provisionBearerPrincipal(owner, {
+			token: home.token,
+			projectId: id("prj", 9_999),
+			actorId: id("actor", 9_999),
+			bindingId: id("principal", 9_999),
+		});
 		let controlPlane;
 		try {
 			controlPlane = await startControlPlane({
@@ -197,6 +204,7 @@ test("J3 durable inbox materializer crash/concurrency/outbox matrix", async (t) 
 				stateDirectory: path.join(home.root, "control-plane-state"),
 				staticDirectory,
 				runtimeIngress: runtime.inbox,
+				principalResolver,
 			});
 			const ingressSignal = signal(9_999);
 			const unauthorized = await fetch(`${controlPlane.origin}/api/v1/runtime/events`, {

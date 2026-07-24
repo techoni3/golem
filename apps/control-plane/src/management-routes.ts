@@ -12,7 +12,7 @@ import { z } from "zod";
 import {
 	type ActorContext,
 	type BrowserPrincipalResolver,
-	hasRequestAuthorityOverride,
+	hasRequestAuthorityHeaderOrQueryOverride,
 } from "./auth.js";
 import { fail, sendValidated } from "./errors.js";
 
@@ -45,7 +45,7 @@ function authorized(
 	reply: FastifyReply,
 	principal: BrowserPrincipalResolver,
 ): ActorContext | undefined {
-	if (hasRequestAuthorityOverride(request)) {
+	if (hasRequestAuthorityHeaderOrQueryOverride(request)) {
 		fail(
 			request,
 			reply,
@@ -126,6 +126,17 @@ function body(request: FastifyRequest): Record<string, unknown> {
 		throw new TrackerManagementError(
 			"management.invalid",
 			"request body must be an object",
+		);
+	if (
+		Object.keys(parsed.data).some((key) =>
+			/^(?:actor|created_?by|project(?:_?id)?|bearer|authorization|token|credential|api_?key|owner(?:_?fence|_?id)?|fence|storage|principal|sender_?id|worker_?id)$/iu.test(
+				key,
+			),
+		)
+	)
+		throw new TrackerManagementError(
+			"management.forbidden",
+			"request authority is server-owned",
 		);
 	return parsed.data;
 }

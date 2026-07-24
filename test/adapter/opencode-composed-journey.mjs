@@ -14,6 +14,7 @@ import {
 	createSessionService,
 } from "@golem/runtime";
 import { createTemporaryHome, waitFor } from "@golem/testkit";
+import { provisionBearerPrincipal } from "../fixtures/control-plane-principal.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const token = "golem-opencode-composed-token-000000000000";
@@ -183,11 +184,18 @@ export async function runOpenCodeComposedJourney() {
 			writer: owner,
 			sessions,
 		});
+		const principalResolver = provisionBearerPrincipal(owner, {
+			token,
+			projectId,
+			actorId: "ses_opencode_composed",
+			bindingId: "principal_opencode_composed",
+		});
 		control = await startControlPlane({
 			token,
 			stateDirectory: path.join(home.root, "control-plane"),
 			staticDirectory,
 			runtimeIngress: runtime.inbox,
+			principalResolver,
 		});
 		restoreEnvironment = withEnvironment({
 			GOLEM_HOME: home.golemHome,

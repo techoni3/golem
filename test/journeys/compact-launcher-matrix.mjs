@@ -9,6 +9,12 @@ const root = path.resolve(new URL("../..", import.meta.url).pathname);
 const golem = path.join(root, "cli/golem.js");
 const golemc = path.join(root, "apps/cli/src/compat/golemc.mjs");
 const golemx = path.join(root, "apps/cli/src/compat/golemx.mjs");
+const fixturePath = [
+	path.dirname(process.execPath),
+	"/usr/local/bin",
+	"/usr/bin",
+	"/bin",
+].join(path.delimiter);
 
 function invoke(home, entry, args, extra = {}) {
 	return spawnSync(process.execPath, [entry, ...args], {
@@ -17,7 +23,7 @@ function invoke(home, entry, args, extra = {}) {
 		env: {
 			...process.env,
 			...home.env,
-			PATH: "/private/tmp/golem-node-v24.18.0-arm64/bin:/usr/bin:/bin",
+			PATH: fixturePath,
 			...extra,
 		},
 	});
@@ -33,6 +39,23 @@ export async function exerciseCompactLauncherMatrix() {
 	const home = createTemporaryHome("golem-gol53-launcher-");
 	const golemHome = home.env.GOLEM_HOME;
 	try {
+		const authorityDirectory = path.join(golemHome, "control-plane");
+		fs.mkdirSync(authorityDirectory, { recursive: true });
+		fs.writeFileSync(
+			path.join(authorityDirectory, "authority.json"),
+			`${JSON.stringify(
+				{
+					schema_version: "golem.control-plane-authority/v1",
+					stage: "C4",
+					write_policy: "canonical_only",
+					revision: 1,
+					canonical_revision: 1,
+					updated_at: "2026-07-21T00:00:00.000Z",
+				},
+				null,
+				2,
+			)}\n`,
+		);
 		const nonTty = assertSuccess(invoke(home, golem, []), "non-TTY no-argument command");
 		assert.match(nonTty, /Usage: golem/);
 		assert.doesNotMatch(nonTty, /Choose a qualified launch preset/);
@@ -113,7 +136,7 @@ process.stdout.write(JSON.stringify({ exit, lines, cancelledExit, cancelled }));
 		const picker = execFileSync(process.execPath, ["--input-type=module", "-e", pickerScript], {
 			cwd: root,
 			encoding: "utf8",
-			env: { ...process.env, ...home.env, PATH: "/private/tmp/golem-node-v24.18.0-arm64/bin:/usr/bin:/bin" },
+			env: { ...process.env, ...home.env, PATH: fixturePath },
 		});
 		const pickerResult = JSON.parse(picker);
 		assert.equal(pickerResult.exit, 0);

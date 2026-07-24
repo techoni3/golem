@@ -9,6 +9,7 @@ import { openControlPlanePersistence } from "../../apps/control-plane/dist/persi
 import { composeControlPlaneManagementServices, composeControlPlaneTrackerCoreServices } from "../../apps/control-plane/dist/index.js";
 import { startControlPlane } from "../../apps/control-plane/dist/index.js";
 import { TrackerManagementError } from "@golem/tracker";
+import { provisionBearerPrincipal } from "../fixtures/control-plane-principal.mjs";
 
 function clock() {
 	return { now: () => "2026-07-21T00:00:00.000Z", after: (ms) => new Date(Date.parse("2026-07-21T00:00:00.000Z") + ms).toISOString() };
@@ -103,17 +104,23 @@ test("roles gates ideas and controls are typed, idempotent, audited, and restart
 		const staticDirectory = path.join(home.root, "static");
 		fs.mkdirSync(staticDirectory, { recursive: true });
 		fs.writeFileSync(path.join(staticDirectory, "index.html"), "management fixture");
-		const server = await startControlPlane({ token: "management-test-token-01234567890123456789", stateDirectory: path.join(home.root, "control-plane"), staticDirectory, management });
+		const principalResolver = provisionBearerPrincipal(opened.writer, {
+			token: "management-test-token-01234567890123456789",
+			projectId: "mgmt-project",
+			actorId: "human:manager",
+			bindingId: "principal_management_fixture",
+		});
+		const server = await startControlPlane({ token: "management-test-token-01234567890123456789", stateDirectory: path.join(home.root, "control-plane"), staticDirectory, management, principalResolver });
 		try {
-			const response = await fetch(`${server.origin}/api/v1/management/roles?project_id=mgmt-project`, { headers: { authorization: "Bearer management-test-token-01234567890123456789" } });
+			const response = await fetch(`${server.origin}/api/v1/management/roles`, { headers: { authorization: "Bearer management-test-token-01234567890123456789" } });
 			assert.equal(response.status, 200);
 			assert.equal((await response.json()).result[0].name, "operator", "the shipped management route delegates to typed storage");
 			const headers = { authorization: "Bearer management-test-token-01234567890123456789", "content-type": "application/json" };
-			const foreignAssignment = await fetch(`${server.origin}/api/v1/management/roles/${role.id}/assign`, { method: "POST", headers, body: JSON.stringify({ project_id: "mgmt-project", session_id: "foreign-session", generation_id: "foreign-generation", actor: "human:manager", idempotency_key: "foreign-assignment" }) });
+			const foreignAssignment = await fetch(`${server.origin}/api/v1/management/roles/${role.id}/assign`, { method: "POST", headers, body: JSON.stringify({ session_id: "foreign-session", generation_id: "foreign-generation", idempotency_key: "foreign-assignment" }) });
 			assert.equal(foreignAssignment.status, 404, "foreign canonical assignment target is rejected at the HTTP boundary");
-			const foreignControl = await fetch(`${server.origin}/api/v1/management/control`, { method: "POST", headers, body: JSON.stringify({ project_id: "mgmt-project", session_id: "foreign-session", generation_id: "foreign-generation", command: "brief", payload: {}, actor: "human:manager", idempotency_key: "foreign-control" }) });
+			const foreignControl = await fetch(`${server.origin}/api/v1/management/control`, { method: "POST", headers, body: JSON.stringify({ session_id: "foreign-session", generation_id: "foreign-generation", command: "brief", payload: {}, idempotency_key: "foreign-control" }) });
 			assert.equal(foreignControl.status, 404, "foreign canonical control target is rejected at the HTTP boundary");
-			const auditResponse = await fetch(`${server.origin}/api/v1/management/audit?project_id=mgmt-project`, { headers });
+			const auditResponse = await fetch(`${server.origin}/api/v1/management/audit`, { headers });
 			assert.equal(auditResponse.status, 200);
 			assert.equal(JSON.stringify(await auditResponse.json()).includes("retry-secret"), false, "HTTP audit output does not expose actor secrets");
 		} finally {
