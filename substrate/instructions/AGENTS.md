@@ -101,5 +101,7 @@ Trust only mechanical evidence: command output you ran, files changed, tests/che
 
 ## Response and Output
 
+Default to compact, full-width prose. Do not put one thought, sentence, or short phrase per line.
+
 Keep responses compact and factual. Do not narrate every tool call. Separate final user-facing briefs from noisy tool output with a long horizontal rule when useful.
 Every turn end should provide a quick recap; the human requires a refresher on what was done (with brief description), what's in progress, and what's next.
