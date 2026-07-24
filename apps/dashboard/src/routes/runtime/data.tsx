@@ -1,7 +1,7 @@
 import {
 	type BrowserControlPlaneClient,
-	type LegacyControlPlaneStream,
 	createProjectionSynchronizer,
+	type LegacyControlPlaneStream,
 	type ProjectionConnectionState,
 } from "@golem/api-client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -17,7 +17,10 @@ const runtimeStreams = [
 	["live", "runtime.live"],
 	["history", "runtime.history"],
 	["diagnostics", "runtime.diagnostics"],
-] as const satisfies readonly (readonly [RuntimeStream, LegacyControlPlaneStream])[];
+] as const satisfies readonly (readonly [
+	RuntimeStream,
+	LegacyControlPlaneStream,
+])[];
 
 type ConnectionMap = Readonly<Record<RuntimeStream, ProjectionConnectionState>>;
 
@@ -77,8 +80,13 @@ export function RuntimeDataProvider({
 					},
 				}),
 		);
-		synchronizers.forEach((synchronizer) => synchronizer.start());
-		return () => synchronizers.forEach((synchronizer) => synchronizer.stop());
+		synchronizers.forEach((synchronizer) => {
+			synchronizer.start();
+		});
+		return () =>
+			synchronizers.forEach((synchronizer) => {
+				synchronizer.stop();
+			});
 	}, [client, enabled, queryClient]);
 
 	const value = React.useMemo<RuntimeDataContextValue>(

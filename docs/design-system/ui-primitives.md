@@ -17,14 +17,17 @@ focus, state colors, spacing, radii, elevation, motion, and the fixed
 `system`, `light`, or `dark` preference under `golem.ui.theme`; it reflects
 the resolved theme on `<html>`. The dashboard's inline bootstrap validates
 that same closed preference set before its module script, so an invalid value
-falls back to the system theme and the first paint cannot use it.
+falls back to the system theme and the first paint cannot use it. Native
+`prefers-contrast`, `forced-colors`, and `prefers-reduced-motion` media
+features stay authoritative; they do not create a second preference store.
 
 ## Primitive contract
 
 The package composes React Aria Buttons, links, labeled text/search/select and
 combobox fields, checkbox/switch, tabs, menus, modal dialog/drawer, tooltip,
 toast/alert, list/table, status, skeleton/state panel, and PassportCard.
-Focus-visible, contrast, and reduced-motion behavior are token-level rules.
+Focus-visible, forced-colors, contrast, and reduced-motion behavior are
+token-level rules.
 Dialog and drawer accept `returnFocusRef`; callers provide the trigger target
 when a controlled overlay must return keyboard focus after Escape. The
 primitive owns that restoration after teardown; callers must not rescue it by
@@ -42,11 +45,16 @@ remain programmatically associated with their inputs.
 
 ## Design lab and verification
 
-`apps/dashboard` mounts this isolated composition at `/design-lab`; it is not
-a production-page migration. The lab renders loading, empty, error, and
-disconnected examples. `npm run test:ui-primitives` is the single real browser
-journey: it serves only generated Vite output from an ephemeral loopback server
-and drives a temporary headless Chrome profile through valid/invalid/system
-theme bootstrap, keyboard overlay/listbox focus, computed token styles,
-representative light/dark AA contrast, high contrast, reduced motion, and
-PassportCard containment.
+`apps/dashboard/src/design-lab` remains an isolated source composition and is
+not imported by the production dashboard entry. The production bundle mounts
+only `DashboardShell` and its typed routes; the bounded legacy compatibility
+island remains a deliberate dynamic import until its still-referenced
+overlays are migrated. Do not delete the island or its scoped CSS while those
+imports remain.
+
+`npm run test:ui-primitives` verifies the primitive lab in a temporary
+headless Chrome profile. The dashboard browser matrices separately exercise
+every production route at 360, 768, 1280, and wide viewports, keyboard
+navigation, accessible names and landmarks, light/dark/system resolution,
+forced colors, reduced motion, reconnection, long content, and empty states
+against a real control-plane service.

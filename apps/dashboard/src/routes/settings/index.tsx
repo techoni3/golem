@@ -282,14 +282,19 @@ function SettingsContent({
 			<section className={styles.card}>
 				<div className={styles.cardHeader}>
 					<div>
-						<h2>Rendered integrations</h2>
+						<h2 id="rendered-integrations-heading">Rendered integrations</h2>
 						<p>
 							Managed files are compiler-owned. Tamper is never overwritten
 							without a separate recovery path.
 						</p>
 					</div>
 				</div>
-				<div className={styles.tableScroll}>
+				<section
+					aria-labelledby="rendered-integrations-heading"
+					className={styles.tableScroll}
+					// biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users need to reach and scroll this labeled overflow region.
+					tabIndex={0}
+				>
 					<table>
 						<thead>
 							<tr>
@@ -373,7 +378,7 @@ function SettingsContent({
 							))}
 						</tbody>
 					</table>
-				</div>
+				</section>
 			</section>
 		</div>
 	);
@@ -383,14 +388,19 @@ function SettingsContent({
 			<section className={styles.card}>
 				<div className={styles.cardHeader}>
 					<div>
-						<h2>Capability matrix</h2>
+						<h2 id="capability-matrix-heading">Capability matrix</h2>
 						<p>
 							Binary, provider, model, qualification, endpoint, and delivery
 							facts stay separate.
 						</p>
 					</div>
 				</div>
-				<div className={styles.tableScroll}>
+				<section
+					aria-labelledby="capability-matrix-heading"
+					className={styles.tableScroll}
+					// biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users need to reach and scroll this labeled overflow region.
+					tabIndex={0}
+				>
 					<table>
 						<thead>
 							<tr>
@@ -445,7 +455,7 @@ function SettingsContent({
 							))}
 						</tbody>
 					</table>
-				</div>
+				</section>
 			</section>
 
 			<section className={styles.card}>
@@ -685,8 +695,13 @@ function SettingsContent({
 			</section>
 
 			<section className={styles.card}>
-				<h2>Resolved presets</h2>
-				<div className={styles.tableScroll}>
+				<h2 id="resolved-presets-heading">Resolved presets</h2>
+				<section
+					aria-labelledby="resolved-presets-heading"
+					className={styles.tableScroll}
+					// biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users need to reach and scroll this labeled overflow region.
+					tabIndex={0}
+				>
 					<table>
 						<thead>
 							<tr>
@@ -709,7 +724,7 @@ function SettingsContent({
 							))}
 						</tbody>
 					</table>
-				</div>
+				</section>
 			</section>
 		</div>
 	);
@@ -932,6 +947,7 @@ function SettingsContent({
 				</InlineAlert>
 			) : null}
 			<OperatorTabs
+				ariaLabel="Settings sections"
 				onSelectionChange={setSelectedTab}
 				selectedKey={selectedTab}
 				tabs={[

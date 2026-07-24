@@ -1,6 +1,5 @@
 import { PassportCard, StatusBadge } from "@golem/ui";
-import * as React from "react";
-
+import styles from "./runtime.module.css";
 import {
 	activityAt,
 	endpoints,
@@ -8,13 +7,12 @@ import {
 	model,
 	observedAt,
 	projectName,
+	type RuntimeEndpoint,
+	type RuntimeItem,
 	role,
 	sessionName,
 	text,
-	type RuntimeEndpoint,
-	type RuntimeItem,
 } from "./types.js";
-import styles from "./runtime.module.css";
 
 type BadgeTone = "success" | "warning" | "danger" | "info" | "neutral";
 
@@ -92,7 +90,7 @@ export function RuntimePassportCard({
 			onOpen={onOpen}
 			openLabel={generationLabel}
 			controls={
-				<div className={styles.passportFacts} aria-label="Delivery facts">
+				<section className={styles.passportFacts} aria-label="Delivery facts">
 					<StatusBadge
 						{...(endpoint
 							? { detail: `${endpoint.delivery_mode} · ${endpoint.readiness}` }
@@ -112,14 +110,14 @@ export function RuntimePassportCard({
 						label={endpoint ? "Capability facts" : "No capability facts"}
 						tone={capabilityTone(endpoint)}
 					/>
-				</div>
+				</section>
 			}
 		>
 			<div className={styles.passportMain}>
 				<p className={styles.eyebrow}>{projectName(item)}</p>
 				<h3>{sessionName(item)}</h3>
 				<p className={styles.model}>{model(item)}</p>
-				<div
+				<section
 					className={styles.badgeRow}
 					aria-label="Session lifecycle and role"
 				>
@@ -128,7 +126,7 @@ export function RuntimePassportCard({
 						tone={lifecycleTone(state)}
 					/>
 					<StatusBadge label={`Role: ${role(item)}`} tone="info" />
-				</div>
+				</section>
 				<dl className={styles.timeFacts}>
 					<div>
 						<dt>Actor activity</dt>

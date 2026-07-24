@@ -175,7 +175,10 @@ export function registerManagementRoutes(options: {
 		readonly payload: Readonly<Record<string, unknown>>;
 		readonly idempotencyKey?: string;
 		readonly handler: () => unknown;
-	}): { readonly handled: true; readonly result: unknown } | typeof GATEWAY_MISMATCH | undefined {
+	}):
+		| { readonly handled: true; readonly result: unknown }
+		| typeof GATEWAY_MISMATCH
+		| undefined {
 		if (!gateway) return undefined;
 		const key =
 			typeof input.idempotencyKey === "string" && input.idempotencyKey
@@ -627,7 +630,10 @@ export function registerManagementRoutes(options: {
 						reply,
 						context,
 						commandKind: "management.asset.put",
-						scope: { resourceType: "asset", resourceId: field(input, "ticket_id") },
+						scope: {
+							resourceType: "asset",
+							resourceId: field(input, "ticket_id"),
+						},
 						payload: input,
 						handler: () =>
 							options.management.assets.put({
@@ -644,16 +650,20 @@ export function registerManagementRoutes(options: {
 		},
 		true,
 	);
-	register("get", "/api/v1/management/assets/:asset_id", (_request, reply, context) => {
-		const params = _request.params as { asset_id: string };
-		const value = options.management.assets.read({
-			projectId: context.defaultProjectId,
-			ticketId: field(_request.query as Record<string, unknown>, "ticket_id"),
-			assetId: params.asset_id,
-		});
-		return sendResult(_request, reply, {
-			asset: publicAsset(value.asset),
-			content_base64: Buffer.from(value.bytes).toString("base64"),
-		});
-	});
+	register(
+		"get",
+		"/api/v1/management/assets/:asset_id",
+		(_request, reply, context) => {
+			const params = _request.params as { asset_id: string };
+			const value = options.management.assets.read({
+				projectId: context.defaultProjectId,
+				ticketId: field(_request.query as Record<string, unknown>, "ticket_id"),
+				assetId: params.asset_id,
+			});
+			return sendResult(_request, reply, {
+				asset: publicAsset(value.asset),
+				content_base64: Buffer.from(value.bytes).toString("base64"),
+			});
+		},
+	);
 }

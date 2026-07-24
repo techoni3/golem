@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import {
-	applyLegacyMigration,
 	applyCanonicalCutover,
+	applyLegacyMigration,
 	auditLegacyHome,
 	canonicalCutoverStatus,
 	evaluateCanonicalCutoverSoak,
@@ -26,9 +26,7 @@ const commands = [
 	"cutover-soak",
 	"cutover-rollback",
 ];
-const command = commands.includes(rawArgs[0])
-	? rawArgs[0]
-	: "plan";
+const command = commands.includes(rawArgs[0]) ? rawArgs[0] : "plan";
 const args = command === rawArgs[0] ? rawArgs.slice(1) : rawArgs;
 const homeIndex = args.indexOf("--home");
 const home = homeIndex === -1 ? undefined : args[homeIndex + 1];
@@ -98,15 +96,9 @@ if (
 			const result = await evaluateCanonicalCutoverSoak(
 				home,
 				{
-					...(args.includes("--health-failed")
-						? { health_ok: false }
-						: {}),
-					...(args.includes("--parity-failed")
-						? { parity_ok: false }
-						: {}),
-					...(args.includes("--owner-conflict")
-						? { single_owner: false }
-						: {}),
+					...(args.includes("--health-failed") ? { health_ok: false } : {}),
+					...(args.includes("--parity-failed") ? { parity_ok: false } : {}),
+					...(args.includes("--owner-conflict") ? { single_owner: false } : {}),
 					...(unsafeBacklog === undefined
 						? {}
 						: { unsafe_backlog: unsafeBacklog }),

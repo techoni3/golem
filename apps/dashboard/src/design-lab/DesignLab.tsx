@@ -80,6 +80,7 @@ export function DesignLab() {
 			</header>
 
 			<OperatorTabs
+				ariaLabel="Design lab sections"
 				onSelectionChange={setActiveTab}
 				selectedKey={activeTab}
 				tabs={[

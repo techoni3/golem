@@ -180,24 +180,23 @@ export function codexRuntimeSignal(input: {
 						generation,
 						...(input.resumedFromGenerationId
 							? {
-									resumed_from_generation_id:
-										input.resumedFromGenerationId,
+									resumed_from_generation_id: input.resumedFromGenerationId,
 								}
 							: {}),
 					}
-			: kind === "session.ended"
-				? {
-						kind: "session.ended" as const,
-						generation,
-						disposition: "ended" as const,
-					}
-				: kind === "session.idle"
-					? { kind: "session.idle" as const, generation }
-					: {
-							kind: "session.activity" as const,
+				: kind === "session.ended"
+					? {
+							kind: "session.ended" as const,
 							generation,
-							activity_kind: activityKind(input.event),
-						};
+							disposition: "ended" as const,
+						}
+					: kind === "session.idle"
+						? { kind: "session.idle" as const, generation }
+						: {
+								kind: "session.activity" as const,
+								generation,
+								activity_kind: activityKind(input.event),
+							};
 	return {
 		schema_version: "golem.runtime-signal/v1",
 		event_id: codexEventId(identity.sessionId, input.revision, input.event),

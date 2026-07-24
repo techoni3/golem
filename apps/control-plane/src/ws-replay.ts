@@ -1,12 +1,12 @@
 import crypto from "node:crypto";
 
 import {
-	BrowserWorkInvalidationSchema,
-	BrowserWorkStreamSchema,
-	BrowserWorkWebSocketFrameSchema,
 	type BrowserWorkInvalidation,
+	BrowserWorkInvalidationSchema,
 	type BrowserWorkProjectionResponse,
 	type BrowserWorkStream,
+	BrowserWorkStreamSchema,
+	BrowserWorkWebSocketFrameSchema,
 	WebSocketFrameV1Schema,
 } from "@golem/contracts";
 import type { FastifyInstance, FastifyRequest } from "fastify";
@@ -177,7 +177,8 @@ export class BoundedReplayWindow
 		entries.push(entry);
 		while (entries.length > this.#capacity) entries.shift();
 		this.#browserEntries.set(key, entries);
-		for (const listener of this.#browserListeners) listener(stream, entry, scope);
+		for (const listener of this.#browserListeners)
+			listener(stream, entry, scope);
 		return entry;
 	}
 
@@ -435,7 +436,10 @@ export function registerWsReplay(options: {
 					browserProjection(browserStream.data, context.defaultProjectId);
 				let messages: readonly ReturnType<typeof browserSnapshotFrame>[];
 				if (!suppliedInstance || cursorValue === null) {
-					const snapshot = browserReplay.browserSnapshot(browserStream.data, scope);
+					const snapshot = browserReplay.browserSnapshot(
+						browserStream.data,
+						scope,
+					);
 					messages = [
 						browserSnapshotFrame(
 							options.instanceId,

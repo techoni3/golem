@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 import { exerciseControlPlaneShell } from "../control-plane/control-plane-shell.mjs";
-import { exerciseRuntimeDashboard } from "./runtime-dashboard.mjs";
+import { exerciseAccessibilityResponsiveThemes } from "./dashboard-polish.mjs";
+import {
+	exerciseDashboardStateMatrix,
+	exerciseRuntimeDashboard,
+} from "./runtime-dashboard.mjs";
 import {
 	exerciseWorkControlPlane,
 	exerciseWorkManagementDashboard,
@@ -18,15 +22,21 @@ if (
 		"work-control-plane",
 		"work-management",
 		"settings-controls",
+		"accessibility-responsive-themes",
+		"dashboard-state-matrix",
 	].includes(grep) ||
 	arguments_.length !== 2
 )
 	throw new Error(
-		"use --grep control-plane-shell, dashboard-shell, runtime-dashboard, work-control-plane, work-management, or settings-controls",
+		"use --grep control-plane-shell, dashboard-shell, runtime-dashboard, work-control-plane, work-management, settings-controls, accessibility-responsive-themes, or dashboard-state-matrix",
 	);
 
 try {
 	if (grep === "runtime-dashboard") await exerciseRuntimeDashboard();
+	else if (grep === "accessibility-responsive-themes")
+		await exerciseAccessibilityResponsiveThemes();
+	else if (grep === "dashboard-state-matrix")
+		await exerciseDashboardStateMatrix();
 	else if (grep === "work-control-plane") await exerciseWorkControlPlane();
 	else if (grep === "work-management")
 		await exerciseWorkManagementDashboard();

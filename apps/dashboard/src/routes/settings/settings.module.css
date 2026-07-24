@@ -132,8 +132,15 @@
 	.tableScroll {
 		max-width: 100%;
 		overflow-x: auto;
+		overscroll-behavior-inline: contain;
+		scrollbar-gutter: stable;
 		border: 1px solid var(--g-divider);
 		border-radius: var(--g-radius-md);
+	}
+
+	.tableScroll:focus-visible {
+		outline: var(--g-focus-width) solid var(--g-focus);
+		outline-offset: 2px;
 	}
 
 	.tableScroll table {
@@ -193,6 +200,7 @@
 
 	.audit li {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
 		justify-content: space-between;
 		gap: var(--g-space-3);

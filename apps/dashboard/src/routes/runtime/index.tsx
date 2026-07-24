@@ -12,21 +12,20 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useRuntimeConnection, useRuntimePage } from "./data.js";
 import { RuntimeSessionDrawer } from "./drawer.js";
 import { endpointSummary, RuntimePassportCard } from "./passport.js";
+import styles from "./runtime.module.css";
 import {
 	activityAt,
-	endpoints,
 	isTerminal,
 	lifecycle,
 	model,
 	number,
 	observedAt,
 	projectName,
+	type RuntimeItem,
 	role,
 	sessionName,
 	text,
-	type RuntimeItem,
 } from "./types.js";
-import styles from "./runtime.module.css";
 
 const lifecycleOptions = [
 	{ id: "", label: "All live states" },
@@ -130,10 +129,10 @@ function RouteHeader({
 
 function LoadingRoster() {
 	return (
-		<div className={styles.cardGrid} aria-label="Loading runtime sessions">
+		<section className={styles.cardGrid} aria-label="Loading runtime sessions">
 			<Skeleton width="min(100%, 32.5rem)" />
 			<Skeleton width="min(100%, 32.5rem)" />
-		</div>
+		</section>
 	);
 }
 
@@ -208,7 +207,7 @@ function RuntimeRoster({
 				/>
 			) : null}
 			{items.length ? (
-				<div
+				<section
 					className={styles.cardGrid}
 					aria-label="Live session passport cards"
 				>
@@ -221,7 +220,7 @@ function RuntimeRoster({
 							}
 						/>
 					))}
-				</div>
+				</section>
 			) : null}
 			<RuntimeSessionDrawer
 				item={selected}

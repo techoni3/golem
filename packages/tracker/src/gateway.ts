@@ -218,9 +218,7 @@ export function createCommandGateway(options: {
 			fingerprint: fp,
 			outcome_status: outcome.status,
 			...(outcome.reason_code ? { reason_code: outcome.reason_code } : {}),
-			...(outcome.operation_id
-				? { operation_id: outcome.operation_id }
-				: {}),
+			...(outcome.operation_id ? { operation_id: outcome.operation_id } : {}),
 			result: (outcome.result as Readonly<Record<string, unknown>>) ?? {},
 			committed_at: committedAt,
 		});
@@ -304,7 +302,7 @@ export function createCommandGateway(options: {
 							error.code === "tracker.not_found"
 								? 404
 								: error.code === "tracker.conflict" ||
-									  error.code === "tracker.phase.invalid"
+										error.code === "tracker.phase.invalid"
 									? 409
 									: 400;
 						// A command that passes preconditions but is legally
@@ -313,9 +311,7 @@ export function createCommandGateway(options: {
 						recordTerminal(input, {
 							command_id: input.commandId,
 							status:
-								error.code === "tracker.conflict"
-									? "conflict"
-									: "rejected",
+								error.code === "tracker.conflict" ? "conflict" : "rejected",
 							reason_code: error.code,
 							result: {},
 						});
@@ -332,8 +328,8 @@ export function createCommandGateway(options: {
 								: error.code === "management.forbidden"
 									? 403
 									: error.code === "management.conflict"
-									? 409
-									: 400;
+										? 409
+										: 400;
 						recordTerminal(input, {
 							command_id: input.commandId,
 							status:
@@ -341,7 +337,11 @@ export function createCommandGateway(options: {
 							reason_code: error.code,
 							result: {},
 						});
-						throw new CommandGatewayError(error.code, error.message, httpStatus);
+						throw new CommandGatewayError(
+							error.code,
+							error.message,
+							httpStatus,
+						);
 					}
 					throw error;
 				}

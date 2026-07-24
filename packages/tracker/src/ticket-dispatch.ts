@@ -80,9 +80,10 @@ export interface TicketDispatchTicketPort {
 }
 
 export interface TicketDispatchSessionPort {
-	resolve(projectId: string, reference: string):
-		| { readonly sessionId: string; readonly generationId: string }
-		| undefined;
+	resolve(
+		projectId: string,
+		reference: string,
+	): { readonly sessionId: string; readonly generationId: string } | undefined;
 }
 
 function queueDisposition(
@@ -154,8 +155,8 @@ function parsedOutcome(
 		direct.kind === "dispatch"
 			? direct
 			: exactKeys(direct, ["resource_revision", "result"]) &&
-				  Number.isSafeInteger(direct.resource_revision) &&
-				  Number(direct.resource_revision) >= 0
+					Number.isSafeInteger(direct.resource_revision) &&
+					Number(direct.resource_revision) >= 0
 				? object(direct.result)
 				: undefined;
 	if (candidate?.kind !== "dispatch") return undefined;
@@ -249,11 +250,7 @@ export function createTicketDispatchService(options: {
 		},
 		dispatch(input: TicketDispatchInput): TicketDispatchOutcome {
 			const ticket = options.tickets.get(input.projectId, input.ticketId);
-			if (
-				!ticket ||
-				ticket.projectId !== input.projectId ||
-				terminal(ticket)
-			)
+			if (!ticket || ticket.projectId !== input.projectId || terminal(ticket))
 				return outcome(input.operationId, "ineligible");
 
 			// Current assignee alone selects the logical recipient. Historical
@@ -272,7 +269,8 @@ export function createTicketDispatchService(options: {
 
 			const endpoint = options.eligibility.resolve(selected.generationId);
 			const disposition = queueDisposition(endpoint);
-			if (disposition === "ineligible") return outcome(input.operationId, disposition);
+			if (disposition === "ineligible")
+				return outcome(input.operationId, disposition);
 
 			// CAS first so a miss is a durable, replayable GOL-79 stale result.
 			// The later envelope enqueue still runs inside the same outer gateway
@@ -282,7 +280,9 @@ export function createTicketDispatchService(options: {
 				expectedRevision: input.expectedRevision,
 				dispatchedTo: selected.sessionId,
 				actor: input.actorId,
-				...(ticket.assignee === undefined ? { assignee: selected.sessionId } : {}),
+				...(ticket.assignee === undefined
+					? { assignee: selected.sessionId }
+					: {}),
 			});
 			if (!committed) return outcome(input.operationId, "stale");
 			const envelopeId = `env_${globalThis.crypto.randomUUID()}`;

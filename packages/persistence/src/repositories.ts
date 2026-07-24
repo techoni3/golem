@@ -261,7 +261,8 @@ export class RuntimeProjectRepository implements RuntimeProjectStorage {
 					now,
 				);
 		}
-		const resolvedLocationId = resolvedLocation?.location_id ?? location.locationId;
+		const resolvedLocationId =
+			resolvedLocation?.location_id ?? location.locationId;
 		this.#database
 			.prepare(
 				"INSERT INTO project_location_state(project_id, location_id, status, last_confirmed_at, provenance_json) VALUES (?, ?, ?, ?, ?) ON CONFLICT(project_id, location_id) DO UPDATE SET status = excluded.status, last_confirmed_at = excluded.last_confirmed_at, provenance_json = excluded.provenance_json",

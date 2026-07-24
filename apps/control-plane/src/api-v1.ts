@@ -1,14 +1,14 @@
 import crypto from "node:crypto";
 
-import {
-	type CommandGateway,
+import type {
+	CommandGateway,
+	CommandGatewayInput,
+	CommandGatewayOutcome,
 	CommandGatewayError as GatewayError,
-	type CommandGatewayInput,
-	type CommandGatewayOutcome,
+	TicketDispatchService,
 	TrackerCoreError,
-	type TrackerCoreServices,
-	type TrackerServices,
-	type TicketDispatchService,
+	TrackerCoreServices,
+	TrackerServices,
 } from "@golem/tracker";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
@@ -251,11 +251,17 @@ export function registerApiV1Routes(options: {
 		source: "bearer" | "mcp",
 	): Caller | undefined => {
 		if (
-			(source === "mcp"
+			source === "mcp"
 				? hasRequestAuthorityHeaderOrQueryOverride(request)
-				: hasRequestAuthorityOverride(request))
+				: hasRequestAuthorityOverride(request)
 		) {
-			fail(request, reply, 403, "browser.forbidden", "request authority is server-owned");
+			fail(
+				request,
+				reply,
+				403,
+				"browser.forbidden",
+				"request authority is server-owned",
+			);
 			return undefined;
 		}
 		const context = options.principal.resolve(request, {
@@ -264,15 +270,33 @@ export function registerApiV1Routes(options: {
 			allowBearer: true,
 		});
 		if (!context) {
-			fail(request, reply, 401, "browser.auth.required", "bearer principal is required");
+			fail(
+				request,
+				reply,
+				401,
+				"browser.auth.required",
+				"bearer principal is required",
+			);
 			return undefined;
 		}
 		if (context.source !== source) {
-			fail(request, reply, 403, "browser.forbidden", "adapter credential is not accepted");
+			fail(
+				request,
+				reply,
+				403,
+				"browser.forbidden",
+				"adapter credential is not accepted",
+			);
 			return undefined;
 		}
 		if (!options.principal.policy.allows(context, "mutate")) {
-			fail(request, reply, 403, "browser.forbidden", "the authenticated principal is not authorized");
+			fail(
+				request,
+				reply,
+				403,
+				"browser.forbidden",
+				"the authenticated principal is not authorized",
+			);
 			return undefined;
 		}
 		return Object.freeze({
@@ -586,9 +610,7 @@ export function registerApiV1Routes(options: {
 							projectId: callerValue.projectId,
 							kind: input.kind as never,
 							title: input.title as string,
-							...(typeof input.body === "string"
-								? { body: input.body }
-								: {}),
+							...(typeof input.body === "string" ? { body: input.body } : {}),
 							...(typeof input.priority === "string"
 								? { priority: input.priority as never }
 								: {}),
@@ -604,17 +626,13 @@ export function registerApiV1Routes(options: {
 							...(typeof input.assignee === "string"
 								? { assignee: input.assignee }
 								: {}),
-							...(typeof input.rank === "number"
-								? { rank: input.rank }
-								: {}),
-							...(typeof input.wave === "number"
-								? { wave: input.wave }
-								: {}),
-						actor: callerValue.actor,
-					}),
-			});
-			if (outcome) return sendGatewayOutcome(reply, outcome, true);
-		}
+							...(typeof input.rank === "number" ? { rank: input.rank } : {}),
+							...(typeof input.wave === "number" ? { wave: input.wave } : {}),
+							actor: callerValue.actor,
+						}),
+				});
+				if (outcome) return sendGatewayOutcome(reply, outcome, true);
+			}
 			const result = command(
 				options.core.compatibility.createTicket({
 					projectId: callerValue.projectId,
@@ -686,9 +704,7 @@ export function registerApiV1Routes(options: {
 								...(typeof input.title === "string"
 									? { title: input.title }
 									: {}),
-								...(typeof input.body === "string"
-									? { body: input.body }
-									: {}),
+								...(typeof input.body === "string" ? { body: input.body } : {}),
 								...(typeof input.priority === "string"
 									? { priority: input.priority as never }
 									: {}),
@@ -698,25 +714,21 @@ export function registerApiV1Routes(options: {
 								...(typeof input.assignee === "string"
 									? { assignee: input.assignee }
 									: {}),
-								...(typeof input.rank === "number"
-									? { rank: input.rank }
-									: {}),
-								...(typeof input.wave === "number"
-									? { wave: input.wave }
-									: {}),
+								...(typeof input.rank === "number" ? { rank: input.rank } : {}),
+								...(typeof input.wave === "number" ? { wave: input.wave } : {}),
 							},
 							...(typeof input.reason === "string"
 								? { reason: input.reason }
 								: {}),
-					actor: callerValue.actor,
-				}),
-			});
-			if (outcome) return sendGatewayOutcome(reply, outcome);
-		}
-		const result = command(
-			options.core.compatibility.updateTicket({
-				id,
-				expectedRevision: revision,
+							actor: callerValue.actor,
+						}),
+				});
+				if (outcome) return sendGatewayOutcome(reply, outcome);
+			}
+			const result = command(
+				options.core.compatibility.updateTicket({
+					id,
+					expectedRevision: revision,
 					patch: {
 						...(typeof input.title === "string" ? { title: input.title } : {}),
 						...(typeof input.body === "string" ? { body: input.body } : {}),
@@ -760,22 +772,36 @@ export function registerApiV1Routes(options: {
 						"tracker.not_found",
 						"ticket was not found",
 					);
-			const revision = expectedRevision(input, request, reply);
-			if (revision === undefined) return;
-			if (gateway) {
-				const outcome = gatewayRoute({
-					request,
-					reply,
-					caller: callerValue,
-					commandKind: "ticket.transition",
-					scope: { resourceType: "ticket", resourceId: id },
-					payload: input,
-					idempotencyKey:
-						typeof input.idempotency_key === "string"
-							? input.idempotency_key
-							: undefined,
-					expectedRevision: revision,
-					handler: () =>
+				const revision = expectedRevision(input, request, reply);
+				if (revision === undefined) return;
+				if (gateway) {
+					const outcome = gatewayRoute({
+						request,
+						reply,
+						caller: callerValue,
+						commandKind: "ticket.transition",
+						scope: { resourceType: "ticket", resourceId: id },
+						payload: input,
+						idempotencyKey:
+							typeof input.idempotency_key === "string"
+								? input.idempotency_key
+								: undefined,
+						expectedRevision: revision,
+						handler: () =>
+							options.core.compatibility.transitionTicket({
+								id,
+								expectedRevision: revision,
+								phase: input.phase as string,
+								...(typeof input.reason === "string"
+									? { reason: input.reason }
+									: {}),
+								actor: callerValue.actor,
+							}),
+					});
+					if (outcome) return sendGatewayOutcome(reply, outcome);
+				}
+				return reply.send(
+					command(
 						options.core.compatibility.transitionTicket({
 							id,
 							expectedRevision: revision,
@@ -783,29 +809,15 @@ export function registerApiV1Routes(options: {
 							...(typeof input.reason === "string"
 								? { reason: input.reason }
 								: {}),
-						actor: callerValue.actor,
-					}),
-			});
-			if (outcome) return sendGatewayOutcome(reply, outcome);
-		}
-		return reply.send(
-			command(
-				options.core.compatibility.transitionTicket({
-					id,
-					expectedRevision: revision,
-					phase: input.phase as string,
-					...(typeof input.reason === "string"
-						? { reason: input.reason }
-						: {}),
-					actor: callerValue.actor,
-				}),
-			),
-		);
-		} catch (error) {
-			return publicError(request, reply, error);
-		}
-	},
-);
+							actor: callerValue.actor,
+						}),
+					),
+				);
+			} catch (error) {
+				return publicError(request, reply, error);
+			}
+		},
+	);
 
 	options.app.post(
 		"/api/v1/tracker/tickets/:id/close",
@@ -862,9 +874,7 @@ export function registerApiV1Routes(options: {
 					body: input.body as string,
 					...(Object.keys(anchor).length > 0 ? { anchor } : {}),
 					...(typeof input.tag === "string" ? { tag: input.tag } : {}),
-					...(typeof input.status === "string"
-						? { status: input.status }
-						: {}),
+					...(typeof input.status === "string" ? { status: input.status } : {}),
 				};
 				if (gateway) {
 					const outcome = gatewayRoute({
@@ -884,9 +894,7 @@ export function registerApiV1Routes(options: {
 								author: callerValue.actor,
 								body: input.body as string,
 								...(Object.keys(anchor).length > 0 ? { anchor } : {}),
-								...(typeof input.tag === "string"
-									? { tag: input.tag }
-									: {}),
+								...(typeof input.tag === "string" ? { tag: input.tag } : {}),
 								...(typeof input.status === "string"
 									? { status: input.status }
 									: {}),
@@ -987,9 +995,7 @@ export function registerApiV1Routes(options: {
 					comment_id: params.commentId,
 					...(typeof input.body === "string" ? { body: input.body } : {}),
 					...(typeof input.tag === "string" ? { tag: input.tag } : {}),
-					...(typeof input.status === "string"
-						? { status: input.status }
-						: {}),
+					...(typeof input.status === "string" ? { status: input.status } : {}),
 				};
 				if (gateway) {
 					const outcome = gatewayRoute({
@@ -1014,9 +1020,7 @@ export function registerApiV1Routes(options: {
 									...(typeof input.body === "string"
 										? { body: input.body }
 										: {}),
-									...(typeof input.tag === "string"
-										? { tag: input.tag }
-										: {}),
+									...(typeof input.tag === "string" ? { tag: input.tag } : {}),
 									...(typeof input.status === "string"
 										? { status: input.status }
 										: {}),
@@ -1055,7 +1059,9 @@ export function registerApiV1Routes(options: {
 		if (!input) return;
 		try {
 			const streamId =
-				typeof input.id === "string" ? input.id : `stream_${crypto.randomUUID()}`;
+				typeof input.id === "string"
+					? input.id
+					: `stream_${crypto.randomUUID()}`;
 			const streamPayload = {
 				id: streamId,
 				name: input.name as string,
