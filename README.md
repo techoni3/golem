@@ -27,7 +27,7 @@ fail-open, so a dashboard outage does not block a coding session.
 | Harness | Support | Delivery contract |
 | --- | --- | --- |
 | **Codex** | **Tier A — recommended** | `golem codex` opens the normal interactive Codex TUI through Golem's private App Server bridge. It provides durable typed delivery into the canonical thread when idle, native resume, lifecycle facts, and Codex-owned sandbox and approvals. This is Golem's most complete managed integration. |
-| Claude Code | Tier A | Rendered plugin, agents, skills, hooks, MCP tools, and addressed push when launched as a channel consumer. Plain `claude` sessions can pull work but do not receive channel pushes. |
+| Claude Code | Tier A | `golem claude` opens native Claude Code with the rendered plugin's addressed-push channel. Plain `claude` sessions can pull work but do not receive channel pushes. |
 | OpenCode | Tier A | Rendered agents, skills, instructions, MCP configuration, and addressed delivery through the live OpenCode shim bridge. |
 | Pi | Tier B | Portable extension with lifecycle facts and durable next-input pickup; no live-idle push. |
 | Gemini CLI | Unsupported | No adapter or release contract is shipped. |
@@ -109,6 +109,14 @@ claude plugin install golem@golem-workspace --scope user
 ```
 
 Launch a push-capable session:
+
+```sh
+golem claude
+golem claude -- --model <model>
+```
+
+`golem claude` passes native Claude Code arguments through and owns the
+development-channel selection. The equivalent raw fallback is:
 
 ```sh
 claude --dangerously-load-development-channels plugin:golem@golem-workspace
@@ -195,6 +203,7 @@ untrusted network.
 | Command | Purpose |
 | --- | --- |
 | `golem codex` | Open the Tier A managed interactive Codex TUI. |
+| `golem claude` | Open native Claude Code with Golem's addressed-push channel. |
 | `golem codex-supervisor ...` | Run or inspect the headless Codex App Server mode. |
 | `golem dashboard` | Start the dashboard in the foreground. |
 | `golem dashboard:restart` | Replace the registered dashboard with a detached instance. |

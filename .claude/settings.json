@@ -5,7 +5,6 @@
     "allow": [
       "Read(//Users/**)",
       "Read(./**)",
-      "Write(./**)",
       "Edit(./**)",
 
       "Bash(ls:*)",
@@ -163,8 +162,6 @@
       "Read(~/.config/gh/**)",
       "Read(/etc/shadow)",
       "Read(/etc/sudoers)",
-      "Write(~/.ssh/**)",
-      "Write(~/.aws/**)",
       "Edit(~/.ssh/**)",
       "Edit(~/.aws/**)"
     ]

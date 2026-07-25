@@ -137,7 +137,7 @@ try {
       return `${role}:${status}:${label}`;
     });
     lines.push(`Team on ${registryId}: ${parts.join(' · ')}`);
-    lines.push('Team roster is a snapshot — call sessions_dispatchable before dispatch.');
+    lines.push('Roster is informational. Cross-session dispatch is off by default — see golem:live-team.');
   } else {
     lines.push(`Team on ${registryId}: (no live sessions)`);
   }

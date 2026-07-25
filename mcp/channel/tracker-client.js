@@ -169,6 +169,27 @@ function buildUrl(pathname, params) {
   return u.toString();
 }
 
+function requireProjectScope(value, operation) {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(
+      `${operation}: project_id is required at the MCP-to-REST boundary; ` +
+        'pass project:"<contract-id>" or ensure the session is registered to a project',
+    );
+  }
+  return value.trim();
+}
+
+function serializeBody(method, pathname, body, requiredFields = []) {
+  for (const field of requiredFields) {
+    if (typeof body?.[field] !== 'string' || !body[field].trim()) {
+      throw new Error(
+        `tracker transport invariant failed: ${method} ${pathname} requires nonblank ${field}`,
+      );
+    }
+  }
+  return JSON.stringify(body);
+}
+
 /**
  * Core fetch wrapper. On a non-2xx response, throws an Error carrying the
  * server's parsed `{error}` (when present) plus the HTTP status; on 2xx returns
@@ -176,7 +197,13 @@ function buildUrl(pathname, params) {
  * (Node 18+/20+). X-Sender is set for parity with the channel server's gating —
  * the /api/* routes do NOT check it, but it is harmless.
  */
-async function request(method, pathname, { params, body, verbatimError = false, caller_session_id = null } = {}) {
+async function request(method, pathname, {
+  params,
+  body,
+  requiredBodyFields = [],
+  verbatimError = false,
+  caller_session_id = null,
+} = {}) {
   const url = buildUrl(pathname, params);
   const init = {
     method,
@@ -185,7 +212,7 @@ async function request(method, pathname, { params, body, verbatimError = false, 
   if (caller_session_id) init.headers['X-Golem-Caller-Session'] = caller_session_id;
   if (body !== undefined) {
     init.headers['Content-Type'] = 'application/json';
-    init.body = JSON.stringify(body);
+    init.body = serializeBody(method, pathname, body, requiredBodyFields);
   }
 
   let res;
@@ -224,7 +251,9 @@ async function request(method, pathname, { params, body, verbatimError = false, 
 
 /** GET /api/tickets?project&state&assignee&kind&stream&includeArchived */
 export function listTickets(params = {}) {
-  return request('GET', '/api/tickets', { params });
+  const query = { ...params };
+  if (query.project != null) query.project = requireProjectScope(query.project, 'listTickets');
+  return request('GET', '/api/tickets', { params: query });
 }
 
 /** GET /api/tickets/:id */
@@ -234,8 +263,15 @@ export function getTicket(id) {
 }
 
 /** POST /api/tickets {project_id,kind?,title,body?,priority?,labels?,stream_id?,parent_id?,assignee?,created_by?} */
-export function createTicket(body) {
-  return request('POST', '/api/tickets', { body });
+export function createTicket(body = {}) {
+  // `project_id` is routing scope required by the legacy REST contract, not
+  // caller identity. Identity scrubbers may remove actor-like fields, but must
+  // never remove this field from a scoped tracker request.
+  const project_id = requireProjectScope(body.project_id, 'createTicket');
+  return request('POST', '/api/tickets', {
+    body: { ...body, project_id },
+    requiredBodyFields: ['project_id'],
+  });
 }
 
 /** PATCH /api/tickets/:id {…patch, actor?} */

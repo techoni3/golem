@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-07-24 @ C3 restore audit — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-25 @ 545427c — maintained via golem:docs-maintenance.
 ## Directory structure
 - `substrate/` — plugin source; design labs stay isolated.
 - `plugin/` — generated CC render; never hand-edit.
@@ -12,6 +12,8 @@
 - `test/` — journey tests.
 
 ## Key modules & entry points
+### `cli/golem.js`
+- `golem claude` fixes the plugin channel; Claude keeps native args/CWD and has no supervisor.
 ### `dashboard/server/index.js`
 - Registers REST/WS; uniquely resolves project names; agents use HTTP/MCP, never direct DB writes.
 ### `tracker-db.js` + `phase-machine.js` + `team-assist.js`
@@ -26,13 +28,13 @@
 - SessionStart registers, journals, and contextualizes; prompts add passive deltas.
 
 ## Data flow
-Hooks/shims write registries in `~/.golem/`; project detail reads only that roster. Dashboard owns envelopes/qualified routes. Managed Codex uses typed turns; CC/OC retain `/role`. Native and dispatchable rows separate channel presence from delivery readiness.
+Hooks/shims write `~/.golem/` registries; dashboard owns routes. `golem claude` enables CC push; managed Codex uses typed turns. Native/dispatchable rows distinguish presence from readiness.
 
 ## Constraints & gotchas
 - Claude runs cached render bytes; sync + update + `/reload-plugins` after edits.
 - `plugin/` is a render target, not the source of truth; hand edits there are overwritten.
-- Ordinary Codex TUIs are Tier B pull-only; `golem codex` is private. Raw role/interrupt/halt stay gated.
-- Agents and project sessions share capped 520px H1 passport cards; never make their grid tracks `1fr`.
+- Bare Codex is pull-only; `golem codex` is private. Raw role/interrupt/halt stay gated.
+- Agent/project passport cards cap at 520px; never use `1fr` tracks.
 
 ## Common tasks
 | Task | Files | Verify with |

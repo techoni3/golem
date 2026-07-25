@@ -31,6 +31,7 @@ const CHANNEL_ROOT = path.resolve(CHANNEL_DIR, '../..');
 const HOST = '127.0.0.1';
 const SESSION_ID = 'test-session-aaaa-bbbb-cccc';
 const PROJECT_ID = 'testproj-abc123'; // synthetic contract id; we pass it explicitly
+const SECOND_PROJECT_ID = 'otherproj-def456';
 const ChannelNotificationSchema = z.object({
   method: z.literal('notifications/claude/channel'),
   params: z.object({
@@ -231,6 +232,17 @@ async function main() {
   check('createTicket persisted project_id', created.project_id === PROJECT_ID, created.project_id);
   check('createTicket default state todo', created.state === 'todo', created.state);
 
+  const foreignSpec = await client.createTicket({
+    project_id: SECOND_PROJECT_ID,
+    title: 'Foreign project spec',
+    body: 'Must never appear in the explicitly scoped project result.',
+    kind: 'spec',
+    created_by: SESSION_ID,
+  });
+  check('createTicket preserves a second explicit project scope',
+    foreignSpec.project_id === SECOND_PROJECT_ID,
+    JSON.stringify(foreignSpec));
+
   const fetched = await client.getTicket(created.id);
   check('getTicket returns the same title', fetched?.title === 'Test ticket from client', fetched?.title);
   check('getTicket includes comments array', Array.isArray(fetched?.comments), typeof fetched?.comments);
@@ -238,6 +250,9 @@ async function main() {
   // 4) listTickets — project filter, then assignee (mine) filter.
   const byProject = await client.listTickets({ project: PROJECT_ID });
   check('listTickets(project) finds the ticket', byProject.some((t) => t.id === created.id), `n=${byProject.length}`);
+  check('listTickets(project) excludes another project',
+    !byProject.some((t) => t.id === foreignSpec.id),
+    JSON.stringify(byProject));
 
   const mine = await client.listTickets({ project: PROJECT_ID, assignee: SESSION_ID });
   check('listTickets(assignee=mine) finds the ticket', mine.some((t) => t.id === created.id), `n=${mine.length}`);
@@ -276,6 +291,16 @@ async function main() {
     threw = e;
   }
   check('getTicket(unknown) throws with status', threw && /404/.test(threw.message), threw?.message);
+
+  let missingProject = null;
+  try {
+    await client.createTicket({ title: 'must fail before HTTP' });
+  } catch (e) {
+    missingProject = e;
+  }
+  check('createTicket without project scope fails at the transport boundary',
+    missingProject && /project_id is required at the MCP-to-REST boundary/.test(missingProject.message),
+    missingProject?.message);
 
   let badCreate = null;
   try {
@@ -800,6 +825,40 @@ async function main() {
     check(`ticket_create succeeds: ${title}`, !out.result.isError && !!out.json?.id, out.text);
     return out.json;
   };
+
+  const specBody = [
+    '# Context',
+    'This spec proves explicit project scope survives MCP, HTTP, and SQLite persistence.',
+    '',
+    '## Acceptance criteria',
+    '- The ticket remains a spec.',
+    '- The requested project remains authoritative routing scope.',
+  ].join('\n');
+  const specCreated = await callTool('ticket_create', {
+    project: PROJECT_ID,
+    title: 'MCP explicit-project spec creation',
+    body: specBody,
+    kind: 'spec',
+    assignee: SESSION_ID,
+  });
+  check('MCP creates a spec with explicit project scope',
+    !specCreated.result.isError
+      && specCreated.json?.kind === 'spec'
+      && specCreated.json?.project_id === PROJECT_ID,
+    specCreated.text);
+  const persistedSpec = await callTool('ticket_get', { id: specCreated.json?.id });
+  check('MCP spec round-trips through REST and SQLite',
+    !persistedSpec.result.isError
+      && persistedSpec.json?.body === specBody
+      && persistedSpec.json?.project_id === PROJECT_ID,
+    persistedSpec.text);
+  const scopedSpecs = await callTool('ticket_list', { project: PROJECT_ID, kind: 'spec' });
+  check('MCP project-scoped spec list does not widen across projects',
+    !scopedSpecs.result.isError
+      && Array.isArray(scopedSpecs.json)
+      && scopedSpecs.json.some((ticket) => ticket.id === specCreated.json?.id)
+      && !scopedSpecs.json.some((ticket) => ticket.id === foreignSpec.id),
+    scopedSpecs.text);
 
   const simple = await createViaMcp('MCP transition success');
   const simpleBuilding = await callTool('ticket_transition', { id: simple.id, phase: 'building' });
