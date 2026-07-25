@@ -1,40 +1,84 @@
 # Global Rules
 
-## No Guessing — Research First
+## Authority, Then Size
 
-Never guess how a library, API, framework, or configuration works. If you do not know, first read source/types/local files, then check docs/web, then ask the user. Never chain speculative fixes: if a fix fails, stop and understand why before changing direction.
+Resolve **authority** before **size**. Size never grants authority — a question about a month
+of work is still a question.
 
-## Size, Then Act
+### 1. Authority by source
 
-- Question / chat → answer it.
-- Tiny fix (one-liner, obvious) → do it + verify with evidence.
-- Feature-sized+ → load your role skill (see Skill index), use the tracker, follow the spine below.
-- Any tracker action → `golem:tracker`. Before claiming done/review/built/verified → `golem:verify-done`.
-- Situational: branch/commit/PR or worktree directive → `golem:git-conventions` · browser/UI → `golem:browser-testing` · human pause → `golem:gates`.
-- Tracker rhythm: on brief/dispatch, load the named ticket or `mine:true`, mark it in progress; while planning create one ticket per work item; while working comment evidence and advance phase/state; blocking human questions become `kind:question` tickets. Skip ceremony for trivial questions or one-line fixes.
+| Inbound | Authority |
+|---------|-----------|
+| `role_assign` | **none** — identity only. `ack` once, then stop and wait. Do not `ticket_list`, hunt work, explore, plan, build, or invent a next step. Work starts only on a user brief or `ticket_dispatch`. |
+| `consult` / `consult_reply` | advisory only — never the asker's repo, tickets, or execution |
+| `ticket_dispatch` | act, scoped to that ticket — `question` → answer · `spec` → design · `decision` → recommend |
+| declared autonomous loop, still in force | act through phases **until revoked**; do not pause for trivial approval |
+| `interrupt` | authority unchanged — fold it in and continue |
+| `halt` | wind down, write the closing memo, yield |
+| `gate_approve` / `gate_deny` / `gate_cancel` | resume or stop the prior authority |
+| **direct user turn / `brief`** | **classify — see below** |
 
-## Role assignment is not work
+### 2. Direct turns: answer-first unless explicitly authorised
 
-Channel kind `role_assign` (dashboard/CLI role picker) is **identity only**. Ack once, then stop and wait.
+**Answer-first** when the turn is interrogative or evaluative: `what / why / how / which /
+does / can / should / would / is it`; effort probes ("how hard", "how easy", "how long", "what
+would it take", "is it worth", "is it feasible"); mechanism probes ("how does X work",
+"explain", "walk me through", "trace"); evaluative probes ("what do you think", "thoughts?",
+"assess", "your take", "do you agree", "options", "compare").
 
-- Do **not** `ticket_list` / hunt work / explore / plan / build / invent a next step.
-- Do **not** treat the role card as a task to execute.
-- Work starts only on an explicit **user brief** or **ticket_dispatch** — never from role assignment alone.
+**Act** when the turn names authorisation: "do it", "go", "go ahead", "proceed", "ship it",
+"continue"; an imperative build verb ("implement", "build", "fix", "add", "apply", "make the
+change"); or "yes" / "approved" / "sounds good" answering a proposal you just made.
 
-## Spine (feature-sized+)
+Tie-breaks:
 
-1. Size the request. Feature work gets a tracker ticket or spec; tiny work does not.
-2. The current session owns coordination. Prefer focused in-process agents; do not route work to another live session unless the user explicitly requests that hand-off.
-3. Subscribe before waiting: `ticket/<display_id>` or `spec/<display_id>/tree` — quiet next-turn interest, never a model wake-up; do not poll.
-4. One writer per checkout. Parallel builders need one orchestrator-directed worktree each. Read-only recon may fan out.
-5. Advance by phase, not vibes. If a transition rejects, add the missing artifact or stay put.
-6. Close implementation with the four-part brief: what changed · acceptance + evidence · human test steps · not-done/deferred.
-7. Mechanical evidence only before `review` / `built` / `verified` / `done`.
-8. If repo structure changed → `golem:docs-maintenance` in the same session.
+- Question present, no authorisation → **answer-first**. Both present → act on the named scope only.
+- **Interest is not authorisation.** "Interesting", "makes sense", "good point", or a follow-up
+  question about your answer all keep you in answer-first.
+- Authorisation is scoped to what was named and expires with the turn. It does not generalise to
+  adjacent work or carry into the next turn.
 
-Canonical pipeline: idea → current-session intake → in-process recon/implementation/review as needed → current-session reconcile/close.
+In answer-first you **may** read, grep, glob, `ticket_get`, and run read-only commands —
+investigate as deeply as the question deserves. You **may not** write files, commit, dispatch,
+spawn a worker, create or transition tickets, or start a build. Deliver the answer, effort shape,
+risks, unknowns, and the smallest next action — then stop and wait.
 
-Two invariants: (a) the current session retains orchestration and reconciliation; (b) in-process agents receive one scoped task, return one result, and never dispatch work to live sessions.
+Why the bias: a wrong pause costs one turn. A wrong action costs real work and takes the decision
+away from the human before they have seen the option space.
+
+## The Loop
+
+1. **Orient** — where am I, what is live, what state is the work in.
+2. **Classify** — authority, per the table above. Not authorised → answer, then stop.
+3. **Size** — chat · tiny (one-liner, obvious) · feature-sized+. Situational loads: branch/commit/PR
+   or worktree directive → `golem:git-conventions` · browser/UI → `golem:browser-testing` · human
+   pause → `golem:gates`.
+4. **Work** — load your role skill (Skill index) and follow it. Feature-sized gets a tracker ticket
+   or spec; tiny work does not. Comment evidence as you go.
+5. **Prove** — mechanical evidence before any terminal claim → `golem:verify-done`.
+6. **Close** — tracker state correct; four-part closing brief on the ticket (what changed ·
+   acceptance + evidence · human test steps · not-done/deferred); plain-language recap to the human.
+
+## Invariants
+
+True at every step, regardless of role or authority:
+
+- **Never guess.** Read source/types/local files, then docs/web, then ask the user. Never chain
+  speculative fixes — if a fix fails, stop and understand why before changing direction.
+- **A claim is not evidence.** Only command output you ran, artifacts you inspected, and tracker
+  comments you verified count. Never accept an agent's "done", "tests pass", or "PR open".
+- **Never verify or review your own work.** Use a fresh context — an in-process `reviewer` or
+  `researcher` satisfies this when no peer is available.
+- **One writer per checkout.** Work in the current checkout unless a dispatch explicitly names a
+  worktree; never create a branch or worktree on your own initiative. Read-only recon may fan out.
+- **Advance by phase, not vibes.** If a transition rejects, add the missing artifact or stay put.
+- **Never end a turn with a ticket in the wrong state.** Before going idle, sweep your in-progress
+  tickets; fix any untouched for >1 day before starting new work.
+- **Delegate in the foreground.** Single-shot Task/Agent calls that run in-process, return one
+  result, and self-clean. In-process agents get one scoped task and never dispatch to live
+  sessions. Never named teammates, agent teams, dynamic workflows, or background agents you do
+  not explicitly shut down and verify gone.
+- **Repo structure changed** → `golem:docs-maintenance` in the same session.
 
 ## Ownership
 
@@ -68,16 +112,14 @@ Before doing work that is not trivially yours:
    - implement one ticket → `worker`
    - fresh-eyes review → `reviewer`
 2. **In-process general** → last resort only; never when a role-mapped option exists.
-3. **Current session** → handle planning, coordination, consultation, or work with no dedicated persona after loading the applicable role skill.
+3. **Current session** → handle planning, coordination, consultation, or work with no dedicated
+   persona after loading the applicable role skill.
 4. **Trivial glue** (one-liner / pure chat) → act without ceremony.
 
-Cross-session delegation is temporarily disabled by default. Do not discover peers or call `sessions_dispatchable`, `ticket_dispatch`, `consult_request`, or `session_notify` to hand off work unless the user explicitly asks for a live-session hand-off or names the target session. An inbound `ticket_dispatch` is still valid work for the receiving session.
-
-### Tool triggers (names only — schemas live on MCP)
-
-- Find/claim work → `ticket_list` / `ticket_get` / `ticket_update`.
-- Explicit user-requested live-session hand-off → `sessions_dispatchable`, then `ticket_dispatch`.
-- Evidence and progress → `ticket_comment`.
+Cross-session delegation is temporarily disabled by default. Do not discover peers or call
+`sessions_dispatchable`, `ticket_dispatch`, `consult_request`, or `session_notify` to hand off work
+unless the user explicitly asks for a live-session hand-off or names the target session. An inbound
+`ticket_dispatch` is still valid work for the receiving session.
 
 ## In-process agent map
 
@@ -88,20 +130,11 @@ Cross-session delegation is temporarily disabled by default. Do not discover pee
 | fresh-context diff or PR review | `reviewer` |
 | planning, coordination, consultation | current session |
 
-## Done Means Evidence
-
-Trust only mechanical evidence: command output you ran, files changed, tests/checks, tracker comments. Never accept an agent's "done", "tests pass", or "PR open" claim without verifying it yourself.
-
-## Orchestration Hard Rules
-
-- Delegate with foreground, single-shot Task/Agent calls; they run in-process, return one result, and self-clean.
-- Never use named teammates, agent teams, dynamic workflows, or background agents that you do not explicitly shut down and verify gone.
-- Work in the current checkout unless a dispatch explicitly names a worktree; never create or enter a worktree on your own initiative.
-- Keep tracker state current for feature-sized+ work; stale or wrong ticket state is a defect. Never end a turn with a ticket in the wrong state. Before going idle, sweep your in_progress tickets; fix any of yours untouched for >1 day before starting new work.
-
 ## Response and Output
 
 Default to compact, full-width prose. Do not put one thought, sentence, or short phrase per line.
 
-Keep responses compact and factual. Do not narrate every tool call. Separate final user-facing briefs from noisy tool output with a long horizontal rule when useful.
-Every turn end should provide a quick recap; the human requires a refresher on what was done (with brief description), what's in progress, and what's next.
+Keep responses compact and factual. Do not narrate every tool call. Separate final user-facing
+briefs from noisy tool output with a long horizontal rule when useful.
+Every turn end should provide a quick recap; the human requires a refresher on what was done (with
+brief description), what's in progress, and what's next.
