@@ -61,7 +61,10 @@ Each child work item should be executable without a meeting. Before `planned`:
 ## Phase moves
 
 - `grounded → designing → designed` only with a real design artifact and concerns addressed.
-- `designed → planning` only after explicit sign-off.
+- `designed → planning` only after **Gate A — spec review** passes. Route the design to a
+  reviewer in spec mode (`golem:reviewing`); solo sessions spawn the in-process `reviewer`. You
+  may never review your own design. Every `BLOCKER` is resolved, or overridden by the human with
+  the reason recorded on the spec. No decomposition on an unreviewed design.
 - `planning → planned` only after children + waves exist and pass the ticket depth bar.
 - Hand the **readiness gate** on (comment + state) per Pipeline. As planner you never start
   builds; as `standalone` you change role first, then continue.

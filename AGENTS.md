@@ -60,6 +60,35 @@ tracker, and long waits should use bus subscriptions (`ticket/<display_id>` or
 the team API suggests a least-loaded explorer, but the manager dispatches and
 records the transition evidence.
 
+## Repo-specific agent rules
+
+These are the golem-repo specifics that the global skills deliberately do not hardcode.
+
+**Scratch tickets** (`golem:test-policy`) — smoke/scratch tickets MUST go through
+`dashboard/scripts/_scratch.mjs`. They land in the quarantined `smoketests-000000` project
+(`created_by: 'smoke'`, `SMOKE-` title prefix) so they never pollute a real board or burn
+per-project ticket numbers. Archive them in a `finally` block.
+
+**Worktree dependencies** (`golem:git-conventions`) — copy-on-write these from the main checkout
+rather than installing:
+
+```bash
+cp -Rc node_modules .worktrees/<TICKET>-<slug>/node_modules
+cp -Rc mcp/channel/node_modules .worktrees/<TICKET>-<slug>/mcp/channel/node_modules
+```
+
+**Post-merge steps** (`golem:git-conventions`) — after landing a branch on main:
+
+- If `substrate/`, `mcp/channel/`, or compiler/render behavior changed:
+  `golem sync --target cc` and `golem sync --target cc --out ./plugin --force`. Bump the root
+  `package.json` version when plugin behavior changed — **the render updating is not the same as
+  the installed plugin updating.**
+- If dashboard server behavior changed, restart the dashboard from the main checkout.
+
+**Prohibited inside a worktree** — `golem sync` or any render writing shared plugin/global outputs;
+restarting the shared dashboard; claiming port 7420, docker stacks, named volumes, or container
+names; editing the main checkout; mutating `~/.golem` as ticket code.
+
 ## Parallel Work = Worktrees
 
 When a dispatch brief explicitly names `workspace: worktree`, follow the

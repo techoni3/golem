@@ -10,6 +10,7 @@ export const BUILTIN_ROLES = Object.freeze([
   { name: 'planner', color: '#a78bfa', glyph: 'PL', builtin: true },
   { name: 'builder', color: '#4ade80', glyph: 'BU', builtin: true },
   { name: 'explorer', color: '#38bdf8', glyph: 'EX', builtin: true },
+  { name: 'reviewer', color: '#f472b6', glyph: 'RV', builtin: true },
   { name: 'standalone', color: '#f97316', glyph: 'SA', builtin: true },
 ]);
 export const ROLE_MIGRATIONS = Object.freeze({ general: 'manager', researcher: 'explorer', 'ui-tester': 'explorer' });

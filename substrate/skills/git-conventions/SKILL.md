@@ -34,11 +34,9 @@ no trailing period. `scope` optional (affected module: `api`, `db`,
 `webhooks`). Body (when needed) explains *why*, not *what*. Small frequent
 commits beat one large commit.
 
-End every commit message with the trailer:
-
-```
-Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-```
+End every commit message with a `Co-Authored-By:` trailer naming the model that wrote it, plus any
+session trailer your harness specifies. Use the exact strings your harness gives you — do not copy
+a model name from this file, it will be stale.
 
 Never `--no-verify`. Never amend already-pushed commits.
 
@@ -90,14 +88,14 @@ current branch in the main checkout.
 Run from the main checkout unless the dispatch gives an absolute path:
 
 ```bash
-git worktree add .worktrees/GOL-<n>-<slug> -b <type>/gol-<n>-<slug> main
-cp -Rc node_modules .worktrees/GOL-<n>-<slug>/node_modules
-cp -Rc mcp/channel/node_modules .worktrees/GOL-<n>-<slug>/mcp/channel/node_modules
+git worktree add .worktrees/<TICKET>-<slug> -b <type>/<ticket>-<slug> main
 ```
 
-If a dependency directory does not exist, do not install packages just for the
-worktree. Record the missing directory and use the repo's existing setup path
-if the ticket explicitly requires it.
+Then reuse the main checkout's installed dependencies rather than installing fresh — copy-on-write
+(`cp -Rc`) each dependency directory the build needs. The repo's own `AGENTS.md` names which ones.
+
+If a dependency directory does not exist, do not install packages just for the worktree. Record the
+missing directory and use the repo's existing setup path only if the ticket explicitly requires it.
 
 ### Builder rules
 
@@ -141,11 +139,8 @@ git merge --no-ff <type>/gol-<n>-<slug>
 
 After merge:
 
-- If `substrate/`, `mcp/channel/`, or compiler/render behavior changed, run
-  `golem sync --target cc` and `golem sync --target cc --out ./plugin
-  --force`; bump the root version when plugin behavior changed.
-- If dashboard server behavior changed, restart the dashboard from the main
-  checkout after the merge.
+- Run any post-merge render, codegen, or service restart the repo requires — its `AGENTS.md` names
+  these. Skipping them is the classic "it works in the branch" failure.
 - Verify integrated behavior on main with canonical runtimes.
 - Clean up:
 

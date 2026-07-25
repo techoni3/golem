@@ -21,10 +21,9 @@ still applies to NEW tests you add — don't import a unit-fan-out habit because
 If a behavior can't be covered mechanically, say so explicitly and name the manual step;
 don't pad the count with hollow tests.
 
-## Smoke fixtures (TKT-0519)
+## Scratch fixtures
 
-Smoke/scratch tickets MUST go through `dashboard/scripts/_scratch.mjs` — they
-land in the quarantined `smoketests-000000` project (`created_by: 'smoke'`,
-`SMOKE-` title prefix) so they never pollute a real project's board or its
-per-project ticket numbering. Archive them in a `finally` block. **Never create
-scratch tickets in a real project.**
+**Never create scratch or smoke tickets in a real project** — they pollute the board and burn
+per-project ticket numbers. Use the repo's quarantined scratch path if it has one, and archive
+fixtures in a `finally` block so a failing test still cleans up. The repo's own `AGENTS.md` names
+the mechanism.

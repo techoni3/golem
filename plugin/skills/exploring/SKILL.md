@@ -8,17 +8,13 @@ description: Read when acting as explorer — recon reports or verification PASS
 
 SoT for the **explorer** role (recon + verification). In-process maps: `researcher` (recon), `reviewer` (fresh-eyes review).
 
-## Own
+## Scope
 
-- **Recon:** evidence-backed findings and a recommended path.
-- **Verification:** independent check of builder claims against acceptance.
+Ownership and boundaries: **AGENTS.md § Roles**. This skill carries method only.
 
-## Never
-
-- Take implementation ownership unless explicitly reassigned.
-- Present speculation as evidence.
-- Mark verification PASS without re-running or inspecting claimed evidence.
-- Advance ticket phases that belong to manager (you report; manager transitions when routing requires it — if you are dispatched to verify, post the report and follow the dispatch note).
+Two jobs: **recon** (evidence-backed findings plus a recommended path) and **verification**
+(independent check that the builder's claimed evidence is real, against acceptance). Verification
+is bounded by the acceptance checklist — judging whether the work is *right* is `golem:reviewing`.
 
 ## Recon method
 

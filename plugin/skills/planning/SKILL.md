@@ -8,29 +8,29 @@ description: Read when acting as planner — design docs, decomposition, waves, 
 
 SoT for the **planner** role. Load before design, fan-out, or readiness gate. Tracker tools: `golem:tracker`. Human pause: `golem:gates`.
 
-## Own
+## Scope
 
-Design, decompose, sequence (streams + waves), readiness gate to manager.
+Ownership and boundaries: **AGENTS.md § Roles**. This skill carries method only.
 
-## Never
-
-- Dispatch build tickets (manager only).
-- Own repo implementation when a builder is available.
-- Deep solo recon when an explorer is available — hand discovery off.
-- Move past `designed` without explicit human or agent sign-off.
-- Infer go-ahead from silence.
+Never infer a go-ahead from silence.
 
 ## Pipeline
 
-`grounded → designing → designed → planning → planned` then hand readiness to manager for `building` dispatch.
+`grounded → designing → designed → planning → planned`, then hand readiness on.
 
-Fan-out = create + sequence children in the tracker. Distribution = manager dispatch. Do not conflate them.
+Fan-out = create + sequence children in the tracker. Distribution = actually starting the work.
+Do not conflate them: you always own fan-out, never distribution.
+
+**Where readiness goes.** To a live manager only if the user asked for a live hand-off
+(`golem:live-team`). Otherwise post the readiness comment on the spec and continue as
+`standalone` (`golem:standalone`) through the build loop yourself. Readiness must always have a
+destination — never park a `planned` spec waiting for a manager who does not exist.
 
 ## Depth bar (design)
 
 Aim for thorough, decision-ready design — not a thin outline. Before `designed`:
 
-1. **Ground in evidence.** Prefer explorer recon or your own cited reads: key files, current behaviour, constraints. Link or quote paths; no vibes-only design.
+1. **Ground in evidence.** An in-process `researcher`, or your own cited reads: key files, current behaviour, constraints. Link or quote paths; no vibes-only design.
 2. **Spec / design body** using tracker templates (`spec`, `design-doc`) as floor, not ceiling:
    - Intent (raw user goal preserved)
    - Behaviour + checkable acceptance (children inherit these)
@@ -62,9 +62,13 @@ Each child work item should be executable without a meeting. Before `planned`:
 ## Phase moves
 
 - `grounded → designing → designed` only with a real design artifact and concerns addressed.
-- `designed → planning` only after explicit sign-off.
+- `designed → planning` only after **Gate A — spec review** passes. Route the design to a
+  reviewer in spec mode (`golem:reviewing`); solo sessions spawn the in-process `reviewer`. You
+  may never review your own design. Every `BLOCKER` is resolved, or overridden by the human with
+  the reason recorded on the spec. No decomposition on an unreviewed design.
 - `planning → planned` only after children + waves exist and pass the ticket depth bar.
-- Hand **readiness gate** to manager (comment + state); do not `ticket_dispatch` builders.
+- Hand the **readiness gate** on (comment + state) per Pipeline. As planner you never start
+  builds; as `standalone` you change role first, then continue.
 
 ## Blockers
 

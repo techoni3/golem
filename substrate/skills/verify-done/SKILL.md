@@ -1,6 +1,6 @@
 ---
 name: verify-done
-description: Read before moving any ticket to `review`, `built`, `verified`, or `done`, or before accepting a worker's "DONE" or "PR open" claim. Run the claimed evidence commands yourself; mechanical outputs (exit codes, test counts, log lines) are the only valid proof of completion.
+description: Read before moving any ticket to `built`, `verifying`, `verified`, or `done`, or before accepting a worker's DONE or PR-open claim. Run the claimed evidence commands yourself; mechanical output is the only valid proof of completion.
 ---
 
 # verify-done
@@ -9,7 +9,13 @@ An agent's textual claim is not evidence. Only command output, inspected artifac
 
 ## Required Tracker Artifacts
 
-Before `built` or `review`, confirm the ticket thread has the four-part closing brief:
+Use phase transitions, never legacy state writes — see `golem:tracker`.
+
+For a spec, before `designed → planning`, confirm **Gate A** passed: a spec-review verdict from a
+reviewer who did not author the design, with every `BLOCKER` resolved or overridden by the human
+with a recorded reason.
+
+Before `built`, confirm the ticket thread has the four-part closing brief:
 
 - What was done: prose plus commits/files changed.
 - Acceptance checklist: copied from the parent spec or original brief, with every item tied to evidence.
@@ -20,7 +26,10 @@ Before `verifying`, confirm there is manager dispatch evidence naming the verifi
 
 Before `verified` or `rejected`, confirm there is a verification report with PASS/FAIL, evidence, and follow-up defects if any.
 
-Before `done`, confirm the current phase is `verified` or a skip reason is recorded. For specs, all children must be terminal and the close/retro artifact must exist.
+Before `done`, confirm the current phase is `verified` or a skip reason is recorded, **and** that
+**Gate B** passed: a code-review verdict from a reviewer who did not write the code. Verification
+and review are separate gates — a green verification is not a review. For specs, all children must
+be terminal and the close/retro artifact must exist.
 
 The server enforces the same artifact classes for phase transitions. If `transitionTicket` rejects a move, the ticket is not done.
 
@@ -41,7 +50,7 @@ git diff --stat HEAD~1
 ```
 
 For a worktree hand-off, also verify branch-aware evidence before accepting the
-ticket as built/review-ready:
+ticket as `built`:
 
 - Commits are on the ticket branch named by the closing brief's `branch:` line.
 - The branch has been rebased on current `main`.

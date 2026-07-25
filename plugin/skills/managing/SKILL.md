@@ -1,64 +1,65 @@
 ---
 name: managing
-description: Read when acting as manager — intake, grounding, dispatch, verification routing, reconcile, and close. Not for design or implementation.
+description: Read when acting as manager — intake, grounding, routing, review and verification routing, reconcile, and close. Not for design or implementation.
 ---
 <!-- GENERATED: skills/managing/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 
 # managing
 
-SoT for the **manager** role. Load this before intake, dispatch, verification routing, reconcile, or closure. For tool contracts use `golem:tracker`; before done claims use `golem:verify-done`.
+Method for the **manager** role. Tool contracts: `golem:tracker`. Evidence bar:
+`golem:verify-done`. Live-peer dispatch is opt-in and lives in `golem:live-team`.
 
-## Own
+## Scope
 
-Intake, grounding, distribution, verification routing, reconcile, closure.
-
-## Never
-
-- Author or decompose specs (planner).
-- Implement application code when a builder is available.
-- Explore deeply when an explorer is available — dispatch recon.
-- Advance to review/done/verified without mechanical evidence.
-- Merge another role's worktree branch except as orchestrating reconcile on main.
-- Rely on server auto-dispatch; you make the routing call.
+Ownership and boundaries: **AGENTS.md § Roles**. This skill carries method only.
 
 ## Intake
 
-1. Size the ask (chat / tiny / feature-sized+).
-2. Feature-sized: create or reuse a tracker ticket/spec; leave acceptance checklist.
-3. Do **not** write the design — hand feature-sized design to a live planner (`sessions_dispatchable` → `ticket_dispatch`).
-4. If no live planner: degraded path only — load `golem:planning` yourself or spawn general with planning instructions; prefer waiting/asking human over silent self-planning when a planner is expected on the team.
+1. Classify authority first (AGENTS.md § Authority). A question gets an answer, not a ticket.
+2. Size the ask: chat · tiny · feature-sized+.
+3. Feature-sized: create or reuse a tracker ticket/spec and leave an acceptance checklist.
+4. Do **not** write the design yourself. Route it: a live planner only if the user asked for a
+   live hand-off (`golem:live-team`); otherwise load `golem:planning` and act as planner for
+   that step, or hand the design to an in-process agent with planning instructions.
 
 ## Grounding
 
-For specs: drive `drafting → grounding → grounded` with a grounding-summary comment. Dispatch explorer for discovery when available.
+For specs, drive `drafting → grounding → grounded` with a grounding-summary comment. Route
+discovery to an in-process `researcher` (or a live explorer under `golem:live-team`).
 
 ## Distribution
 
-When the spec is `planned`:
+When the spec is `planned`, its children are already scoped and sequenced by wave. Wave N+1
+does not start until every open wave N child is terminal.
 
-1. Call `sessions_dispatchable` (do not trust a stale Team snapshot alone).
-2. Dispatch child work items to live builders (least-loaded). Prefer explorers for verification later.
-3. Parallel builders in one repo → explicit worktree directive per builder (`golem:git-conventions`).
-4. Subscribe to `spec/<display_id>/tree` and relevant `ticket/<display_id>` topics.
+Default route is in-process: one `worker` per child, one at a time in this checkout. Parallel
+builders require one directed worktree each — that is a live-team pattern
+(`golem:live-team` + `golem:git-conventions`), never something you set up on your own initiative.
+
+Subscribe to `spec/<display_id>/tree` when you are waiting on a hand-off. Quiet next-turn
+interest — never poll.
 
 ## Built event loop
 
-When a child reaches `built`:
+When a child reaches `built`, it needs **both** gates before it can close. They are different
+jobs and neither substitutes for the other:
 
-1. Pick least-loaded live explorer (or team assist suggestion).
-2. Dispatch verification; move child to `verifying` with manager-dispatch evidence.
-3. On `verified` → `done`. On `rejected` → re-dispatch original builder with the report → `building`.
-
-If no live explorer: spawn `reviewer` (or `researcher` for recon-only) and note on ticket; still record verification evidence before phase advance.
+1. **Verify** — is the claimed evidence real? Re-run the commands yourself or route to an
+   in-process `researcher`. Move to `verifying` with evidence naming the verifier.
+2. **Review** — is the work right, *including what acceptance missed*? Route to an in-process
+   `reviewer` in code mode (`golem:reviewing`). You are never the reviewer of record for work
+   you routed.
+3. Verified **and** review clean → `done`. A `BLOCKER` finding or a `FAIL` → back to the
+   builder with the report → `building`. A `BLOCKER` may only be overridden by the human, with
+   the reason recorded on the ticket.
 
 ## Reconcile
 
-For worktree branches you orchestrated: serialize `git merge --no-ff <branch>` on main after verification. Bounce conflicts to the builder; never ask a builder to merge into main.
+Only for worktree branches you orchestrated, and only after both gates pass. Serialise one
+branch at a time on main; bounce conflicts back to the builder rather than resolving them
+yourself. Full lifecycle: `golem:git-conventions`.
 
 ## Closure
 
-When all children are terminal: move spec to `done`; close artifact names shipped children and deferred work.
-
-## Delegation reminder
-
-Live roled → live compatible → in-process mapped → general. You route; you do not absorb idle peers' lanes.
+When all children are terminal, move the spec to `done`. The close artifact names the shipped
+children and any deferred work, in plain language — ticket IDs are references, not the content.

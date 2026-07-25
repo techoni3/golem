@@ -1,40 +1,41 @@
 ---
 name: consulting
-description: Read when asking or answering a peer consult — async fresh eyes, advisory only, not delegation or ticket work.
+description: Read when answering a peer consult — independent fresh eyes, advisory only. Never delegation, never a subagent, never tracker work or repo edits for the asker's lane. Asking for a consult is a live-session action and lives in golem:live-team.
 ---
 <!-- GENERATED: skills/consulting/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 
 # consulting
 
-SoT for **consults** between live sessions. Not delegation, not a subagent, not tracker work for the asker's lane.
+A consult is **advice between sessions**. It is not delegation, not a subagent, and not tracker
+work for the asker's lane.
 
-## Ask (`consult_request`)
+## Answering an inbound consult
 
-Use when stuck after a real attempt, when you suspect tunnel vision, or when the user says to consult a named session.
-
-1. Load this skill; call `consult_request` with `to`, `question`, optional `context`.
-2. Fire-and-forget — keep working; do not poll. Reply arrives as `consult_reply`.
-3. Treat the reply as advice: keep what holds up, discard the rest; you keep final say.
-4. Optional nudge: `consult_status`.
-
-Do **not** use consults as cheap task handoff — that is dispatch or an in-process agent.
-
-## Answer (`consult_reply`)
-
-Trigger: channel event `kind=consult` with `consult_id` and `from_session`.
+Trigger: channel event `kind=consult` with `consult_id` and `from_session`. Inbound consults are
+always valid — no opt-in needed.
 
 1. `ack` immediately.
-2. Investigate independently (code, docs, web) — do not only restate their framing.
-3. Look for root causes and blind spots.
-4. `consult_reply` with self-contained advice: root cause(s), blind spots, recommended approach, unverified gaps.
+2. Investigate **independently** — code, docs, web. Do not simply restate their framing; a
+   consult that only agrees with the asker is worthless.
+3. Look for root causes and blind spots, not just an answer to the literal question.
+4. `consult_reply` with self-contained advice: root cause(s), blind spots, recommended approach,
+   and what you could not verify.
 5. Return to your own work.
 
-## Never (consultant)
+### Never, as consultant
 
-- Edit their repo, open PRs, or "just fix it."
+- Edit their repo, open PRs, or "just fix it".
 - Create tracker tickets or enter managing/planning/building SOPs for their work.
-- Run long execution; keep the consult proportionate.
+- Run long execution — keep the consult proportionate to the question.
 
-## Related tools
+## Receiving a reply to your own consult
 
-`consult_request`, `consult_reply`, `consult_status` on the golem channel MCP.
+Treat it as advice, not instruction. Keep what holds up under your own checking, discard the
+rest; you keep final say. A consultant's claim is not evidence — verify anything load-bearing
+before you act on it.
+
+## Asking for a consult
+
+Outbound `consult_request` needs a live peer, so it is a live-team action: see
+`golem:live-team`. Do not fire one because you are stuck — first try the cheapest discriminating
+probe yourself, then an in-process `researcher`.

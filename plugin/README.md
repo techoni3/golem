@@ -36,8 +36,8 @@ sub-agents, and the golem channel MCP.
 - **Consult tools** (on the same `golem` MCP) → `consult_request`, `consult_reply`,
   `consult_status`. One live session asks ANOTHER for a fresh pair of eyes on a
   hard problem (a second opinion, not delegation) over the channel transport —
-  fully async, the asker never blocks. See the `golem:get-consult` /
-  `golem:provide-consult` skills and the section below.
+  fully async, the asker never blocks. Answering lives in `golem:consulting`;
+  asking is a live-session action in `golem:live-team`. See the section below.
 - **Tracker tools** (on the same `golem` MCP) → live sessions read/write the
   cross-project ticket tracker — the source of truth for work, **replacing
   PLAN.md**. These are thin HTTP clients of the dashboard's REST API (the
@@ -135,12 +135,12 @@ like glm-5.2). It rides the same channel transport as dispatch:
    transport accepts it. This is not confirmation of a model turn. **The asker
    never blocks.**
 2. The consult arrives at the peer as `<channel kind="consult" consult_id=…
-   from_session=…>`. Its `golem:provide-consult` skill investigates independently
+   from_session=…>`. Its `golem:consulting` skill investigates independently
    (code, web), forms a proposal, and calls **`consult_reply({ to_session,
    consult_id, text })`**.
 3. The reply POSTs to the asker's channel **`/consult/reply`** route and pushes in
    as `<channel kind="consult_reply" consult_id=…>` — like a subagent result
-   landing. The asker (`golem:get-consult`) weighs it as advice and keeps the
+   landing. The asker (`golem:live-team`) weighs it as advice and keeps the
    final say. `consult_status` nudges a pending consult without blocking.
 
 Both routes are gated by `X-Sender: consult` (in the default allow-list).
@@ -197,8 +197,10 @@ plugin/
   agents/reviewer.md           # fresh-context diff review, findings only
   agents/researcher.md         # read-only investigation, structured summary
   skills/tracker/SKILL.md      # golem:tracker — tracker is the source of truth for work
-  skills/get-consult/SKILL.md  # golem:get-consult — ask a peer session for a fresh pair of eyes
-  skills/provide-consult/SKILL.md # golem:provide-consult — answer a peer's consult
+  skills/standalone/SKILL.md   # golem:standalone — default role; one session owns the whole loop
+  skills/reviewing/SKILL.md    # golem:reviewing — spec + code review gates, binding verdict
+  skills/consulting/SKILL.md   # golem:consulting — answer a peer's consult, advisory only
+  skills/live-team/SKILL.md    # golem:live-team — opt-in cross-session dispatch and consults
   mcp/channel/index.js         # golem channel MCP — ack/respond + tracker + consult tools, /consult routes
   mcp/channel/tracker-client.js# HTTP client of the dashboard tracker REST API
   mcp/channel/node_modules/    # bundled deps (@modelcontextprotocol/sdk)

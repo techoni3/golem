@@ -10,7 +10,17 @@ Journals live OUTSIDE the repo at `~/.golem/journals/<project_id>/`:
 `hook.jsonl` (mechanical) and `summary.jsonl` (semantic). Both append-only JSONL.
 
 **Mechanical journaling is automatic** via plugin hooks — never write `hook.jsonl`
-lines by hand. The model's ONLY write is appending milestone lines (see AGENTS spine / role skills).
+lines by hand. The model's ONLY write is appending milestone lines — see When, below.
+
+## When
+
+Append a milestone at a **spec closure** or a genuine **wave boundary** — a point a future session
+would need to know about. Never per tool call (the hooks already do that), never per ticket (the
+tracker already does that), and never as a substitute for a ticket comment.
+
+One line, plain language, understandable without the surrounding conversation.
+
+## Locating the journal
 
 `project_id`: look it up in the registry — the SessionStart hook already registered
 this project, and the registry is authoritative (legacy projects have non-derived ids):
