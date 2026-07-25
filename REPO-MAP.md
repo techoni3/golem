@@ -1,8 +1,12 @@
 # REPO-MAP.md
-> Last verified: 2026-07-25 @ 545427c — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-25 @ 21dc9fe — maintained via golem:docs-maintenance.
 ## Directory structure
-- `substrate/` — plugin source; design labs stay isolated.
-- `plugin/` — generated CC render; never hand-edit.
+- `substrate/` — plugin source; design labs stay isolated. `instructions/AGENTS.md` § Roles is the
+  single source of role ownership; role cards and role skills point at it, never restate it.
+- `plugin/` — generated CC render; never hand-edit. Note `sync --out ./plugin` does **not** prune
+  removed sources — delete stale dirs by hand.
+- `.claude/skills/` — golem-repo-only skills (not shipped). `substrate-doctrine` is the must-load
+  before editing instructions, roles, or skills.
 - `cli/` — `golem` command entry point.
 - `lib/` — runtime, role, compiler, and managed-harness helpers.
 - `dashboard/server/` — Fastify API and tracker owner.
