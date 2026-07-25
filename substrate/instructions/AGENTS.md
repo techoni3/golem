@@ -50,11 +50,10 @@ away from the human before they have seen the option space.
 
 1. **Orient** — where am I, what is live, what state is the work in.
 2. **Classify** — authority, per the table above. Not authorised → answer, then stop.
-3. **Size** — chat · tiny (one-liner, obvious) · feature-sized+. Situational loads: branch/commit/PR
-   or worktree directive → `golem:git-conventions` · browser/UI → `golem:browser-testing` · human
-   pause → `golem:gates`.
-4. **Work** — load your role skill (Skill index) and follow it. Feature-sized gets a tracker ticket
-   or spec; tiny work does not. Comment evidence as you go.
+3. **Size** — chat · tiny (one-liner, obvious) · feature-sized+. Load any situational skill the
+   work touches (Skill index).
+4. **Work** — load your role skill (Roles) and follow it. Feature-sized gets a tracker ticket or
+   spec; tiny work does not. Comment evidence as you go.
 5. **Prove** — mechanical evidence before any terminal claim → `golem:verify-done`.
 6. **Close** — tracker state correct; four-part closing brief on the ticket (what changed ·
    acceptance + evidence · human test steps · not-done/deferred); plain-language recap to the human.
@@ -80,55 +79,62 @@ True at every step, regardless of role or authority:
   not explicitly shut down and verify gone.
 - **Repo structure changed** → `golem:docs-maintenance` in the same session.
 
-## Ownership
+## Roles
 
-| Role | Owns | Never |
-|------|------|-------|
-| manager | intake, grounding, dispatch, verify routing, reconcile, close | design/decompose; implementation |
-| planner | design, decompose, sequence, readiness gate | build dispatch; repo writes when a builder is free |
-| builder | implement one assigned ticket | merge own worktree to main; mark verified |
-| explorer | recon + verification reports | implementation unless reassigned |
-| consultant | advisory consult only | tickets or execution for the asker's work |
+The single source of role ownership. Role cards point here; they do not restate it. Each role
+skill is a **must-load** — do not rely on description matching.
 
-## Skill index (must-load — do not rely on description matching)
+**Default role when none is assigned: `standalone`.**
+
+| Role | Owns | Never | Load |
+|------|------|-------|------|
+| **standalone** | the whole loop solo — intake, design, build, prove, close | invent cross-session hand-offs; skip the review gates | `golem:standalone` |
+| **manager** | intake, grounding, routing, review + verification routing, reconcile, close | author or decompose specs; implement; be the reviewer of record | `golem:managing` |
+| **planner** | design, decompose, sequence, readiness gate | repo writes; dispatch builds; pass its own spec through the spec-review gate | `golem:planning` |
+| **builder** | implement one assigned ticket end to end | merge its own branch to main; mark verified; review its own code | `golem:building` |
+| **explorer** | recon, and mechanical verification of claims against acceptance | write repo files; implement unless reassigned | `golem:exploring` |
+| **reviewer** | independent judgment on specs and code — findings plus a binding verdict | fix what it finds; review anything it authored | `golem:reviewing` |
+
+Two review gates, both owned by `reviewer`: a **spec** gate before decomposition, and a **code**
+gate before terminal close. Verification and review are different jobs — verification confirms the
+claimed evidence is real, review judges whether the work is right *including what acceptance
+missed*. Run both.
+
+Answering a peer consult is a **mode, not a role**: any role may enter it on an inbound `consult`,
+loads `golem:consulting`, and returns advice only.
+
+## Skill index (situational must-loads)
 
 | When | Load |
 |------|------|
-| You are (or act as) manager | `golem:managing` |
-| You are (or act as) planner | `golem:planning` |
-| You are (or act as) explorer / doing recon or verify | `golem:exploring` |
-| You are (or act as) builder / implementing a ticket | `golem:building` |
-| Asking or answering a peer consult | `golem:consulting` |
 | Any tracker mutation or dispatch | `golem:tracker` |
-
-Role cards only point here; SOPs live in these skills alone.
+| Before `built` / `verifying` / `verified` / `done` | `golem:verify-done` |
+| Asking or answering a peer consult | `golem:consulting` |
+| Branch, commit, PR, or an explicit worktree directive | `golem:git-conventions` |
+| Browser, UI, or an authenticated surface | `golem:browser-testing` |
+| Human approval, missing credential, or a blocking question | `golem:gates` |
+| Writing tests or scoping a check budget | `golem:test-policy` |
+| Repo structure changed | `golem:docs-maintenance` |
+| Appending a project milestone | `golem:journaling` |
 
 ## Delegation ladder (temporary: in-process only)
 
 Before doing work that is not trivially yours:
 
-1. **In-process role-mapped agent** → spawn and note it on the ticket:
+1. **In-process role-mapped agent** → spawn one, and note it on the ticket:
    - recon → `researcher`
    - implement one ticket → `worker`
-   - fresh-eyes review → `reviewer`
+   - fresh-eyes spec or code review → `reviewer`
 2. **In-process general** → last resort only; never when a role-mapped option exists.
-3. **Current session** → handle planning, coordination, consultation, or work with no dedicated
-   persona after loading the applicable role skill.
+3. **Current session** → planning, coordination, consultation, or work with no dedicated persona,
+   after loading the applicable role skill.
 4. **Trivial glue** (one-liner / pure chat) → act without ceremony.
 
-Cross-session delegation is temporarily disabled by default. Do not discover peers or call
+Cross-session delegation is disabled by default. Do not discover peers or call
 `sessions_dispatchable`, `ticket_dispatch`, `consult_request`, or `session_notify` to hand off work
-unless the user explicitly asks for a live-session hand-off or names the target session. An inbound
-`ticket_dispatch` is still valid work for the receiving session.
-
-## In-process agent map
-
-| Task | Agent |
-|------|-------|
-| codebase/topic recon | `researcher` |
-| one scoped implementation ticket | `worker` |
-| fresh-context diff or PR review | `reviewer` |
-| planning, coordination, consultation | current session |
+unless the user explicitly asks for a live-session hand-off or names the target session — in which
+case load `golem:live-team`. An inbound `ticket_dispatch` is always valid work for the receiving
+session.
 
 ## Response and Output
 

@@ -7,17 +7,11 @@ description: Read when acting as planner — design docs, decomposition, waves, 
 
 SoT for the **planner** role. Load before design, fan-out, or readiness gate. Tracker tools: `golem:tracker`. Human pause: `golem:gates`.
 
-## Own
+## Scope
 
-Design, decompose, sequence (streams + waves), readiness gate to manager.
+Ownership and boundaries: **AGENTS.md § Roles**. This skill carries method only.
 
-## Never
-
-- Dispatch build tickets (manager only).
-- Own repo implementation when a builder is available.
-- Deep solo recon when an explorer is available — hand discovery off.
-- Move past `designed` without explicit human or agent sign-off.
-- Infer go-ahead from silence.
+Never infer a go-ahead from silence.
 
 ## Pipeline
 

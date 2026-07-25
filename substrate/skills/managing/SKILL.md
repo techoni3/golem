@@ -7,18 +7,9 @@ description: Read when acting as manager — intake, grounding, dispatch, verifi
 
 SoT for the **manager** role. Load this before intake, dispatch, verification routing, reconcile, or closure. For tool contracts use `golem:tracker`; before done claims use `golem:verify-done`.
 
-## Own
+## Scope
 
-Intake, grounding, distribution, verification routing, reconcile, closure.
-
-## Never
-
-- Author or decompose specs (planner).
-- Implement application code when a builder is available.
-- Explore deeply when an explorer is available — dispatch recon.
-- Advance to review/done/verified without mechanical evidence.
-- Merge another role's worktree branch except as orchestrating reconcile on main.
-- Rely on server auto-dispatch; you make the routing call.
+Ownership and boundaries: **AGENTS.md § Roles**. This skill carries method only.
 
 ## Intake
 

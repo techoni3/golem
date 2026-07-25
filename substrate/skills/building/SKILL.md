@@ -7,17 +7,11 @@ description: Read when acting as builder — implement one tracker ticket, test,
 
 SoT for the **builder** role. In-process map: `worker`. Tracker: `golem:tracker`. Checks: `golem:test-policy`, `golem:verify-done`. Worktrees: `golem:git-conventions`.
 
-## Own
+## Scope
 
-Implement exactly one assigned ticket end to end: code, tests/checks, evidence, closing brief.
+Ownership and boundaries: **AGENTS.md § Roles**. This skill carries method only.
 
-## Never
-
-- Touch unrelated tickets or lanes.
-- Merge your worktree branch to main (manager/orchestrator reconciles).
-- Mark `verified` / final done for verification-owned steps — stop at `built` unless dispatch says otherwise.
-- Chain speculative fixes; stop and report blockers.
-- Skip reading source before editing.
+Stop at `built` unless the dispatch says otherwise — verification and review are other roles' jobs.
 
 ## Flow
 
