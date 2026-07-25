@@ -28,10 +28,10 @@ function seedFixture(name) {
   }, null, 2) + '\n');
   write(path.join(root, 'hooks', 'hooks.json'), '{}\n');
   write(path.join(root, 'hooks', 'session-register.sh'), '#!/usr/bin/env bash\nexit 0\n');
-  write(path.join(root, 'roles', 'manager.md'), '# Role: manager\nMission: Own intake, routing, and closure across active work in the tracker.\nLeads with: golem:tracker\nBoundaries: never author or decompose specs; stay scoped.\nHand-offs: hand off clearly.\n');
-  write(path.join(root, 'roles', 'planner.md'), '# Role: planner\nMission: Turn ambiguity into executable tracker work and hand the readiness gate to the manager.\nLeads with: golem:tracker\nBoundaries: never dispatch build tickets; stay scoped.\nHand-offs: hand off clearly.\n');
-  for (const role of ['builder', 'explorer', 'standalone']) {
-    write(path.join(root, 'roles', `${role}.md`), `# Role: ${role}\nMission: ${role} mission.\nLeads with: golem:tracker\nBoundaries: stay scoped.\nHand-offs: hand off clearly.\n`);
+  // Cards carry identity + a skill pointer only; ownership lives in instructions/AGENTS.md
+  // § Roles, so no role needs card-specific content here.
+  for (const role of ['manager', 'planner', 'builder', 'explorer', 'reviewer', 'standalone']) {
+    write(path.join(root, 'roles', `${role}.md`), `# Role: ${role}\nMission: ${role} mission.\nLoad: golem:tracker\n`);
   }
   write(path.join(root, 'skills', 'tracker', 'SKILL.md'), '---\nname: tracker\ndescription: Track assigned work through the golem tracker.\n---\n# tracker\n');
   write(path.join(root, 'skills', 'extra', 'SKILL.md'), '---\nname: extra\ndescription: Extra fixture skill used to verify orphan warnings.\n---\n# extra\n');
@@ -253,25 +253,25 @@ try {
   }, /golem:not-a-skill does not resolve/);
 
   assertFails('bad-card', (root) => {
-    write(path.join(root, 'roles', 'builder.md'), '# Role: builder\nMission: Build.\nLeads with: \nBoundaries: scoped.\n');
-  }, /missing required field Hand-offs|Leads with field is empty/);
+    write(path.join(root, 'roles', 'builder.md'), '# Role: builder\nMission: Build.\nLoad: \n');
+  }, /missing required field Load|Load field is empty/);
 
   assertFails('bad-description', (root) => {
     write(path.join(root, 'skills', 'tracker', 'SKILL.md'), `---\nname: tracker\ndescription: ${Array.from({ length: 46 }, (_, i) => `word${i}`).join(' ')}\n---\n# tracker\n`);
   }, /description is 46 words/);
 
-  const oldCardsRoot = seedFixture('old-card-protocol');
-  const oldCardsHome = path.join(tmp, 'old-card-protocol', 'home');
-  write(path.join(oldCardsRoot, 'roles', 'planner.md'), '# Role: planner\nMission: Turn ideas into executable work and hand off to builders.\nLeads with: golem:tracker\nBoundaries: never own repo writes when a builder is available.\nHand-offs: hand off clearly.\n');
-  write(path.join(oldCardsRoot, 'roles', 'manager.md'), '# Role: manager\nMission: Own intake, routing, and closure across active work in the tracker.\nLeads with: golem:tracker\nBoundaries: never take a builder implementation lane; stay scoped.\nHand-offs: hand off clearly.\n');
+  // Migration guard. Ownership used to be duplicated across the role card, the role skill,
+  // AGENTS.md, and regexes in the linter — four copies that drifted. Cards now carry
+  // Mission + Load only, so a card in the legacy Leads-with/Boundaries/Hand-offs shape must
+  // fail rather than be silently accepted.
+  const oldCardsRoot = seedFixture('legacy-card-format');
+  const oldCardsHome = path.join(tmp, 'legacy-card-format', 'home');
+  write(path.join(oldCardsRoot, 'roles', 'planner.md'), '# Role: planner\nMission: Turn ideas into executable work.\nLeads with: golem:tracker\nBoundaries: never dispatch build tickets.\nHand-offs: hand off clearly.\n');
   const oldCards = lintSubstrate({ substrateRoot: oldCardsRoot, home: oldCardsHome });
-  assert.equal(oldCards.ok, false, 'old card protocol fixture should fail');
+  assert.equal(oldCards.ok, false, 'legacy card format should fail');
   const oldMessages = oldCards.issues.map((i) => `${i.file}:${i.line} ${i.message}`).join('\n');
-  assert.match(oldMessages, /roles\/planner\.md:2 planner Mission must contain "readiness gate"/);
-  assert.match(oldMessages, /roles\/planner\.md:2 planner Mission must NOT contain "hand off to builders"/);
-  assert.match(oldMessages, /roles\/planner\.md:4 planner Boundaries must contain "never dispatch"/);
-  assert.match(oldMessages, /roles\/manager\.md:4 manager Boundaries must contain "never author or decompose specs"/);
-  console.log('old card protocol: failed as expected');
+  assert.match(oldMessages, /roles\/planner\.md:1 role card missing required field Load/);
+  console.log('legacy card format: failed as expected');
 
   const cleanRoot = seedFixture('clean-warn');
   const cleanHome = path.join(tmp, 'clean-warn', 'home');
