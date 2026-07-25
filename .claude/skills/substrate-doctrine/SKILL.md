@@ -104,20 +104,26 @@ from source, never written as diffs against an old draft.
 
 Every instruction bug found so far traces to one of these. Check them first.
 
-### 3.1 Two operating models are layered on top of each other
+### 3.1 Two operating models layered on top of each other
 
-`AGENTS.md` disables cross-session delegation. Roughly **40% of the substrate still
-describes the cross-session team model** — role cards, `managing`'s Distribution and Built
-event loop, `consulting`'s Ask section, `night-shift`. A session loads a confident,
-complete, **action-shaped** SOP for a world that does not exist, then has to improvise.
+*Fixed in GOL-92 (2026-07-25); recorded because it is the pattern most likely to recur.*
+
+`AGENTS.md` disabled cross-session delegation while roughly **40% of the substrate still
+described the cross-session team model** — role cards, `managing`'s Distribution and Built
+event loop, `consulting`'s Ask section, `night-shift`. A session loaded a confident,
+complete, **action-shaped** SOP for a world that did not exist, then had to improvise.
 
 **Improvisation under conflicting instructions resolves toward action**, because
-action-shaped guidance outweighs a short restraint clause. That is the generator of the
-whole bug class.
+action-shaped guidance outweighs a short restraint clause. That was the generator of the
+whole bug class — not any single badly worded rule.
 
-Corollary: **the pipeline can dead-end.** A planner may not dispatch builds and must hand
-off to a manager it cannot reach. Feature work has no legal path to completion in the
+Corollary: **the pipeline dead-ended.** A planner could not dispatch builds and had to hand
+off to a manager it could not reach, so feature work had no legal path to completion in the
 default configuration.
+
+**How to avoid recreating it:** when you disable a capability, move its SOP out in the same
+change. A disabled capability whose instructions remain is worse than either state alone.
+Cross-session content now lives in `golem:live-team` and nowhere else — keep it that way.
 
 ### 3.2 The same fact is stated in three places and has drifted
 
@@ -233,15 +239,31 @@ without a live team.
 | Review is **blocking with a recorded override** | Advisory findings get waved through — that is the unadopted-insight failure again. A recorded override keeps the human in control without making the gate decorative | Advisory-only; or hard-blocking | Advisory is decorative; hard-blocking makes a wrong finding stall work |
 | Reviewer **never fixes** what it finds | A reviewer who edits becomes an author and loses standing | Let it fix trivia | Destroys the independence the role exists for |
 | Cross-session content **quarantined** into an opt-in skill, not deleted | Default is off; the fabricated-PR incident came from live-session trust; 40% dead content is actively harmful. Reversible — capability preserved | Restore cross-session; or delete it | Restoring recreates the trust surface that burned us; deleting loses a real capability |
+| Self-verification allowed; self-**review** never | Re-running a command whose output you did not author carries no fabrication risk. Blanket "never verify your own work" made the default solo role illegal | Forbid both | Would have made `standalone` — the default — unable to close anything |
+| `Never` rows bind the **hat**, review-independence binds the **session** | One session must be able to plan then build; it must never review its own output. Stated in § Roles so the single source carries its own resolution rule | Leave the hat-change doctrine only in `golem:standalone` | Then `manager`/`planner` skills appear to violate their own `Never` rows |
+| Effort/mechanism/evaluative probes outrank build verbs | "How hard would it be to *add* X?" matched both cue lists, and the tie-break sent it to *act* — self-defeating on the exact motivating example | Rely on "imperative build verb" implying mood | That is intent inference, which is what failed originally |
+| Solo close is `built → done` with a `skip_reason` naming the re-run and the reviewer verdict | `built → verifying` requires manager dispatch evidence a solo session cannot produce, and self-dispatch is not a workaround | Add a solo path to `phase-machine.js` | Server change for a documentation gap; the escape hatch already exists |
+| Lint guards the single source | Deleting the whole `## Roles` section left lint green while 12 files pointed at it. `golem:` refs inside skills now fail rather than warn | Leave it to review | The whole point of single-sourcing is one place to break; that place needs a guard |
 | Continuity work reframed: *"add goals + a decision log, a render, and a janitor"* | Five of six continuity layers already have authoritative stores (tracker, git, channel, journals). What is missing is a **render** and a **janitor**, not a system | Build the full GOL-88 program (Mem0 + local observer + pack evaluator) | It is the biggest meta-project yet, and the associative layer is the least-justified piece — nearly every high-value finding wants *deterministic loading of current truth*, not semantic search over history |
 
 ---
 
-## 6. Known-contradiction inventory — snapshot 2026-07-25
+## 6. Contradiction inventory — ALL CLOSED 2026-07-25 (GOL-92)
 
-Verify line numbers before quoting; update or delete rows as they are fixed.
+> Every C / R / G row below was closed by commits `ed0c011..HEAD`. The tables are kept as the
+> historical record of what this architecture used to get wrong — **line numbers are from the
+> pre-fix tree and no longer resolve.** Do not treat them as open work.
 
-### Contradictions
+**What remains open after GOL-92:**
+
+| Open item | Detail |
+|---|---|
+| **Review gates are session-enforced, not server-enforced** | `dashboard/server/phase-machine.js` requires nothing review-shaped for `designed → planning` or `verified → done`, and `verificationReport` matches `/verification\|verify-done\|smoke\|test/i` — almost any comment satisfies it. A close that ignored a `BLOCKER` is invisible to the tracker. `verify-done` now says this plainly instead of overclaiming. Adding real `phase-machine` requirements plus a walk test is the follow-up. |
+| **`AGENTS.md` is 157 lines, not the ~75 budgeted** | The budget predated the authority table (~45 lines) and the six-row Roles table. Every line is load-bearing and single-sourced, so the number was wrong, not the content. Re-budget; do not cut to hit it. |
+| **Two commits bundle unrelated work** | `git add -A` swept pre-existing uncommitted CLI, tracker-client, and `.claude/settings.json` changes into `016fced` / `633c697`. Nothing was lost, but a substrate revert would take the CLI with it. Stage explicitly next time. |
+| **In-process `reviewer` has no tracker tools** | Its verdict always reaches the ticket second-hand via the session that routed the work, which weakens the independence the gate exists for. |
+
+### Contradictions (historical — all closed)
 
 | # | Conflict | Locations |
 |---|---|---|
@@ -252,7 +274,7 @@ Verify line numbers before quoting; update or delete rows as they are fixed.
 | C5 | `AGENTS.md:14` teaches the deprecated pattern | says "mark it in progress"; `tracker/SKILL.md` requires `ticket_transition({phase})` |
 | C6 | `night-shift` contradicts three rules | 15-min wake cron vs the no-unattended-background-loops rule and the no-Monitors preference; live-peer monitoring (disabled); introduces a `planner > manager > builder > explorer` tier ladder that exists nowhere else and inverts the ownership table |
 
-### Redundancies
+### Redundancies (historical — all closed)
 
 | # | Duplicated fact | Copies |
 |---|---|---|
@@ -264,7 +286,7 @@ Verify line numbers before quoting; update or delete rows as they are fixed.
 | R6 | No-guessing × 4 | `AGENTS.md:5` · `roles/builder.md:4` · `building/SKILL.md:19` · `agents/worker.md:19` |
 | R7 | Consult skills × 3 | `get-consult` and `provide-consult` are 8-line redirects to `consulting` |
 
-### Gaps
+### Gaps (historical — all closed)
 
 | # | Gap |
 |---|---|

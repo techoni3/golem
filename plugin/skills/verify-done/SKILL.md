@@ -32,7 +32,13 @@ Before `done`, confirm the current phase is `verified` or a skip reason is recor
 and review are separate gates — a green verification is not a review. For specs, all children must
 be terminal and the close/retro artifact must exist.
 
-The server enforces the same artifact classes for phase transitions. If `transitionTicket` rejects a move, the ticket is not done.
+The server enforces *some* of these artifact classes — closing brief, dispatch evidence, a
+verification-shaped comment, and `verified`-or-skip-reason. If `transitionTicket` rejects a move,
+the ticket is not done.
+
+**The review gates are session-enforced, not server-enforced.** Nothing rejects a close that
+ignored a `BLOCKER`, so a skipped review gate is invisible to the tracker and detectable only in
+the thread. That makes it your responsibility, not the server's.
 
 ## Checks
 

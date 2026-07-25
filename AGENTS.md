@@ -52,13 +52,16 @@ See `substrate/README.md` for the channel-consumer launch (`golemc`) and the ful
 
 ## Work Choreography
 
-Feature-sized work defaults through a live `manager` role session when available;
-the dashboard preselects that manager as the Assignee/dispatch target, but any
-explicit target overrides it. Specs and work items are phase-backed in the
-tracker, and long waits should use bus subscriptions (`ticket/<display_id>` or
-`spec/<display_id>/tree`) instead of polling. Via-manager verification is manual:
-the team API suggests a least-loaded explorer, but the manager dispatches and
-records the transition evidence.
+Cross-session routing is **opt-in** — see `golem:live-team`. The default is a
+single session owning the whole loop (`golem:standalone`), using in-process
+agents for recon and both review gates. Specs and work items are phase-backed in
+the tracker, and long waits use bus subscriptions (`ticket/<display_id>` or
+`spec/<display_id>/tree`) instead of polling.
+
+When a live team **is** enabled: the dashboard preselects a manager as the
+Assignee/dispatch target and any explicit target overrides it; the team API
+suggests a least-loaded explorer, but the manager dispatches verification and
+review and records the transition evidence.
 
 ## Repo-specific agent rules
 
@@ -85,13 +88,15 @@ cp -Rc mcp/channel/node_modules .worktrees/<TICKET>-<slug>/mcp/channel/node_modu
   the installed plugin updating.**
 - If dashboard server behavior changed, restart the dashboard from the main checkout.
 
-**Prohibited inside a worktree** — `golem sync` or any render writing shared plugin/global outputs;
-restarting the shared dashboard; claiming port 7420, docker stacks, named volumes, or container
-names; editing the main checkout; mutating `~/.golem` as ticket code.
+**Shared runtimes to avoid inside a worktree** (the generic rule is in
+`golem:git-conventions`) — `golem sync` or any render writing shared plugin/global outputs;
+restarting the shared dashboard; port 7420, docker stacks, named volumes, container names;
+`~/.golem` as ticket code.
 
 ## Parallel Work = Worktrees
 
 When a dispatch brief explicitly names `workspace: worktree`, follow the
 worktree directive: one ticket branch in `.worktrees/<ticket>/`, self-contained
-checks only, `branch:` in the closing brief, and manager/planner reconciliation
-on main. Ad-hoc worktrees remain prohibited without an explicit directive.
+checks only, `branch:` in the closing brief, and reconciliation on main by the
+orchestrating non-builder. Ad-hoc worktrees remain prohibited without an
+explicit directive.

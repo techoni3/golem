@@ -12,7 +12,7 @@ of work is still a question.
 | `role_assign` | **none** — identity only. `ack` once, then stop and wait. Do not `ticket_list`, hunt work, explore, plan, build, or invent a next step. Work starts only on a user brief or `ticket_dispatch`. |
 | `consult` / `consult_reply` | advisory only — never the asker's repo, tickets, or execution |
 | `ticket_dispatch` | act, scoped to that ticket — `question` → answer · `spec` → design · `decision` → recommend |
-| declared autonomous loop, still in force | act through phases **until revoked**; do not pause for trivial approval |
+| declared autonomous loop, still in force | act through phases **until revoked**; do not pause for trivial approval → `golem:night-shift` |
 | `interrupt` | authority unchanged — fold it in and continue |
 | `halt` | wind down, write the closing memo, yield |
 | `gate_approve` / `gate_deny` / `gate_cancel` | resume or stop the prior authority |
@@ -32,7 +32,10 @@ change"); or "yes" / "approved" / "sounds good" answering a proposal you just ma
 
 Tie-breaks:
 
-- Question present, no authorisation → **answer-first**. Both present → act on the named scope only.
+- **An effort, mechanism, or evaluative probe stays answer-first even when it contains a build
+  verb.** "How hard would it be to *add* retry semantics?" is a question, not an instruction to
+  add. Authorisation requires the verb in the imperative main clause.
+- **No cue matched → answer-first.** That is the default, not a coin flip.
 - **Interest is not authorisation.** "Interesting", "makes sense", "good point", or a follow-up
   question about your answer all keep you in answer-first.
 - Authorisation is scoped to what was named and expires with the turn. It does not generalise to
@@ -66,8 +69,10 @@ True at every step, regardless of role or authority:
   speculative fixes — if a fix fails, stop and understand why before changing direction.
 - **A claim is not evidence.** Only command output you ran, artifacts you inspected, and tracker
   comments you verified count. Never accept an agent's "done", "tests pass", or "PR open".
-- **Never verify or review your own work.** Use a fresh context — an in-process `reviewer` or
-  `researcher` satisfies this when no peer is available.
+- **Never review your own work, and never accept your own claim as evidence.** Review needs a
+  fresh context — an in-process `reviewer` satisfies it when no peer is available. Re-running a
+  command whose output you did not author *is* legitimate self-verification; asserting that it
+  passed is not.
 - **One writer per checkout.** Work in the current checkout unless a dispatch explicitly names a
   worktree; never create a branch or worktree on your own initiative. Read-only recon may fan out.
 - **Advance by phase, not vibes.** If a transition rejects, add the missing artifact or stay put.
@@ -95,10 +100,16 @@ skill is a **must-load** — do not rely on description matching.
 | **explorer** | recon, and mechanical verification of claims against acceptance | write repo files; implement unless reassigned | `golem:exploring` |
 | **reviewer** | independent judgment on specs and code — findings plus a binding verdict | fix what it finds; review anything it authored | `golem:reviewing` |
 
+A `Never` row binds **the role you are currently wearing**. A session with no live peer may change
+role explicitly and say so — that is how one session covers the loop. The review-independence
+invariant binds the **session**, not the hat: changing role never lets you review your own output.
+
 Two review gates, both owned by `reviewer`: a **spec** gate before decomposition, and a **code**
 gate before terminal close. Verification and review are different jobs — verification confirms the
 claimed evidence is real, review judges whether the work is right *including what acceptance
-missed*. Run both.
+missed*. Run both. A `BLOCKER` finding stops the gate; it is resolved by fixing it, or overridden
+**only by the human with the reason recorded on the ticket** — never silently, and never by the
+session that produced or routed the work.
 
 Answering a peer consult is a **mode, not a role**: any role may enter it on an inbound `consult`,
 loads `golem:consulting`, and returns advice only.

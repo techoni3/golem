@@ -17,8 +17,8 @@ or the human explicitly says to branch. Otherwise, continue on the branch the
 session/ticket is already pointed at.
 
 How to know branching is allowed: the ticket body or dispatch brief names a
-branch with `branch: <name>` or an equivalent explicit instruction, or Lavee
-asks for a branch in chat. Absence of that directive means stay put.
+branch with `branch: <name>` or an equivalent explicit instruction, or the
+human asks for a branch in chat. Absence of that directive means stay put.
 
 A worktree directive in the dispatch is an explicit branching instruction.
 Follow the [Worktree Lifecycle](#worktree-lifecycle) section below.
@@ -77,11 +77,10 @@ current branch in the main checkout.
 ### Contract
 
 - One ticket = one branch = one worktree.
-- Branch: `<type>/gol-<n>-<kebab-slug>` (`fix` for fixes, otherwise `feat`).
-- Directory: `.worktrees/GOL-<n>-<slug>/` inside the repo.
-- Builders work in the worktree; the orchestrating manager/planner
-  reconciles on main. Builders never merge their own worktree branch into
-  main.
+- Branch: `<type>/<ticket>-<kebab-slug>` (`fix` for fixes, otherwise `feat`).
+- Directory: `.worktrees/<TICKET>-<slug>/` inside the repo.
+- Builders work in the worktree; the orchestrating non-builder reconciles on
+  main. Builders never merge their own worktree branch into main.
 
 ### Builder setup
 
@@ -108,33 +107,36 @@ missing directory and use the repo's existing setup path only if the ticket expl
 
 Prohibited inside a worktree:
 
-- `golem sync` or any render that writes shared plugin/global outputs.
-- Restarting the shared dashboard or claiming fixed/shared runtimes such as
-  port 7420, docker stacks, named volumes, or container names.
+- Any render, codegen, or sync that writes shared outputs outside the worktree.
+- Restarting shared services, or claiming fixed ports, docker stacks, named
+  volumes, or container names.
 - Editing the main checkout.
-- Mutating `~/.golem` as part of ticket code.
+- Mutating shared state outside the repo as part of ticket code.
 - Installing new packages unless the ticket explicitly requires it.
+
+The repo's own `AGENTS.md` names the specific shared runtimes and render
+commands to avoid.
 
 ### Hand-off
 
 The closing brief must include a standalone branch line:
 
 ```text
-branch: <type>/gol-<n>-<slug>
+branch: <type>/<ticket>-<slug>
 ```
 
 Also include the worktree path, commits, checks run from inside the worktree,
 and any conflicts resolved during `git rebase main`. Move the ticket to
 review/built only after the four-part closing brief exists.
 
-### Manager/Planner reconcile
+### Reconcile
 
 Only the orchestrating non-builder reconciles; never a builder.
 
 From the main checkout, serialize one branch at a time:
 
 ```bash
-git merge --no-ff <type>/gol-<n>-<slug>
+git merge --no-ff <type>/<ticket>-<slug>
 ```
 
 After merge:
@@ -145,16 +147,16 @@ After merge:
 - Clean up:
 
 ```bash
-git worktree remove .worktrees/GOL-<n>-<slug>
-git branch -d <type>/gol-<n>-<slug>
+git worktree remove .worktrees/<TICKET>-<slug>
+git branch -d <type>/<ticket>-<slug>
 ```
 
 ### Conflict bounce
 
 If `git merge --no-ff` conflicts, abort the merge and bounce the ticket back
 to the builder with the conflict output. The builder rebases in the worktree
-and hands off again. Managers/planners do not resolve builder conflicts for
-them.
+and hands off again. The reconciling session does not resolve builder conflicts
+for them.
 
 ### Stale-worktree hygiene
 

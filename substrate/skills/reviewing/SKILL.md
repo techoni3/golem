@@ -5,7 +5,7 @@ description: Read when acting as reviewer, or when spawning fresh eyes over a sp
 
 # reviewing
 
-Method for the **reviewer** role. Ownership and boundaries: AGENTS.md § Roles.
+Method for the **reviewer** role. Ownership and boundaries: Global Rules § Roles.
 
 Review is not verification. Verification asks *did the claimed evidence actually happen?* and is
 bounded by the acceptance checklist. Review asks *is this right, including what the checklist

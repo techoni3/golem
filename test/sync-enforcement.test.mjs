@@ -18,6 +18,20 @@ function write(file, text) {
   fs.writeFileSync(file, text);
 }
 
+// Every role registered in lib/session-role.js needs a card AND a row in the instructions
+// Roles table — that table is the single source of role ownership.
+const FIXTURE_ROLES = ['manager', 'planner', 'builder', 'explorer', 'reviewer', 'standalone'];
+
+function rolesTable(roles) {
+  return [
+    '## Roles',
+    '',
+    '| Role | Owns | Never | Load |',
+    '|---|---|---|---|',
+    ...roles.map((r) => `| **${r}** | fixture owns | fixture never | \`golem:tracker\` |`),
+  ].join('\n');
+}
+
 function seedFixture(name) {
   const root = path.join(tmp, name, 'substrate');
   write(path.join(root, 'README.md'), '# fixture\n');
@@ -30,13 +44,13 @@ function seedFixture(name) {
   write(path.join(root, 'hooks', 'session-register.sh'), '#!/usr/bin/env bash\nexit 0\n');
   // Cards carry identity + a skill pointer only; ownership lives in instructions/AGENTS.md
   // § Roles, so no role needs card-specific content here.
-  for (const role of ['manager', 'planner', 'builder', 'explorer', 'reviewer', 'standalone']) {
+  for (const role of FIXTURE_ROLES) {
     write(path.join(root, 'roles', `${role}.md`), `# Role: ${role}\nMission: ${role} mission.\nLoad: golem:tracker\n`);
   }
   write(path.join(root, 'skills', 'tracker', 'SKILL.md'), '---\nname: tracker\ndescription: Track assigned work through the golem tracker.\n---\n# tracker\n');
   write(path.join(root, 'skills', 'extra', 'SKILL.md'), '---\nname: extra\ndescription: Extra fixture skill used to verify orphan warnings.\n---\n# extra\n');
   write(path.join(root, 'agents', 'worker.md'), '---\nname: worker\ndescription: worker\n---\nUse golem:tracker.\n');
-  write(path.join(root, 'instructions', 'AGENTS.md'), 'Use golem:tracker.\n');
+  write(path.join(root, 'instructions', 'AGENTS.md'), `Use golem:tracker.\n\n${rolesTable(FIXTURE_ROLES)}\n`);
   return root;
 }
 
@@ -255,6 +269,23 @@ try {
   assertFails('bad-card', (root) => {
     write(path.join(root, 'roles', 'builder.md'), '# Role: builder\nMission: Build.\nLoad: \n');
   }, /missing required field Load|Load field is empty/);
+
+  // The Roles table is the single source of role ownership; losing it, or losing a row, must fail
+  // rather than silently orphan every card and role skill that points at it.
+  assertFails('missing-roles-section', (root) => {
+    write(path.join(root, 'instructions', 'AGENTS.md'), 'Use golem:tracker.\n');
+  }, /has no "## Roles" section/);
+
+  assertFails('role-missing-table-row', (root) => {
+    const partial = FIXTURE_ROLES.filter((r) => r !== 'explorer');
+    write(path.join(root, 'instructions', 'AGENTS.md'), `Use golem:tracker.\n\n${rolesTable(partial)}\n`);
+  }, /registered role explorer has no row in the Roles table/);
+
+  // Routing now lives largely in skill-to-skill pointers, so a dangling ref inside a skill must
+  // fail, not merely warn.
+  assertFails('bad-skill-reference', (root) => {
+    write(path.join(root, 'skills', 'extra', 'SKILL.md'), '---\nname: extra\ndescription: Extra fixture skill used to verify orphan warnings.\n---\n# extra\nSee golem:not-a-skill.\n');
+  }, /golem:not-a-skill does not resolve/);
 
   assertFails('bad-description', (root) => {
     write(path.join(root, 'skills', 'tracker', 'SKILL.md'), `---\nname: tracker\ndescription: ${Array.from({ length: 46 }, (_, i) => `word${i}`).join(' ')}\n---\n# tracker\n`);

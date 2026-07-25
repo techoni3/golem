@@ -35,5 +35,6 @@ export function teamAssists(rows = []) {
   return {
     suggested_manager: slimSession(leastLoadedRoleSession(rows, 'manager')),
     suggested_explorer: slimSession(leastLoadedRoleSession(rows, 'explorer')),
+    suggested_reviewer: slimSession(leastLoadedRoleSession(rows, 'reviewer')),
   };
 }

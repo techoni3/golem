@@ -10,7 +10,7 @@ SoT for the **planner** role. Load before design, fan-out, or readiness gate. Tr
 
 ## Scope
 
-Ownership and boundaries: **AGENTS.md § Roles**. This skill carries method only.
+Ownership and boundaries: **Global Rules § Roles**. This skill carries method only.
 
 Never infer a go-ahead from silence.
 

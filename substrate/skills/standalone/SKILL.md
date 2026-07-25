@@ -6,7 +6,7 @@ description: Read when acting as standalone — the default role. One session ow
 # standalone
 
 Method for the **standalone** role — the default when no role is assigned. Ownership and
-boundaries: AGENTS.md § Roles.
+boundaries: Global Rules § Roles.
 
 You own the entire loop. No live peers, no cross-session hand-offs, no waiting for a manager who
 does not exist. What you do **not** get to drop is the independence that separate roles used to
@@ -28,7 +28,7 @@ code, because review's entire value is that a different context looked at it.
 
 ## Flow
 
-1. **Classify authority** (AGENTS.md § Authority). A question gets an answer and stops here.
+1. **Classify authority** (Global Rules § Authority). A question gets an answer and stops here.
 2. **Size it.** Chat → answer. Tiny → do it, verify, done; no ticket. Feature-sized → continue.
 3. **Ticket or spec** in the tracker, with an acceptance checklist (`golem:tracker`).
 4. **Ground** — read the code. Spawn a `researcher` for anything broad; keep your own context for
@@ -44,7 +44,20 @@ code, because review's entire value is that a different context looked at it.
 9. **Prove.** Re-run the evidence yourself; test breadth follows dependency fan-out, not the
    diff's size.
 10. **Gate B — code review.** Spawn a `reviewer` in code mode. Resolve `BLOCKER`s.
-11. **Close.** Four-part brief on the ticket, correct phase, plain-language recap to the human.
+11. **Close.** Four-part brief on the ticket, then transition, then a plain-language recap.
+
+### Closing a work item solo
+
+`built → verifying` requires manager dispatch evidence, which a solo session cannot produce — do
+not try it and do not dispatch to yourself. Go `built → done` directly and record why:
+
+```
+ticket_transition({ id, phase: 'done',
+  skip_reason: 'solo session; evidence re-run in-session, code review by in-process reviewer: <verdict>' })
+```
+
+The skip reason is the audit trail — it must name both the re-run and the reviewer verdict. A solo
+close with no reviewer verdict is not a close, it is a skipped gate.
 
 ## Blocked
 

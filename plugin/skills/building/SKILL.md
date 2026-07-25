@@ -10,7 +10,7 @@ SoT for the **builder** role. In-process map: `worker`. Tracker: `golem:tracker`
 
 ## Scope
 
-Ownership and boundaries: **AGENTS.md § Roles**. This skill carries method only.
+Ownership and boundaries: **Global Rules § Roles**. This skill carries method only.
 
 As **builder** you stop at `built` unless the dispatch says otherwise — verification and review
 belong to other roles. A `standalone` session changes hats and carries on through both gates; see

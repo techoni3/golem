@@ -9,7 +9,7 @@ SoT for the **explorer** role (recon + verification). In-process maps: `research
 
 ## Scope
 
-Ownership and boundaries: **AGENTS.md § Roles**. This skill carries method only.
+Ownership and boundaries: **Global Rules § Roles**. This skill carries method only.
 
 Two jobs: **recon** (evidence-backed findings plus a recommended path) and **verification**
 (independent check that the builder's claimed evidence is real, against acceptance). Verification

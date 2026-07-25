@@ -11,11 +11,11 @@ Method for the **manager** role. Tool contracts: `golem:tracker`. Evidence bar:
 
 ## Scope
 
-Ownership and boundaries: **AGENTS.md § Roles**. This skill carries method only.
+Ownership and boundaries: **Global Rules § Roles**. This skill carries method only.
 
 ## Intake
 
-1. Classify authority first (AGENTS.md § Authority). A question gets an answer, not a ticket.
+1. Classify authority first (Global Rules § Authority). A question gets an answer, not a ticket.
 2. Size the ask: chat · tiny · feature-sized+.
 3. Feature-sized: create or reuse a tracker ticket/spec and leave an acceptance checklist.
 4. Do **not** write the design yourself. Route it: a live planner only if the user asked for a
