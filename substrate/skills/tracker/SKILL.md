@@ -56,11 +56,39 @@ Prefer `ticket_transition({id, phase, reason?, skip_reason?})` over `ticket_upda
 - Subscriptions preserve durable event history/cursors; normal delivery is disabled by default, so they never create a standalone model turn.
 - Manual exact ticket/spec subscriptions contribute only passive phase, assignment, blocker, and result deltas. Activity/raw history is never injected into a prompt.
 
+## The Spec Is The Intent Record
+
+A spec carries more than the plan: the option space, the branches that were rejected **and why**,
+and the non-goals. Those are the parts that cannot be recovered later — everything else eventually
+shows up in the code. Write them while the conversation is still live.
+
+Supporting documents attach to the spec. Every code survey, research report, and finding lands
+there, so a slice can point at work it did not commission and nothing an agent discovered dies with
+its session.
+
 ## Decompose Larger Work
+
+**Default to one slice per spec.** Split only for a reason stated on the ticket, and only these
+qualify:
+
+- a genuine wave dependency — B cannot start until A lands;
+- parallelism you will actually use;
+- a surface boundary needing different hands or a different skill.
+
+**Never split to make tickets smaller or clearer.** That is the instinct that turns a medium spec
+into eight tickets, and every extra slice is another cold start for whoever picks it up.
+
+**The test:** if two slices would go to the same builder one after the other, they should have been
+one slice.
+
+**Slices point; they do not restate.** Each child carries its scope, its acceptance, its non-goals,
+and a link to the parent — not a copy of the parent's reasoning. Copying context in feels helpful
+and is a prediction about what the builder will need; that prediction is what fails. The builder
+reads the chain instead.
 
 - Create children with `parent_id` and group them with a stream when useful.
 - Set `wave` for dependency order. Wave N+1 must not dispatch until every open wave N child is terminal.
-- Copy the relevant acceptance checklist into each child.
+- Give each child a checkable acceptance list of its own, derived from the parent's behaviour items.
 
 ## Blocking Human Input
 

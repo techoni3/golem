@@ -22,8 +22,9 @@ code, because review's entire value is that a different context looked at it.
 | Job | Who |
 |-----|-----|
 | design, decompose, sequence | you, under `golem:lead` |
+| code survey to ground the design | an in-process `worker` loading `golem:code-survey` — the same agent then builds what it surveyed |
+| web research, non-code scouting | in-process `researcher` (cheaper, keeps your context clean) |
 | implement | you, under `golem:building` — or an in-process `worker` |
-| recon | in-process `researcher` (cheaper, keeps your context clean) |
 | verification of claims | you, by re-running — you did not fabricate your own output |
 | **spec review · code review** | **always an in-process `reviewer`. Never you.** |
 
@@ -32,14 +33,16 @@ code, because review's entire value is that a different context looked at it.
 1. **Classify authority** (Global Rules § Authority). A question gets an answer and stops here.
 2. **Size it.** Chat → answer. Tiny → do it, verify, done; no ticket. Feature-sized → continue.
 3. **Ticket or spec** in the tracker, with an acceptance checklist (`golem:tracker`).
-4. **Ground** — read the code. Spawn a `researcher` for anything broad; keep your own context for
-   the decisions.
+4. **Ground** — read the code. For a survey wide enough to flood your context, spawn a `worker`
+   under `golem:code-survey` and let it build that slice later; spawn a `researcher` for anything
+   outside the codebase. Keep your own context for the decisions.
 5. **Design** under `golem:lead`. Hit the depth bar: options, decision, rejected alternative,
    observable acceptance.
 6. **Gate A — spec review.** Spawn a `reviewer` in spec mode (`golem:reviewing`). Resolve every
    `BLOCKER` before decomposing. This gate catches the expensive class of error, so do not skip it
    because you are confident.
-7. **Decompose** into children with waves. Wave N+1 waits for wave N terminal.
+7. **Decompose** — default to one slice, and split only for a reason you state on the ticket
+   (`golem:tracker`). Set waves; wave N+1 waits for wave N terminal.
 8. **Build** one child at a time — one writer per checkout, always. Run the project's real checks
    (`golem:test-policy`).
 9. **Prove.** Re-run the evidence yourself; test breadth follows dependency fan-out, not the
