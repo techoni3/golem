@@ -9,14 +9,19 @@ description: Read when appending a milestone to a project journal, locating `~/.
 Journals live OUTSIDE the repo at `~/.golem/journals/<project_id>/`:
 `hook.jsonl` (mechanical) and `summary.jsonl` (semantic). Both append-only JSONL.
 
-**Mechanical journaling is automatic on every harness** — never write `hook.jsonl` lines by hand.
-The model's ONLY write is appending milestone lines; see When, below.
+**Never write `hook.jsonl` lines by hand.** Where it is written at all, it is written by hooks; the
+model's ONLY write is appending milestone lines. See When, below.
 
-Claude Code and Codex fire golem's lifecycle hooks natively. opencode reaches the same scripts
-through `shims/opencode/index.js`, which bridges its plugin event bus onto them —
-`session.created` → `session-register.sh` + journal, `tool.execute.before`/`after` → tool-pre/post,
-`session.idle` → stop, `session.compacted` → pre-compact, `session.deleted` → session-end. So
-`hook.jsonl` is written and the project entry is registered there too.
+Which harness writes it differs, and the difference is real:
+
+| Harness | `hook.jsonl` | How |
+|---|---|---|
+| Claude Code | ✅ automatic | native lifecycle hooks run `journal-route.sh` |
+| opencode | ✅ automatic | `shims/opencode/index.js` bridges the plugin event bus onto the same scripts — `session.created` → `session-register.sh` + journal, `tool.execute.before`/`after` → tool-pre/post, `session.idle` → stop, `session.compacted` → pre-compact, `session.deleted` → session-end |
+| Codex | ❌ not written | lifecycle hooks fire, but `shims/codex/hook.mjs` records session facts and registration only — `journal-route.sh` does not ship in that bundle |
+
+So under Codex the mechanical stream is absent while milestones still work. Append milestone lines
+exactly as below; do not assume a tool-call history exists to read back.
 
 ## When
 

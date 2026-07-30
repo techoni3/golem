@@ -27,7 +27,7 @@ const CAPABILITY_WARNINGS = {
   ],
 };
 
-const GLOBAL_ARTIFACTS = ['skills', 'agents', 'commands', 'hooks', 'mcp', 'config-fragment', 'instructions'];
+const GLOBAL_ARTIFACTS = ['skills', 'agents', 'roles', 'commands', 'hooks', 'mcp', 'config-fragment', 'instructions'];
 
 const MANAGED_ELSEWHERE = {
   opencode: {
@@ -117,6 +117,9 @@ function neutralCell({ harness, scope = 'global', artifact, target, enabled, sta
 function artifactTypeForCc(relPath) {
   if (relPath.startsWith('skills/')) return 'skills';
   if (relPath.startsWith('agents/')) return 'agents';
+  // Without this, cc role cards fall through to the config-fragment bucket and
+  // are counted under the wrong label rather than not at all.
+  if (relPath.startsWith('roles/')) return 'roles';
   if (relPath.startsWith('hooks/')) return 'hooks';
   if (relPath === '.mcp.json' || relPath.startsWith('mcp/')) return 'mcp';
   if (relPath.startsWith('.claude-plugin/') || relPath === 'README.md') return 'config-fragment';
@@ -223,10 +226,12 @@ function globalCells(cfg) {
   const ocEnabled = !!cfg.harnesses?.opencode?.enabled;
   const ocAgentItems = ocAdapter.buildAgentPlan({ substrateRoot: root });
   const ocSkillItems = ocAdapter.buildSkillPlan({ substrateRoot: root });
+  const ocRoleItems = ocAdapter.buildRolePlan({ substrateRoot: root });
   const ocInstructionItems = ocAdapter.buildInstructionPlan({ substrateRoot: root });
   const ocRows = new Map([
     ['agents', cell({ harness: 'opencode', scope: 'global', artifact: 'agents', target: 'opencode', outDir: ocAdapter.agentOutDir(), items: ocAgentItems, enabled: ocEnabled, config: { testedVersion: cfg.harnesses?.opencode?.testedVersion ?? null, currentVersion: opencodeVersion() } })],
     ['skills', cell({ harness: 'opencode', scope: 'global', artifact: 'skills', target: 'opencode', outDir: ocAdapter.skillsOutDir(), items: ocSkillItems, enabled: ocEnabled })],
+    ['roles', cell({ harness: 'opencode', scope: 'global', artifact: 'roles', target: 'opencode', outDir: ocAdapter.rolesOutDir(), items: ocRoleItems, enabled: ocEnabled })],
     ['instructions', cell({ harness: 'opencode', scope: 'global', artifact: 'instructions', target: 'opencode-instructions', outDir: ocAdapter.instructionOutDir(), items: ocInstructionItems, enabled: ocEnabled })],
     ['config-fragment', opencodeConfigCell(cfg, ocEnabled)],
   ]);

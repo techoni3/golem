@@ -32,8 +32,13 @@ e.g. `feat/stripe-webhook-handler`.
 A `lead` may open one branch for a whole spec. When a spec branch is open it
 becomes the **integration target**: slice branches merge into it, not into
 `main`, and the lead merges the spec branch to `main` once the spec's gates are
-clear. Read every "merge to main" instruction below as "merge to the integration
-target" — which is `main` only when no spec branch is open.
+clear.
+
+**Read `main` in every instruction and command below as the integration target**
+— which is `main` only when no spec branch is open. That includes the base a
+worktree is cut from and every `git rebase main`, not just the merges: a slice
+cut from `main` while a spec branch is open carries none of its sibling slices,
+and merging it back reintroduces every divergence.
 
 This does not loosen the rule above: a slice still gets its own branch, and a
 builder still never merges its own work into the integration target.
