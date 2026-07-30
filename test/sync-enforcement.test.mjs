@@ -217,7 +217,36 @@ async function assertPayloadBudgetAndRefusal() {
   assert.match(hugeCtx, /role card truncated/, 'an undroppable card must still be truncatable');
   assert.ok(hugeCtx.length <= 3600, `a 6KB card must still fit the budget, got ${hugeCtx.length}`);
   assert.ok(shown(hugeCtx) > 0, 'a capped card cannot starve the commits behind it');
-  console.log('payload budget resizes commits and truncates rather than starving');
+  // Shed ORDER, across the whole card-size range. Commits are the cheapest field
+  // to re-fetch (one command) and recently-closed the dearest (node:sqlite plus
+  // the tracker schema), so recently-closed must never be dropped while commits
+  // survive. It used to be, for a 30-char overshoot: commitsWithin fitted the
+  // entries but returned the header too, so the assembled payload was over by the
+  // header's length and the next branch paid for that with a ~700-char section.
+  // The hook resolves registryId from projects.json (by id or by path), so
+  // without this mapping the ticket rows never match and the section is simply
+  // absent — which would make the shed-order assertion below pass on nothing.
+  write(path.join(home, 'projects.json'), JSON.stringify({ projects: [{ id: 'budget-fixture', path: project }] }));
+  const db = new DatabaseSync(path.join(home, 'tracker.db'));
+  db.exec('CREATE TABLE tickets (display_id TEXT, kind TEXT, title TEXT, project_id TEXT, state TEXT, done_at TEXT)');
+  const ins = db.prepare('INSERT INTO tickets VALUES (?,?,?,?,?,?)');
+  for (let i = 0; i < 8; i += 1) ins.run(`GOL-${i}`, 'work-item', `closed item ${i} ${'y'.repeat(60)}`, 'budget-fixture', 'done', '2026-07-30');
+  db.close();
+  for (const size of [0, 100, 300, 500, 1000, 2000]) {
+    write(path.join(home, 'roles', 'lead.md'), `# Role: lead\n${'x'.repeat(size)}\n`);
+    const out = spawnSync('bash', [hook], {
+      cwd: project, encoding: 'utf8', input: JSON.stringify({ session_id: 'b', cwd: project }),
+      env: { ...process.env, GOLEM_HOME: home, HOME: home, CLAUDE_CODE_SESSION_ID: 'b' },
+    });
+    const c = JSON.parse(out.stdout).hookSpecificOutput.additionalContext;
+    assert.ok(c.length <= 3600, `card ${size}b must stay in budget, got ${c.length}`);
+    if (shown(c) > 0) {
+      assert.match(c, /Recently closed:/, `card ${size}b dropped recently-closed while keeping commits — shed order inverted`);
+    }
+    const h = c.match(/Recent commits \((\d+) of \d+\)/);
+    if (h) assert.equal(Number(h[1]), shown(c), `card ${size}b header disagrees with the lines present`);
+  }
+  console.log('payload budget resizes commits, truncates the card, and sheds in order');
 }
 
 async function assertOrphanDirectoryPruning() {

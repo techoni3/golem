@@ -71,12 +71,12 @@ const path = require('path');
 const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 const [home, start, cardPath] = process.argv.slice(2);
-// Droppable sections, in the order they are shed under budget pressure. The axis
-// is re-fetchability, not size: commits are one dependency-free command a session
-// can run itself, recently-closed needs node:sqlite plus the tracker schema, and
-// the roster needs three registry files plus liveness checks. Shed what the
-// session can rebuild alone, first.
-const DROP_ORDER = ['commits', 'recent-closes'];
+// Shed order, by RE-FETCHABILITY rather than size: commits are one
+// dependency-free command a session can run itself, recently-closed needs
+// node:sqlite plus the tracker schema, and the roster needs three registry files
+// plus liveness checks. Shed what the session can rebuild alone, first. The order
+// is enforced by the shed sequence at the bottom of this block; it was previously
+// also declared as a const that nothing read.
 const sections = new Map();
 function rootFrom(dir) {
   let cur = path.resolve(dir);
@@ -249,19 +249,24 @@ try {
 // role card is 241-298 bytes, so being 33 bytes over budget cost all 2,600 chars
 // of commits. Fitting to the remaining budget keeps the header honest, because it
 // is computed from what was actually kept.
-function commitsWithin(budget) {
-  const out = [];
-  let used = 0;
-  for (const entry of commitLines) {
-    if (used + entry.length + 1 > budget) break;
-    out.push(entry);
-    used += entry.length + 1;
+// Fit against the ASSEMBLED payload, not a precomputed entry budget. The header
+// is part of what this section costs and its own length changes with the number
+// of entries kept, so any budget computed before the header exists is wrong by
+// roughly its length. That was not a rounding error: overshooting by ~30 chars
+// made the next branch delete the whole ~700-char recently-closed section, after
+// which commits refit and expanded — trading the field that needs node:sqlite
+// plus the tracker schema for the one that is a single dependency-free command.
+function commitsFitting(fits) {
+  let best = null;
+  for (let n = 1; n <= commitLines.length; n += 1) {
+    const header = n < commitLines.length
+      ? `Recent commits (${n} of ${commitLines.length}):`
+      : 'Recent commits:';
+    const candidate = ['', header, ...commitLines.slice(0, n)];
+    if (!fits(candidate)) break;
+    best = candidate;
   }
-  if (!out.length) return null;
-  const header = out.length < commitLines.length
-    ? `Recent commits (${out.length} of ${commitLines.length}):`
-    : 'Recent commits:';
-  return ['', header, ...out];
+  return best;
 }
 
 // The role card is part of the payload, so it is part of the budget. It used to
@@ -293,22 +298,20 @@ const build = (commits) => [
   ...(dropped.length ? ['', `(${dropped.join(', ')} omitted — payload budget)`] : []),
 ].join('\n');
 
-// DROP_ORDER in one pass. Commits yield first, and yielding means SHRINKING —
-// they only disappear when not one entry fits. Only then does the next section go.
+// Shed in one direction only: commits first, by shrinking; then commits entirely;
+// then recently-closed. Never resurrect an earlier section by dropping a later
+// one — that is the inversion this used to have.
 //
-// With every other section capped (card 1200, roster 12 rows, closes 8 rows) the
-// fixed part cannot exceed ~2,600, so in practice some commits always fit and the
-// drop branches below are a backstop rather than an expected path. They stay
-// because the caps are the only thing making that true, and a future field
-// without one would need them.
-let commits = commitsWithin(Math.max(0, PAYLOAD_MAX - build(null).length));
+// The commits-gone case is unreachable while every other section stays capped
+// (card 1200, roster 12 rows, closes 8 rows): the fixed part maxes near 2,790
+// against 3,600, so at least a few entries always fit. It stays as a backstop
+// precisely because its unreachability rests on a conjunction of separately
+// maintained caps, which is the invariant a future field would break silently.
+const commits = commitsFitting((c) => build(c).length <= PAYLOAD_MAX);
 if (!commits && commitLines.length) dropped.push('commits');
-
 if (build(commits).length > PAYLOAD_MAX && sections.has('recent-closes')) {
   sections.delete('recent-closes');
   dropped.push('recent-closes');
-  commits = commitsWithin(Math.max(0, PAYLOAD_MAX - build(null).length));
-  if (!commits && commitLines.length && !dropped.includes('commits')) dropped.push('commits');
 }
 process.stdout.write(build(commits));
 NODE
@@ -321,7 +324,12 @@ NODE
       ctx="$ctx$MAP_ESC"
     fi
   fi
-elif [ -n "$CARD" ] && command -v jq >/dev/null 2>&1; then
+fi
+
+# Gate on the RESULT, not on whether node exists. "node is missing" and "node ran
+# and produced nothing" are the same outcome for the payload, and only the first
+# was covered — a node that exits non-zero lost the card silently.
+if [ -z "${MAP_BLOCK:-}" ] && [ -n "$CARD" ] && command -v jq >/dev/null 2>&1; then
   # No node means no assembled payload, but the role card needs neither. Every
   # other field degrades independently, and moving the card into the node block
   # had quietly made it the one field that did not — a session without node lost
