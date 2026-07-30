@@ -151,17 +151,38 @@ try {
 // because this runs from a render that has no node_modules. On older Node the
 // require throws and the field is simply omitted.
 try {
-  const { DatabaseSync } = require('node:sqlite');
+  // node:sqlite is built in from Node 22. On an older runtime the require throws
+  // and the field would vanish with no signal at all, so say so rather than
+  // leaving a silently incomplete payload.
+  let DatabaseSync;
+  try {
+    ({ DatabaseSync } = require('node:sqlite'));
+  } catch {
+    lines.push('', '(recently-closed unavailable: needs Node 22+ for node:sqlite)');
+    throw new Error('no node:sqlite');
+  }
   const dbPath = path.join(home, 'tracker.db');
   if (fs.existsSync(dbPath)) {
     const db = new DatabaseSync(dbPath, { readOnly: true });
-    const rows = db.prepare(
-      'SELECT display_id, kind, title FROM tickets WHERE project_id = ? AND state = ? ORDER BY done_at DESC LIMIT 8',
-    ).all(registryId, 'done');
-    db.close();
+    let rows;
+    try {
+      // Schema-coupled on purpose: the hook must still work with the dashboard
+      // down, and a read does not violate single-writer. But tracker-db.js has a
+      // live migration ladder, so a rename here vanishes the field silently.
+      // test/sync-enforcement.test.mjs covers this query for that reason.
+      rows = db.prepare(
+        'SELECT display_id, kind, title FROM tickets WHERE project_id = ? AND state = ? ORDER BY done_at DESC LIMIT 8',
+      ).all(registryId, 'done');
+    } finally {
+      db.close();
+    }
     if (rows.length) {
       lines.push('', 'Recently closed:');
-      for (const r of rows) lines.push(`  ${r.display_id} (${r.kind}) ${String(r.title).slice(0, 72)}`);
+      // Fold whitespace before clipping. Titles are agent-authored free text and
+      // this is the only field that carries it into system context, so a title
+      // containing a newline would otherwise inject a second, structurally
+      // identical section that reads exactly like a derived one.
+      for (const r of rows) lines.push(`  ${r.display_id} (${r.kind}) ${String(r.title).replace(/\s+/g, ' ').slice(0, 72)}`);
     }
   }
 } catch {}
@@ -176,15 +197,30 @@ try {
 // though the delimiter is quoted. Writing a bare dollar-paren pair or a lone
 // apostrophe in a JS comment here breaks the whole script with an EOF error
 // pointing at the last line of the file, which is a long way from the cause.
-// 40 rather than 50: at 50 the whole payload measured 1022 tokens, just over the
-// ceiling. 40 keeps it near 800 and still sits inside the 25-50 range this was
-// specified with. Subjects are clipped so one pathological commit message cannot
-// blow the budget on its own.
+// Budgeted on cumulative characters, not on line count. Capping count x
+// per-line-length bounds one pathological commit but not the aggregate: 40 lines
+// of realistic 150-char subjects is ~1,300 tokens on its own. This repo happens
+// to have terse subjects, which is exactly the input the design says cannot be
+// relied on. So: take up to 40, stop at CHAR_CAP, and say when truncated.
 try {
+  const CHAR_CAP = 2600; // ~640 tokens, leaving room for the other four fields
   const log = execFileSync('git', ['log', '--oneline', '-40'], {
     cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
   }).trim();
-  if (log) lines.push('', 'Recent commits:', ...log.split('\n').map((l) => `  ${l.slice(0, 110)}`));
+  if (log) {
+    const out = [];
+    let used = 0;
+    for (const line of log.split('\n')) {
+      const entry = `  ${line.slice(0, 110)}`;
+      if (used + entry.length > CHAR_CAP) break;
+      out.push(entry);
+      used += entry.length + 1;
+    }
+    if (out.length) {
+      const all = log.split('\n').length;
+      lines.push('', out.length < all ? `Recent commits (${out.length} of ${all}):` : 'Recent commits:', ...out);
+    }
+  }
 } catch {}
 
 process.stdout.write(lines.join('\n'));

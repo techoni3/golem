@@ -48,7 +48,8 @@ claude plugin marketplace add /Users/laveesingh/Documents/software/experiments/g
 claude plugin install golem@golem-local --scope user
 ```
 
-**opencode is bound to this checkout.** `opencode.jsonc`'s `plugin[]` points at
+**opencode is bound to this checkout.** `~/.config/opencode/opencode.jsonc` (outside the repo — a
+reader will look in the checkout first) has a `plugin[]` entry pointing at
 `shims/opencode/index.js` by absolute path, and that shim derives `REPO_ROOT` from its own
 location to find `substrate/hooks/`. The shim is not rendered anywhere, so opencode integration
 does not survive the repo moving or going away. `GOLEM_HOOKS_DIR` overrides the hooks path but

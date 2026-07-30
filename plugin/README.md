@@ -45,6 +45,9 @@ sub-agents, and the golem channel MCP.
   running** (`golem dashboard`) for them to work. Tools: `ticket_list`,
   `ticket_get`, `ticket_create`, `ticket_update`, `ticket_comment`,
   `ticket_dispatch`, `stream_create`, `stream_list`, `sessions_dispatchable`.
+  Plus `project_context`, which is not a tracker tool — it re-renders the session's
+  ambient context (role card, roster, recently-closed pointers, recent commits) by
+  shelling out to the same `tracker-context.sh` the SessionStart hook runs.
   Identity is injected — `ticket_list mine:true` finds your work, and `project`
   defaults to your current project. See the `golem:tracker` skill.
 

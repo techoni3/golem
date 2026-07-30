@@ -1142,6 +1142,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         encoding: 'utf8',
         input: JSON.stringify({ session_id: SESSION_ID || '', cwd: process.cwd() }),
         stdio: ['pipe', 'pipe', 'ignore'],
+        timeout: 3000, // matches shims/opencode/index.js; a hung script must not block stdio
       });
       const ctx = JSON.parse(out)?.hookSpecificOutput?.additionalContext || '';
       return { content: [{ type: 'text', text: ctx.trim() || '(no project context available)' }] };
