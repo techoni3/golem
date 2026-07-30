@@ -272,6 +272,10 @@ function commitsFitting(fits) {
 // The role card is part of the payload, so it is part of the budget. It used to
 // be concatenated by bash after this block, which is how a 2KB overlay card could
 // push the total past a ceiling this code believed it was enforcing.
+// Measured in UTF-16 code units, which is what .length counts. The payload
+// carries em dashes and similar, so the byte size runs ~11 higher than this
+// figure — immaterial against a ~880-token target, but it is why a byte-based
+// reading of the output can look like a violation when it is not.
 const PAYLOAD_MAX = 3600; // ~880 tokens at ~4.09 chars/token
 const CARD_MAX = 1200;    // a card is never droppable, so it must be truncatable
 

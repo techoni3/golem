@@ -246,6 +246,23 @@ async function assertPayloadBudgetAndRefusal() {
     const h = c.match(/Recent commits \((\d+) of \d+\)/);
     if (h) assert.equal(Number(h[1]), shown(c), `card ${size}b header disagrees with the lines present`);
   }
+  // The card must survive node failing, not just node being absent. Moving the
+  // card into the node block had quietly made it the one field that did not
+  // degrade independently, and the first fix gated on `command -v node` — which
+  // covers a missing binary but not one that runs and produces nothing.
+  const nodeShim = path.join(tmp, 'budget', 'nonode');
+  fs.mkdirSync(nodeShim, { recursive: true });
+  write(path.join(nodeShim, 'node'), '#!/usr/bin/env bash\nexit 1\n');
+  fs.chmodSync(path.join(nodeShim, 'node'), 0o755);
+  write(path.join(home, 'roles', 'lead.md'), '# Role: lead\nMission: fixture.\n');
+  const broken = spawnSync('bash', [hook], {
+    cwd: project, encoding: 'utf8', input: JSON.stringify({ session_id: 'b', cwd: project }),
+    env: { ...process.env, PATH: `${nodeShim}:${process.env.PATH}`, GOLEM_HOME: home, HOME: home, CLAUDE_CODE_SESSION_ID: 'b' },
+  });
+  assert.equal(broken.status, 0, 'a failing node must not break session start');
+  const brokenCtx = JSON.parse(broken.stdout).hookSpecificOutput.additionalContext;
+  assert.match(brokenCtx, /Role: lead/, 'the role card survives node exiting non-zero');
+  assert.equal((brokenCtx.match(/Role: lead/g) || []).length, 1, 'and is not emitted twice when node succeeds');
   console.log('payload budget resizes commits, truncates the card, and sheds in order');
 }
 
