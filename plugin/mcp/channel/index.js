@@ -1158,10 +1158,16 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       // through anyway produced the whole reason this tool was rewritten: a
       // confident "no live sessions, no recent work" for the wrong directory.
       // Better to say we cannot tell.
+      // Mirrors rootFrom() in tracker-context.sh exactly, and must keep doing so:
+      // stop at $HOME, and match only .git or CLAUDE.md. Including AGENTS.md or
+      // walking past home finds a dotfiles repo — a very common setup — and then
+      // happily renders that repo's commits as if they were the project's. That
+      // is the confidently-wrong payload again, wearing a more convincing disguise.
       if (!projectCwd) {
+        const homeDir = os.homedir();
         let dir = process.cwd();
-        for (let i = 0; i < 64 && dir !== path.dirname(dir); i += 1) {
-          if (fs.existsSync(path.join(dir, '.git')) || fs.existsSync(path.join(dir, 'CLAUDE.md')) || fs.existsSync(path.join(dir, 'AGENTS.md'))) {
+        for (let i = 0; i < 64 && dir !== path.dirname(dir) && dir !== homeDir; i += 1) {
+          if (fs.existsSync(path.join(dir, '.git')) || fs.existsSync(path.join(dir, 'CLAUDE.md'))) {
             projectCwd = dir;
             break;
           }

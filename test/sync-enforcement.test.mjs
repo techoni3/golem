@@ -94,9 +94,11 @@ async function assertShippedHookBundlesAreRunnable() {
   const codex = await import('../lib/compiler/adapters/codex.js');
   const plan = codex.buildPlan({ substrateRoot: path.join(repo, 'substrate'), repoRoot: repo, packageVersion: '0.0.0' });
   const shipped = new Set(plan.map((i) => path.basename(i.outputRelPath)));
-  if (shipped.has('tracker-context.sh')) {
-    assert.ok(shipped.has('_golem-home.sh'), 'codex bundle ships tracker-context.sh without the _golem-home.sh it sources');
-  }
+  // Assert both unconditionally. Guarding this on `if (shipped.has(...))` made it
+  // vacuous: dropping BOTH entries from the adapter passed, because the check
+  // simply skipped.
+  assert.ok(shipped.has('tracker-context.sh'), 'codex bundle must ship tracker-context.sh');
+  assert.ok(shipped.has('_golem-home.sh'), 'codex bundle ships tracker-context.sh without the _golem-home.sh it sources');
 
   // Then actually execute what was rendered, not an equivalent copy elsewhere.
   const out = path.join(tmp, 'codex-bundle');
@@ -106,13 +108,52 @@ async function assertShippedHookBundlesAreRunnable() {
     fs.writeFileSync(dest, it.build());
   }
   const script = path.join(out, 'plugins', 'golem', 'hooks', 'tracker-context.sh');
-  if (fs.existsSync(script)) {
-    const res = spawnSync('bash', [script], { input: '{}', encoding: 'utf8', cwd: repo });
-    assert.equal(res.status, 0, `rendered codex tracker-context.sh must run: ${res.stderr}`);
-    assert.doesNotMatch(res.stderr || '', /No such file or directory/, 'rendered script must not be missing a sourced sibling');
-    JSON.parse(res.stdout); // must emit valid JSON, not a truncated payload
-  }
+  assert.ok(fs.existsSync(script), 'rendered codex bundle must contain tracker-context.sh');
+  const res = spawnSync('bash', [script], { input: '{}', encoding: 'utf8', cwd: repo });
+  assert.equal(res.status, 0, `rendered codex tracker-context.sh must run: ${res.stderr}`);
+  assert.doesNotMatch(res.stderr || '', /No such file or directory/, 'rendered script must not be missing a sourced sibling');
+  JSON.parse(res.stdout); // must emit valid JSON, not a truncated payload
   console.log('shipped hook bundles run standalone');
+}
+
+async function assertPayloadBudgetAndRefusal() {
+  // The aggregate budget and the project_context refusal both shipped unguarded.
+  // The refusal is the one that got silently reverted and passed every gate.
+  const hook = path.join(repo, 'substrate', 'hooks', 'tracker-context.sh');
+  const home = path.join(tmp, 'budget', 'home');
+  const project = path.join(tmp, 'budget', 'project');
+  fs.mkdirSync(path.join(home, 'roles'), { recursive: true });
+  fs.mkdirSync(project, { recursive: true });
+  write(path.join(project, 'CLAUDE.md'), '# budget fixture\n');
+  spawnSync('git', ['init', '-q'], { cwd: project, encoding: 'utf8' });
+  // Enough commits that the section reaches its own 2,600-char cap; together with
+  // the oversized card that is comfortably past the aggregate ceiling, so the drop
+  // actually fires. One commit left the payload under budget and the assertion
+  // passed without exercising anything.
+  for (let i = 0; i < 30; i += 1) {
+    spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', `feat(scope-${i}): ${'x'.repeat(150)}`], { cwd: project, encoding: 'utf8' });
+  }
+  write(path.join(home, 'sessions.json'), JSON.stringify({
+    sessions: [{ session_id: 'b', project_id: 'budget-fixture', project_path: project, role: 'lead', status: 'idle', name: 'b' }],
+  }));
+  // A large overlay card is the documented precedence-1 override, and it used to
+  // land outside the budget entirely because bash appended it after assembly.
+  // Sized to actually force a drop. A 2KB card left the payload under budget and
+  // the "omission is stated" assertion passed vacuously.
+  write(path.join(home, 'roles', 'lead.md'), `# Role: lead\n${'x'.repeat(2048)}\n`);
+  const res = spawnSync('bash', [hook], {
+    cwd: project, encoding: 'utf8', input: JSON.stringify({ session_id: 'b', cwd: project }),
+    env: { ...process.env, GOLEM_HOME: home, HOME: home, CLAUDE_CODE_SESSION_ID: 'b' },
+  });
+  const ctx = JSON.parse(res.stdout).hookSpecificOutput.additionalContext;
+  assert.match(ctx, /Role: lead/, 'the role card is part of the payload');
+  assert.ok(ctx.length <= 3600, `a large role card must not blow the budget, got ${ctx.length} chars`);
+  assert.match(ctx, /omitted — payload budget/, 'dropping a section must be stated, not silent');
+  // A header that survives must describe what is actually there.
+  const header = ctx.match(/Recent commits \((\d+) of \d+\)/);
+  const shown = (ctx.match(/^ {2}[0-9a-f]{7} /gm) || []).length;
+  if (header) assert.equal(Number(header[1]), shown, 'the (N of M) header must match the lines present');
+  console.log('payload budget covers the role card and drops whole sections');
 }
 
 async function assertOrphanDirectoryPruning() {
@@ -488,6 +529,7 @@ try {
   await assertTrackerContextFiltersStaleRoster();
   await assertOrphanDirectoryPruning();
   await assertShippedHookBundlesAreRunnable();
+  await assertPayloadBudgetAndRefusal();
   assertNativeSessionDeduplication();
   await assertNativeSessionDiscovery();
 } finally {

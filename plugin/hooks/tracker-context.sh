@@ -44,13 +44,41 @@ fi
 
 ctx=""
 
+# Resolve the role card BEFORE assembling, so the payload budget can account for
+# it. It used to be concatenated afterwards, which meant a large overlay card
+# blew the ceiling the node block thought it was enforcing.
+#   1. overlay  -> $GOLEM_HOME_DIR/roles/<role>.md   (per-user override)
+#   2. custom   -> $GOLEM_ROLES_DIR/<role>.md         (env override)
+#   3. default  -> $SCRIPT_DIR/../roles/<role>.md     (packaged card)
+# Same precedence as lib/session-role.js#readRoleCard. Fail-open: no card is fine.
+CARD=""
+if [ -n "$SESSION_ID" ] && command -v jq >/dev/null 2>&1; then
+  SESSIONS_JSON="$GOLEM_HOME_DIR/sessions.json"
+  ROLE="$(jq -r --arg sid "$SESSION_ID" '(.sessions // [])[] | select(.session_id == $sid) | .role // empty' "$SESSIONS_JSON" 2>/dev/null | head -n 1 || true)"
+  if [ -n "$ROLE" ]; then
+    for candidate in "$GOLEM_HOME_DIR/roles/$ROLE.md" "${GOLEM_ROLES_DIR:+$GOLEM_ROLES_DIR/$ROLE.md}" "$SCRIPT_DIR/../roles/$ROLE.md"; do
+      if [ -n "$candidate" ] && [ -f "$candidate" ]; then
+        CARD="$candidate"
+        break
+      fi
+    done
+  fi
+fi
+
 if command -v node >/dev/null 2>&1; then
-  MAP_BLOCK="$(node - "$GOLEM_HOME_DIR" "$START_DIR" <<'NODE' 2>/dev/null || true
+  MAP_BLOCK="$(node - "$GOLEM_HOME_DIR" "$START_DIR" "$CARD" <<'NODE' 2>/dev/null || true
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { execFileSync } = require('child_process');
-const [home, start] = process.argv.slice(2);
+const [home, start, cardPath] = process.argv.slice(2);
+// Droppable sections, in the order they are shed under budget pressure. The axis
+// is re-fetchability, not size: commits are one dependency-free command a session
+// can run itself, recently-closed needs node:sqlite plus the tracker schema, and
+// the roster needs three registry files plus liveness checks. Shed what the
+// session can rebuild alone, first.
+const DROP_ORDER = ['commits', 'recent-closes'];
+const sections = new Map();
 function rootFrom(dir) {
   let cur = path.resolve(dir);
   const homeDir = process.env.HOME || '';
@@ -183,12 +211,12 @@ try {
       db.close();
     }
     if (rows.length) {
-      lines.push('', 'Recently closed:');
       // Fold whitespace before clipping. Titles are agent-authored free text and
       // this is the only field that carries it into system context, so a title
       // containing a newline would otherwise inject a second, structurally
       // identical section that reads exactly like a derived one.
-      for (const r of rows) lines.push(`  ${r.display_id} (${r.kind}) ${String(r.title).replace(/\s+/g, ' ').slice(0, 72)}`);
+      sections.set('recent-closes', ['', 'Recently closed:',
+        ...rows.map((r) => `  ${r.display_id} (${r.kind}) ${String(r.title).replace(/\s+/g, ' ').slice(0, 72)}`)]);
     }
   }
 } catch {}
@@ -224,20 +252,40 @@ try {
     }
     if (out.length) {
       const all = log.split('\n').length;
-      lines.push('', out.length < all ? `Recent commits (${out.length} of ${all}):` : 'Recent commits:', ...out);
+      // Header states what this section actually contains. It used to be computed
+      // before the aggregate trim ran, so it could claim 23 of 40 above 17 lines.
+      sections.set('commits', ['', out.length < all ? `Recent commits (${out.length} of ${all}):` : 'Recent commits:', ...out]);
     }
   }
 } catch {}
 
-// Aggregate ceiling. Every field is capped individually, but capped parts do not
-// make a capped whole: the per-field limits sum to well over the budget, so a
-// full roster plus long titles plus long subjects can still overshoot. Trim from
-// the end — the earlier fields are the ones a session cannot re-fetch cheaply.
+// The role card is part of the payload, so it is part of the budget. It used to
+// be concatenated by bash after this block, which is how a 2KB overlay card could
+// push the total past a ceiling this code believed it was enforcing.
+let card = [];
+try {
+  if (cardPath && fs.existsSync(cardPath)) card = ['', fs.readFileSync(cardPath, 'utf8').trimEnd()];
+} catch {}
+
+// Aggregate ceiling. Capped parts do not make a capped whole. Drop WHOLE sections
+// in DROP_ORDER and say so — trimming trailing lines is what left a header
+// claiming more entries than it listed.
 const PAYLOAD_MAX = 3600; // ~880 tokens at ~4.09 chars/token
-let payload = lines.join('\n');
-while (payload.length > PAYLOAD_MAX && lines.length > 1) {
-  lines.pop();
-  payload = lines.join('\n');
+const dropped = [];
+const assemble = () => [
+  ...card,
+  ...lines,
+  ...DROP_ORDER.filter((n) => sections.has(n)).flatMap((n) => sections.get(n)),
+  ...(dropped.length ? ['', `(${dropped.join(', ')} omitted — payload budget)`] : []),
+].join('\n');
+
+let payload = assemble();
+for (const name of DROP_ORDER) {
+  if (payload.length <= PAYLOAD_MAX) break;
+  if (!sections.has(name)) continue;
+  sections.delete(name);
+  dropped.push(name);
+  payload = assemble();
 }
 process.stdout.write(payload);
 NODE
@@ -248,34 +296,6 @@ NODE
       MAP_ESC="${MAP_ESC#\"}"
       MAP_ESC="${MAP_ESC%\"}"
       ctx="$ctx$MAP_ESC"
-    fi
-  fi
-fi
-
-if [ -n "$SESSION_ID" ] && command -v jq >/dev/null 2>&1; then
-  SESSIONS_JSON="$GOLEM_HOME_DIR/sessions.json"
-  ROLE="$(jq -r --arg sid "$SESSION_ID" '(.sessions // [])[] | select(.session_id == $sid) | .role // empty' "$SESSIONS_JSON" 2>/dev/null | head -n 1 || true)"
-  # Resolve the role card with the same precedence as lib/session-role.js#readRoleCard:
-  #   1. overlay  -> $GOLEM_HOME_DIR/roles/<role>.md   (per-user override, single source of truth)
-  #   2. custom   -> $GOLEM_ROLES_DIR/<role>.md         (env override; preserves the lib's contract)
-  #   3. default  -> $SCRIPT_DIR/../roles/<role>.md     (packaged substrate card)
-  # Fail-open: if nothing resolves we just skip the card and the session still
-  # gets the base tracker context.
-  CARD=""
-  if [ -n "$ROLE" ]; then
-    for candidate in "$GOLEM_HOME_DIR/roles/$ROLE.md" "${GOLEM_ROLES_DIR:+$GOLEM_ROLES_DIR/$ROLE.md}" "$SCRIPT_DIR/../roles/$ROLE.md"; do
-      if [ -n "$candidate" ] && [ -f "$candidate" ]; then
-        CARD="$candidate"
-        break
-      fi
-    done
-  fi
-  if [ -n "$ROLE" ] && [ -n "$CARD" ]; then
-    ROLE_ESC="$( { printf '\n\n'; cat "$CARD"; } | jq -Rs . 2>/dev/null || true)"
-    if [ -n "$ROLE_ESC" ]; then
-      ROLE_ESC="${ROLE_ESC#\"}"
-      ROLE_ESC="${ROLE_ESC%\"}"
-      ctx="$ctx$ROLE_ESC"
     fi
   fi
 fi
