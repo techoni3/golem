@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-07-30 @ e27857e — maintained via golem:docs-maintenance.
+> Last verified: 2026-07-30 @ 435d4f1 — maintained via golem:docs-maintenance.
 ## Directory structure
 - `substrate/` — plugin source; `plugin/` is its generated CC render, never hand-edited.
   `instructions/AGENTS.md` § Roles is the single source of role ownership; cards and skills point
@@ -35,8 +35,8 @@ dispatchable rows mean readiness.
   global file; text outside the markers is the human's. `pi` has none.
 - Claude runs cached render bytes: sync **and** version bump **and** `/reload-plugins`. The render
   updating is not the plugin updating.
-- Role cards render for all three harnesses; agents only for cc and opencode — codex ships none
-  despite `capabilities.json` claiming `subagents: true`.
+- Role cards render for cc, codex, opencode (not pi); agents only for cc and opencode — codex
+  ships none despite `capabilities.json` claiming `subagents: true`.
 - opencode is bound to this checkout; its `plugin[]` names the shim by absolute path.
 - Bare Codex is pull-only; `golem codex` is private. Raw role/interrupt/halt stay gated.
 

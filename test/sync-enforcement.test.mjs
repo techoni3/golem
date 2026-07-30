@@ -85,6 +85,36 @@ function assertFails(label, mutate, pattern) {
   console.log(`${label}: failed as expected`);
 }
 
+async function assertShippedHookBundlesAreRunnable() {
+  // Rendering a script without the sibling it sources ships a bundle that dies
+  // on line 1. Checking that the file resolves is not the same as running it —
+  // the codex bundle shipped tracker-context.sh without _golem-home.sh and
+  // every project_context call on Codex returned isError, while sync --check
+  // stayed green because the adapter never declared the missing file.
+  const codex = await import('../lib/compiler/adapters/codex.js');
+  const plan = codex.buildPlan({ substrateRoot: path.join(repo, 'substrate'), repoRoot: repo, packageVersion: '0.0.0' });
+  const shipped = new Set(plan.map((i) => path.basename(i.outputRelPath)));
+  if (shipped.has('tracker-context.sh')) {
+    assert.ok(shipped.has('_golem-home.sh'), 'codex bundle ships tracker-context.sh without the _golem-home.sh it sources');
+  }
+
+  // Then actually execute what was rendered, not an equivalent copy elsewhere.
+  const out = path.join(tmp, 'codex-bundle');
+  for (const it of plan.filter((i) => i.outputRelPath.includes('/hooks/'))) {
+    const dest = path.join(out, it.outputRelPath);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, it.build());
+  }
+  const script = path.join(out, 'plugins', 'golem', 'hooks', 'tracker-context.sh');
+  if (fs.existsSync(script)) {
+    const res = spawnSync('bash', [script], { input: '{}', encoding: 'utf8', cwd: repo });
+    assert.equal(res.status, 0, `rendered codex tracker-context.sh must run: ${res.stderr}`);
+    assert.doesNotMatch(res.stderr || '', /No such file or directory/, 'rendered script must not be missing a sourced sibling');
+    JSON.parse(res.stdout); // must emit valid JSON, not a truncated payload
+  }
+  console.log('shipped hook bundles run standalone');
+}
+
 async function assertOrphanDirectoryPruning() {
   const compiler = await import('../lib/compiler/engine.js');
   const base = path.join(tmp, 'prune');
@@ -348,6 +378,25 @@ async function assertTrackerContextFiltersStaleRoster() {
     assert.match(injected, /^Recent commits/m, 'the real derived commits section is present');
     assert.equal((injected.match(/^Recent commits/gm) || []).length, 1, 'a ticket title cannot forge a second section');
     console.log('tracker context folds whitespace in ticket titles');
+
+    // The roster was the last unbounded field. Without a cap, 20 live sessions
+    // with long names add ~1,200 chars on their own.
+    const many = { sessions: [] };
+    for (let i = 0; i < 20; i += 1) {
+      many.sessions.push({
+        session_id: `s${i}`, project_id: 'fixture-project', project_path: project,
+        hook_ppid: 2147483647, status: 'idle', name: `session-with-a-long-name-${i}`,
+      });
+    }
+    write(path.join(home, 'sessions.json'), JSON.stringify(many));
+    write(path.join(home, 'channels.json'), JSON.stringify({
+      channels: many.sessions.map((s) => ({ session_id: s.session_id, pid: liveProcess.pid })),
+    }));
+    const rosterLine = ctxOf(runHook()).split('\n').find((l) => l.startsWith('Team on ')) || '';
+    assert.ok(rosterLine.includes('(+8 more)'), `roster must cap and report the remainder: ${rosterLine}`);
+    assert.ok(rosterLine.split(' · ').length <= 12, 'roster shows at most 12 rows');
+    assert.ok(rosterLine.length < 700, `roster line must stay bounded, got ${rosterLine.length} chars`);
+    console.log('tracker context caps the roster line');
   } finally {
     liveProcess.kill();
   }
@@ -438,6 +487,7 @@ try {
 
   await assertTrackerContextFiltersStaleRoster();
   await assertOrphanDirectoryPruning();
+  await assertShippedHookBundlesAreRunnable();
   assertNativeSessionDeduplication();
   await assertNativeSessionDiscovery();
 } finally {

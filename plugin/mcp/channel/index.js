@@ -1144,12 +1144,33 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       // there. That does not error: it emits a confident, plausible-looking
       // payload claiming no live sessions and no recent work, in the exact
       // voice of derived state. Silently wrong is worse here than failing.
-      let projectCwd = process.cwd();
+      let projectCwd = null;
       try {
-        const reg = JSON.parse(fs.readFileSync(path.join(tracker.golemHome(), 'sessions.json'), 'utf8'));
-        const row = (reg?.sessions || []).find((s) => s && s.session_id === SESSION_ID);
+        const reg = JSON.parse(tracker.golemHome() && fs.readFileSync(path.join(tracker.golemHome(), 'sessions.json'), 'utf8'));
+        const row = (reg?.sessions || []).find((s) => s && SESSION_ID && s.session_id === SESSION_ID);
         if (row?.project_path && fs.existsSync(row.project_path)) projectCwd = row.project_path;
-      } catch { /* no registry — fall through to cwd */ }
+      } catch { /* no registry — fall through */ }
+
+      // cwd is only a safe fallback when it actually sits in a project. Under
+      // ordinary Codex it never does — the server starts at the plugin bundle
+      // root, and SESSION_ID is empty there because neither the managed binding
+      // nor the parent-session file nor the opencode bridge resolves it. Falling
+      // through anyway produced the whole reason this tool was rewritten: a
+      // confident "no live sessions, no recent work" for the wrong directory.
+      // Better to say we cannot tell.
+      if (!projectCwd) {
+        let dir = process.cwd();
+        for (let i = 0; i < 64 && dir !== path.dirname(dir); i += 1) {
+          if (fs.existsSync(path.join(dir, '.git')) || fs.existsSync(path.join(dir, 'CLAUDE.md')) || fs.existsSync(path.join(dir, 'AGENTS.md'))) {
+            projectCwd = dir;
+            break;
+          }
+          dir = path.dirname(dir);
+        }
+      }
+      if (!projectCwd) {
+        return { isError: true, content: [{ type: 'text', text: 'project_context: cannot determine the project — this session has no registry row and the working directory is not inside a project. Refusing to render context for the wrong directory.' }] };
+      }
       const out = execFileSync('bash', [script], {
         cwd: projectCwd,
         encoding: 'utf8',

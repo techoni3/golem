@@ -15,9 +15,14 @@ writes that one by hand.
 | **Durable knowledge** | architecture, conventions, `REPO-MAP.md`, ADRs | `docs/` + the map, behind a trigger index | on demand |
 | **Current state** | live sessions, recently closed work, recent commits | nowhere — derived at session start | every session |
 
-Episodic memory — what a session *learned* — is not a third store here. It is
-`~/.golem/journals/<project_id>/summary.jsonl`, and `golem:journaling` owns its location, schema,
-and append recipe. Do not invent a second one; see § Do not add a store.
+Episodic memory — what a session *learned* — is not a third store here. It is a **milestone line in
+`~/.golem/journals/<project_id>/hook.jsonl`**, and `golem:journaling` owns the location, the schema,
+and the append recipe. Do not invent a second one; see § Do not add a store.
+
+Docs and milestones share a trigger and have opposite write semantics, which is the whole
+distinction: **a doc update *replaces* a description of current reality** — idempotent, it rots, the
+audit sweeps it. **A milestone *appends* what a session learned** — immutable, never rewritten,
+never swept. They sit next to each other at spec close only because that is when you know both.
 
 ## Invariants — root `AGENTS.md`
 
@@ -28,8 +33,9 @@ answer is no, it belongs in durable knowledge instead.
 **One file, never two.** Codex and opencode read `AGENTS.md` natively; Claude Code reads
 `CLAUDE.md`, which should be a one-line `@AGENTS.md` import. Two hand-maintained copies drift in
 *both* directions — each ends up holding invariants the other lacks, so agents on different
-harnesses work from different rules. This repo uses the import-stub pattern; `~/Documents/software/yitfit/trialroomai`
-does not, and its two files have already diverged.
+harnesses work from different rules. This is observed, not theoretical: a repo audited during this
+design had one file uniquely holding an ownership invariant and the other uniquely holding a
+container gotcha.
 
 Keep it short. Every line is paid on every session, on every harness.
 
@@ -101,7 +107,9 @@ re-render, no ownership claim.
 
 1. Root `AGENTS.md` with an invariants section; apply the admission test to every line. If
    `CLAUDE.md` is a separate hand-maintained copy, replace its body with `@AGENTS.md`.
-2. `docs/` with a trigger-table index, and `adr/` with a `0000-template.md`.
+2. `docs/` with a trigger-table index, and `adr/` with a `0000-template.md` carrying the four
+   fields an ADR needs: **Status · Context · Decision · Consequences**. The decision is worthless
+   without the rejected alternative, so say so in the template rather than hoping.
 3. `REPO-MAP.md` per the contract above.
 4. Wire the pointers into `AGENTS.md`, then run the verify pass.
 
@@ -141,7 +149,12 @@ git diff --name-only <base>..HEAD | xargs -n1 dirname | sort -u
 # 2. Which docs name any of it. Grep ancestors too: a doc that says `lib/compiler/`
 #    will never match a search for `lib/compiler/engine.js`.
 for d in $(git diff --name-only <base>..HEAD | xargs -n1 dirname | sort -u); do
-  while [ "$d" != "." ]; do grep -rl -- "$d" docs/ AGENTS.md REPO-MAP.md 2>/dev/null; d=$(dirname "$d"); done
+  # Stop BEFORE the top level. Walking all the way to "." greps bare `lib`,
+  # `test`, `substrate` — which match nearly every doc and drown the signal.
+  while [ "$(dirname "$d")" != "." ]; do
+    grep -rl -- "$d" docs/ AGENTS.md REPO-MAP.md 2>/dev/null
+    d=$(dirname "$d")
+  done
 done | sort -u
 ```
 

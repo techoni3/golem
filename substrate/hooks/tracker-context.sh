@@ -228,7 +228,17 @@ try {
   }
 } catch {}
 
-process.stdout.write(lines.join('\n'));
+// Aggregate ceiling. Every field is capped individually, but capped parts do not
+// make a capped whole: the per-field limits sum to well over the budget, so a
+// full roster plus long titles plus long subjects can still overshoot. Trim from
+// the end — the earlier fields are the ones a session cannot re-fetch cheaply.
+const PAYLOAD_MAX = 3600; // ~880 tokens at ~4.09 chars/token
+let payload = lines.join('\n');
+while (payload.length > PAYLOAD_MAX && lines.length > 1) {
+  lines.pop();
+  payload = lines.join('\n');
+}
+process.stdout.write(payload);
 NODE
 )"
   if [ -n "$MAP_BLOCK" ] && command -v jq >/dev/null 2>&1; then
