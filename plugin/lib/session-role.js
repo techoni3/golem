@@ -146,7 +146,12 @@ export function migrateSessionRoles({ actor = 'system:role-migration' } = {}) {
     withFileLock(`${file}.lock`, () => {
       const reg = readRegistry(file);
       reg.sessions = reg.sessions.map((s) => {
-        const nextRole = ROLE_MIGRATIONS[s.role];
+        // hasOwn for the same reason as the two lookups above, but the stakes are
+        // higher here: a bare lookup on a role named `constructor` resolves to
+        // Object via the prototype, passes the truthiness check, and writes a
+        // function into `role` — which JSON.stringify drops, silently destroying
+        // the session's role instead of merely skipping a check.
+        const nextRole = Object.hasOwn(ROLE_MIGRATIONS, s.role) ? ROLE_MIGRATIONS[s.role] : undefined;
         if (!nextRole) return s;
         changed = true;
         const next = {

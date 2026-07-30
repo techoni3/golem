@@ -56,6 +56,10 @@ Milestone line schema: `{ts, event:"milestone", session_id, project_id, text}`.
 Append a milestone (one line, no array wrapper, newline-terminated):
 
 ```bash
+# The directory is created by journal-route.sh, which only Claude Code and
+# opencode run — under Codex nothing has created it, so the append would fail
+# with "No such file or directory" on a project that has never journalled.
+mkdir -p ~/.golem/journals/"$PID"
 printf '{"ts":"%s","event":"milestone","session_id":"%s","project_id":"%s","text":%s}\n' \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${CLAUDE_CODE_SESSION_ID:-}" "$PID" \
   "$(jq -Rn --arg t "ITEM TEXT" '$t')" \
