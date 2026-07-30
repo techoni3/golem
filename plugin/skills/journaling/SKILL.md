@@ -9,8 +9,14 @@ description: Read when appending a milestone to a project journal, locating `~/.
 Journals live OUTSIDE the repo at `~/.golem/journals/<project_id>/`:
 `hook.jsonl` (mechanical) and `summary.jsonl` (semantic). Both append-only JSONL.
 
-**Mechanical journaling is automatic** via plugin hooks — never write `hook.jsonl`
-lines by hand. The model's ONLY write is appending milestone lines — see When, below.
+**Mechanical journaling is automatic on every harness** — never write `hook.jsonl` lines by hand.
+The model's ONLY write is appending milestone lines; see When, below.
+
+Claude Code and Codex fire golem's lifecycle hooks natively. opencode reaches the same scripts
+through `shims/opencode/index.js`, which bridges its plugin event bus onto them —
+`session.created` → `session-register.sh` + journal, `tool.execute.before`/`after` → tool-pre/post,
+`session.idle` → stop, `session.compacted` → pre-compact, `session.deleted` → session-end. So
+`hook.jsonl` is written and the project entry is registered there too.
 
 ## When
 

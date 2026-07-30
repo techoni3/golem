@@ -32,7 +32,7 @@ is bounded by the acceptance checklist — judging whether the work is *right* i
    - Verdict: `PASS` or `FAIL`
    - Commands/clicks run and outputs observed
    - Follow-up defects (if FAIL), concrete enough to re-dispatch
-4. PASS → manager may move `verifying → verified`. FAIL → `verifying → rejected` with report on re-dispatch.
+4. PASS → the lead may move `verifying → verified`. FAIL → `verifying → rejected` with report on re-dispatch.
 
 ## Browser / UI
 

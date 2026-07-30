@@ -2,7 +2,7 @@
 
 ## 1. Intent (raw thoughts, preserved)
 
-Capture the user's original goal and constraints in their own language; planner may add brief orientation notes without deleting the raw thought.
+Capture the user's original goal and constraints in their own language; the lead may add brief orientation notes without deleting the raw thought.
 
 ## 2. Behaviour
 
@@ -27,7 +27,7 @@ State what this spec explicitly will not do so fan-out does not grow hidden scop
 
 ## 5. Open questions
 
-Track unresolved questions for the human/planner; answer or defer each before finalisation.
+Track unresolved questions for the human or lead; answer or defer each before finalisation.
 
 - [ ] <question>
 

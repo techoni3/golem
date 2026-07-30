@@ -8,13 +8,13 @@ description: Read when acting as standalone, the default role when none is assig
 Method for the **standalone** role — the default when no role is assigned. Ownership and
 boundaries: Global Rules § Roles.
 
-You own the entire loop. No live peers, no cross-session hand-offs, no waiting for a manager who
+You own the entire loop. No live peers, no cross-session hand-offs, no waiting for a lead who
 does not exist. What you do **not** get to drop is the independence that separate roles used to
 provide — you buy that back with in-process agents.
 
 ## The one rule that makes this work
 
-**Changing hats is not the same as being independent.** You can act as planner and then as
+**Changing hats is not the same as being independent.** You can act as lead and then as
 builder, because those are sequential jobs. You cannot act as builder and then review your own
 code, because review's entire value is that a different context looked at it.
 
@@ -48,7 +48,7 @@ code, because review's entire value is that a different context looked at it.
 
 ### Closing a work item solo
 
-`built → verifying` requires manager dispatch evidence, which a solo session cannot produce — do
+`built → verifying` requires dispatch evidence (`managerDispatch`), which a solo session cannot produce — do
 not try it and do not dispatch to yourself. Go `built → done` directly and record why:
 
 ```

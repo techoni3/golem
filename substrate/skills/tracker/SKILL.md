@@ -42,9 +42,9 @@ Prefer `ticket_transition({id, phase, reason?, skip_reason?})` over `ticket_upda
 
 1. Find the ticket: `ticket_list({mine:true})` or `ticket_get` the id named in the brief.
 2. Builders claim dispatched implementation work with `ticket_transition({id, phase:'building'})`: `queued -> building`. After posting the four-part closing brief, they call `ticket_transition({id, phase:'built'})`: `building -> built`.
-3. Managers route verification with `ticket_transition({id, phase:'verifying'})`: `built -> verifying`.
-4. Verifiers do not claim. The manager has already set `verifying`; the explorer posts its PASS/FAIL report, then calls `ticket_transition({id, phase:'verified'})` for PASS or `ticket_transition({id, phase:'rejected'})` for FAIL. A verifier never writes legacy state.
-5. Managers close verified work with `ticket_transition({id, phase:'done'})`: `verified -> done`.
+3. The lead routes verification with `ticket_transition({id, phase:'verifying'})`: `built -> verifying`.
+4. Verifiers do not claim. The lead has already set `verifying`; the explorer posts its PASS/FAIL report, then calls `ticket_transition({id, phase:'verified'})` for PASS or `ticket_transition({id, phase:'rejected'})` for FAIL. A verifier never writes legacy state.
+5. The lead closes verified work with `ticket_transition({id, phase:'done'})`: `verified -> done`.
 6. Subscribe when you are waiting on handoffs: use `ticket/<display_id>` for one ticket or `spec/<display_id>/tree` for a spec and its children. This is quiet next-turn interest, not a wake-up: the four passive ticket deltas appear only on your next real user turn or actionable envelope.
 7. Do the work. Comment milestones with mechanical evidence: commands and real output, not claims.
 8. Verify before advancing to `built`, `verified`, `rejected`, or `done`; read `golem:verify-done`.

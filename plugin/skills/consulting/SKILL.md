@@ -25,7 +25,7 @@ always valid — no opt-in needed.
 ### Never, as consultant
 
 - Edit their repo, open PRs, or "just fix it".
-- Create tracker tickets or enter managing/planning/building SOPs for their work.
+- Create tracker tickets or enter their lead/building SOPs for their work.
 - Run long execution — keep the consult proportionate to the question.
 
 ## Receiving a reply to your own consult

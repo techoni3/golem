@@ -1,6 +1,6 @@
 ---
 name: live-team
-description: Read ONLY when the user explicitly asks for a live-session hand-off or names a target session. Covers cross-session dispatch, outbound consults, manager distribution across live peers, and worktree reconcile. Do not use for solo work — the default path is golem:standalone.
+description: Read ONLY when the user explicitly asks for a live-session hand-off or names a target session. Covers cross-session dispatch, outbound consults, distributing slices across live peers, and worktree reconcile. Do not use for solo work — the default path is golem:standalone.
 ---
 <!-- GENERATED: skills/live-team/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 
@@ -36,18 +36,18 @@ Route by capability, not by model brand:
 
 | Work | Target role |
 |------|-------------|
-| bounded recon | explorer |
-| design, decomposition, context packs | planner |
-| one scoped implementation ticket | builder |
+| web research, non-code scouting | explorer |
+| code survey to ground a design | builder, loading `golem:code-survey` |
+| design, decomposition, routing, reconcile, closure | lead |
+| one scoped implementation slice | builder |
 | mechanical verification of claims | explorer |
 | spec or code review | reviewer |
-| routing, reconcile, closure | manager |
 
 If the target role is not live, fall back to the in-process agent (`researcher` / `worker` /
 `reviewer`) and record the exception on the ticket. Never leave work parked because a peer is
 absent.
 
-## Manager: distribution
+## Lead: distribution
 
 When a spec reaches `planned`:
 
@@ -58,7 +58,7 @@ When a spec reaches `planned`:
 4. Subscribe to `spec/<display_id>/tree` and the relevant `ticket/<display_id>` topics. Quiet
    next-turn interest — never poll.
 
-## Manager: built event loop
+## Lead: built event loop
 
 When a child reaches `built`:
 
@@ -72,16 +72,17 @@ When a child reaches `built`:
 No live explorer or reviewer → spawn the in-process `researcher` / `reviewer`, note it on the
 ticket, and still record the evidence before advancing.
 
-## Manager: reconcile
+## Lead: reconcile
 
-For worktree branches you orchestrated, serialise on main after verification and review:
+For worktree branches you orchestrated, serialise after verification and review — onto the spec
+branch when one is open, otherwise onto `main`:
 
 ```bash
 git merge --no-ff <type>/gol-<n>-<kebab-slug>
 ```
 
-Bounce conflicts back to the builder with the conflict output; never ask a builder to merge
-into main, and never resolve a builder's conflicts for them. Full lifecycle:
+Bounce conflicts back to the builder with the conflict output; never ask a builder to merge into
+the integration branch, and never resolve a builder's conflicts for them. Full lifecycle:
 `golem:git-conventions`.
 
 ## Outbound consults

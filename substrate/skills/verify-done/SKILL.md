@@ -22,7 +22,8 @@ Before `built`, confirm the ticket thread has the four-part closing brief:
 - Testing instructions for the human: exact commands, URLs, or clicks.
 - Not-done/deferred: explicit, even when empty.
 
-Before `verifying`, confirm there is manager dispatch evidence naming the verifier or skip reason.
+Before `verifying`, confirm there is dispatch evidence naming the verifier, or a skip reason. (The
+phase machine calls this requirement `managerDispatch`; the role that satisfies it is now `lead`.)
 
 Before `verified` or `rejected`, confirm there is a verification report with PASS/FAIL, evidence, and follow-up defects if any.
 

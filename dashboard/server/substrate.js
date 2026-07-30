@@ -348,9 +348,16 @@ function syncTarget({ harness, project = null, force = false }) {
     } else {
       const agentItems = ocAdapter.buildAgentPlan({ substrateRoot: root });
       const skillItems = ocAdapter.buildSkillPlan({ substrateRoot: root });
+      // Roles are a separate (target, outDir) bucket for opencode. `golem sync
+      // --check` and `golem doctor` both check it, so a dashboard sync that
+      // skipped it would leave permanent drift and a red doctor with no way to
+      // clear it from the dashboard. cc and codex carry roles inside their
+      // single buildPlan, which is why only opencode needs this.
+      const roleItems = ocAdapter.buildRolePlan({ substrateRoot: root });
       const instructionItems = ocAdapter.buildInstructionPlan({ substrateRoot: root });
       results.push({ artifact: 'agents', out_dir: ocAdapter.agentOutDir(), ...renderSummary(compiler.render({ target: 'opencode', outDir: ocAdapter.agentOutDir(), items: agentItems, packageVersion: pkg, force })) });
       results.push({ artifact: 'skills', out_dir: ocAdapter.skillsOutDir(), ...renderSummary(compiler.render({ target: 'opencode', outDir: ocAdapter.skillsOutDir(), items: skillItems, packageVersion: pkg, force })) });
+      results.push({ artifact: 'roles', out_dir: ocAdapter.rolesOutDir(), ...renderSummary(compiler.render({ target: 'opencode', outDir: ocAdapter.rolesOutDir(), items: roleItems, packageVersion: pkg, force })) });
       results.push({ artifact: 'instructions', out_dir: ocAdapter.instructionOutDir(), ...renderSummary(compiler.render({ target: 'opencode-instructions', outDir: ocAdapter.instructionOutDir(), items: instructionItems, packageVersion: pkg, force })) });
       const bin = resolveOpencodeBin();
       const merge = ocAdapter.buildConfigMerge({ repoRoot: REPO_ROOT });

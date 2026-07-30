@@ -101,10 +101,13 @@ need, and the attempt is what fails. Set `wave` for dependency order.
 
 ## Branch
 
-You own **one branch per spec**. Builders commit and merge into it; you merge it to `main` when the
-spec is complete and its gates are clear. Builders never target `main`.
+You own **one branch per spec**, and while it is open it is the integration target: builders merge
+their slice branches into it, and you merge it to `main` once the spec is complete and its gates are
+clear. Builders never target `main`. The full contract, including worktrees, is in
+`golem:git-conventions` § Spec branches.
 
-The human may give explicit branching instructions that override this.
+Opening one is still an explicit act — the human asks for it, or the spec says so. Absent that, work
+on the branch you are already on and `main` is the integration target.
 
 ## Orchestrate
 
@@ -131,12 +134,14 @@ Verified **and** review clean → `done`. A `BLOCKER` or `FAIL` → back to the 
 
 When every child is terminal, before moving the spec to `done`:
 
-1. **Update L2.** Which docs did this feature invalidate? You are the only actor who saw the whole
-   thing, so you are the only one who can tell. Method: `golem:docs-maintenance`.
-2. **Write the L3 record.** One append to the project's memory JSONL — and only if it clears the bar:
-   *a future session working on something else would be wrong without this.* Write remembrance, not
-   description. What surprised you, what you had to discover the hard way, what you would tell
-   someone starting this tomorrow. "Implemented X per spec Y" fails the bar; it belongs on the ticket.
+1. **Fix the docs this feature invalidated.** You are the only actor who saw the whole thing, so you
+   are the only one who can tell which ones moved. Method and the audit itself:
+   `golem:docs-maintenance`.
+2. **Append one milestone record** — and only if it clears the bar: *a future session working on
+   something else would be wrong without this.* Write remembrance, not description: what surprised
+   you, what you had to discover the hard way, what you would tell someone starting this tomorrow.
+   "Implemented X per spec Y" fails the bar and belongs on the ticket. Location, schema, and the
+   append recipe: `golem:journaling`.
 3. **Close artifact** naming the shipped children and anything deferred, in plain language. Ticket
    IDs are references, not the content.
 
