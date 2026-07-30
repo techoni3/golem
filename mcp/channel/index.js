@@ -1137,10 +1137,23 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       if (!script) {
         return { isError: true, content: [{ type: 'text', text: 'project_context: tracker-context.sh not found relative to this server.' }] };
       }
+      // Registry first, cwd only as a last resort — the same precedence
+      // currentProjectId() documents. On Codex `cwd` is the plugin bundle root
+      // (codex.js:75 passes a relative `args` path, so the server only starts
+      // at all if cwd is the bundle), and the hook's root-walk finds no repo
+      // there. That does not error: it emits a confident, plausible-looking
+      // payload claiming no live sessions and no recent work, in the exact
+      // voice of derived state. Silently wrong is worse here than failing.
+      let projectCwd = process.cwd();
+      try {
+        const reg = JSON.parse(fs.readFileSync(path.join(tracker.golemHome(), 'sessions.json'), 'utf8'));
+        const row = (reg?.sessions || []).find((s) => s && s.session_id === SESSION_ID);
+        if (row?.project_path && fs.existsSync(row.project_path)) projectCwd = row.project_path;
+      } catch { /* no registry — fall through to cwd */ }
       const out = execFileSync('bash', [script], {
-        cwd: process.cwd(),
+        cwd: projectCwd,
         encoding: 'utf8',
-        input: JSON.stringify({ session_id: SESSION_ID || '', cwd: process.cwd() }),
+        input: JSON.stringify({ session_id: SESSION_ID || '', cwd: projectCwd }),
         stdio: ['pipe', 'pipe', 'ignore'],
         timeout: 3000, // matches shims/opencode/index.js; a hung script must not block stdio
       });

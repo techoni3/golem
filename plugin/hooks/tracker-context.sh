@@ -132,13 +132,18 @@ try {
     return String(a.name || a.session_id).localeCompare(String(b.name || b.session_id));
   });
   if (rows.length) {
-    const parts = rows.map((s) => {
+    // Capped like the commit list. This was the last unbounded field: 20 live
+    // sessions with long names produced a 1,200-char line on their own.
+    const ROSTER_MAX = 12;
+    const shown = rows.slice(0, ROSTER_MAX);
+    const parts = shown.map((s) => {
       const role = s.role || 'unassigned';
       const status = s.status || 'unknown';
-      const label = s.name || String(s.session_id || '').slice(0, 12);
+      const label = String(s.name || String(s.session_id || '').slice(0, 12)).slice(0, 24);
       return `${role}:${status}:${label}`;
     });
-    lines.push(`Team on ${registryId}: ${parts.join(' · ')}`);
+    const more = rows.length > shown.length ? ` (+${rows.length - shown.length} more)` : '';
+    lines.push(`Team on ${registryId}: ${parts.join(' · ')}${more}`);
     lines.push('Roster is informational. Cross-session dispatch is off by default — see golem:live-team.');
   } else {
     lines.push(`Team on ${registryId}: (no live sessions)`);
