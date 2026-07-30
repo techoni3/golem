@@ -1,6 +1,6 @@
 ---
 name: researcher
-description: Read-only investigation of a codebase or topic. Returns a structured summary with evidence — never edits files. Use to answer "how does X work", "where does Y live", or to scope an unfamiliar area before work begins.
+description: Read-only external research and repo orientation. Returns a structured summary with evidence — never edits files. Use for library and API behaviour, prior art, or "where does Y live". Not for grounding a build; that is a worker loading golem:code-survey.
 model: opus
 tools: Read, Bash, Glob, Grep, WebFetch, WebSearch, mcp__plugin_golem_golem__ticket_get, mcp__plugin_golem_golem__ticket_comment
 ---

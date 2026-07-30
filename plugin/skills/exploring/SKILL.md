@@ -1,6 +1,6 @@
 ---
 name: exploring
-description: Read when acting as explorer — web research, non-code scouting, and mechanical verification with re-run evidence. Never grounds a build by surveying code; that is a builder loading golem:code-survey. Not for judging whether work is right, use golem:reviewing.
+description: Read when acting as explorer — external research, repo orientation, and mechanical verification with re-run evidence. Never grounds a build by surveying code; that is a builder loading golem:code-survey. Not for judging whether work is right, use golem:reviewing.
 ---
 <!-- GENERATED: skills/exploring/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 

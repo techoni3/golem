@@ -155,9 +155,15 @@ already hold the context, or when the task is smaller than the cost of explainin
 
 | Need | Agent |
 |------|-------|
-| Recon, "where does X live", scoping an unfamiliar area | `researcher` |
-| Implement one scoped ticket end to end | `worker` |
+| **Code survey to ground a design** — feasibility, blast radius, touch points | `worker` + `golem:code-survey` |
+| External research, non-code orientation, "where does X live" | `researcher` |
+| Implement one scoped slice end to end | `worker` |
 | Fresh-eyes judgment on a spec or a diff | `reviewer` |
+
+The first row is deliberate and is the mechanism the handoff model rests on: the agent that forms
+the code understanding should be the one that uses it. Sending a `researcher` instead splits the two,
+and the builder rebuilds the understanding from a summary. In-process agents are single-shot, so a
+solo session cannot span both — see `golem:standalone` for what that costs and how to handle it.
 
 Rules that hold for all three: one scoped task each, foreground and single-shot, note it on the
 ticket. A general-purpose agent only when no role-mapped one fits. Never named teammates, agent

@@ -82,22 +82,14 @@ No decomposition on an unreviewed design.
 
 ## Decompose
 
-**Default to one slice per spec.** Split only for a reason you state on the ticket, and only these
-qualify:
+**Default to one slice per spec**, split only for a stated reason, and slices point at the spec
+rather than restating it. The rule, the three qualifying split reasons, the same-builder test, and
+the wave requirement all live in `golem:tracker` § Decompose Larger Work — read it there rather than
+working from memory, and do not restate it here.
 
-- a genuine wave dependency — B cannot start until A lands;
-- parallelism you will actually use;
-- a surface boundary needing different hands or a different skill.
-
-**Never split to make tickets smaller or clearer.** That instinct is what produces eight tickets for
-a medium spec, and every extra slice is an independent cold start.
-
-**The test:** if two slices would go to the same builder one after the other, they should have been
-one slice.
-
-Slices **point at the spec; they do not restate it.** Each carries scope, acceptance, non-goals, and
-a link to its parent. Resist the urge to copy context in — you cannot predict what the builder will
-need, and the attempt is what fails. Set `wave` for dependency order.
+What is yours rather than the tracker's: **resisting the urge to copy context into a slice.** It
+feels like helping. It is a prediction about what the builder will need, and that prediction is the
+thing that fails — which is why the builder reads the chain instead.
 
 ## Branch
 

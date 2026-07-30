@@ -47,13 +47,13 @@ is stale, wrong, or missing; that comment is how the next slice gets a better ti
    - Not-done / deferred
 7. Move to `built` only once that brief exists.
 
-## Merging
+## You do not merge
 
-Merge into the **integration target**, never into `main` directly. When the lead has a spec branch
-open, that branch is the target; otherwise it is `main`. Full contract, including the worktree
-lifecycle: `golem:git-conventions` § Spec branches.
+Commit on your branch and stop. **The lead reconciles**, after verification and review — which is
+the whole point of stopping: a merge at `built` would land the work before either gate ran.
 
-You never merge your own work past that target, and you never mark it verified.
+You never merge your own work anywhere, never mark it verified, and never review it. Full
+lifecycle, including worktrees and where the lead merges to: `golem:git-conventions`.
 
 ## Stop at `built`
 

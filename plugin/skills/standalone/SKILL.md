@@ -22,7 +22,7 @@ code, because review's entire value is that a different context looked at it.
 | Job | Who |
 |-----|-----|
 | design, decompose, sequence | you, under `golem:lead` |
-| code survey to ground the design | an in-process `worker` loading `golem:code-survey` — the same agent then builds what it surveyed |
+| code survey to ground the design | **you**, in your own context — see the caveat below |
 | web research, non-code scouting | in-process `researcher` (cheaper, keeps your context clean) |
 | implement | you, under `golem:building` — or an in-process `worker` |
 | verification of claims | you, by re-running — you did not fabricate your own output |
@@ -33,9 +33,15 @@ code, because review's entire value is that a different context looked at it.
 1. **Classify authority** (Global Rules § Authority). A question gets an answer and stops here.
 2. **Size it.** Chat → answer. Tiny → do it, verify, done; no ticket. Feature-sized → continue.
 3. **Ticket or spec** in the tracker, with an acceptance checklist (`golem:tracker`).
-4. **Ground** — read the code. For a survey wide enough to flood your context, spawn a `worker`
-   under `golem:code-survey` and let it build that slice later; spawn a `researcher` for anything
-   outside the codebase. Keep your own context for the decisions.
+4. **Ground** — read the code yourself, under `golem:code-survey` if the survey is substantial.
+   Spawn a `researcher` for anything outside the codebase.
+
+   **The survey-becomes-builder trick does not work here, and pretending otherwise would be the
+   worse error.** In-process agents are single-shot: they return one result and self-clean, so a
+   second spawn is a fresh context reading a report — exactly the summarise-and-rebuild loss the
+   split exists to avoid. Either hold the survey in your own context and build from it, or accept
+   that the boundary is real and write the report well enough to survive it. A live builder session
+   can span both; you cannot.
 5. **Design** under `golem:lead`. Hit the depth bar: options, decision, rejected alternative,
    observable acceptance.
 6. **Gate A — spec review.** Spawn a `reviewer` in spec mode (`golem:reviewing`). Resolve every

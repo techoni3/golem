@@ -280,7 +280,7 @@ without a live team.
 | **Review gates are session-enforced, not server-enforced** | `dashboard/server/phase-machine.js` requires nothing review-shaped for `designed → planning` or `verified → done`, and `verificationReport` matches `/verification\|verify-done\|smoke\|test/i` — almost any comment satisfies it. A close that ignored a `BLOCKER` is invisible to the tracker. `verify-done` now says this plainly instead of overclaiming. Adding real `phase-machine` requirements plus a walk test is the follow-up. |
 | **`AGENTS.md` is 157 lines, not the ~75 budgeted** | The budget predated the authority table (~45 lines) and the six-row Roles table. Every line is load-bearing and single-sourced, so the number was wrong, not the content. Re-budget; do not cut to hit it. |
 | **Two commits bundle unrelated work** | `git add -A` swept pre-existing uncommitted CLI, tracker-client, and `.claude/settings.json` changes into `016fced` / `633c697`. Nothing was lost, but a substrate revert would take the CLI with it. Stage explicitly next time. |
-| **In-process `reviewer` has no tracker tools** | Its verdict always reaches the ticket second-hand via the session that routed the work, which weakens the independence the gate exists for. |
+| ~~**In-process `reviewer` has no tracker tools**~~ | **Closed 2026-07-30 (GOL-105).** All three in-process agents now carry `ticket_get`/`ticket_comment`; the reviewer also gets no transition or mutation tools, so it can read the chain and post a verdict without being able to move work. One residual: tracker authorship resolves to the parent session, so the reviewer is told to name itself in the comment. |
 
 ### Contradictions (historical — all closed)
 

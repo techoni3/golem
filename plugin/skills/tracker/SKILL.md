@@ -88,7 +88,9 @@ and is a prediction about what the builder will need; that prediction is what fa
 reads the chain instead.
 
 - Create children with `parent_id` and group them with a stream when useful.
-- Set `wave` for dependency order. Wave N+1 must not dispatch until every open wave N child is terminal.
+- **Every child needs a `wave`, including the only one — start at 1.** `planning → planned` is
+  rejected without waves, so a single-slice spec still fails the transition if you leave it null.
+  Wave N+1 must not dispatch until every open wave N child is terminal.
 - Give each child a checkable acceptance list of its own, derived from the parent's behaviour items.
 
 ## Blocking Human Input
