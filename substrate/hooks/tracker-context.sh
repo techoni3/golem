@@ -203,8 +203,12 @@ try {
       // down, and a read does not violate single-writer. But tracker-db.js has a
       // live migration ladder, so a rename here vanishes the field silently.
       // test/sync-enforcement.test.mjs covers this query for that reason.
+      // Specs only. The design says "recent SPEC closes" because a spec is the
+      // unit a fresh session needs to orient against; listing every closed work
+      // item spends the same budget restating slices of one feature, and the
+      // slice titles are meaningless without the spec they hang off.
       rows = db.prepare(
-        'SELECT display_id, kind, title FROM tickets WHERE project_id = ? AND state = ? ORDER BY done_at DESC LIMIT 8',
+        "SELECT display_id, kind, title FROM tickets WHERE project_id = ? AND state = ? AND kind = 'spec' ORDER BY done_at DESC LIMIT 8",
       ).all(registryId, 'done');
     } finally {
       db.close();

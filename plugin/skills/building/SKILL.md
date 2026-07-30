@@ -48,10 +48,19 @@ is stale, wrong, or missing; that comment is how the next slice gets a better ti
    - Not-done / deferred
 7. Move to `built` only once that brief exists.
 
-## You do not merge
+## You merge into the spec branch, never into `main`
 
-Commit on your branch and stop. **The lead reconciles**, after verification and review — which is
-the whole point of stopping: a merge at `built` would land the work before either gate ran.
+When a spec branch is open it is the **integration target**: merge your slice into it once your
+closing brief is posted, then move to `built`. Slices integrate continuously so siblings do not
+diverge — a slice held back until the end is a conflict you have chosen to defer.
+
+`main` is not yours. The lead merges the spec branch there, and only after the spec's gates are
+clear. **The gate is at the spec boundary, not at each slice** — that is the trade: `main` stays
+behind one review, while slices land against each other early enough for the conflicts to be small.
+
+When no spec branch is open the integration target *is* `main`, so you merge nothing and the lead
+reconciles. Under an explicit worktree directive the lead reconciles regardless. Both follow from
+the same rule rather than being exceptions to it — see `golem:git-conventions`.
 
 You never merge your own work anywhere, never mark it verified, and never review it. Full
 lifecycle, including worktrees and where the lead merges to: `golem:git-conventions`.

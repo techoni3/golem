@@ -101,7 +101,7 @@ skill is a **must-load** — do not rely on description matching.
 |------|------|-------|------|
 | **standalone** | the whole loop solo — intake, design, build, prove, close | invent cross-session hand-offs; skip the review gates | `golem:standalone` |
 | **lead** | one workstream end to end — intake and brainstorm, design, decompose, orchestrate, reconcile, close. Owns replanning and the spec branch | review its own output; hold two workstreams at once | `golem:lead` |
-| **builder** | implement one slice end to end; also the code survey that grounds a design | merge at all — the lead reconciles; mark its own work verified; review its own code | `golem:building` |
+| **builder** | implement one slice end to end, merging it into the open spec branch; also the code survey that grounds a design | merge to `main` — the lead owns the spec branch and that merge; mark its own work verified; review its own code | `golem:building` |
 | **explorer** | web research, repo orientation, and mechanical verification of claims | ground a build by surveying code — that is the builder's job; write repo files | `golem:exploring` |
 | **reviewer** | independent judgment on specs and code — findings plus a binding verdict | fix what it finds; review anything it authored | `golem:reviewing` |
 

@@ -41,8 +41,17 @@ worktree is cut from and every `git rebase main`, not just the merges: a slice
 cut from `main` while a spec branch is open carries none of its sibling slices,
 and merging it back reintroduces every divergence.
 
-This does not loosen the rule above: a slice still gets its own branch, and a
-builder still never merges its own work into the integration target.
+A builder **merges its own slice into the spec branch** once its brief is
+posted — slices integrate continuously, which is what keeps sibling slices from
+diverging. What a builder never touches is `main`. The gate sits at the spec
+boundary, not at each slice: the lead merges the spec branch to `main` only
+after the spec's review and verification gates are clear.
+
+When no spec branch is open, the integration target *is* `main`, so the builder
+merges nothing and the lead reconciles — the same rule, not an exception.
+
+Under an explicit **worktree** directive the reconcile is the lead's regardless;
+see the worktree lifecycle below.
 
 ## Commits
 

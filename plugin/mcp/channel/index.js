@@ -723,7 +723,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           id: { type: 'string', description: 'Display ticket id, e.g. GOL-244. Legacy TKT refs still resolve.' },
           phase: { type: 'string', description: 'Target phase (kind-dependent), e.g. queued|building|blocked|built|verifying|verified|rejected|done.' },
           reason: { type: 'string', description: 'Reason required by blocked/parked transitions.' },
-          skip_reason: { type: 'string', description: 'Explicit lifecycle skip reason; reserved for the manager-authorized escape hatch once phase enforcement lands.' },
+          skip_reason: { type: 'string', description: 'Explicit lifecycle skip reason; reserved for the lead-authorized escape hatch once phase enforcement lands.' },
         },
         required: ['id', 'phase'],
       },
@@ -781,11 +781,11 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'session_role',
-      description: 'Set or clear this live session role. role must be planner|builder|researcher|ui-tester|general or null/clear.',
+      description: 'Set or clear this live session role. role must be lead|builder|explorer|reviewer|standalone or null/clear. Legacy names (manager, planner, general, researcher, ui-tester) are rejected on write — existing sessions carrying them are rewritten by the registry migration, not by this tool.',
       inputSchema: {
         type: 'object',
         properties: {
-          role: { type: 'string', description: 'planner|builder|researcher|ui-tester|general|clear' },
+          role: { type: 'string', description: 'lead|builder|explorer|reviewer|standalone|clear' },
         },
         required: ['role'],
       },

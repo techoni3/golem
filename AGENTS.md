@@ -4,6 +4,10 @@ This directory is the golem root: the source repo for the **golem v4 Claude Code
 
 **Codebase map:** [REPO-MAP.md](REPO-MAP.md) — read it before exploring.
 
+**Project memory:** [docs/memory.jsonl](docs/memory.jsonl) — append-only lessons, newest last. Read
+the tail before starting anything non-trivial; append at spec close only when a future session
+working on something else would be wrong without the record. Swept via `golem:docs-maintenance`.
+
 ## Layout
 
 | What | Where |

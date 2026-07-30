@@ -112,3 +112,44 @@ try {
   };
   upsertSessionFact(fact);
 } catch {}
+
+// L4 ambient context. Codex 0.146.0 accepts the same SessionStart contract as
+// Claude Code — `SessionStartHookSpecificOutputWire` in the binary declares
+// exactly `{hookEventName, additionalContext}` with `additionalProperties:
+// false`, so re-emit those two fields rather than passing the script's JSON
+// through: an extra key fails validation and the whole payload is dropped.
+//
+// Registering the session is NOT delivering context. Until this existed, Codex
+// wrote its session fact and returned silently, so ordinary Codex was the one
+// harness with no L4 at all while the bundle shipped the script that renders it.
+if (event === 'session-start') {
+  try {
+    // Sibling only. This file imports `../lib/*.js`, which resolves solely inside
+    // the rendered bundle (`plugins/golem/{hooks,lib}/`) — running it from the
+    // repo checkout fails at import time — so the bundle layout is the only one
+    // that can reach here, and a repo-relative fallback would be dead code that
+    // makes the resolution look better tested than it is. The codex adapter ships
+    // `tracker-context.sh` and `_golem-home.sh` into this directory; if that ever
+    // stops, the guard below degrades to no context rather than a broken session.
+    const here = path.dirname(new URL(import.meta.url).pathname);
+    const script = path.join(here, 'tracker-context.sh');
+    if (fs.existsSync(script)) {
+      const { execFileSync } = await import('node:child_process');
+      const args = [script];
+      if (canonicalId) args.push('--session', canonicalId);
+      const out = execFileSync('bash', args, {
+        encoding: 'utf8',
+        timeout: 3000,
+        cwd: input.cwd, // the script walks up from $PWD; give it the session's cwd
+        input: JSON.stringify({ session_id: canonicalId || '', cwd: input.cwd, harness: 'codex' }),
+        stdio: ['pipe', 'pipe', 'ignore'],
+      });
+      const additionalContext = JSON.parse(out)?.hookSpecificOutput?.additionalContext;
+      if (additionalContext) {
+        process.stdout.write(`${JSON.stringify({
+          hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext },
+        })}\n`);
+      }
+    }
+  } catch {} // fail open: no context is bad, a broken session start is worse
+}

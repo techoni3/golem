@@ -29,27 +29,36 @@ const sessionsPath = path.join(home, 'sessions.json');
 writeFileSync(sessionsPath, JSON.stringify({
   version: 1,
   sessions: [
-    { session_id: 's-manager', name: 'old-general', role: 'general', project_path: repoRoot },
+    { session_id: 's-lead-1', name: 'old-general', role: 'general', project_path: repoRoot },
     { session_id: 's-explorer-1', name: 'old-researcher', role: 'researcher', project_path: repoRoot },
     { session_id: 's-explorer-2', name: 'old-ui', role: 'ui-tester', project_path: repoRoot },
-    { session_id: 's-planner', name: 'planner', role: 'planner', project_path: repoRoot },
+    { session_id: 's-lead-2', name: 'old-planner', role: 'planner', project_path: repoRoot },
+    { session_id: 's-lead-3', name: 'old-manager', role: 'manager', project_path: repoRoot },
   ],
 }, null, 2));
 
 const roles = await import('../../lib/session-role.js');
 const seeded = roles.readRoleRegistry();
-assert.deepEqual(seeded.map((r) => r.name).sort(), ['builder', 'explorer', 'manager', 'planner']);
-assert.deepEqual(json(path.join(home, 'roles', 'index.json')).roles.map((r) => r.name).sort(), ['builder', 'explorer', 'manager', 'planner']);
+const EXPECTED = ['builder', 'explorer', 'lead', 'reviewer', 'standalone'];
+assert.deepEqual(seeded.map((r) => r.name).sort(), EXPECTED);
+assert.deepEqual(json(path.join(home, 'roles', 'index.json')).roles.map((r) => r.name).sort(), EXPECTED);
 
 const migrated = json(sessionsPath).sessions;
-assert.equal(migrated.find((s) => s.session_id === 's-manager').role, 'manager');
-assert.equal(migrated.find((s) => s.session_id === 's-manager').role_updated_by, 'system:role-migration');
+// GOL-103 merged manager+planner into lead; general/researcher/ui-tester already
+// migrated. All three legacy judgment roles must land on `lead`.
+assert.equal(migrated.find((s) => s.session_id === 's-lead-1').role, 'lead');
+assert.equal(migrated.find((s) => s.session_id === 's-lead-1').role_updated_by, 'system:role-migration');
+assert.equal(migrated.find((s) => s.session_id === 's-lead-2').role, 'lead');
+assert.equal(migrated.find((s) => s.session_id === 's-lead-3').role, 'lead');
 assert.equal(migrated.find((s) => s.session_id === 's-explorer-1').role, 'explorer');
 assert.equal(migrated.find((s) => s.session_id === 's-explorer-2').role, 'explorer');
-assert.equal(migrated.find((s) => s.session_id === 's-planner').role, 'planner');
 
-assert.throws(() => roles.validateSessionRole('general'), /invalid session role/);
-assert.equal(roles.validateSessionRole('manager'), 'manager');
+// Legacy names are rejected on WRITE — migration rewrites stored rows, it does not
+// make the old vocabulary valid again. session_role's MCP description says so.
+for (const legacy of ['general', 'manager', 'planner', 'researcher', 'ui-tester']) {
+  assert.throws(() => roles.validateSessionRole(legacy), /invalid session role/, `${legacy} must be rejected`);
+}
+assert.equal(roles.validateSessionRole('lead'), 'lead');
 
 const critic = roles.createRole({ name: 'critic', color: '#ff00aa', glyph: 'CR', body: '# Role: critic\nReview plans and surface risks.' });
 assert.equal(critic.name, 'critic');
@@ -58,17 +67,17 @@ roles.updateRoleMeta('critic', { glyph: 'RV' });
 assert.equal(roles.getRole('critic').glyph, 'RV');
 assert.match(roles.readRoleCard('critic'), /Review plans/);
 
-roles.setSessionRole('s-planner', 'critic', { by: 'human:cli' });
+roles.setSessionRole('s-lead-2', 'critic', { by: 'human:cli' });
 assert.throws(() => roles.deleteRole('critic'), /assigned to 1 session/);
 assert.deepEqual(roles.deleteRole('critic', { force: true }), { ok: true, role: 'critic', cleared_sessions: 1 });
-assert.equal(json(sessionsPath).sessions.find((s) => s.session_id === 's-planner').role, null);
+assert.equal(json(sessionsPath).sessions.find((s) => s.session_id === 's-lead-2').role, null);
 
 roles.createRole({ name: 'critic', color: '#ff00aa', glyph: 'CR', body: '# Role: critic\nReview plans and surface risks.' });
-const cliOut = run(['cli/golem.js', 'role', 'critic', '--session', 's-manager']);
+const cliOut = run(['cli/golem.js', 'role', 'critic', '--session', 's-lead-1']);
 assert.equal(JSON.parse(cliOut).role, 'critic');
 const cliSessions = json(sessionsPath).sessions;
-assert.equal(cliSessions.find((s) => s.session_id === 's-manager').role, 'critic');
-assert.equal(cliSessions.find((s) => s.session_id === 's-manager').role_updated_by, 'human:cli');
+assert.equal(cliSessions.find((s) => s.session_id === 's-lead-1').role, 'critic');
+assert.equal(cliSessions.find((s) => s.session_id === 's-lead-1').role_updated_by, 'human:cli');
 
 console.log(JSON.stringify({
   ok: true,
@@ -76,8 +85,8 @@ console.log(JSON.stringify({
   seeded_roles: seeded.map((r) => r.name).sort(),
   migrated_roles: migrated.map((s) => ({ id: s.session_id, role: s.role, by: s.role_updated_by })),
   assertions: [
-    'temp GOLEM_HOME seeded only manager/planner/builder/explorer',
-    'general/researcher/ui-tester migrated with system:role-migration provenance',
+    'temp GOLEM_HOME seeded builder/explorer/lead/reviewer/standalone',
+    'general/manager/planner->lead and researcher/ui-tester->explorer, with system:role-migration provenance',
     'custom role CRUD persisted card + metadata',
     'delete refused assigned role unless force cleared sessions',
     'CLI accepted dynamic custom role from registry',

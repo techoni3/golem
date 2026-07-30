@@ -5,8 +5,15 @@ description: Read when appending a milestone to a project journal, locating `~/.
 
 # journaling
 
-Journals live OUTSIDE the repo at `~/.golem/journals/<project_id>/`:
-`hook.jsonl` (mechanical) and `summary.jsonl` (semantic). Both append-only JSONL.
+Journals live OUTSIDE the repo at `~/.golem/journals/<project_id>/hook.jsonl` — append-only JSONL,
+machine-local, one line per tool call and lifecycle event.
+
+> [!IMPORTANT]
+> **This is telemetry, not the project's memory.** What a session *learned* belongs in
+> `docs/memory.jsonl` in the repo, which `golem:docs-maintenance` owns — it carries an evidence
+> field, it is swept and promoted, and a colleague not running golem can read it. This file has
+> none of those properties. A lesson recorded here is invisible to the repo and never swept.
+> Milestones here mark that something happened; memory records what it taught you.
 
 **Never write `hook.jsonl` lines by hand.** Where it is written at all, it is written by hooks; the
 model's ONLY write is appending milestone lines. See When, below.

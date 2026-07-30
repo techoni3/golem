@@ -99,13 +99,18 @@ thing that fails — which is why the builder reads the chain instead.
 
 ## Branch
 
-You own **one branch per spec**, and while it is open it is the integration target. **Builders never
-merge — theirs or anyone's.** They commit on their slice branch and stop at `built`. You merge each
-slice in after both its gates pass, and you merge the spec branch to `main` once the spec is
-complete. The full contract, including worktrees, is in `golem:git-conventions` § Spec branches.
+You own **one branch per spec**, and while it is open it is the integration target. Builders merge
+their own slices into it and stop at `built`; **you** merge the spec branch to `main` once the whole
+spec's gates are clear. The full contract, including worktrees, is in `golem:git-conventions`
+§ Spec branches.
 
-Reconciling is yours because merging is the act that makes work real, and a builder merging at
-`built` would land it before verification or review had run at all.
+**The gate sits at the spec boundary, not at each slice.** That is deliberate: slices integrate
+continuously so their conflicts stay small, and `main` stays behind exactly one review. It also
+means the spec branch may hold unreviewed work at any moment — which is fine on a branch nobody
+ships from, and is why you never merge it out early to "unblock" something.
+
+The merge to `main` is yours because that is the act that makes work real, and it is the one place
+where "both gates passed" is a fact rather than a plan.
 
 Opening one is still an explicit act — the human asks for it, or the spec says so. Absent that, work
 on the branch you are already on and `main` is the integration target.
@@ -128,9 +133,11 @@ A slice at `built` needs **both** gates. They are different jobs and neither sub
    what it needs. Do not front-load spec content into its context; a reviewer handed a pre-selected
    context is being steered by whoever selected it.
 
-Verified **and** review clean → **you merge the slice into the integration target**, then `done`. A
-`BLOCKER` or `FAIL` → back to the builder with the report → `building`. Only the human overrides a
-`BLOCKER`, with the reason on the ticket.
+Verified **and** review clean → `done`; the slice is already on the spec branch. A `BLOCKER` or
+`FAIL` → back to the builder with the report → `building`. Only the human overrides a `BLOCKER`,
+with the reason on the ticket.
+
+When every slice is terminal, run the spec-level gates, then merge the spec branch to `main`.
 
 Bounce merge conflicts back to the builder with the conflict output rather than resolving them
 yourself — they know what they meant.

@@ -1,27 +1,35 @@
 ---
 name: docs-maintenance
-description: Read when bootstrapping a project's agent docs, after a structural change, at spec close to fix what a feature invalidated, or to audit docs against code. Stale docs are defects. Not for journal or memory lines, use golem:journaling.
+description: Read when bootstrapping a project's agent docs, after a structural change, at spec close to fix what a feature invalidated, or to sweep docs and project memory for drift. Covers the knowledge layers a project owns in git. Not for golem hook-journal milestones, use golem:journaling.
 ---
 
 # docs-maintenance
 
-A project owns two layers of durable knowledge in git. Golem derives a third and renders it; nobody
-writes that one by hand.
+A project owns **three** layers of durable knowledge, all of them ordinary files in git. Golem
+derives a fourth and renders it; nobody writes that one by hand.
 
-| | What | Lives | Loaded |
-|---|---|---|---|
-| **Invariants** | what stays true if this were rewritten in another language | root `AGENTS.md` | always |
-| **Durable knowledge** | architecture, conventions, `REPO-MAP.md`, ADRs | `docs/` + the map, behind a trigger index | on demand |
-| **Current state** | live sessions, recently closed work, recent commits | nowhere — derived at session start | every session |
+| | What | Lives | Loaded | Rots? |
+|---|---|---|---|---|
+| **L1 — invariants** | what stays true if this were rewritten in another language | root `AGENTS.md` | always | no, if the admission test is applied |
+| **L2 — durable knowledge** | architecture, conventions, `REPO-MAP.md`, ADRs | `docs/` + the map, behind a trigger index | on demand | the living half does; ADRs do not |
+| **L3 — episodic memory** | what a session *learned* | `docs/memory.jsonl` in the repo | last ~50 records | no, it is append-only — but it fills |
+| **L4 — current state** | live sessions, recent spec closes, recent commits | nowhere — derived at session start | every session | cannot; it is derived |
 
-Episodic memory — what a session *learned* — is not a third store here. It is a **milestone line in
-`~/.golem/journals/<project_id>/hook.jsonl`**, and `golem:journaling` owns the location, the schema,
-and the append recipe. Do not invent a second one; see § Do not add a store.
+**All three project layers live in the repo, and that is load-bearing.** A colleague working on the
+same codebase without golem gets L1, L2, and L3 in full, because they are just files. Move any of
+them into golem's own storage and that stops being true — the knowledge becomes a private benefit
+of a tool the rest of the team does not run. L4 is the only layer golem owns, because coordination
+state is genuinely the tool's job.
 
-Docs and milestones share a trigger and have opposite write semantics, which is the whole
-distinction: **a doc update *replaces* a description of current reality** — idempotent, it rots, the
-audit sweeps it. **A milestone *appends* what a session learned** — immutable, never rewritten,
-never swept. They sit next to each other at spec close only because that is when you know both.
+**L3 is not the golem journal.** `~/.golem/journals/<project_id>/hook.jsonl` is central hook
+telemetry — per-tool-call, machine-local, never swept, and its milestone line has no evidence field.
+It is fine for "this session hit a milestone"; it is not the project's memory. `golem:journaling`
+owns that file. This skill owns `docs/memory.jsonl`.
+
+Docs and memory share a trigger and have opposite write semantics, which is the whole distinction:
+**a doc update *replaces* a description of current reality** — idempotent, it rots, the audit sweeps
+it. **A memory record *appends* what a session learned** — immutable, never rewritten, but swept for
+promotion. They sit next to each other at spec close only because that is when you know both.
 
 ## Invariants — root `AGENTS.md`
 
@@ -99,6 +107,38 @@ and **updating the verify pass to match**. A contract whose own check disagrees 
 re-budget, it is an exception someone granted themselves. Before concluding you are there, cut the
 sections the template does not list: that is where the slack usually is.
 
+## Episodic memory — `docs/memory.jsonl`
+
+One append-only JSONL in the repo. **JSONL, not a JSON array**, for a concrete reason: several agents
+on several machines append through git, and an array requires rewriting the closing bracket, so it
+conflicts on every concurrent write. Line appends usually merge, and the resolution rule is just
+"keep both lines".
+
+```json
+{"ts":"2026-07-30T09:12:00Z","scope":"project","claim":"…","evidence":"GOL-123 | commit abc1234","author":"lead:session-name"}
+```
+
+`scope` is `gateway | project | global`. **The `evidence` reference is what keeps the file from
+becoming a pile of unfalsifiable assertions** — a record no one can check is a rumour with a
+timestamp. If you cannot name a ticket, commit, or file, you probably have an opinion rather than a
+finding.
+
+**Admission bar, and it is high:** *a future session working on something else would be wrong
+without this.* Most closing briefs fail it, correctly — they belong on the ticket.
+
+**Elicit remembrance, not description.** A field called `claim` invites a restatement of what was
+built, which is worthless. Ask instead: what surprised you, what did you have to discover the hard
+way, what would you tell someone starting this tomorrow, what would you do differently. "Implemented
+X per spec Y" is a log line. "The retry wrapper silently swallows 429s, so the integration looked
+healthy for a week" is a lesson.
+
+**Written at spec close by whoever closed it**, not by each builder at ticket close. Ten builders
+appending "implemented X per spec Y" reaches the read window in a fortnight and evicts real insight
+at the rate of routine work.
+
+L3 is a **staging area, not an archive.** The window is bounded, so an unpromoted insight at position
+600 is unreachable and its absence is silent. That is what the sweep is for.
+
 ## Mode: bootstrap — the project has none of this
 
 Lay the pattern down once, then hand off. These become ordinary project files — no golem markers, no
@@ -110,7 +150,10 @@ re-render, no ownership claim.
    fields an ADR needs: **Status · Context · Decision · Consequences**. The decision is worthless
    without the rejected alternative, so say so in the template rather than hoping.
 3. `REPO-MAP.md` per the contract above.
-4. Wire the pointers into `AGENTS.md`, then run the verify pass.
+4. `docs/memory.jsonl`, empty. Create the file rather than waiting for the first record — an absent
+   file reads as "this project does not do that" and nobody starts it later.
+5. Wire the pointers into `AGENTS.md` — including where memory lives and its admission bar, since
+   L1 is what tells a session the other layers exist — then run the verify pass.
 
 Do not invent content to fill sections. A section with nothing true to say should not exist.
 
@@ -161,8 +204,9 @@ Grepping the full changed path is the trap: it finds almost nothing, and the dri
 exactly the structural kind the map is for.
 
 Then walk the incremental triggers, decide whether the work earned an **ADR** (a load-bearing choice
-with a rejected alternative — append one, never edit an old one), and append a milestone line via
-`golem:journaling` if anything clears its bar. Usually nothing does.
+with a rejected alternative — append one, never edit an old one), and append an L3 record to
+`docs/memory.jsonl` if anything clears its bar. Usually nothing does — and the bar is the point, so
+resist the urge to record that the feature shipped. The tracker already knows.
 
 ## Mode: audit — map versus reality
 
@@ -175,6 +219,28 @@ has lied to you twice. **Living docs only** — dated artifacts are out of scope
 4. Delete stale claims aggressively. A shorter true doc beats a longer doubtful one.
 5. Re-stamp.
 
+## Mode: sweep — memory, on demand
+
+No fixed trigger. Run it when `docs/memory.jsonl` has grown past the read window, when a record has
+stopped being true, or when asked. **Every record gets exactly one of three outcomes**, and the
+middle one is the reason the file stays useful:
+
+| Outcome | When | Action |
+|---|---|---|
+| **Promote** | it has stopped being episodic and is now just how this codebase works | write it into the relevant L2 doc, or open an ADR if it was a decision. Then drop the record — it is not lost, it moved |
+| **Discard** | superseded, fixed, or it was never true | delete the line |
+| **Keep** | still a live lesson, not yet general | leave it |
+
+Promotion is the whole point. An insight that never leaves L3 falls out of the read window and is
+silently unreachable — the file grows while its usefulness drops.
+
+**L2 → L1 is not a promotion path.** L1 is what survives a rewrite in another stack; L2 is by
+definition stack and implementation knowledge. Anything crossing that line was misfiled when it was
+written, so it is a correction, not a promotion, and it needs no mechanism.
+
+Rewriting history is allowed here and only here: the sweep is the one writer permitted to delete
+lines. Everything else appends.
+
 ## Precedence
 
 **Code outranks docs, always.** When they disagree, trust the code and fix the doc in the same
@@ -182,10 +248,15 @@ session. A disagreement you noticed and left is a defect you chose.
 
 ## Do not add a store
 
-Episodic memory already has a home in `golem:journaling`. If you find yourself designing a second
-place to record what a session learned, you are duplicating it — and two stores with the same
-admission bar means neither gets swept and both get half the records. Sprawl is a
-garbage-collection failure, not a storage failure; a new store makes it worse.
+The project has exactly one memory file, `docs/memory.jsonl`. If you find yourself designing a
+second place to record what a session learned — a `LESSONS.md`, a notes directory, a table in the
+tracker — you are duplicating it, and two stores with the same admission bar means neither gets
+swept and both get half the records. Sprawl is a garbage-collection failure, not a storage failure;
+a new store makes it worse.
+
+The same rule cuts the other way: **do not redirect L3 into golem's hook journal.** It is central,
+machine-local, unswept, and has no evidence field, so records put there are invisible to the repo,
+to a colleague not running golem, and to the sweep below.
 
 ## Verify pass — after every write
 

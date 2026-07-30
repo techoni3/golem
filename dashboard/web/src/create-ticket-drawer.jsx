@@ -312,12 +312,15 @@ function CreateTicketDrawer({ open, preselectProject, preselectKind, preselectPa
     if (dispatchSession && !sessions.some((s) => s.session_id === dispatchSession)) setDispatchSession('');
   }, [sessions]); // eslint-disable-line
 
-  // GOL-315: manager front door. The assignee dropdown is also the dispatch
-  // target, so default new work to the least-loaded live manager when present.
+  // GOL-315: lead front door. The assignee dropdown is also the dispatch target,
+  // so default new work to the least-loaded live lead when present. The role was
+  // `manager` until GOL-103 merged it into `lead`; both halves of this lookup have
+  // to move together, because the server annotation and this search are matched by
+  // string and nothing fails loudly when they disagree.
   React.useEffect(() => {
     if (!open || !projectId || assignee) return;
-    const manager = sessions.find((s) => s.suggested === 'manager') || sessions.find((s) => s.role === 'manager');
-    if (manager?.session_id) setAssignee(manager.session_id);
+    const lead = sessions.find((s) => s.suggested === 'lead') || sessions.find((s) => s.role === 'lead');
+    if (lead?.session_id) setAssignee(lead.session_id);
   }, [open, projectId, sessions, assignee]);
 
   // ── Autosave (debounced) on any field change while open ───────────────────
