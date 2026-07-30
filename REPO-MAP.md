@@ -22,7 +22,7 @@
   mapping it forward; the registry self-prunes on next `readRoleRegistry()`.
 ### `substrate/hooks/tracker-context.sh`
 - Builds the SessionStart payload — role card, roster, LSP, recently-closed pointers, recent
-  commits. All derived; fail-open per field; every field capped. Also served by `project_context`.
+  commits. All derived; fail-open per field; per-field and aggregate caps. Also via `project_context`.
 - Its node block sits inside a command substitution: a bare dollar-paren pair or a lone apostrophe
   in a JS comment breaks it, with an EOF error pointing at the last line.
 

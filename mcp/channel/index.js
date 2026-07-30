@@ -1168,9 +1168,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           dir = path.dirname(dir);
         }
       }
-      if (!projectCwd) {
-        return { isError: true, content: [{ type: 'text', text: 'project_context: cannot determine the project — this session has no registry row and the working directory is not inside a project. Refusing to render context for the wrong directory.' }] };
-      }
+      if (!projectCwd) projectCwd = process.cwd();
       const out = execFileSync('bash', [script], {
         cwd: projectCwd,
         encoding: 'utf8',
