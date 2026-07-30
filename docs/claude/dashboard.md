@@ -146,18 +146,18 @@ endpoint for designed→planning and the server-enforced phase artifacts instead
 Tracker schema version 10 adds `tickets.phase`; version 11 adds hook-ingest UUID
 idempotency; version 12 adds dispatch-queue workspace fields. `dashboard/server/phase-machine.js` is the workflow source of truth.
 The DB layer derives board `state` from phase and rejects illegal transitions or
-missing artifacts such as closing briefs, manager dispatch evidence, verification
+missing artifacts such as closing briefs, dispatch evidence (the phase machine key is `managerDispatch`; the role is now `lead`), verification
 reports, child waves, and spec close requirements.
 
 Tracker mutations emit bus events on `ticket/<display_id>`. Child ticket events
-mirror to `spec/<parent-display-id>/tree`, which is the manager subscription
-surface for via-manager verification. Hook ingest writes lifecycle/activity/custom
+mirror to `spec/<parent-display-id>/tree`, which is the lead subscription
+surface for via-lead verification. Hook ingest writes lifecycle/activity/custom
 events through `/api/bus/ingest`; subscriptions are managed through
 `/api/bus/subscribe`, `/api/bus/unsubscribe`, and `/api/bus/subscriptions`.
 
-The dispatchable-session route marks the least-loaded live same-project manager
-with `suggested: "manager"`, ranking by in-progress work then pending queue. The
-create-ticket drawer uses that annotation to preselect a live manager in the
+The dispatchable-session route marks the least-loaded live same-project lead
+with `suggested: "lead"`, ranking by in-progress work then pending queue. The
+create-ticket drawer uses that annotation to preselect a live lead in the
 Assignee/dispatch dropdown when the user has not chosen another target. These
 are defaults and suggestions, never gates; explicit selections always win. The
 project detail page presents the project-scoped session roster directly rather
@@ -168,6 +168,6 @@ than a second, overlapping team roster.
 Tracker schema version 8 adds nullable `tickets.wave` for spec fan-out ordering.
 `NULL` means the ticket is not wave-managed; otherwise the value must be a
 positive integer. `createTicket` and `updateTicket` validate this invariant, and
-REST/MCP ticket create/update pass the field through so planners can assign
+REST/MCP ticket create/update pass the field through so leads can assign
 dependency waves while creating child work items. The v8 migration backfills
 GOL-158 children from `[W1]`, `[W2]`, and `[W3]` title prefixes.

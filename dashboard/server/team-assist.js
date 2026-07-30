@@ -33,7 +33,9 @@ function slimSession(row) {
 
 export function teamAssists(rows = []) {
   return {
-    suggested_manager: slimSession(leastLoadedRoleSession(rows, 'manager')),
+    // Role merged into `lead` in GOL-103. The key keeps its old name because
+    // dashboard clients read it; the ROLE queried has to be one that exists.
+    suggested_manager: slimSession(leastLoadedRoleSession(rows, 'lead')),
     suggested_explorer: slimSession(leastLoadedRoleSession(rows, 'explorer')),
     suggested_reviewer: slimSession(leastLoadedRoleSession(rows, 'reviewer')),
   };

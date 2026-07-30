@@ -48,12 +48,12 @@ try {
   assertSchemaAtLeast11(tracker, 'memory tracker DB');
 
   const assists = teamAssists([
-    { session_id: 'mgr-busy', label: 'busy manager', role: 'manager', alive: true, pending_count: 2, in_progress_tickets: [{ id: 'x' }] },
-    { session_id: MANAGER, label: 'free manager', role: 'manager', alive: true, pending_count: 0, in_progress_tickets: [] },
+    { session_id: 'mgr-busy', label: 'busy lead', role: 'lead', alive: true, pending_count: 2, in_progress_tickets: [{ id: 'x' }] },
+    { session_id: MANAGER, label: 'free lead', role: 'lead', alive: true, pending_count: 0, in_progress_tickets: [] },
     { session_id: EXPLORER, label: 'free explorer', role: 'explorer', alive: true, pending_count: 0, in_progress_tickets: [] },
     { session_id: 'explorer-busy', label: 'busy explorer', role: 'explorer', alive: true, pending_count: 1, in_progress_tickets: [{ id: 'y' }] },
   ]);
-  assert.equal(assists.suggested_manager.session_id, MANAGER, 'least-loaded manager is suggested');
+  assert.equal(assists.suggested_manager.session_id, MANAGER, 'least-loaded lead is suggested');
   assert.equal(assists.suggested_explorer.session_id, EXPLORER, 'least-loaded explorer is suggested');
 
   const spec = tracker.createTicket({ project_id: PROJECT, kind: 'spec', title: 'SMOKE GOL-315 spec', created_by: MANAGER, assignee: MANAGER });

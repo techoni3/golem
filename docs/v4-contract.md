@@ -87,7 +87,7 @@ Target ≤ 40 lines each.
 
 | skill | contents |
 |---|---|
-| `managing` / `planning` / `building` / `exploring` | role-specific SOPs for intake/routing, design/decomposition, implementation, and evidence-backed verification |
+| `lead` / `building` / `exploring` | role-specific SOPs for intake and design through orchestration and close, implementation, and evidence-backed verification. `managing` and `planning` merged into `lead` in GOL-103 |
 | `verify-done` | exact evidence commands (test cmd from repo, `gh pr view --json state,mergeable`, CI check) ; "an agent's claim is not evidence" |
 | `test-policy` | budget ~10–20 journey-level integration/e2e tests; what counts; unit-test fan-out banned unless complex pure logic |
 | `gates` | gate file format + central path; how channel/dashboard verdicts clear it; when to gate (user said so at intake, or missing secret) |

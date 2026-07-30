@@ -65,9 +65,9 @@ agents for recon and both review gates. Specs and work items are phase-backed in
 the tracker, and long waits use bus subscriptions (`ticket/<display_id>` or
 `spec/<display_id>/tree`) instead of polling.
 
-When a live team **is** enabled: the dashboard preselects a manager as the
+When a live team **is** enabled: the dashboard preselects a lead as the
 Assignee/dispatch target and any explicit target overrides it; the team API
-suggests a least-loaded explorer, but the manager dispatches verification and
+suggests a least-loaded explorer, but the lead dispatches verification and
 review and records the transition evidence.
 
 ## Repo-specific agent rules

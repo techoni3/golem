@@ -2087,7 +2087,7 @@ async function main() {
       });
     }
     const assists = teamAssists(out);
-    return out.map((row) => ({ ...row, suggested: row.session_id === assists.suggested_manager?.session_id ? 'manager' : null }));
+    return out.map((row) => ({ ...row, suggested: row.session_id === assists.suggested_manager?.session_id ? 'lead' : null }));
   });
 
   fastify.get('/api/roles', async () => listRoleCards());
