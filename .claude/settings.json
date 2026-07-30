@@ -129,8 +129,8 @@
       "Bash(golem:*)",
       "Bash(bash:*)",
 
-      "Skill(golem:managing)",
-      "Skill(golem:planning)",
+      "Skill(golem:lead)",
+      "Skill(golem:code-survey)",
       "Skill(golem:exploring)",
       "Skill(golem:building)",
       "Skill(golem:consulting)",

@@ -1403,14 +1403,16 @@ async function cmdSyncCheckAll({ quiet = false } = {}) {
     const root = substrateRoot();
     const a = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.agentOutDir(), items: ocAdapter.buildAgentPlan({ substrateRoot: root }) });
     const s = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.skillsOutDir(), items: ocAdapter.buildSkillPlan({ substrateRoot: root }) });
+    const r = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.rolesOutDir(), items: ocAdapter.buildRolePlan({ substrateRoot: root }) });
     const i = compiler.checkDrift({ target: 'opencode-instructions', outDir: ocAdapter.instructionOutDir(), items: ocAdapter.buildInstructionPlan({ substrateRoot: root }) });
-    const clean = a.clean && s.clean && i.clean;
+    const clean = a.clean && s.clean && r.clean && i.clean;
     if (!quiet) log('');
     say('global opencode:');
     say(`  agents out: ${ocAdapter.agentOutDir()}`);
     say(`  skills out: ${ocAdapter.skillsOutDir()}`);
+    say(`  roles out: ${ocAdapter.rolesOutDir()}`);
     say(`  instructions out: ${ocAdapter.instructionOutDir()}`);
-    if (!quiet) printDrift({ clean, drifted: [...a.drifted, ...s.drifted, ...i.drifted], orphaned: [...a.orphaned, ...s.orphaned, ...i.orphaned] });
+    if (!quiet) printDrift({ clean, drifted: [...a.drifted, ...s.drifted, ...r.drifted, ...i.drifted], orphaned: [...a.orphaned, ...s.orphaned, ...r.orphaned, ...i.orphaned] });
     drift = drift || !clean;
   }
 
@@ -1457,21 +1459,25 @@ async function cmdSyncOpencode({ checkOnly, force }) {
   const packageVersion = readPackageVersion();
   const agentItems = ocAdapter.buildAgentPlan({ substrateRoot: root });
   const skillItems = ocAdapter.buildSkillPlan({ substrateRoot: root });
+  const roleItems = ocAdapter.buildRolePlan({ substrateRoot: root });
   const instructionItems = ocAdapter.buildInstructionPlan({ substrateRoot: root });
   const agentDir = ocAdapter.agentOutDir();
   const skillsDir = ocAdapter.skillsOutDir();
+  const rolesDir = ocAdapter.rolesOutDir();
   const instructionDir = ocAdapter.instructionOutDir();
 
   if (checkOnly) {
     const a = compiler.checkDrift({ target: 'opencode', outDir: agentDir, items: agentItems });
     const s = compiler.checkDrift({ target: 'opencode', outDir: skillsDir, items: skillItems });
+    const r = compiler.checkDrift({ target: 'opencode', outDir: rolesDir, items: roleItems });
     const i = compiler.checkDrift({ target: 'opencode-instructions', outDir: instructionDir, items: instructionItems });
     log(`  agents out: ${agentDir}`);
     log(`  skills out: ${skillsDir}`);
+    log(`  roles out: ${rolesDir}`);
     log(`  instructions out: ${instructionDir}`);
-    const drifted = [...a.drifted, ...s.drifted, ...i.drifted];
-    const orphaned = [...a.orphaned, ...s.orphaned, ...i.orphaned];
-    if (a.clean && s.clean && i.clean) {
+    const drifted = [...a.drifted, ...s.drifted, ...r.drifted, ...i.drifted];
+    const orphaned = [...a.orphaned, ...s.orphaned, ...r.orphaned, ...i.orphaned];
+    if (a.clean && s.clean && r.clean && i.clean) {
       log('  OK clean — no drift');
       return;
     }
@@ -1490,15 +1496,18 @@ async function cmdSyncOpencode({ checkOnly, force }) {
 
   const ra = compiler.render({ target: 'opencode', outDir: agentDir, items: agentItems, packageVersion, force });
   const rs = compiler.render({ target: 'opencode', outDir: skillsDir, items: skillItems, packageVersion, force });
+  const rr = compiler.render({ target: 'opencode', outDir: rolesDir, items: roleItems, packageVersion, force });
   const ri = compiler.render({ target: 'opencode-instructions', outDir: instructionDir, items: instructionItems, packageVersion, force });
   log(`  agents out: ${agentDir}`);
   log(`    written: ${ra.written.length}, unchanged: ${ra.unchanged.length}, pruned: ${ra.pruned.length}, tampered: ${ra.tampered.length}`);
   log(`  skills out: ${skillsDir}`);
   log(`    written: ${rs.written.length}, unchanged: ${rs.unchanged.length}, pruned: ${rs.pruned.length}, tampered: ${rs.tampered.length}`);
+  log(`  roles out: ${rolesDir}`);
+  log(`    written: ${rr.written.length}, unchanged: ${rr.unchanged.length}, pruned: ${rr.pruned.length}, tampered: ${rr.tampered.length}`);
   log(`  instructions out: ${instructionDir}`);
   log(`    written: ${ri.written.length}, unchanged: ${ri.unchanged.length}, pruned: ${ri.pruned.length}, tampered: ${ri.tampered.length}`);
 
-  const tampered = [...ra.tampered, ...rs.tampered, ...ri.tampered];
+  const tampered = [...ra.tampered, ...rs.tampered, ...rr.tampered, ...ri.tampered];
   if (tampered.length) {
     printTamper({ tampered });
     process.exit(1);
@@ -1604,9 +1613,10 @@ async function cmdDoctor() {
       const substrateRoot = resolve(GOLEM_ROOT, 'substrate');
       const a = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.agentOutDir(), items: ocAdapter.buildAgentPlan({ substrateRoot }) });
       const s = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.skillsOutDir(), items: ocAdapter.buildSkillPlan({ substrateRoot }) });
-      (a.clean && s.clean)
-        ? ok('opencode render clean (agents + skills)')
-        : skip(`opencode render drifted (${a.drifted.length + s.drifted.length} changed, ${a.orphaned.length + s.orphaned.length} orphaned) — run \`golem sync --target opencode\``);
+      const r = compiler.checkDrift({ target: 'opencode', outDir: ocAdapter.rolesOutDir(), items: ocAdapter.buildRolePlan({ substrateRoot }) });
+      (a.clean && s.clean && r.clean)
+        ? ok('opencode render clean (agents + skills + roles)')
+        : skip(`opencode render drifted (${a.drifted.length + s.drifted.length + r.drifted.length} changed, ${a.orphaned.length + s.orphaned.length + r.orphaned.length} orphaned) — run \`golem sync --target opencode\``);
     } catch (e) {
       skip(`could not check opencode drift — ${e.message}`);
     }

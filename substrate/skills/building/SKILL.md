@@ -1,6 +1,6 @@
 ---
 name: building
-description: Read when acting as builder — implement one tracker ticket, test, and post a four-part closing brief. No self-merge to main. Not for design or decomposition, use golem:planning; not for judging the result, use golem:reviewing.
+description: Read when acting as builder — implement one tracker ticket, test, and post a four-part closing brief. No self-merge to main. Not for design or decomposition, use golem:lead; not for judging the result, use golem:reviewing.
 ---
 
 # building

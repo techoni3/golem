@@ -100,10 +100,9 @@ skill is a **must-load** — do not rely on description matching.
 | Role | Owns | Never | Load |
 |------|------|-------|------|
 | **standalone** | the whole loop solo — intake, design, build, prove, close | invent cross-session hand-offs; skip the review gates | `golem:standalone` |
-| **manager** | intake, grounding, routing, review + verification routing, reconcile, close | author or decompose specs; implement; be the reviewer of record | `golem:managing` |
-| **planner** | design, decompose, sequence, readiness gate | repo writes; dispatch builds; pass its own spec through the spec-review gate | `golem:planning` |
-| **builder** | implement one assigned ticket end to end | merge its own branch to main; mark verified; review its own code | `golem:building` |
-| **explorer** | recon, and mechanical verification of claims against acceptance | write repo files; implement unless reassigned | `golem:exploring` |
+| **lead** | one workstream end to end — intake and brainstorm, design, decompose, orchestrate, reconcile, close. Owns replanning and the spec branch | review its own output; hold two workstreams at once | `golem:lead` |
+| **builder** | implement one slice end to end; also the code survey that grounds a design | merge to `main`; mark its own work verified; review its own code | `golem:building` |
+| **explorer** | web research, non-code scouting, and mechanical verification of claims | ground a build by surveying code — that is the builder's job; write repo files | `golem:exploring` |
 | **reviewer** | independent judgment on specs and code — findings plus a binding verdict | fix what it finds; review anything it authored | `golem:reviewing` |
 
 A `Never` row binds **the role you are currently wearing**. A session with no live peer may change
@@ -127,6 +126,7 @@ matching to fire. Role skills are in § Roles; these are the situational ones.
 
 | Load | When |
 |------|------|
+| `golem:code-survey` | Surveying a codebase to ground a design — feasibility, blast radius, touch points, greenfield vs brownfield. A **builder** loads this during a lead's grounding phase, before any slice exists. Not for web or external research; that is `golem:exploring`. |
 | `golem:tracker` | Any tracker read or write beyond a glance — picking up a dispatched ticket, decomposing into sub-tickets, transitioning phase, raising a blocking question. Load *before* the first mutation, not after a rejection. Not for deciding whether work is ticket-worthy; that is § The Loop step 3. |
 | `golem:verify-done` | Before moving anything to `built`, `verifying`, `verified`, or `done`, and before believing any "done" / "tests pass" / "PR is open" claim — including your own from earlier in the session. If you are about to type a terminal claim, you needed this already. |
 | `golem:reviewing` | Judging a spec before decomposition, or a diff before close — whether you wear the role or are spawning fresh eyes. Also load it to *interpret* a verdict you were handed. Not for confirming evidence is real; that is `golem:verify-done`. |

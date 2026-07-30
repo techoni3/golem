@@ -20,7 +20,10 @@ function write(file, text) {
 
 // Every role registered in lib/session-role.js needs a card AND a row in the instructions
 // Roles table — that table is the single source of role ownership.
-const FIXTURE_ROLES = ['manager', 'planner', 'builder', 'explorer', 'reviewer', 'standalone'];
+// Must track BUILTIN_ROLES in lib/session-role.js — the lint checks registered
+// roles against the fixture's cards and AGENTS.md table, so a stale list here
+// fails as a missing card rather than as a real defect.
+const FIXTURE_ROLES = ['lead', 'builder', 'explorer', 'reviewer', 'standalone'];
 
 function rolesTable(roles) {
   return [
@@ -297,11 +300,11 @@ try {
   // fail rather than be silently accepted.
   const oldCardsRoot = seedFixture('legacy-card-format');
   const oldCardsHome = path.join(tmp, 'legacy-card-format', 'home');
-  write(path.join(oldCardsRoot, 'roles', 'planner.md'), '# Role: planner\nMission: Turn ideas into executable work.\nLeads with: golem:tracker\nBoundaries: never dispatch build tickets.\nHand-offs: hand off clearly.\n');
+  write(path.join(oldCardsRoot, 'roles', 'lead.md'), '# Role: lead\nMission: Turn ideas into executable work.\nLeads with: golem:tracker\nBoundaries: never dispatch build tickets.\nHand-offs: hand off clearly.\n');
   const oldCards = lintSubstrate({ substrateRoot: oldCardsRoot, home: oldCardsHome });
   assert.equal(oldCards.ok, false, 'legacy card format should fail');
   const oldMessages = oldCards.issues.map((i) => `${i.file}:${i.line} ${i.message}`).join('\n');
-  assert.match(oldMessages, /roles\/planner\.md:1 role card missing required field Load/);
+  assert.match(oldMessages, /roles\/lead\.md:1 role card missing required field Load/);
   console.log('legacy card format: failed as expected');
 
   const cleanRoot = seedFixture('clean-warn');

@@ -47,9 +47,28 @@ does not, and you spend an hour debugging an instruction that never shipped.
 ### Multi-harness guards
 
 Substrate is templated with Handlebars: `{{#if claudecode}}…{{/if}}` and
-`{{#if opencode}}…{{/if}}`. Anything harness-specific **must** be guarded — opencode has
-no golem lifecycle hooks, so hook-dependent instructions are false there. See
-`substrate/skills/journaling/SKILL.md` for the pattern.
+`{{#if opencode}}…{{/if}}`. Anything harness-specific **must** be guarded, and the guard has to
+reflect what each harness can actually do. See `substrate/skills/journaling/SKILL.md` for the
+pattern.
+
+> [!IMPORTANT]
+> **Corrected 2026-07-30 (GOL-103).** This section previously said "opencode has no golem lifecycle
+> hooks, so hook-dependent instructions are false there." **That is wrong**, and it produced at
+> least one bad design before it was caught.
+>
+> `shims/opencode/index.js` bridges opencode's plugin event bus onto golem's existing hook scripts:
+> `session.created` → `session-register.sh` + journal, `tool.execute.before/after` → tool-pre/post,
+> `session.idle` → stop, `session.compacted` → **pre-compact**, `session.deleted` → session-end. At
+> lines 605–619 it runs `tracker-context.sh` and injects the parsed `additionalContext` via
+> `experimental.chat.system.transform`. It is wired through `"plugin": [...]` in `opencode.jsonc`.
+>
+> So **all three harnesses have lifecycle hooks and all three receive the SessionStart payload.** The
+> one caveat is that the shim resolves `GOLEM_HOOKS_DIR || <repo>/substrate/hooks`, so a user without
+> the repo checkout needs that variable set.
+>
+> The general lesson is worth more than the fact: a confident capability claim in a must-load
+> reference keeps generating wrong designs until someone checks it against the code. This file's own
+> header already says its inventory is a snapshot — treat capability claims the same way.
 
 ### Scope rule for skill content
 

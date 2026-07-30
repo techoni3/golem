@@ -21,7 +21,7 @@ code, because review's entire value is that a different context looked at it.
 
 | Job | Who |
 |-----|-----|
-| design, decompose, sequence | you, under `golem:planning` |
+| design, decompose, sequence | you, under `golem:lead` |
 | implement | you, under `golem:building` — or an in-process `worker` |
 | recon | in-process `researcher` (cheaper, keeps your context clean) |
 | verification of claims | you, by re-running — you did not fabricate your own output |
@@ -34,7 +34,7 @@ code, because review's entire value is that a different context looked at it.
 3. **Ticket or spec** in the tracker, with an acceptance checklist (`golem:tracker`).
 4. **Ground** — read the code. Spawn a `researcher` for anything broad; keep your own context for
    the decisions.
-5. **Design** under `golem:planning`. Hit the depth bar: options, decision, rejected alternative,
+5. **Design** under `golem:lead`. Hit the depth bar: options, decision, rejected alternative,
    observable acceptance.
 6. **Gate A — spec review.** Spawn a `reviewer` in spec mode (`golem:reviewing`). Resolve every
    `BLOCKER` before decomposing. This gate catches the expensive class of error, so do not skip it

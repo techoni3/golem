@@ -6,14 +6,22 @@ import { fileURLToPath } from 'node:url';
 import { readEndpointLeases, readSessionFacts } from './session-facts.js';
 
 export const BUILTIN_ROLES = Object.freeze([
-  { name: 'manager', color: '#f59e0b', glyph: 'MG', builtin: true },
-  { name: 'planner', color: '#a78bfa', glyph: 'PL', builtin: true },
+  { name: 'lead', color: '#a78bfa', glyph: 'LD', builtin: true },
   { name: 'builder', color: '#4ade80', glyph: 'BU', builtin: true },
   { name: 'explorer', color: '#38bdf8', glyph: 'EX', builtin: true },
   { name: 'reviewer', color: '#f472b6', glyph: 'RV', builtin: true },
   { name: 'standalone', color: '#f97316', glyph: 'SA', builtin: true },
 ]);
-export const ROLE_MIGRATIONS = Object.freeze({ general: 'manager', researcher: 'explorer', 'ui-tester': 'explorer' });
+// `manager` and `planner` merged into `lead` (GOL-103). `general` previously
+// pointed at `manager`, so it has to follow the merge or it would migrate to a
+// role that no longer exists.
+export const ROLE_MIGRATIONS = Object.freeze({
+  general: 'lead',
+  manager: 'lead',
+  planner: 'lead',
+  researcher: 'explorer',
+  'ui-tester': 'explorer',
+});
 export const SESSION_ROLES = new Proxy([], {
   get(_target, prop) {
     const roles = roleNames();
