@@ -48,6 +48,7 @@ if command -v node >/dev/null 2>&1; then
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { execFileSync } = require('child_process');
 const [home, start] = process.argv.slice(2);
 function rootFrom(dir) {
   let cur = path.resolve(dir);
@@ -142,6 +143,50 @@ try {
     lines.push(`Team on ${registryId}: (no live sessions)`);
   }
 } catch {}
+
+// Recently closed work, as POINTERS ONLY — id plus one-line title, never body.
+// Summarising these into prose would reintroduce exactly the lossy re-encoding
+// the reference model exists to remove; an id is something the agent can pull.
+// node:sqlite is built in from Node 22 and needs no dependency, which matters
+// because this runs from a render that has no node_modules. On older Node the
+// require throws and the field is simply omitted.
+try {
+  const { DatabaseSync } = require('node:sqlite');
+  const dbPath = path.join(home, 'tracker.db');
+  if (fs.existsSync(dbPath)) {
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    const rows = db.prepare(
+      'SELECT display_id, kind, title FROM tickets WHERE project_id = ? AND state = ? ORDER BY done_at DESC LIMIT 8',
+    ).all(registryId, 'done');
+    db.close();
+    if (rows.length) {
+      lines.push('', 'Recently closed:');
+      for (const r of rows) lines.push(`  ${r.display_id} (${r.kind}) ${String(r.title).slice(0, 72)}`);
+    }
+  }
+} catch {}
+
+// Recent commits. The densest freshness signal available, derived so it cannot
+// go stale, and the only field that also captures work done outside golem.
+// Its value is exactly the quality of the commit messages in this repo — do not
+// try to summarise or clean them up here.
+//
+// NB for anyone editing this heredoc: it lives inside a command substitution,
+// and bash still tracks paren nesting and quote pairs through the body even
+// though the delimiter is quoted. Writing a bare dollar-paren pair or a lone
+// apostrophe in a JS comment here breaks the whole script with an EOF error
+// pointing at the last line of the file, which is a long way from the cause.
+// 40 rather than 50: at 50 the whole payload measured 1022 tokens, just over the
+// ceiling. 40 keeps it near 800 and still sits inside the 25-50 range this was
+// specified with. Subjects are clipped so one pathological commit message cannot
+// blow the budget on its own.
+try {
+  const log = execFileSync('git', ['log', '--oneline', '-40'], {
+    cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+  }).trim();
+  if (log) lines.push('', 'Recent commits:', ...log.split('\n').map((l) => `  ${l.slice(0, 110)}`));
+} catch {}
+
 process.stdout.write(lines.join('\n'));
 NODE
 )"

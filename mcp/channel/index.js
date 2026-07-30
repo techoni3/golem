@@ -19,8 +19,8 @@ import http from 'node:http';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
-import { URL } from 'node:url';
-import { execFile } from 'node:child_process';
+import { URL, fileURLToPath } from 'node:url';
+import { execFile, execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -932,6 +932,12 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ['to'],
       },
     },
+    {
+      name: 'project_context',
+      description:
+        'Re-render this session\'s ambient project context — role card, live sessions, LSP, recently closed work as id+title pointers, and the last 40 commits. The same payload the SessionStart hook injects, on demand. Use when the session has run long enough that the boot payload is stale, or when a hook did not run. Returns pointers, never ticket bodies: pull those with ticket_get.',
+      inputSchema: { type: 'object', properties: {} },
+    },
   ],
 }));
 
@@ -1114,6 +1120,33 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       return { content: [{ type: 'text', text: JSON.stringify({ ok: true, delivered_to: managed.session_id, consult_id: args.consult_id || null, envelope_id: delivery.envelope_id }, null, 2) }] };
     } catch (error) {
       return { isError: true, content: [{ type: 'text', text: `consult_reply: managed Codex delivery failed — ${error instanceof Error ? error.message : String(error)}` }] };
+    }
+  }
+
+  if (name === 'project_context') {
+    // Deliberately shells out to the same script the SessionStart hook runs,
+    // rather than reimplementing the payload here. Two implementations of
+    // "what does a session need to know" would drift, and the drift would be
+    // invisible because each looks correct on its own.
+    try {
+      const here = path.dirname(fileURLToPath(import.meta.url));
+      const script = [
+        path.join(here, '..', '..', 'hooks', 'tracker-context.sh'),
+        path.join(here, '..', '..', 'substrate', 'hooks', 'tracker-context.sh'),
+      ].find((p) => fs.existsSync(p));
+      if (!script) {
+        return { isError: true, content: [{ type: 'text', text: 'project_context: tracker-context.sh not found relative to this server.' }] };
+      }
+      const out = execFileSync('bash', [script], {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        input: JSON.stringify({ session_id: SESSION_ID || '', cwd: process.cwd() }),
+        stdio: ['pipe', 'pipe', 'ignore'],
+      });
+      const ctx = JSON.parse(out)?.hookSpecificOutput?.additionalContext || '';
+      return { content: [{ type: 'text', text: ctx.trim() || '(no project context available)' }] };
+    } catch (err) {
+      return { isError: true, content: [{ type: 'text', text: `project_context: ${String(err?.message ?? err)}` }] };
     }
   }
 
