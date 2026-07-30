@@ -42,12 +42,18 @@ Two different jobs, two different agents:
 
 | Need | Who | Why |
 |------|-----|-----|
-| feasibility, blast radius, touch points, greenfield vs brownfield | a **builder**, loading `golem:code-survey` | it will build this slice, so the code understanding never crosses a boundary |
+| feasibility, blast radius, touch points, greenfield vs brownfield | a **builder**, loading `golem:code-survey` | when it goes on to build the slice, the code understanding never crosses a boundary at all |
 | web research, external API semantics, anything not in this codebase | an **explorer** | cheapest tier, stateless, no build follows |
 
 Engaging a builder for code grounding is deliberate and is the mechanism the whole design rests on.
 Do **not** send an explorer to survey code you are about to have built — that splits the
 understanding from the agent that needs it, which is the bug this role exists to fix.
+
+**The boundary only truly disappears with a live builder session.** In-process agents are
+single-shot, so a survey there returns a report and the agent is gone; the builder you spawn next is
+a fresh context reading it. That is still better than an explorer — the surveyor knows it is writing
+for a builder — but say which route you are on when you dispatch, because it changes how the survey
+should be written.
 
 Every report attaches to the spec as a supporting document. Nothing an agent discovers is allowed to
 die with its session.
@@ -92,10 +98,13 @@ thing that fails — which is why the builder reads the chain instead.
 
 ## Branch
 
-You own **one branch per spec**, and while it is open it is the integration target: builders merge
-their slice branches into it, and you merge it to `main` once the spec is complete and its gates are
-clear. Builders never target `main`. The full contract, including worktrees, is in
-`golem:git-conventions` § Spec branches.
+You own **one branch per spec**, and while it is open it is the integration target. **Builders never
+merge — theirs or anyone's.** They commit on their slice branch and stop at `built`. You merge each
+slice in after both its gates pass, and you merge the spec branch to `main` once the spec is
+complete. The full contract, including worktrees, is in `golem:git-conventions` § Spec branches.
+
+Reconciling is yours because merging is the act that makes work real, and a builder merging at
+`built` would land it before verification or review had run at all.
 
 Opening one is still an explicit act — the human asks for it, or the spec says so. Absent that, work
 on the branch you are already on and `main` is the integration target.
@@ -118,8 +127,12 @@ A slice at `built` needs **both** gates. They are different jobs and neither sub
    what it needs. Do not front-load spec content into its context; a reviewer handed a pre-selected
    context is being steered by whoever selected it.
 
-Verified **and** review clean → `done`. A `BLOCKER` or `FAIL` → back to the builder with the report →
-`building`. Only the human overrides a `BLOCKER`, with the reason on the ticket.
+Verified **and** review clean → **you merge the slice into the integration target**, then `done`. A
+`BLOCKER` or `FAIL` → back to the builder with the report → `building`. Only the human overrides a
+`BLOCKER`, with the reason on the ticket.
+
+Bounce merge conflicts back to the builder with the conflict output rather than resolving them
+yourself — they know what they meant.
 
 ## Close
 

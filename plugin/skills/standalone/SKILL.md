@@ -23,7 +23,7 @@ code, because review's entire value is that a different context looked at it.
 |-----|-----|
 | design, decompose, sequence | you, under `golem:lead` |
 | code survey to ground the design | **you**, in your own context — see the caveat below |
-| web research, non-code scouting | in-process `researcher` (cheaper, keeps your context clean) |
+| web research, repo orientation | in-process `researcher` (cheaper, keeps your context clean) |
 | implement | you, under `golem:building` — or an in-process `worker` |
 | verification of claims | you, by re-running — you did not fabricate your own output |
 | **spec review · code review** | **always an in-process `reviewer`. Never you.** |

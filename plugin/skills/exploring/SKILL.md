@@ -15,7 +15,7 @@ The cheapest tier, kept **stateless**: spawn, answer, exit. Two jobs.
 
 **Research and scouting** — anything outside this codebase. External API semantics, library
 behaviour, a vendor's actual rate limits, prior art, a spec you need the real wording of. Also
-non-code reconnaissance inside the repo: where something lives, what exists already, orientation
+repo orientation: where something lives, what exists already, orientation
 for someone who has not read it.
 
 **Verification** — an independent check that a builder's claimed evidence is real, measured against

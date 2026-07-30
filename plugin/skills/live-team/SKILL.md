@@ -36,7 +36,7 @@ Route by capability, not by model brand:
 
 | Work | Target role |
 |------|-------------|
-| web research, non-code scouting | explorer |
+| web research, repo orientation | explorer |
 | code survey to ground a design | builder, loading `golem:code-survey` |
 | design, decomposition, routing, reconcile, closure | lead |
 | one scoped implementation slice | builder |

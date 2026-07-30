@@ -14,10 +14,21 @@ A survey answers four questions and nothing else:
 
 ## Who runs this, and why it matters
 
-Normally **a builder**, during a lead's grounding phase, before any slice exists. The builder that
-surveys an area is the one that will build it, so the survey is a **note to your own future self**,
-not a document for a stranger. That changes what is worth writing down: record the thing that will
-save you an hour when you start, not a tour of the architecture.
+Normally **a builder**, during a lead's grounding phase, before any slice exists.
+
+**Who reads this decides how you write it, so establish that first.**
+
+*If you will build what you surveyed* — a live builder session that stays for the slice — the report
+is a **note to your future self**. Record the thing that will save you an hour when you start, not a
+tour of the architecture.
+
+*If you will not* — and on the default in-process route you will not, because those agents are
+single-shot and self-clean — **the reader is a stranger**, and a terse self-note is worthless to
+them. Write it to survive the boundary: state the constraint in full, cite the paths, and spell out
+what you would otherwise have left implicit because you expected to be the one reading it.
+
+Guessing wrong in the second direction is much cheaper than guessing wrong in the first. When
+unsure, write for the stranger.
 
 An explorer may also load this for a code question that no build follows. It never carries a survey
 into implementation, because it never implements.
