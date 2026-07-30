@@ -235,58 +235,82 @@ try {
 // of realistic 150-char subjects is ~1,300 tokens on its own. This repo happens
 // to have terse subjects, which is exactly the input the design says cannot be
 // relied on. So: take up to 40, stop at CHAR_CAP, and say when truncated.
+let commitLines = [];
 try {
-  const CHAR_CAP = 2600; // ~640 tokens, leaving room for the other four fields
   const log = execFileSync('git', ['log', '--oneline', '-40'], {
     cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
   }).trim();
-  if (log) {
-    const out = [];
-    let used = 0;
-    for (const line of log.split('\n')) {
-      const entry = `  ${line.slice(0, 110)}`;
-      if (used + entry.length > CHAR_CAP) break;
-      out.push(entry);
-      used += entry.length + 1;
-    }
-    if (out.length) {
-      const all = log.split('\n').length;
-      // Header states what this section actually contains. It used to be computed
-      // before the aggregate trim ran, so it could claim 23 of 40 above 17 lines.
-      sections.set('commits', ['', out.length < all ? `Recent commits (${out.length} of ${all}):` : 'Recent commits:', ...out]);
-    }
-  }
+  if (log) commitLines = log.split('\n').map((l) => `  ${l.slice(0, 110)}`);
 } catch {}
+
+// Resize, then restate — do not drop the section wholesale. Whole-section
+// dropping was adopted to stop the header lying about how many entries it listed,
+// but as the ONLY lever it produced a cliff on the ordinary path: every packaged
+// role card is 241-298 bytes, so being 33 bytes over budget cost all 2,600 chars
+// of commits. Fitting to the remaining budget keeps the header honest, because it
+// is computed from what was actually kept.
+function commitsWithin(budget) {
+  const out = [];
+  let used = 0;
+  for (const entry of commitLines) {
+    if (used + entry.length + 1 > budget) break;
+    out.push(entry);
+    used += entry.length + 1;
+  }
+  if (!out.length) return null;
+  const header = out.length < commitLines.length
+    ? `Recent commits (${out.length} of ${commitLines.length}):`
+    : 'Recent commits:';
+  return ['', header, ...out];
+}
 
 // The role card is part of the payload, so it is part of the budget. It used to
 // be concatenated by bash after this block, which is how a 2KB overlay card could
 // push the total past a ceiling this code believed it was enforcing.
+const PAYLOAD_MAX = 3600; // ~880 tokens at ~4.09 chars/token
+const CARD_MAX = 1200;    // a card is never droppable, so it must be truncatable
+
+// Card first: it is the session identity, and identity should be the first thing
+// read. That is a decision, not a side effect of where the code happens to
+// concatenate. It is also never dropped — a session without its role card does
+// not know what it is — which is exactly why it needs its own ceiling.
 let card = [];
 try {
-  if (cardPath && fs.existsSync(cardPath)) card = ['', fs.readFileSync(cardPath, 'utf8').trimEnd()];
+  if (cardPath && fs.existsSync(cardPath)) {
+    let body = fs.readFileSync(cardPath, 'utf8').trimEnd();
+    if (body.length > CARD_MAX) body = `${body.slice(0, CARD_MAX)}\n(role card truncated — see the card on disk)`;
+    card = ['', body];
+  }
 } catch {}
 
-// Aggregate ceiling. Capped parts do not make a capped whole. Drop WHOLE sections
-// in DROP_ORDER and say so — trimming trailing lines is what left a header
-// claiming more entries than it listed.
-const PAYLOAD_MAX = 3600; // ~880 tokens at ~4.09 chars/token
+// Aggregate ceiling. Capped parts do not make a capped whole.
 const dropped = [];
-const assemble = () => [
+const build = (commits) => [
   ...card,
   ...lines,
-  ...DROP_ORDER.filter((n) => sections.has(n)).flatMap((n) => sections.get(n)),
+  ...(sections.has('recent-closes') ? sections.get('recent-closes') : []),
+  ...(commits || []),
   ...(dropped.length ? ['', `(${dropped.join(', ')} omitted — payload budget)`] : []),
 ].join('\n');
 
-let payload = assemble();
-for (const name of DROP_ORDER) {
-  if (payload.length <= PAYLOAD_MAX) break;
-  if (!sections.has(name)) continue;
-  sections.delete(name);
-  dropped.push(name);
-  payload = assemble();
+// DROP_ORDER in one pass. Commits yield first, and yielding means SHRINKING —
+// they only disappear when not one entry fits. Only then does the next section go.
+//
+// With every other section capped (card 1200, roster 12 rows, closes 8 rows) the
+// fixed part cannot exceed ~2,600, so in practice some commits always fit and the
+// drop branches below are a backstop rather than an expected path. They stay
+// because the caps are the only thing making that true, and a future field
+// without one would need them.
+let commits = commitsWithin(Math.max(0, PAYLOAD_MAX - build(null).length));
+if (!commits && commitLines.length) dropped.push('commits');
+
+if (build(commits).length > PAYLOAD_MAX && sections.has('recent-closes')) {
+  sections.delete('recent-closes');
+  dropped.push('recent-closes');
+  commits = commitsWithin(Math.max(0, PAYLOAD_MAX - build(null).length));
+  if (!commits && commitLines.length && !dropped.includes('commits')) dropped.push('commits');
 }
-process.stdout.write(payload);
+process.stdout.write(build(commits));
 NODE
 )"
   if [ -n "$MAP_BLOCK" ] && command -v jq >/dev/null 2>&1; then
@@ -296,6 +320,17 @@ NODE
       MAP_ESC="${MAP_ESC%\"}"
       ctx="$ctx$MAP_ESC"
     fi
+  fi
+elif [ -n "$CARD" ] && command -v jq >/dev/null 2>&1; then
+  # No node means no assembled payload, but the role card needs neither. Every
+  # other field degrades independently, and moving the card into the node block
+  # had quietly made it the one field that did not — a session without node lost
+  # its identity as well as its context.
+  CARD_ESC="$( { printf '\n\n'; cat "$CARD"; } | jq -Rs . 2>/dev/null || true)"
+  if [ -n "$CARD_ESC" ]; then
+    CARD_ESC="${CARD_ESC#\"}"
+    CARD_ESC="${CARD_ESC%\"}"
+    ctx="$ctx$CARD_ESC"
   fi
 fi
 

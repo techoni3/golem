@@ -29,7 +29,7 @@ import {
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import * as tracker from './tracker-client.js';
-import { bridgeEndpointForParent, managedCodexBinding, resolveCallerSessionId, sessionsForParent } from './identity.js';
+import { bridgeEndpointForParent, managedCodexBinding, resolveCallerSessionId, resolveProjectCwd, sessionsForParent } from './identity.js';
 import { SESSION_ROLES, pushRoleBriefDirect, setSessionRole } from '../../lib/session-role.js';
 import { releaseEndpointLeases, renewEndpointLease, upsertSessionFact } from '../../lib/session-facts.js';
 
@@ -1137,43 +1137,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       if (!script) {
         return { isError: true, content: [{ type: 'text', text: 'project_context: tracker-context.sh not found relative to this server.' }] };
       }
-      // Registry first, cwd only as a last resort — the same precedence
-      // currentProjectId() documents. On Codex `cwd` is the plugin bundle root
-      // (codex.js:75 passes a relative `args` path, so the server only starts
-      // at all if cwd is the bundle), and the hook's root-walk finds no repo
-      // there. That does not error: it emits a confident, plausible-looking
-      // payload claiming no live sessions and no recent work, in the exact
-      // voice of derived state. Silently wrong is worse here than failing.
-      let projectCwd = null;
-      try {
-        const reg = JSON.parse(tracker.golemHome() && fs.readFileSync(path.join(tracker.golemHome(), 'sessions.json'), 'utf8'));
-        const row = (reg?.sessions || []).find((s) => s && SESSION_ID && s.session_id === SESSION_ID);
-        if (row?.project_path && fs.existsSync(row.project_path)) projectCwd = row.project_path;
-      } catch { /* no registry — fall through */ }
-
-      // cwd is only a safe fallback when it actually sits in a project. Under
-      // ordinary Codex it never does — the server starts at the plugin bundle
-      // root, and SESSION_ID is empty there because neither the managed binding
-      // nor the parent-session file nor the opencode bridge resolves it. Falling
-      // through anyway produced the whole reason this tool was rewritten: a
-      // confident "no live sessions, no recent work" for the wrong directory.
-      // Better to say we cannot tell.
-      // Mirrors rootFrom() in tracker-context.sh exactly, and must keep doing so:
-      // stop at $HOME, and match only .git or CLAUDE.md. Including AGENTS.md or
-      // walking past home finds a dotfiles repo — a very common setup — and then
-      // happily renders that repo's commits as if they were the project's. That
-      // is the confidently-wrong payload again, wearing a more convincing disguise.
-      if (!projectCwd) {
-        const homeDir = os.homedir();
-        let dir = process.cwd();
-        for (let i = 0; i < 64 && dir !== path.dirname(dir) && dir !== homeDir; i += 1) {
-          if (fs.existsSync(path.join(dir, '.git')) || fs.existsSync(path.join(dir, 'CLAUDE.md'))) {
-            projectCwd = dir;
-            break;
-          }
-          dir = path.dirname(dir);
-        }
-      }
+      // Rules and rationale live with the function, which is unit-tested in
+      // test/sync-enforcement.test.mjs — all three bugs this logic had were
+      // reachable without a live server, and all shipped unguarded.
+      const projectCwd = resolveProjectCwd({ sessionId: SESSION_ID, home: tracker.golemHome(), cwd: process.cwd() });
       if (!projectCwd) {
         return { isError: true, content: [{ type: 'text', text: 'project_context: cannot determine the project — this session has no registry row and the working directory is not inside a project. Refusing to render context for the wrong directory.' }] };
       }

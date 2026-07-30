@@ -116,6 +116,50 @@ async function assertShippedHookBundlesAreRunnable() {
   console.log('shipped hook bundles run standalone');
 }
 
+async function assertProjectCwdResolution() {
+  // The three cases below were all reachable without a live server and all
+  // shipped unguarded: removing the $HOME stop, re-adding AGENTS.md to the
+  // predicate, and removing the refusal itself each left the suite green.
+  const { resolveProjectCwd } = await import('../mcp/channel/identity.js');
+  const base = path.join(tmp, 'cwdres');
+  const home = path.join(base, 'home');
+  const repoDir = path.join(base, 'proj');
+  const nested = path.join(repoDir, 'a', 'b');
+  fs.mkdirSync(path.join(repoDir, '.git'), { recursive: true });
+  fs.mkdirSync(nested, { recursive: true });
+  fs.mkdirSync(home, { recursive: true });
+  write(path.join(home, 'sessions.json'), JSON.stringify({
+    sessions: [{ session_id: 'known', project_path: repoDir }],
+  }));
+
+  assert.equal(resolveProjectCwd({ sessionId: 'known', home, cwd: '/tmp', homeDir: base }), repoDir,
+    'registry row wins over cwd');
+  assert.equal(resolveProjectCwd({ sessionId: '', home, cwd: nested, homeDir: base }), repoDir,
+    'no row: walks up from cwd to the repo root');
+
+  // A dotfiles repo at HOME is very common. Walking into it renders that repo's
+  // commits as the project's — confidently, and in the voice of derived state.
+  const fakeHome = path.join(base, 'fakehome');
+  fs.mkdirSync(path.join(fakeHome, '.git'), { recursive: true });
+  const underHome = path.join(fakeHome, 'scratch');
+  fs.mkdirSync(underHome, { recursive: true });
+  assert.equal(resolveProjectCwd({ sessionId: '', home, cwd: underHome, homeDir: fakeHome }), null,
+    'must not climb into a dotfiles repo at HOME');
+
+  // AGENTS.md is deliberately NOT a project marker here: rootFrom() in
+  // tracker-context.sh matches only .git/CLAUDE.md, and these two must agree.
+  const agentsOnly = path.join(base, 'agents-only');
+  fs.mkdirSync(agentsOnly, { recursive: true });
+  write(path.join(agentsOnly, 'AGENTS.md'), '# not a project root\n');
+  assert.equal(resolveProjectCwd({ sessionId: '', home, cwd: agentsOnly, homeDir: base }), null,
+    'AGENTS.md alone must not mark a project root');
+
+  // null is the contract the refusal depends on.
+  assert.equal(resolveProjectCwd({ sessionId: 'unknown', home, cwd: path.join(base, 'nowhere'), homeDir: base }), null,
+    'unknown session outside any project resolves to null, which the caller must treat as isError');
+  console.log('project cwd resolution refuses rather than guessing');
+}
+
 async function assertPayloadBudgetAndRefusal() {
   // The aggregate budget and the project_context refusal both shipped unguarded.
   // The refusal is the one that got silently reverted and passed every gate.
@@ -146,14 +190,34 @@ async function assertPayloadBudgetAndRefusal() {
     env: { ...process.env, GOLEM_HOME: home, HOME: home, CLAUDE_CODE_SESSION_ID: 'b' },
   });
   const ctx = JSON.parse(res.stdout).hookSpecificOutput.additionalContext;
+  const shown = (s) => (s.match(/^ {2}[0-9a-f]{7} /gm) || []).length;
+
   assert.match(ctx, /Role: lead/, 'the role card is part of the payload');
   assert.ok(ctx.length <= 3600, `a large role card must not blow the budget, got ${ctx.length} chars`);
-  assert.match(ctx, /omitted — payload budget/, 'dropping a section must be stated, not silent');
-  // A header that survives must describe what is actually there.
+
+  // Commits RESIZE under pressure; they do not vanish. Whole-section dropping as
+  // the only lever put a cliff on the ordinary path — every packaged role card is
+  // 241-298 bytes, so 33 bytes over budget cost all 2,600 chars of commits.
+  assert.ok(shown(ctx) > 0, 'commits shrink to fit rather than dropping wholesale');
+  assert.doesNotMatch(ctx, /commits omitted/, 'a section that was merely trimmed must not be reported as omitted');
   const header = ctx.match(/Recent commits \((\d+) of \d+\)/);
-  const shown = (ctx.match(/^ {2}[0-9a-f]{7} /gm) || []).length;
-  if (header) assert.equal(Number(header[1]), shown, 'the (N of M) header must match the lines present');
-  console.log('payload budget covers the role card and drops whole sections');
+  assert.ok(header, 'a trimmed commits section states how many of how many');
+  assert.equal(Number(header[1]), shown(ctx), 'the (N of M) header must match the lines present');
+
+  // A pathological card is truncated rather than dropped, and — because it is
+  // capped — it can never starve the sections behind it. That is the property
+  // worth pinning: no single field can crowd out the rest.
+  write(path.join(home, 'roles', 'lead.md'), `# Role: lead\n${'x'.repeat(6000)}\n`);
+  const huge = spawnSync('bash', [hook], {
+    cwd: project, encoding: 'utf8', input: JSON.stringify({ session_id: 'b', cwd: project }),
+    env: { ...process.env, GOLEM_HOME: home, HOME: home, CLAUDE_CODE_SESSION_ID: 'b' },
+  });
+  const hugeCtx = JSON.parse(huge.stdout).hookSpecificOutput.additionalContext;
+  assert.match(hugeCtx, /Role: lead/, 'the card is never dropped — a session must know what it is');
+  assert.match(hugeCtx, /role card truncated/, 'an undroppable card must still be truncatable');
+  assert.ok(hugeCtx.length <= 3600, `a 6KB card must still fit the budget, got ${hugeCtx.length}`);
+  assert.ok(shown(hugeCtx) > 0, 'a capped card cannot starve the commits behind it');
+  console.log('payload budget resizes commits and truncates rather than starving');
 }
 
 async function assertOrphanDirectoryPruning() {
@@ -529,6 +593,7 @@ try {
   await assertTrackerContextFiltersStaleRoster();
   await assertOrphanDirectoryPruning();
   await assertShippedHookBundlesAreRunnable();
+  await assertProjectCwdResolution();
   await assertPayloadBudgetAndRefusal();
   assertNativeSessionDeduplication();
   await assertNativeSessionDiscovery();
