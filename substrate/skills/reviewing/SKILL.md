@@ -58,6 +58,24 @@ Judge the design, not its formatting:
 4. **Regression surface** — what else consumes the contract that changed?
 5. **Test breadth vs fan-out** — a green touched-file subset is not sufficient when a shared
    service, fixture, model, or contract moved. Name the consumer set.
+6. **Sweep the fact, not the file.** When a change states a rule — who may merge, who owns a step,
+   what a role may never do — grep the whole tree for that *fact* rather than re-reading the files
+   the diff touched. Contradictions do not live where the fix landed; they live in the copy nobody
+   remembered.
+
+## Re-review: verify the fix, then sweep again
+
+A fix that resolves a finding in the file you named can leave the same contradiction alive
+elsewhere, which reads as resolved and is not. It has a tell: the author reports fixing *the
+instance you cited* rather than *the fact*.
+
+So on any re-review, grep for the fact before accepting the fix. If the first round found a rule
+contradicted in one file, the second round's job is proving no other file still contradicts it —
+including files the diff never touched, and especially the skill belonging to whichever role acts on
+that rule.
+
+This is cheap and it is the only reliable instrument here: prose review does not surface a
+duplicated fact by reading, only by searching.
 
 ## Output
 
