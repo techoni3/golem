@@ -1,6 +1,6 @@
 ---
 name: compare-design-options
-description: Create an interactive, standalone HTML decision lab for comparing UI/UX directions before production implementation. Use when a user wants to evaluate 5–8 alternatives for visual themes, page layouts, component UX, navigation or information architecture, interaction flows, density, or loading, empty, error, and edge states.
+description: Create an interactive standalone HTML decision lab comparing UI/UX directions before production implementation. Use to evaluate 5–8 alternatives for visual themes, page layouts, component UX, navigation, interaction flows, density, or empty and error states. Not for choosing between technical approaches.
 ---
 
 # Compare Design Options

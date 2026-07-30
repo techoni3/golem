@@ -1,6 +1,6 @@
 ---
 name: browser-testing
-description: Read before any browser/CDP/devtools work, a UI smoke test, or an authenticated site. Covers the headless-only rule, the shared persistent Chrome profile at `~/.golem/chrome-profile`, and the per-process port lock — one agent must never share the non-headless Chrome on 9222.
+description: Read before any browser, CDP, or devtools work, a UI smoke test, or an authenticated site. Covers the headless-only rule, the shared Chrome profile, and the per-process port lock — never share non-headless Chrome on 9222. Not for non-browser tests, use golem:test-policy.
 ---
 
 # browser-testing

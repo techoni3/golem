@@ -86,6 +86,10 @@ cp -Rc mcp/channel/node_modules .worktrees/<TICKET>-<slug>/mcp/channel/node_modu
   `golem sync --target cc` and `golem sync --target cc --out ./plugin --force`. Bump the root
   `package.json` version when plugin behavior changed — **the render updating is not the same as
   the installed plugin updating.**
+- If `substrate/instructions/AGENTS.md` changed, also `golem sync --target codex` — root rules
+  render as a marked block into `$CODEX_HOME/AGENTS.md` as well as `~/.claude/CLAUDE.md`, and the
+  two are separate targets. `golem sync --check --all` reports both. `pi` has no instruction
+  surface, so it renders none.
 - If dashboard server behavior changed, restart the dashboard from the main checkout.
 
 **Shared runtimes to avoid inside a worktree** (the generic rule is in

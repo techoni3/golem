@@ -1,6 +1,6 @@
 ---
 name: live-team
-description: Read ONLY when the user explicitly asks for a live-session hand-off or names a target session. Covers cross-session dispatch, outbound consults, manager distribution and built-event loops across live peers, and worktree reconcile. Cross-session delegation is OFF by default; the default path is golem:standalone.
+description: Read ONLY when the user explicitly asks for a live-session hand-off or names a target session. Covers cross-session dispatch, outbound consults, manager distribution across live peers, and worktree reconcile. Do not use for solo work — the default path is golem:standalone.
 ---
 
 # live-team

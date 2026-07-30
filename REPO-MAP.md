@@ -22,6 +22,8 @@
 - Registers REST/WS; uniquely resolves project names; agents use HTTP/MCP, never direct DB writes.
 ### `tracker-db.js` + `phase-machine.js` + `team-assist.js`
 - Phase is source of truth; `state` derives from it; assists suggest but never dispatch.
+### `dashboard/server/comment-dispatch.js` + `subscription-reaper.js`
+- Comment dispatch is durable-first then rolled back on an undelivered push (502, comments return to `undispatched`); the reaper suspends subscriptions of sessions absent from the native roster, because only a graceful CC `SessionEnd` ever suspended them.
 ### `dashboard/server/native-sessions.js`
 - Merges registries with facts; Codex owns presentation and facts own freshness/leases. Supervisor thread mappings collapse raw twins even when a lease is down.
 ### `lib/codex-supervisor.js` + `lib/codex-tui-bridge.js`
@@ -35,6 +37,10 @@
 Hooks/shims write `~/.golem/` registries; dashboard owns routes. `golem claude` enables CC push; managed Codex uses typed turns. Native/dispatchable rows distinguish presence from readiness.
 
 ## Constraints & gotchas
+- Root instructions render as a **marked block** (`<!-- golem:instructions:begin -->`) into each
+  harness's own global file: `~/.claude/CLAUDE.md` (cc), `$CODEX_HOME/AGENTS.md` (codex),
+  opencode's `AGENTS.md`. Text outside the markers belongs to the human and is never rewritten;
+  adoption of a pre-existing file appends and never truncates. `pi` has no instruction surface.
 - Claude runs cached render bytes; sync + update + `/reload-plugins` after edits.
 - `plugin/` is a render target, not the source of truth; hand edits there are overwritten.
 - Bare Codex is pull-only; `golem codex` is private. Raw role/interrupt/halt stay gated.
@@ -45,6 +51,7 @@ Hooks/shims write `~/.golem/` registries; dashboard owns routes. `golem claude` 
 |------|-------|-------------|
 | Skill/plugin | `substrate/`, `plugin/` | `golem sync --target cc --out ./plugin --check` |
 | Dashboard | `dashboard/server/`, `dashboard/web/` | `npm run dashboard:build`, isolated browser journey |
+| Comment dispatch / subscriptions | `comment-dispatch.js`, `subscription-reaper.js`, `ticket-drawer.jsx` | `node test/subscription-reaper.test.mjs`, `node dashboard/scripts/smoke-gol-101.mjs` |
 | Sessions | `substrate/hooks/`, shims | fresh session |
 | Cross-harness delivery | supervisor, `mcp/channel/`, dashboard, OC shim | `node test/cross-harness-matrix.test.mjs` |
 | Managed Codex controls | supervisor, tracker envelopes, dashboard | `node test/codex-control-plane.test.mjs` |

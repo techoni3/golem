@@ -1,6 +1,6 @@
 ---
 name: reviewing
-description: Read when acting as reviewer, or when spawning fresh eyes over a spec or a diff. Two modes — spec review before decomposition, code review before close. Severity-tagged findings plus a binding verdict; never fix what you find, never review what you authored.
+description: Read when acting as reviewer, or spawning fresh eyes on a spec or diff. Two modes — spec review before decomposition, code review before close. Findings plus binding verdict; never fix what you find or review what you authored. Not for confirming evidence, use golem:verify-done.
 ---
 <!-- GENERATED: skills/reviewing/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 

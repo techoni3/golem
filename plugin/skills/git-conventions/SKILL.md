@@ -1,6 +1,6 @@
 ---
 name: git-conventions
-description: Read when opening a branch, writing a commit, opening a PR, or when a ticket or dispatch brief includes an explicit worktree directive. Covers the branch + commit + PR contract and the worktree lifecycle that kicks in only under an explicit directive.
+description: Read when opening a branch, writing a commit, opening a PR, rewriting history, or acting on an explicit worktree directive. Covers the branch, commit, and PR contract plus the worktree lifecycle. Not needed for read-only git status, log, or diff.
 ---
 <!-- GENERATED: skills/git-conventions/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 

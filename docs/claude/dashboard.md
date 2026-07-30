@@ -67,17 +67,59 @@ a fallback ticket state change by that session, marks matching dispatch rows as
 Wave 2 adds the dashboard UI and REST wrappers over the same service:
 
 - `POST /api/comments/:id/dispatch` dispatches one comment as a mini-brief to the
-  spec's assigned session, or to an explicit `session_id` when the spec is
-  unassigned.
+  ticket's assignee, or to an explicit `session_id`. The server does no liveness
+  check on the assignee; it is the drawer that falls back to the picker when the
+  assignee is not currently dispatchable.
 - `POST /api/tickets/:id/comments/batch-dispatch` dispatches every
-  `undispatched` comment on a spec in one brief with one shared `batch_id`.
+  `undispatched` comment on a ticket in one brief with one shared `batch_id`.
 
-The spec ticket drawer shows an `undispatched: N` badge, dispatch-state chips on
-comment cards for non-`n/a` states, and spec-only composer actions: plain Save,
-Save & dispatch, and Save & batch-dispatch. Plain Save never enqueues dispatch
-rows; the dispatch actions call the server wrappers, which enqueue through
+Both routes work for **every ticket kind** (GOL-101). They were spec-only, but
+`defaultDispatchStateForComment` queues every human comment as `undispatched`
+regardless of kind, so a spec-only dispatch stranded work-item feedback in a
+queue with no exit.
+
+Delivery is not best-effort here. The enqueue is durable-first, so a channel
+push that fails would otherwise leave its comments `dispatched` forever and the
+next batch would find nothing to send. Instead both routes **return 502 and roll
+the enqueue back** (`cancelDispatches`), returning every comment to
+`undispatched` so the human can retry against a reachable session. `recomputeState`
+treats an all-cancelled row set as "never delivered", not as `addressed`. The
+push carries a durable `session_notify` envelope because a managed Codex
+supervisor rejects any brief without one.
+
+There is no subscription short-circuit. Delivery used to be skipped when the
+target held an active `ticket/<display_id>` subscription; subscriptions are
+passive (`events.subscriptionDigestEnabled` defaults false) and never wake a
+session, so that silently dropped every such dispatch.
+
+The ticket drawer shows an `undispatched: N` badge, dispatch-state chips on
+comment cards for non-`n/a` states, and composer actions: plain Save, Save &
+dispatch, and Save & batch-dispatch. Plain Save never enqueues dispatch rows;
+the dispatch actions call the server wrappers, which enqueue through
 `comment-dispatch.js`, push via the existing channel bridge, and broadcast
 updated comment payloads so chips flip live when replies mark work addressed.
+Both dispatch actions surface delivery failure — neither reports success on an
+undelivered push, and a disabled batch button always states which precondition
+is missing.
+
+## Subscription Reaper
+
+`dashboard/server/subscription-reaper.js` suspends bus subscriptions whose owning
+session is gone. The lifecycle path it backstops (`applySubscriptionLifecycle`)
+only fires on a graceful Claude Code `SessionEnd`; the Codex adapter renders no
+such hook, a killed session runs none, and `expires_at` is never enforced — so
+stale subscriptions accumulated indefinitely.
+
+It reconciles against `state.nativeSessions()` on a 5-minute tick, suspending an
+owner only after it has been continuously absent for 60 minutes, and no-ops
+entirely on an empty roster (unreadable ≠ everyone died). The absence clock is
+in-memory, so a dashboard restart restarts it — a dashboard that never runs an
+uninterrupted hour never auto-reaps, and the `force` route exists partly for that
+reason. Suspension is
+reversible: re-subscribing reactivates, as does `hook_session_start` for Claude
+Code. `POST /api/bus/subscriptions/reap` runs it on demand, with optional
+`{ force: true }` to skip the grace window and `{ session_id }` to scope the
+sweep to one owner.
 
 Spec ticket dispatches use a full-context brief builder (`buildSpecBrief`) via
 the same `/api/tickets/:id/dispatch` and dispatch-queue paths. Work-item briefs

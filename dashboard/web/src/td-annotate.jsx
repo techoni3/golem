@@ -781,12 +781,25 @@ React.useEffect(() => {
     return ann;
   }, [onCreate, flashSaved]);
 
+  // GOL-101: the dispatch half used to be fired and forgotten — no await, no
+  // catch — so a rejected dispatch became an unhandled rejection while the
+  // optimistic annotation sat in the rail looking delivered. Now the promise is
+  // returned, and if the *save* failed the optimistic card is withdrawn rather
+  // than left flashing "saved" for a comment the server never took. A dispatch
+  // that fails after a successful save keeps the card — that comment does exist
+  // — and the drawer reports the delivery failure.
   const createCommentAndDispatch = React.useCallback((input) => {
     const ann = { id: uid(), ...input, status: input.status || 'open', replies: input.replies || [], created_at: nowISO(), updated_at: nowISO() };
     setAnnotations((prev) => [ann, ...prev]);
     flashSaved();
-    if (onCreateAndDispatch) onCreateAndDispatch(ann);
-    return ann;
+    if (!onCreateAndDispatch) return Promise.resolve(ann);
+    return Promise.resolve(onCreateAndDispatch(ann)).then(
+      () => ann,
+      (err) => {
+        if (err?.golemCommentSaved !== true) setAnnotations((prev) => prev.filter((a) => a.id !== ann.id));
+        throw err;
+      },
+    );
   }, [onCreateAndDispatch, flashSaved]);
 
   const updateComment = React.useCallback((id, patch) => {
@@ -1032,7 +1045,15 @@ React.useEffect(() => {
               currentAuthor={currentAuthor}
               canDispatch={canDispatchComments && !!onCreateAndDispatch}
               onSend={(text, author, tag) => { createComment({ author, body: text, tag }); setPlainComposer(false); }}
-              onSendAndDispatch={(text, author, tag) => { createCommentAndDispatch({ author, body: text, tag }); setPlainComposer(false); }}
+              onSendAndDispatch={(text, author, tag) => {
+                // The composer closes immediately either way: on a delivery
+                // failure the comment is still saved, and on a save failure the
+                // rail withdraws its optimistic card. Both outcomes are
+                // reported on the drawer's comment-dispatch note (GOL-101).
+                const done = createCommentAndDispatch({ author, body: text, tag });
+                setPlainComposer(false);
+                return done;
+              }}
               onCancel={() => setPlainComposer(false)}
             />
           )}
@@ -1055,7 +1076,7 @@ React.useEffect(() => {
                 setPendingComposer(null);
               }}
               onSendAndDispatch={(text, author, tag) => {
-                createCommentAndDispatch({
+                const done = createCommentAndDispatch({
                   author, body: text,
                   block_id: pendingComposer.blockId || null,
                   quote: pendingComposer.quote,
@@ -1066,6 +1087,7 @@ React.useEffect(() => {
                   tag,
                 });
                 setPendingComposer(null);
+                return done;
               }}
               onCancel={() => setPendingComposer(null)}
             />
@@ -1259,10 +1281,16 @@ function AnnoComposer({ quote, hideTag, currentAuthor, onSend, onSendAndDispatch
     if (!t) return;
     onSend(t, author, tag);
   };
+  // GOL-101: swallow nothing. A rejected dispatch is reported on the drawer's
+  // comment-dispatch note; catching here only keeps it from surfacing as an
+  // unhandled rejection.
   const fireDispatch = () => {
     const t = text.trim();
     if (!t || !onSendAndDispatch) return;
-    onSendAndDispatch(t, author, tag);
+    const result = onSendAndDispatch(t, author, tag);
+    if (result && typeof result.catch === 'function') {
+      result.catch((err) => console.error('comment dispatch failed', err));
+    }
   };
 
   return (

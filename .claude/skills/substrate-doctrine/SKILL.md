@@ -1,6 +1,6 @@
 ---
 name: substrate-doctrine
-description: Accumulated doctrine for revising golem's agent instructions — substrate/instructions/AGENTS.md, role cards, skills, the work loop, delegation, and authority. Load BEFORE editing any of those, before adding or removing a role or skill, before "fixing" an instruction bug, and before proposing a memory/continuity layer. Carries the shipping mechanics, the operator model, the known-contradiction inventory with file:line, the role-vs-mode test, and the decision log so a fresh session does not re-derive a 1,600-line audit.
+description: Accumulated doctrine for revising golem's agent instructions — AGENTS.md, role cards, skills, the work loop, authority. Load BEFORE editing those, adding or removing a role, or fixing an instruction bug. For how to write a skill well, use golem:skill-authoring.
 ---
 
 # Substrate doctrine
@@ -275,6 +275,9 @@ without a live team.
 | C6 | `night-shift` contradicts three rules | 15-min wake cron vs the no-unattended-background-loops rule and the no-Monitors preference; live-peer monitoring (disabled); introduces a `planner > manager > builder > explorer` tier ladder that exists nowhere else and inverts the ownership table |
 
 ### Redundancies (historical — all closed)
+
+Line numbers are as-of the pre-rework `AGENTS.md` and no longer resolve. Kept as the record of what
+the duplication looked like, not as pointers to follow.
 
 | # | Duplicated fact | Copies |
 |---|---|---|

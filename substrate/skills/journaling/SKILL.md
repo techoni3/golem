@@ -1,6 +1,6 @@
 ---
 name: journaling
-description: Read when appending a milestone to a project journal, locating `~/.golem/journals/<project_id>/hook.jsonl`, or formatting a hook entry. The plugin hooks journal every tool call automatically — agents add milestones, not noise.
+description: Read when appending a milestone to a project journal, locating `~/.golem/journals/<project_id>/hook.jsonl`, or formatting a hook entry. Hooks journal every tool call already — add milestones, not noise. Not for architecture docs, use golem:docs-maintenance.
 ---
 
 # journaling

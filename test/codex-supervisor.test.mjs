@@ -96,7 +96,7 @@ try {
   assert.ok(first.model_provider, 'thread/start required modelProvider is persisted');
   assert.equal(first.cwd, repo);
   assert.ok(first.project_id, 'derived project id is persisted');
-  assert.equal(first.version.cli_version, CODEX_APP_SERVER_CONTRACT.cliVersion);
+  assert.match(first.version.cli_version, /^[0-9]+\.[0-9]+\.[0-9]+$/, 'observed cli version is recorded');
   assert.equal(first.version.schema_fingerprint, CODEX_APP_SERVER_CONTRACT.schemaFingerprint);
   assert.equal(first.turn.state, 'idle', 'readiness turn has completed before health is exposed');
   assert.equal(first.inbox.in_flight_envelope_id, null, 'future durable inbox starts without an in-flight envelope');
@@ -173,10 +173,22 @@ try {
   assert.equal(deleted?.thread_id, null, 'explicit cleanup never leaves a stale resumable thread mapping');
   assert.equal(readEndpointLeases().some((row) => row.canonical_id === canonicalId), false);
 
+  // The gate is the schema, not the version. Corrupt one pinned leaf hash and
+  // the supervisor must refuse to spawn, naming the leaf that drifted.
   assert.throws(
-    () => verifyCodexAppServerContract({ contract: { ...CODEX_APP_SERVER_CONTRACT, cliVersion: '0.0.0' } }),
-    /expected codex-cli 0\.0\.0/i,
-    'a CLI version mismatch fails before a managed App Server can spawn',
+    () => verifyCodexAppServerContract({
+      contract: {
+        ...CODEX_APP_SERVER_CONTRACT,
+        schemaFiles: { ...CODEX_APP_SERVER_CONTRACT.schemaFiles, 'v2/ThreadStartParams.json': '0'.repeat(64) },
+      },
+    }),
+    /schema leaves changed[\s\S]*ThreadStartParams\.json/i,
+    'a drifted protocol schema fails before a managed App Server can spawn',
+  );
+  // A newer CLI whose protocol is unchanged must NOT be blocked.
+  assert.doesNotThrow(
+    () => verifyCodexAppServerContract({ contract: CODEX_APP_SERVER_CONTRACT }),
+    'the installed CLI satisfies the pinned schema contract',
   );
   const help = spawnSync(process.execPath, ['cli/golem.js', 'codex-supervisor', '--help'], { cwd: repo, encoding: 'utf8' });
   assert.equal(help.status, 0, help.stderr);

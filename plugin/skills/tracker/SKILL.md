@@ -1,6 +1,6 @@
 ---
 name: tracker
-description: Read when picking up a dispatched/assigned ticket, decomposing work into sub-tickets, raising a blocking question, or transitioning state. Covers MCP tool contracts (`ticket_list/get/create/update/comment/dispatch` + `sessions_dispatchable`) and the phases + streams + subscriptions model. The tracker is the source of truth, not PLAN.md.
+description: Read when picking up a dispatched or assigned ticket, decomposing work into sub-tickets, or transitioning phase. Covers the MCP ticket tools and the phases, streams, and subscriptions model. The tracker is the source of truth, not PLAN.md. Cross-session dispatch lives in golem:live-team.
 ---
 <!-- GENERATED: skills/tracker/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 

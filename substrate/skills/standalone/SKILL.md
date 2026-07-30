@@ -1,6 +1,6 @@
 ---
 name: standalone
-description: Read when acting as standalone — the default role. One session owns the whole loop: intake, design, build, prove, close, with in-process agents instead of live peers. Covers how to change hats without losing the gates that independence provides.
+description: Read when acting as standalone, the default role when none is assigned. One session owns the whole loop — intake, design, build, prove, close — using in-process agents. Covers changing hats without losing review independence. Not for live hand-offs, use golem:live-team.
 ---
 
 # standalone

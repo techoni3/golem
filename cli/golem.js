@@ -232,20 +232,32 @@ an explicit one-off decision. Stop a running supervisor with Ctrl-C.`);
 }
 
 function codexTuiHelp() {
-  log(`Usage: golem codex [--session <canonical-id>] [--cwd <dir>] [-- <codex args...>]
+  log(`Usage: golem codex [--session <canonical-id>] [--thread <codex-thread-id>]
+                   [--cwd <dir>] [-- <codex args...>]
 
 Open a normal interactive Codex TUI backed by one Golem-owned, private App
 Server. With no flags it uses the current directory and creates one canonical
 tracker session. The TUI owns normal Codex model, sandbox, and approval options.
 
 Wrapper options:
-  --session <canonical-id>  Reuse a chosen tracker canonical id.
+  --session <canonical-id>  Reuse a chosen tracker canonical id, resuming the
+                            Codex thread stored against it.
+  --thread <thread-id>      Resume this Codex thread by its native id. Wins over
+                            any thread stored against --session. Use this to
+                            resume a session Golem did not launch.
   --cwd <dir>               Run the App Server and TUI in this directory.
 
 All other Codex arguments are passed through. --remote and -C/--cd are
 reserved: Golem owns the private Unix socket and canonical project directory.
-When an explicit --session has a stored thread, Golem launches native
-\`codex resume <thread-id>\` through that same private bridge.`);
+Golem launches native \`codex resume <thread-id>\` through that same private
+bridge; a thread that cannot be resumed is an error, never a silent new session.
+
+Note: /resume inside the TUI cannot work under golem codex. The picker opens a
+second connection and the bridge is deliberately single-client, so it reports
+"failed to connect to remote app server". Name the thread at launch instead.
+
+  golem codex --thread 019f...  # resume a specific thread
+  golem codex -- resume --last  # let Codex pick the most recent one`);
 }
 
 function isReservedCodexTuiArgument(arg) {
@@ -265,12 +277,67 @@ function reservedCodexTuiArgumentMessage(arg) {
   return 'golem codex owns the working directory; use wrapper --cwd before -- and do not pass -C/--cd';
 }
 
+// Codex stores one rollout per resumable thread at
+// <sessions>/YYYY/MM/DD/rollout-<timestamp>-<thread-id>.jsonl. Golem's own
+// mapping can outlive that file, so a stored thread id is a hint, not proof.
+// An unreadable or absent store cannot disprove the thread — say so by
+// returning true and let the Codex CLI issue the authoritative error.
+function codexThreadIsResumable(threadId, { sessionsDir = join(homedir(), '.codex', 'sessions') } = {}) {
+  if (!existsSync(sessionsDir)) return true;
+  const suffix = `-${threadId}.jsonl`;
+  const walk = (dir, depth) => {
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return false; }
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (depth > 0 && walk(join(dir, entry.name), depth - 1)) return true;
+      } else if (entry.name.endsWith(suffix)) return true;
+    }
+    return false;
+  };
+  return walk(sessionsDir, 4);
+}
+
+// Decide which native Codex thread `golem codex` should resume, if any.
+// An explicit --thread wins over the thread stored against --session, because
+// the caller naming an id is stronger evidence than Golem's own recovery hint.
+// Returns null only when the caller asked for a fresh session.
+function resolveCodexResumeThread({ canonicalId, threadId, isResumable = codexThreadIsResumable }) {
+  let requested = threadId;
+  let origin = '--thread';
+  if (!requested && canonicalId) {
+    const stored = readCodexSupervisor(canonicalId);
+    if (!stored) {
+      fatal(2, `golem codex: no Golem-launched session recorded as ${canonicalId}.\n`
+        + '  --session takes a Golem canonical id (codex-<uuid>), not a Codex thread id.\n'
+        + '  To resume a Codex thread by its native id, use --thread <thread-id>.\n'
+        + '  Run `golem sessions` to list recorded sessions.');
+    }
+    if (!stored.thread_id) {
+      fatal(2, `golem codex: session ${canonicalId} has no recorded Codex thread to resume.\n`
+        + '  Drop --session to start a fresh thread, or name one with --thread <thread-id>.');
+    }
+    requested = stored.thread_id;
+    origin = `--session ${canonicalId}`;
+  }
+  if (!requested) return null;
+  if (!isResumable(requested)) {
+    const cause = origin === '--thread'
+      ? '  Codex has no rollout for that id — check it, or list what Codex still has.'
+      : '  Golem\'s mapping outlived the Codex rollout, so this thread cannot be resumed.';
+    fatal(2, `golem codex: Codex has no saved session ${requested} (from ${origin}).\n${cause}\n`
+      + '  Run `codex resume --all` to see resumable threads, then pass --thread <thread-id>.');
+  }
+  return requested;
+}
+
 async function cmdCodex(args) {
   if (args.includes('--help') || args.includes('-h')) {
     codexTuiHelp();
     return;
   }
   let canonicalId = null;
+  let threadId = null;
   let cwd = process.cwd();
   const passthrough = [];
   let passthroughOnly = false;
@@ -287,12 +354,24 @@ async function cmdCodex(args) {
     }
     if (arg === '--session') canonicalId = args[++index] ?? null;
     else if (arg.startsWith('--session=')) canonicalId = arg.slice('--session='.length);
+    else if (arg === '--thread') threadId = args[++index] ?? null;
+    else if (arg.startsWith('--thread=')) threadId = arg.slice('--thread='.length);
     else if (arg === '--cwd') cwd = args[++index] ?? null;
     else if (arg.startsWith('--cwd=')) cwd = arg.slice('--cwd='.length);
     else passthrough.push(arg);
   }
   if (!cwd) fatal(2, 'golem codex requires a non-empty --cwd');
   if (canonicalId != null && !canonicalId.trim()) fatal(2, 'golem codex requires a non-empty --session');
+  if (threadId != null && !threadId.trim()) fatal(2, 'golem codex requires a non-empty --thread');
+
+  // Resolve what to resume before paying for an App Server. In TUI mode the
+  // supervisor never resumes a thread itself — the TUI does, over the bridge —
+  // so an unresumable request has to fail here. Silently opening a fresh thread
+  // is indistinguishable from a successful resume and loses the session.
+  const resumeThreadId = resolveCodexResumeThread({
+    canonicalId: canonicalId?.trim() ?? null,
+    threadId: threadId?.trim() ?? null,
+  });
 
   const supervisor = new CodexSupervisor({
     ...(canonicalId ? { canonicalId: canonicalId.trim() } : {}),
@@ -306,10 +385,9 @@ async function cmdCodex(args) {
     throw new Error('managed Codex TUI bridge did not expose a private Unix socket');
   }
 
-  // OpenAI documents remote mode for `codex resume`. When a caller names the
-  // same canonical session again, use that native lifecycle rather than
-  // starting a fresh thread and silently overwriting the durable mapping.
-  const resumeThreadId = canonicalId ? supervisor.threadId : null;
+  // OpenAI documents remote mode for `codex resume`. Use that native lifecycle
+  // rather than starting a fresh thread and silently overwriting the durable
+  // mapping. resumeThreadId was resolved and validated before start().
   const launchArgs = ['--remote', remote];
   if (resumeThreadId) launchArgs.push('resume', resumeThreadId);
   launchArgs.push(...passthrough);
@@ -1036,6 +1114,25 @@ function planForTarget(target) {
   return adapter.buildPlan({ substrateRoot: root, repoRoot: GOLEM_ROOT, packageVersion: readPackageVersion() });
 }
 
+// Targets whose adapter renders a golem-owned block into a global instructions
+// file the human also owns (~/.claude/CLAUDE.md, $CODEX_HOME/AGENTS.md). This
+// used to be hardcoded to cc, which is why codex silently received no root
+// rules at all. opencode has its own sync path and resolves its own adapter.
+const INSTRUCTION_ADAPTERS = { cc: ccAdapter, codex: codexAdapter };
+
+/** Instruction render plan for a target, or an empty plan when it has none.
+ * The lock target is namespaced per harness because instructions land outside
+ * the bundle's out dir and must not share its lockfile section. */
+function instructionPlanFor(target) {
+  const adapter = INSTRUCTION_ADAPTERS[target];
+  if (!adapter) return { items: [], outDir: null, lockTarget: null };
+  return {
+    items: adapter.buildInstructionPlan({ substrateRoot: substrateRoot() }),
+    outDir: adapter.instructionOutDir(),
+    lockTarget: `${target}-instructions`,
+  };
+}
+
 function knownProjects() {
   try {
     const doc = JSON.parse(readFileSync(projectsJsonPath(), 'utf8'));
@@ -1129,13 +1226,16 @@ async function cmdSync(args) {
   const outDir = customOut ? resolve(customOut) : renderDirFor(target);
 
   const items = planForTarget(target);
-  const instructionItems = target === 'cc' && !customOut ? ccAdapter.buildInstructionPlan({ substrateRoot: substrateRoot() }) : [];
-  const instructionOutDir = ccAdapter.instructionOutDir();
+  // A custom --out means "render the bundle over there" (e.g. ./plugin for the
+  // committed round-trip). Instructions always belong to the real harness home,
+  // so they are deliberately skipped in that mode rather than misfiled.
+  const { items: instructionItems, outDir: instructionOutDir, lockTarget: instructionLockTarget } =
+    customOut ? { items: [], outDir: null, lockTarget: null } : instructionPlanFor(target);
 
   if (checkOnly) {
     const main = compiler.checkDrift({ target, outDir, items });
     const instr = instructionItems.length
-      ? compiler.checkDrift({ target: 'cc-instructions', outDir: instructionOutDir, items: instructionItems })
+      ? compiler.checkDrift({ target: instructionLockTarget, outDir: instructionOutDir, items: instructionItems })
       : { clean: true, drifted: [], orphaned: [] };
     const clean = main.clean && instr.clean;
     log('');
@@ -1155,7 +1255,7 @@ async function cmdSync(args) {
     force,
   });
   const instr = instructionItems.length
-    ? compiler.render({ target: 'cc-instructions', outDir: instructionOutDir, items: instructionItems, packageVersion: readPackageVersion(), force })
+    ? compiler.render({ target: instructionLockTarget, outDir: instructionOutDir, items: instructionItems, packageVersion: readPackageVersion(), force })
     : { written: [], unchanged: [], tampered: [], pruned: [] };
   if (target === 'cc') {
     ccAdapter.syncMcpChannelDeps({ repoRoot: GOLEM_ROOT, outDir });
@@ -1284,10 +1384,13 @@ async function cmdSyncCheckAll({ quiet = false } = {}) {
 
   const codexOut = renderDirFor('codex');
   const codex = compiler.checkDrift({ target: 'codex', outDir: codexOut, items: planForTarget('codex') });
+  const codexInstrPlan = instructionPlanFor('codex');
+  const codexInstr = compiler.checkDrift({ target: codexInstrPlan.lockTarget, outDir: codexInstrPlan.outDir, items: codexInstrPlan.items });
   if (!quiet) log('');
   say(`global codex: ${codexOut}`);
-  if (!quiet) printDrift(codex);
-  drift = drift || !codex.clean;
+  say(`  instructions out: ${codexInstrPlan.outDir}`);
+  if (!quiet) printDrift({ clean: codex.clean && codexInstr.clean, drifted: [...codex.drifted, ...codexInstr.drifted], orphaned: [...codex.orphaned, ...codexInstr.orphaned] });
+  drift = drift || !codex.clean || !codexInstr.clean;
 
   const piOut = renderDirFor('pi');
   const pi = compiler.checkDrift({ target: 'pi', outDir: piOut, items: planForTarget('pi') });
@@ -1632,9 +1735,11 @@ Run:
   codex-supervisor run --session <canonical-id> [--cwd <dir>]
                        Run a version-gated, headless Codex App Server lifecycle
                        supervisor with typed delivery while idle and MCP-bound.
-  codex [--session <canonical-id>] [--cwd <dir>] [-- <codex args...>]
+  codex [--session <canonical-id>] [--thread <codex-thread-id>] [--cwd <dir>]
+        [-- <codex args...>]
                        Open a normal interactive Codex TUI through Golem's
                        private App Server bridge; no flags are required.
+                       --thread resumes a Codex thread by its native id.
   claude [-- <claude args...>]
                        Open native Claude Code with Golem's push-capable
                        development channel loaded.
@@ -1648,8 +1753,8 @@ Run:
                        the old path to the new one, restarts. Explicit only —
                        never runs automatically. Rollback is one command
                        (printed on completion).
-  sync [--check] [--all] [--target cc|cc-marketplace|opencode] [--out <dir>] [--force]
-       [--project <root>] [--harness cc|claudecode|opencode]
+  sync [--check] [--all] [--target cc|cc-marketplace|opencode|codex|pi] [--out <dir>]
+       [--force] [--project <root>] [--harness cc|claudecode|opencode]
                         Render substrate/ sources into a harness bundle
                         (default target: cc, default out: ~/.golem/renders/
                         cc-plugin/). --check reports drift without writing
@@ -1666,6 +1771,11 @@ Run:
                        ~/.golem/renders/opencode/skills/ and merges managed
                        keys into opencode.jsonc — only when the opencode
                        harness is enabled in ~/.golem/config.json.
+                       Root instructions render as a marked block into the
+                       harness's own global file — ~/.claude/CLAUDE.md for cc,
+                       $CODEX_HOME/AGENTS.md for codex. Text outside the
+                       markers is yours and is never rewritten. Skipped when
+                       --out is given, since the bundle is going elsewhere.
 
 Inspect:
   doctor               Sanity-check the environment.

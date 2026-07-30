@@ -1,6 +1,6 @@
 ---
 name: planning
-description: Read when acting as planner — design docs, decomposition, waves, and readiness gate. Never dispatch builds.
+description: Read when acting as planner — design docs, decomposition, waves, and the readiness gate. Never dispatch builds. Not for implementation, use golem:building; a spec passes golem:reviewing before decomposition.
 ---
 <!-- GENERATED: skills/planning/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 

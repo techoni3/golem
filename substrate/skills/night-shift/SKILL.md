@@ -1,6 +1,6 @@
 ---
 name: night-shift
-description: Read when the user is stepping away and has granted autonomous execution of already-planned work. Covers what that authority grants and withholds, staying unblocked without a human, handling real blockers, and the closing memo.
+description: Read when the user is stepping away and has granted autonomous execution of already-planned work. Covers what that authority grants and withholds, staying unblocked, and the closing memo. Never a licence to find new work; a true blocker goes to golem:gates.
 ---
 
 # night-shift

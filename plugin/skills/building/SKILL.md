@@ -1,6 +1,6 @@
 ---
 name: building
-description: Read when acting as builder — implement one tracker ticket, test, and post a four-part closing brief. No self-merge to main.
+description: Read when acting as builder — implement one tracker ticket, test, and post a four-part closing brief. No self-merge to main. Not for design or decomposition, use golem:planning; not for judging the result, use golem:reviewing.
 ---
 <!-- GENERATED: skills/building/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 

@@ -164,7 +164,10 @@ class AppServerRpc {
 let rpc;
 let threadId;
 try {
-  assert.equal(version(), CONTRACT.cliVersion, 'Codex version changed; regenerate the schema and intentionally review this contract before enabling the supervisor');
+  // The CLI version is recorded, not gated — the schema fingerprint below is
+  // the real contract, and a CLI upgrade that leaves the protocol untouched
+  // must not fail. Assert only that a version is readable.
+  assert.match(version(), /^[0-9]+\.[0-9]+\.[0-9]+$/, 'codex-cli version is readable');
   const generatedSchema = spawnSync('codex', ['app-server', 'generate-json-schema', '--experimental', '--out', generated], { encoding: 'utf8' });
   assert.equal(generatedSchema.status, 0, `schema generation failed: ${generatedSchema.stderr || generatedSchema.stdout}`);
   const schemaFingerprint = fingerprintCodexAppServerSchema(generated, CONTRACT);

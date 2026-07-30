@@ -1,6 +1,6 @@
 {
   "name": "@laveesingh/golem",
-  "version": "5.2.0",
+  "version": "5.3.0",
   "description": "Golem — substrate compiler, dashboard/tracker, and CLI for the agentic harness.",
   "license": "MIT",
   "repository": {
@@ -42,10 +42,12 @@
     "node": ">=20"
   },
   "scripts": {
-    "check": "node --check cli/golem.js && node cli/golem.js sync --check --all",
-    "test": "node test/claude-cli.test.mjs && node test/session-facts.test.mjs && node test/codex-zombie-sessions.test.mjs && node test/codex-journey.test.mjs && node test/pi-journey.test.mjs && node test/pi-tracker-integration.test.mjs && node test/sync-enforcement.test.mjs && node shims/opencode/resume-dispatchable.test.mjs && node shims/opencode/passive-delta.test.mjs && node mcp/channel/tracker-client.test.mjs",
+    "check": "node --check cli/golem.js && npm run audit:skills && node cli/golem.js sync --check --all",
+    "audit:skills": "node scripts/audit-skills.mjs && node scripts/audit-skills.mjs .claude/skills",
+    "test": "node test/claude-cli.test.mjs && node test/instruction-block.test.mjs && node test/subscription-reaper.test.mjs && node test/session-facts.test.mjs && node test/codex-zombie-sessions.test.mjs && node test/codex-journey.test.mjs && node test/pi-journey.test.mjs && node test/pi-tracker-integration.test.mjs && node test/sync-enforcement.test.mjs && node shims/opencode/resume-dispatchable.test.mjs && node shims/opencode/passive-delta.test.mjs && node mcp/channel/tracker-client.test.mjs",
     "postinstall": "npm ci --omit=dev --prefix mcp/channel",
     "test:release": "node test/release-smoke.mjs",
+    "measure:turns": "node scripts/measure-turns.mjs",
     "dashboard": "node dashboard/server/index.js",
     "dashboard:build": "vite build --config dashboard/vite.config.js",
     "dashboard:dev": "vite --config dashboard/vite.config.js",

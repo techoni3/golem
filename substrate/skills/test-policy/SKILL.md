@@ -1,6 +1,6 @@
 ---
 name: test-policy
-description: Read when writing tests for a feature, telling a worker how to test, or scoping a CI budget. The golem test policy is journey-level integration/e2e with real DBs and harnesses, no unit fan-out — one end-to-end that exercises the contract beats ten isolated mocks.
+description: Read when writing tests, telling a worker how to test, or scoping a CI or check budget. Golem's policy is journey-level integration against real DBs and harnesses, no unit fan-out. Not for verifying a completion claim, use golem:verify-done.
 ---
 
 # test-policy

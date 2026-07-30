@@ -22,11 +22,21 @@ export function createCommentDispatchService({ db, now, recordEvent, actorFormsF
     if (!comment) throw new Error(`recomputeState: comment '${commentId}' not found`);
     if (comment.dispatch_state === 'n/a') return comment;
     const rows = db.prepare('SELECT status FROM comment_dispatches WHERE comment_id = ?').all(comment.id);
+    // GOL-101: a cancelled row is a dispatch that never landed (delivery failed
+    // and was rolled back). Only a genuine `addressed` row means the target
+    // engaged; rows that are *all* cancelled fall back to the default state so
+    // the comment re-enters the undispatched queue and can be retried.
     let state = defaultDispatchStateForComment(comment);
     if (rows.some((r) => r.status === 'pending' || r.status === 'delivered')) {
       state = 'dispatched';
-    } else if (rows.length && rows.every((r) => r.status === 'addressed' || r.status === 'cancelled')) {
+    } else if (rows.some((r) => r.status === 'addressed')) {
       state = 'addressed';
+    } else if (rows.length) {
+      // Every row cancelled: the dispatch never landed. Re-queue it rather than
+      // re-deriving from the comment's *current* status — a comment resolved
+      // between enqueue and a failed push would otherwise fall to 'n/a', which
+      // recomputeState treats as terminal, stranding it forever.
+      state = isHumanCommentAuthor(comment.author) ? 'undispatched' : state;
     }
     db.prepare('UPDATE comments SET dispatch_state = ?, updated_at = ? WHERE id = ?').run(state, now(), comment.id);
     return db.prepare('SELECT * FROM comments WHERE id = ?').get(comment.id);
@@ -68,8 +78,8 @@ export function createCommentDispatchService({ db, now, recordEvent, actorFormsF
     return row;
   }
 
-  function listUndispatchedForSpec(ticketId) {
-    if (!ticketId) throw new Error('listUndispatchedForSpec: ticket_id is required');
+  function listUndispatchedForTicket(ticketId) {
+    if (!ticketId) throw new Error('listUndispatchedForTicket: ticket_id is required');
     return db.prepare(`
       SELECT * FROM comments
       WHERE ticket_id = ? AND dispatch_state = 'undispatched'
@@ -79,10 +89,57 @@ export function createCommentDispatchService({ db, now, recordEvent, actorFormsF
 
   function enqueueBatch(ticketId, sessionId) {
     if (!sessionId) throw new Error('enqueueBatch: session_id is required');
-    const comments = listUndispatchedForSpec(ticketId);
+    const comments = listUndispatchedForTicket(ticketId);
     const batchId = crypto.randomUUID();
     const txn = db.transaction(() => comments.map((comment) => enqueueDispatch(comment, sessionId, batchId)));
     return { batch_id: batchId, dispatches: txn() };
+  }
+
+  // GOL-101: roll an enqueued-but-undelivered dispatch back. Enqueue happens
+  // before the channel push (durable-first), so a push that fails would
+  // otherwise strand its comments in `dispatched` with nothing left to retry —
+  // the batch endpoint then finds zero undispatched comments and no-ops.
+  function cancelDispatches(dispatchIds, reason = 'delivery_failed') {
+    const ids = (Array.isArray(dispatchIds) ? dispatchIds : [dispatchIds]).filter(Boolean);
+    if (ids.length === 0) return { cancelled: 0, comments: [] };
+    const ts = now();
+    const select = db.prepare('SELECT * FROM comment_dispatches WHERE id = ?');
+    const cancel = db.prepare(`
+      UPDATE comment_dispatches
+      SET status = 'cancelled', addressed_at = NULL
+      WHERE id = @id AND status IN ('pending', 'delivered')
+    `);
+    const rows = ids.map((id) => select.get(id)).filter(Boolean);
+    // Only rows this call actually moved get an event — a row that was already
+    // addressed or cancelled is not re-cancelled and must not be reported as if
+    // it were.
+    const changedIds = new Set();
+    const txn = db.transaction(() => rows.reduce((n, row) => {
+      const info = cancel.run({ id: row.id });
+      if (info.changes > 0) changedIds.add(row.id);
+      return n + info.changes;
+    }, 0));
+    const cancelled = txn();
+    const changedRows = rows.filter((r) => changedIds.has(r.id));
+    const commentIds = [...new Set(changedRows.map((r) => r.comment_id))];
+    for (const commentId of commentIds) recomputeState(commentId);
+    for (const row of changedRows) {
+      recordEvent({
+        ticket_id: row.ticket_id,
+        project_id: row.project_id,
+        type: 'comment_dispatch_cancelled',
+        actor: 'system',
+        data: {
+          comment_id: row.comment_id,
+          dispatch_id: row.id,
+          session_id: row.session_id,
+          batch_id: row.batch_id,
+          reason,
+          cancelled_at: ts,
+        },
+      });
+    }
+    return { cancelled, comments: commentIds };
   }
 
   function markAddressed(commentId, bySession) {
@@ -179,11 +236,12 @@ export function createCommentDispatchService({ db, now, recordEvent, actorFormsF
   return {
     enqueueDispatch,
     enqueueBatch,
+    cancelDispatches,
     markAddressed,
     markAddressedByComment,
     markAddressedForTicketActivity,
     markDeliveredForTicket,
-    listUndispatchedForSpec,
+    listUndispatchedForTicket,
     recomputeState,
     recomputeAll,
   };

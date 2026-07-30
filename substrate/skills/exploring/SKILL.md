@@ -1,6 +1,6 @@
 ---
 name: exploring
-description: Read when acting as explorer — recon reports or verification PASS/FAIL with re-run evidence. Do not implement unless reassigned.
+description: Read when acting as explorer — recon reports, or verification PASS/FAIL with re-run evidence. Do not implement unless reassigned. Not for judging whether work is right, use golem:reviewing; not for repo writes, use golem:building.
 ---
 
 # exploring

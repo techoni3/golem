@@ -1,6 +1,6 @@
 ---
 name: verify-done
-description: Read before moving any ticket to `built`, `verifying`, `verified`, or `done`, or before accepting a worker's DONE or PR-open claim. Run the claimed evidence commands yourself; mechanical output is the only valid proof of completion.
+description: Read before moving any ticket to `built`, `verifying`, `verified`, or `done`, or before accepting a DONE or PR-open claim. Run the claimed commands yourself. Confirms evidence is real — to judge whether the work is right, use golem:reviewing.
 ---
 
 # verify-done

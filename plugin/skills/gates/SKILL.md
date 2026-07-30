@@ -1,6 +1,6 @@
 ---
 name: gates
-description: Read when a spec must pause for human approval/credentials, when work blocks on a missing secret, or when scanning for open gates on resume. Covers posting a `kind:question` ticket to the human and reading legacy gate files under `~/.golem/gates/`.
+description: Read when work must pause for human approval, a decision only the human can make, or a missing credential, and when scanning for open gates on resume. Covers posting a `kind:question` ticket. Not for ordinary phase transitions, use golem:tracker.
 ---
 <!-- GENERATED: skills/gates/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 

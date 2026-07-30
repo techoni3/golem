@@ -3146,12 +3146,16 @@ WHERE state_changed_at IS NULL`).run();
       return commentDispatch.enqueueBatch(ticketId, sessionId);
     },
 
+    cancelCommentDispatches(dispatchIds, reason = 'delivery_failed') {
+      return commentDispatch.cancelDispatches(dispatchIds, reason);
+    },
+
     markCommentAddressed(commentId, bySession) {
       return commentDispatch.markAddressed(commentId, bySession);
     },
 
-    listUndispatchedCommentsForSpec(ticketId) {
-      return commentDispatch.listUndispatchedForSpec(ticketId);
+    listUndispatchedCommentsForTicket(ticketId) {
+      return commentDispatch.listUndispatchedForTicket(ticketId);
     },
 
     getComment(commentId) {

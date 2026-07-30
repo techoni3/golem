@@ -1,6 +1,6 @@
 ---
 name: transcript-workflow-coach
-description: Extract evidence-backed workflow patterns from selected AI-chat transcripts, including Claude sessions and exports. Use for retrospectives or improving prompting, delegation, reusable instructions, skills, and tool setup. Separate user preferences from agent, tool, and external failures; avoid personality, clinical, or performance assessment.
+description: Extract evidence-backed workflow patterns from selected AI-chat transcripts, including Claude sessions and exports. Use for retrospectives or improving prompting, delegation, reusable instructions, skills, and tool setup. Separate user preferences from agent, tool, and external failures. Never use it for personality, clinical, or performance assessment.
 ---
 <!-- GENERATED: skills/transcript-workflow-coach/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 

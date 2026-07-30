@@ -42,7 +42,20 @@ async function mcpInitialize(transport, plugin) {
 }
 try {
   execFileSync(process.execPath, [path.join(repo, 'cli/golem.js'), 'sync', '--target', 'codex'], { cwd: repo, env });
-  assert.equal(fs.existsSync(path.join(home, '.codex')), false, 'render must not mutate user Codex state');
+  // The codex render owns exactly one file inside CODEX_HOME: the global
+  // AGENTS.md instruction block, which is the whole point of the target. It
+  // must still never touch config.toml, auth.json, sessions/, or the plugin
+  // cache — so assert the contents of CODEX_HOME, not merely its absence.
+  const codexHome = path.join(home, '.codex');
+  assert.deepEqual(
+    fs.existsSync(codexHome) ? fs.readdirSync(codexHome).sort() : [],
+    ['AGENTS.md'],
+    'render must write only AGENTS.md into CODEX_HOME and mutate no other Codex state',
+  );
+  const codexInstructions = fs.readFileSync(path.join(codexHome, 'AGENTS.md'), 'utf8');
+  assert.match(codexInstructions, /<!-- golem:instructions:begin -->/, 'Codex instructions are a marked block');
+  assert.match(codexInstructions, /<!-- golem:instructions:end -->/, 'Codex instruction block is closed');
+  assert.match(codexInstructions, /# Global Rules/, 'Codex receives the substrate root rules');
   const root = path.join(state, 'renders', 'codex');
   const plugin = path.join(root, 'plugins', 'golem');
   assert.ok(fs.existsSync(path.join(plugin, 'lib', 'session-registry.js')), 'Codex render includes the registry helper');

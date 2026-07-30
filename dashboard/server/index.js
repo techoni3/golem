@@ -17,6 +17,7 @@ import { isChannelDeliveryReady, readChannels } from './channels.js';
 import { applyGateVerdict, createGate } from './projects.js';
 import { listIdeas, createIdea, popIdea, readIdea } from './ideas.js';
 import { initDispatchDrainer } from './dispatch-queue.js';
+import { createSubscriptionReaper } from './subscription-reaper.js';
 import { registerSubstrateRoutes } from './substrate.js';
 import { teamAssists } from './team-assist.js';
 import { golemHome, dashboardJsonPath, journalDirFor, sessionsJsonPath } from '../../lib/golem-home.js';
@@ -1373,14 +1374,16 @@ async function main() {
     return assignee && assignee !== 'human' ? assignee : null;
   }
 
-  function commentDispatchCoveredBySubscription(ticket, sessionId) {
-    if (!ticket || !sessionId) return false;
-    const topic = `ticket/${ticket.display_id || ticket.id}`;
-    return tracker.listSubscriptions({ session_id: sessionId }).some((sub) => {
-      if (sub.status !== 'active' || sub.topic !== topic) return false;
-      const classes = Array.isArray(sub.classes_filter) ? sub.classes_filter : [];
-      return classes.includes('tracker');
-    });
+  // GOL-101: comment dispatch used to skip the channel push entirely when the
+  // target held an active `ticket/<display_id>` subscription, on the assumption
+  // that the subscription would carry the feedback. It does not: subscriptions
+  // are passive by design (`events.subscriptionDigestEnabled` defaults false)
+  // and never wake a session, so the short-circuit dropped every dispatch on
+  // the floor while reporting success. The brief push is the only delivery
+  // mechanism — always take it.
+
+  function channelFailureDetail(channelResult) {
+    return channelResult?.error || `status ${channelResult?.status ?? '?'}`;
   }
 
   function commentBrief(ticket, comments, { batchId = null } = {}) {
@@ -1390,7 +1393,7 @@ async function main() {
     const lines = [
       `Comment dispatch for ${label}: ${title}`,
       '',
-      'You have been sent human comment feedback on this spec. Re-read the ticket and address the dispatched comment(s).',
+      'You have been sent human comment feedback on this ticket. Re-read it and address the dispatched comment(s).',
       '',
       batchId ? `Batch id: ${batchId}` : null,
       `Ticket: ${label}`,
@@ -1408,20 +1411,56 @@ async function main() {
     return lines.join('\n');
   }
 
-  async function deliverCommentDispatch(ticket, comments, sessionId, { batchId = null } = {}) {
+  async function deliverCommentDispatch(ticket, comments, sessionId, { batchId = null, dispatches = [] } = {}) {
     const brief = commentBrief(ticket, comments, { batchId });
+    // GOL-101: a managed Codex supervisor is a typed adapter, not a generic
+    // channel — brief.js rejects any push without a durable envelope id, so a
+    // bare pushBrief could never reach a Codex target. Mint the same kind of
+    // envelope ticket dispatch uses.
+    // The mint shares the push's failure path: the enqueue already happened, so
+    // anything that stops delivery has to reach the rollback below rather than
+    // escaping as a 400 with the comments left `dispatched`.
+    let envelope = null;
     let channelResult = null;
     try {
-      channelResult = await pushBrief(brief, sessionId);
+      envelope = tracker.createControlEnvelope({
+        project_id: ticket.project_id ?? null,
+        sender_id: 'human:dashboard',
+        recipient_session_id: sessionId,
+        kind: 'session_notify',
+        payload: { content: brief, ticket_id: ticket.id, batch_id: batchId },
+      });
+      channelResult = await pushBrief(brief, sessionId, {
+        envelope_id: envelope.id,
+        sender_session_id: envelope.sender_session_id,
+        target_session_id: sessionId,
+      });
     } catch (err) {
       channelResult = { ok: false, error: String(err?.message ?? err) };
     }
+    if (envelope) {
+      try {
+        tracker.markEnvelopeDelivery(envelope.id, {
+          error: channelResult?.ok ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),
+        });
+      } catch (err) {
+        fastify.log.warn({ err, envelope: envelope.id }, 'comment dispatch envelope delivery stamp failed');
+      }
+    }
+    let rolledBack = 0;
     if (channelResult?.ok) {
       chat.record('user', 'brief', brief, { session_id: sessionId });
       tracker.markCommentDispatchesDeliveredForTicket(ticket.id, sessionId);
     } else {
-      const detail = channelResult?.error || `status ${channelResult?.status ?? '?'}`;
+      const detail = channelFailureDetail(channelResult);
       chat.record('system', 'error', `comment dispatch of ${ticket.id} to ${sessionId} — channel ${detail}`);
+      // GOL-101: the enqueue is durable-first, so an undelivered push has to be
+      // rolled back or its comments stay `dispatched` forever with no retry —
+      // the next batch would find nothing undispatched and silently no-op.
+      rolledBack = tracker.cancelCommentDispatches(
+        dispatches.map((d) => d?.id).filter(Boolean),
+        `delivery_failed: ${detail}`,
+      ).cancelled;
     }
     const updated = tracker.getTicket(ticket.id);
     if (updated) {
@@ -1430,7 +1469,7 @@ async function main() {
         broadcastWS({ type: 'ticket-comment-updated', ticket_id: updated.id, comment });
       }
     }
-    return { channel: channelResult, ticket: updated };
+    return { channel: channelResult, ticket: updated, delivered: !!channelResult?.ok, rolled_back: rolledBack };
   }
 
   // POST /api/comments/:id/dispatch — enqueue and deliver one comment as a
@@ -1443,14 +1482,18 @@ async function main() {
       if (!comment) return reply.code(404).send({ error: 'comment_not_found' });
       const ticket = tracker.getTicket(comment.ticket_id);
       if (!ticket) return reply.code(404).send({ error: 'ticket_not_found' });
-      if (ticket.kind !== 'spec') return reply.code(400).send({ error: 'comment dispatch is only available for spec tickets' });
       const sessionId = commentDispatchTarget(ticket, b);
-      if (!sessionId) return reply.code(400).send({ error: 'session_id is required when the spec has no session assignee' });
+      if (!sessionId) return reply.code(400).send({ error: 'session_id is required when the ticket has no session assignee' });
       const dispatch = tracker.enqueueCommentDispatch(comment, sessionId);
-      if (commentDispatchCoveredBySubscription(ticket, sessionId)) {
-        return { ok: true, dispatch, delivery: 'subscription', ticket: tracker.getTicket(ticket.id) };
+      const delivered = await deliverCommentDispatch(ticket, comment, sessionId, { dispatches: [dispatch] });
+      if (!delivered.delivered) {
+        return reply.code(502).send({
+          error: `comment dispatch to ${sessionId} was not delivered — ${channelFailureDetail(delivered.channel)}`,
+          delivered: false,
+          rolled_back: delivered.rolled_back,
+          channel: delivered.channel,
+        });
       }
-      const delivered = await deliverCommentDispatch(ticket, comment, sessionId);
       return { ok: true, dispatch, ...delivered };
     } catch (err) {
       const msg = String(err?.message ?? err);
@@ -1460,7 +1503,10 @@ async function main() {
   });
 
   // POST /api/tickets/:id/comments/batch-dispatch — enqueue all undispatched
-  // comments on a spec using one shared batch_id and deliver one combined brief.
+  // comments on a ticket using one shared batch_id and deliver one combined
+  // brief. GOL-101: any ticket kind, not just specs — every human comment is
+  // queued `undispatched` regardless of kind, so a spec-only dispatch left
+  // work-item feedback with no way out.
   fastify.post('/api/tickets/:id/comments/batch-dispatch', async (req, reply) => {
     const ticketRef = resolveTicketRef(req.params.id);
     if (!ticketRef) return reply.code(404).send({ error: 'not_found' });
@@ -1469,16 +1515,23 @@ async function main() {
     try {
       const ticket = ticketRef;
       if (!ticket) return reply.code(404).send({ error: 'not_found' });
-      if (ticket.kind !== 'spec') return reply.code(400).send({ error: 'comment dispatch is only available for spec tickets' });
       const sessionId = commentDispatchTarget(ticket, b);
-      if (!sessionId) return reply.code(400).send({ error: 'session_id is required when the spec has no session assignee' });
-      const comments = tracker.listUndispatchedCommentsForSpec(id);
-      if (comments.length === 0) return { ok: true, batch_id: null, dispatches: [], ticket };
+      if (!sessionId) return reply.code(400).send({ error: 'session_id is required when the ticket has no session assignee' });
+      const comments = tracker.listUndispatchedCommentsForTicket(id);
+      if (comments.length === 0) return { ok: true, batch_id: null, dispatches: [], delivered: false, ticket };
       const batch = tracker.enqueueCommentDispatchBatch(id, sessionId);
-      if (commentDispatchCoveredBySubscription(ticket, sessionId)) {
-        return { ok: true, ...batch, delivery: 'subscription', ticket: tracker.getTicket(ticket.id) };
+      const delivered = await deliverCommentDispatch(ticket, comments, sessionId, {
+        batchId: batch.batch_id,
+        dispatches: batch.dispatches,
+      });
+      if (!delivered.delivered) {
+        return reply.code(502).send({
+          error: `comment dispatch to ${sessionId} was not delivered — ${channelFailureDetail(delivered.channel)}`,
+          delivered: false,
+          rolled_back: delivered.rolled_back,
+          channel: delivered.channel,
+        });
       }
-      const delivered = await deliverCommentDispatch(ticket, comments, sessionId, { batchId: batch.batch_id });
       return { ok: true, ...batch, ...delivered };
     } catch (err) {
       const msg = String(err?.message ?? err);
@@ -1889,6 +1942,19 @@ async function main() {
   fastify.get('/api/bus/subscriptions', async (req) => {
     const sessionId = typeof req.query?.session_id === 'string' ? req.query.session_id : null;
     return tracker.listSubscriptions({ session_id: sessionId });
+  });
+
+  // GOL-101: run the subscription reap on demand. `force: true` skips the
+  // grace window, which is how already-stale rows get cleared without waiting
+  // out a full grace period after a restart; `session_id` narrows it to one
+  // owner so a forced reap need not be a fleet-wide action.
+  fastify.post('/api/bus/subscriptions/reap', async (req) => {
+    const sessionId = typeof req.body?.session_id === 'string' && req.body.session_id.trim()
+      ? req.body.session_id.trim()
+      : null;
+    const result = subscriptionReaper.sweep({ force: req.body?.force === true, sessionId });
+    if (result.suspended > 0) broadcastWS({ type: 'bus-subscriptions-updated' });
+    return result;
   });
 
   fastify.get('/api/bus/stats', async () => tracker.busStats());
@@ -2376,6 +2442,12 @@ async function main() {
     listChannels,
   });
 
+  // GOL-101: reap subscriptions whose owning session is gone. Same 3s-refreshed
+  // roster the drainer reads; own 5-minute tick with a 60-minute grace. Stopped
+  // in shutdown().
+  const subscriptionReaper = createSubscriptionReaper({ tracker, state, log: fastify.log });
+  subscriptionReaper.start();
+
   // Pin to the canonical dashboard URL http://dashboard.golem.localhost:7420.
   // If 7420 is busy, check whether the occupying process is the previous
   // dashboard recorded in ~/.golem/dashboard.json. If so, terminate it
@@ -2475,6 +2547,7 @@ async function main() {
     fastify.log.info('shutting down…');
     try {
       dispatchDrainer.close();
+      subscriptionReaper.stop();
       chat.stop();
       await state.close();
       tracker.close();
