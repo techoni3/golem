@@ -2318,8 +2318,10 @@ WHERE state_changed_at IS NULL`).run();
 
       const actor = patch.actor ?? 'human';
       // source_ref is patchable over REST so a human can repair a wrong GitHub
-      // bridge link; the MCP ticket_update whitelist deliberately omits it, so
-      // agents still cannot rewrite provenance they did not set at creation.
+      // bridge link; the MCP ticket_update whitelist omits it, so provenance is
+      // not rewritable through the agent-facing tracker surface. That is a
+      // guardrail against casual edits, not enforcement — anything with shell
+      // access can reach this route directly.
       const ALLOWED = ['title', 'body', 'kind', 'state', 'phase', 'priority', 'labels', 'stream_id', 'parent_id', 'wave', 'assignee', 'source_ref'];
       const updates = {};
       for (const key of ALLOWED) {

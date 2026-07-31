@@ -856,6 +856,23 @@ async function main() {
   check('GitHub bridge source_ref survives MCP, REST, and SQLite',
     persistedSpec.json?.source_ref === 'github:example/repo#42',
     persistedSpec.text);
+  // The bridge link is repairable by a human over REST but never through the
+  // agent-facing MCP surface: ticket_update's whitelist omits source_ref, so a
+  // wrong ref cannot be silently rewritten by whoever filed it.
+  const agentRewrite = await callTool('ticket_update', { id: specCreated.json?.id, source_ref: 'github:evil/repo#1', title: 'MCP explicit-project spec creation' });
+  const afterAgentRewrite = await callTool('ticket_get', { id: specCreated.json?.id });
+  check('MCP ticket_update cannot rewrite a bridge source_ref',
+    !agentRewrite.result.isError && afterAgentRewrite.json?.source_ref === 'github:example/repo#42',
+    afterAgentRewrite.text);
+  const humanRepair = await fetch(`http://${HOST}:${port}/api/tickets/${encodeURIComponent(specCreated.json?.id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source_ref: 'github:example/repo#99', actor: 'human' }),
+  });
+  const afterRepair = await callTool('ticket_get', { id: specCreated.json?.id });
+  check('human REST PATCH repairs a wrong bridge source_ref',
+    humanRepair.ok && afterRepair.json?.source_ref === 'github:example/repo#99',
+    `${humanRepair.status} ${afterRepair.text}`);
   const scopedSpecs = await callTool('ticket_list', { project: PROJECT_ID, kind: 'spec' });
   check('MCP project-scoped spec list does not widen across projects',
     !scopedSpecs.result.isError
