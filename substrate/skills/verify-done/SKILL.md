@@ -47,7 +47,7 @@ Detect and run the repo's relevant test/check commands, full enough to prove the
 - `package.json` scripts: `npm test`, `npm run check`, or the repo-specific smoke.
 - Python: `pytest -q` plus configured lint/type checks.
 - Go/Rust/Make: `go test ./...`, `cargo test`, or `make test` when defined.
-- UI/browser: use the repo headless helper, not a shared visible browser.
+- UI/browser: load `golem:browsing` and spawn your own Chrome, never a shared visible browser.
 
 Also inspect recent commits when a commit is claimed:
 

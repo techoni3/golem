@@ -56,7 +56,7 @@ Keep option data and rendering structured so every direction receives the same c
 
 ## Render and inspect
 
-Load any applicable repository browser-testing instructions before browser work. Serve or open the artifact in a real browser and inspect it visually; source review alone is not verification.
+Load `golem:browsing` before browser work. Serve or open the artifact in a real browser and inspect it visually; source review alone is not verification.
 
 Verify mechanically:
 

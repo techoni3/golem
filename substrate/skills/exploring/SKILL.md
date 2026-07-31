@@ -62,6 +62,6 @@ finding that will be paid for twice.
 
 ## Browser / UI
 
-UI or authenticated surfaces → load `golem:browser-testing` first, before launching anything. The
-headless rule, the shared profile, and the port lock exist because two agents sharing Chrome
-corrupts both runs.
+UI or authenticated surfaces → load `golem:browsing` first, before launching anything. The
+uniform launch recipe, the shared profile, and the login handoff live there — two agents
+improvising Chrome setups corrupt both runs.
