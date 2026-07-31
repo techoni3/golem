@@ -396,7 +396,9 @@
   }
 
   function sessionRecency(s) {
-    for (const raw of [s?.last_seen_at, s?.fact_observed_at, s?.updated_at, s?.started_at]) {
+    // updated_at is the server-side max of fact activity and registry recency
+    // (GOL-109); fact_observed_at alone can lag real hook-driven activity.
+    for (const raw of [s?.last_seen_at, s?.updated_at, s?.fact_observed_at, s?.started_at]) {
       const stamp = typeof raw === 'number' ? raw : Date.parse(raw);
       if (Number.isFinite(stamp)) return stamp;
     }

@@ -295,15 +295,22 @@ function registerChannel(port, { logMissing = true } = {}) {
         delivery_ready: consumer.ready,
         started_at: STARTED_AT,
       });
+      // reassert: a periodic re-register proves the endpoint process is alive
+      // (the lease covers that); it is NOT session activity, so an unchanged
+      // row must not re-stamp observed_at — that forged "seen Ns ago" on idle
+      // sessions and made agent cards resort every heartbeat (GOL-109). name
+      // and status are omitted when this process has nothing to say, so they
+      // inherit the stored fact instead of clobbering a hook-written value
+      // back to null (which would count as a material change every tick).
       upsertSessionFact({
         canonical_id: row.session_id,
         harness,
         locator: { raw_session_id: harness === 'claudecode' ? (process.env.CLAUDE_CODE_SESSION_ID || row.session_id) : row.session_id },
         continuation_key: harness === 'claudecode' ? row.session_id : null,
-        name: row.name || null,
-        status: row.status || null,
+        ...(row.name ? { name: row.name } : {}),
+        ...(row.status ? { status: row.status } : {}),
         observed_at: new Date().toISOString(),
-      });
+      }, { reassert: true });
       renewEndpointLease({
         canonical_id: row.session_id,
         owner_token: LEASE_OWNER,

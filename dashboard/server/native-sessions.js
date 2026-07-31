@@ -101,6 +101,19 @@ function readCodexSupervisorRows() {
   try { return readCodexSupervisors(); } catch { return []; }
 }
 
+// Presentation-field authority differs by harness. For Claude Code the live
+// CLI/registry row is the authority: no CC writer maintains fact status or
+// waiting_for after SessionStart (the channel heartbeat deliberately omits
+// them, GOL-109), so a frozen fact must never shadow the live sources — that
+// froze every CC card on "idle" and broke the when_idle dispatch gate.
+// opencode and codex facts are written by the shim/supervisor on real
+// changes, so the fact leads. Exported for tests.
+export function factPresentationField(harness, factValue, liveValue) {
+  return harness === 'claudecode'
+    ? (liveValue ?? factValue ?? null)
+    : (factValue ?? liveValue ?? null);
+}
+
 function managedCodexPresentation(record, endpoint, fallbackStatus, fallbackWaitingFor) {
   if (!record) return { status: fallbackStatus, waiting_for: fallbackWaitingFor };
   // A ready typed lease is stricter than a hook fact: it proves the canonical
@@ -323,8 +336,10 @@ async function readRegistrySessions() {
 
 // Merge CLI + registry rows keyed by session_id (falling back to pid). CLI
 // wins on conflict (it is the live, authoritative view); registry fills gaps
-// (e.g. updatedAt, sessions the CLI momentarily omits).
-function mergeSources(cliRows, registryRows, golemRows = []) {
+// (e.g. updatedAt, sessions the CLI momentarily omits). Exported for tests:
+// the CLI row's fabricated updated_at (= startedAt) must never regress the
+// merged recency (GOL-109).
+export function mergeSources(cliRows, registryRows, golemRows = []) {
   const byKey = new Map();
   const keyOf = (r) => r.session_id || `pid:${r.pid}`;
   // Priority (last write wins on shared fields): golem < registry < cli.
@@ -337,8 +352,13 @@ function mergeSources(cliRows, registryRows, golemRows = []) {
         byKey.set(k, {
           ...prev,
           ...r,
-          // Preserve fields the higher-priority source doesn't supply.
-          updated_at: r.updated_at ?? prev.updated_at,
+          // Preserve fields the higher-priority source doesn't supply. Recency
+          // is the max across sources, never priority-ordered: the CLI row's
+          // updated_at is really startedAt (the CLI emits no updatedAt), and
+          // letting it clobber the golem registry's hook-driven last_seen_at
+          // freezes a session's activity at its start time (GOL-109).
+          updated_at: Math.max(Number(r.updated_at) || 0, Number(prev.updated_at) || 0)
+            || (r.updated_at ?? prev.updated_at),
           name: r.name ?? prev.name,
           harness: r.harness ?? prev.harness, // only the golem source sets harness
           model: r.model ?? prev.model,
@@ -475,9 +495,13 @@ export async function readNativeSessions(registeredIdLookup, verifiedChannels = 
     const presentation = managedCodexPresentation(
       supervisor,
       verifiedBySession.get(fact.canonical_id),
-      fact.status ?? previous.status ?? null,
-      fact.waiting_for ?? previous.waiting_for ?? null,
+      factPresentationField(fact.harness, fact.status, previous.status),
+      factPresentationField(fact.harness, fact.waiting_for, previous.waiting_for),
     );
+    // Facts advance on real session activity only (heartbeat re-asserts skip
+    // the write, GOL-109), so a fact can be OLDER than hook-driven registry
+    // recency. Recency is the max of both — never regress a live signal.
+    const factObservedMs = msFromIso(fact.observed_at);
     mergedById.set(fact.canonical_id, {
       ...previous,
       session_id: fact.canonical_id,
@@ -487,7 +511,9 @@ export async function readNativeSessions(registeredIdLookup, verifiedChannels = 
       waiting_for: presentation.waiting_for,
       model: fact.model ?? previous.model ?? null,
       harness: fact.harness,
-      updated_at: msFromIso(fact.observed_at),
+      updated_at: (factObservedMs == null && previous.updated_at == null)
+        ? null
+        : Math.max(factObservedMs ?? 0, Number(previous.updated_at) || 0),
       // Prefer explicit fact retirement; keep prior registry ended_at if set.
       ended_at: msFromIso(fact.ended_at) ?? previous.ended_at ?? null,
       _fact: fact,
@@ -509,17 +535,26 @@ export async function readNativeSessions(registeredIdLookup, verifiedChannels = 
     const isGolemRegistryCc = harness === 'claudecode' && s._from === 'golem';
     const bridge = harness === 'opencode' ? opencodeBridges.get(s.session_id) : null;
     const bridgePid = Number(bridge?.opencode_pid || bridge?.pid) || null;
-    const factFresh = !s._fact || (s.updated_at && Date.now() - s.updated_at < GOLEM_SESSION_RECENT_MS);
+    // Freshness of the fact itself (observed_at), not row recency: updated_at
+    // is now the max of fact and registry activity, so it can no longer stand
+    // in for "the fact is recent" (GOL-109).
+    const factObservedAtMs = msFromIso(s._fact?.observed_at);
+    const factFresh = !s._fact || !!(factObservedAtMs && Date.now() - factObservedAtMs < GOLEM_SESSION_RECENT_MS);
     // Explicit session retirement only — never bare turn-stop `status: ended`
     // (Codex fires stop per turn). Terminal = ended_at or dead|stopped|failed|superseded.
     const factTerminal = isSessionFactTerminal(s._fact);
     const rowEnded = !!s.ended_at || factTerminal;
     const verifiedEndpoint = verifiedBySession.get(s.session_id);
     const managedCodexHealthy = harness === 'codex' && verifiedEndpoint?.kind === 'codex-supervisor';
+    // An authenticated healthy endpoint is sufficient liveness evidence on its
+    // own (mirrors managed Codex): with heartbeat fact re-stamps gone (GOL-109)
+    // an idle opencode session's fact legitimately ages past the recency
+    // window while its bridge stays live. The fallback arm only applies to
+    // rows without a fact, so it needs no fact-freshness gate.
     const alive = managedCodexHealthy
       ? !rowEnded
       : harness === 'opencode'
-      ? !!(!factTerminal && !s.ended_at && factFresh && (verifiedEndpoint || (!s._fact && liveChannelSessionIds.has(s.session_id) && (bridge
+      ? !!(!factTerminal && !s.ended_at && (verifiedEndpoint || (!s._fact && liveChannelSessionIds.has(s.session_id) && (bridge
         ? pidAlive(bridgePid)
         : (s.updated_at && (Date.now() - s.updated_at) < GOLEM_SESSION_RECENT_MS)))))
       : (isNonCc || isGolemRegistryCc
