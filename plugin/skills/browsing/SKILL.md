@@ -61,13 +61,14 @@ A login page or expired session on the shared profile is not a dead end. Bring t
    login window needs no CDP — you are hands-off during login anyway.
 3. One-line chat ping: which site needs login, and what you'll continue with after. When
    the human is present, chat only — no gate ceremony for a routine login.
-4. **Hands off while they log in.** No CDP navigation, clicks, or keystrokes into that
-   window until the target site shows a signed-in state — the window is theirs, and
-   credentials are being typed into it.
-5. Signed in (observed, or the human says done) → the login window closes, and you
-   relaunch with `--remote-debugging-port` — headless by default, headed only if the task
-   itself is visual/interactive. The no-port login window can never be driven over CDP,
-   so a relaunch is always required.
+4. **Hands off while they log in.** The window is theirs and credentials are being typed
+   into it — and with no debug port it has no endpoint you could drive or observe anyway.
+   The human's "done" in chat is the only completion signal; wait for it.
+5. On "done": close the login window — `open -na` hands back no pid, so
+   `pkill -f -- "--user-data-dir=$HOME/.golem/chrome-profile"`. It holds the profile lock;
+   left open, your relaunch aborts as "launch failed (locked profile)" with your own
+   window as the invisible cause. Then relaunch with `--remote-debugging-port` — headless
+   by default, headed only if the task itself is visual/interactive.
 
 Running autonomously (night-shift, human away): a missing login is a missing credential —
 follow the credential path in `golem:night-shift`/`golem:gates` (question ticket, thread
