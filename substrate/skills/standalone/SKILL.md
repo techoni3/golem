@@ -54,6 +54,8 @@ code, because review's entire value is that a different context looked at it.
    diff's size.
 10. **Gate B — code review.** Spawn a `reviewer` in code mode. Resolve `BLOCKER`s.
 11. **Close.** Four-part brief on the ticket, then transition, then a plain-language recap.
+    Closing a spec in a GitHub-backed project also runs the bridge close-out —
+    `golem:tracker` § GitHub Bridge.
 
 ### Closing a work item solo
 

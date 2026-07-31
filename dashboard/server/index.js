@@ -1113,6 +1113,7 @@ async function main() {
         wave: b.wave,
         assignee: b.assignee,
         created_by: b.created_by,
+        source_ref: b.source_ref,
       });
       broadcastWS({ type: 'ticket-created', ticket });
       return reply.code(201).send(ticket);

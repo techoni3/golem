@@ -693,6 +693,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           parent_id: { type: 'string', description: 'Optional parent display ticket id (sub-ticket).' },
           wave: { anyOf: [{ type: 'integer' }, { type: 'null' }], description: 'Optional positive dependency wave number; null/omitted means not wave-managed.' },
           assignee: { type: 'string', description: 'session_id | "human" | null. Use "human" for questions.' },
+          source_ref: { type: 'string', description: 'Optional provenance link, e.g. "github:<owner>/<repo>#<N>" for a spec ingested from a GitHub issue (see golem:tracker § GitHub Bridge).' },
           project: { type: 'string', description: 'Contract project_id. Defaults to your current project.' },
         },
         required: ['title'],
@@ -1361,6 +1362,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           parent_id: args.parent_id,
           wave: args.wave,
           assignee: args.assignee,
+          source_ref: args.source_ref,
           created_by: sessionId ?? undefined,
         };
         return await jsonResult(await tracker.createTicket(body));

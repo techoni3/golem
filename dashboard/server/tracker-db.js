@@ -2317,7 +2317,10 @@ WHERE state_changed_at IS NULL`).run();
       if (!existing) throw new Error(`updateTicket: ticket '${id}' not found`);
 
       const actor = patch.actor ?? 'human';
-      const ALLOWED = ['title', 'body', 'kind', 'state', 'phase', 'priority', 'labels', 'stream_id', 'parent_id', 'wave', 'assignee'];
+      // source_ref is patchable over REST so a human can repair a wrong GitHub
+      // bridge link; the MCP ticket_update whitelist deliberately omits it, so
+      // agents still cannot rewrite provenance they did not set at creation.
+      const ALLOWED = ['title', 'body', 'kind', 'state', 'phase', 'priority', 'labels', 'stream_id', 'parent_id', 'wave', 'assignee', 'source_ref'];
       const updates = {};
       for (const key of ALLOWED) {
         if (Object.prototype.hasOwnProperty.call(patch, key)) {

@@ -155,6 +155,9 @@ When every child is terminal, before moving the spec to `done`:
    append recipe: `golem:journaling`.
 3. **Close artifact** naming the shipped children and anything deferred, in plain language. Ticket
    IDs are references, not the content.
+4. **GitHub close-out** — in a GitHub-backed project, every spec ends with a GitHub issue
+   carrying its high-level content, closed with the spec. Precondition, contract, and both
+   origin paths: `golem:tracker` § GitHub Bridge.
 
 ## Blocked
 

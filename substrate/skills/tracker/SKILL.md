@@ -98,6 +98,31 @@ reads the chain instead.
 - For spec-level ambiguity, prefer a `tag:'question'` comment on the parent spec so the design thread remains coherent.
 - Do not guess past missing credentials, approvals, or product decisions.
 
+## GitHub Bridge
+
+Specs may be linked to a GitHub issue; implementation children never leave golem. The
+tracker is the working system — GitHub is touched at exactly **two moments**, ingest and
+spec close. No daemon, no background sync; that is what keeps the bridge conflict-free.
+
+**Precondition**: the bridge applies only when the project's `origin` remote is a GitHub
+repo. A project without one skips the bridge entirely — no issue, no error, nothing to
+report.
+
+- **Link**: `source_ref: "github:<owner>/<repo>#<N>"` on the spec. The repo is the
+  project's `origin` remote. Set it at creation (`ticket_create`); agent tools cannot
+  rewrite it afterwards, so a wrong ref needs the human (REST `PATCH /api/tickets/:id`).
+- **GitHub-origin**: an ingested issue seeds the brief, and the spec created from it MUST
+  carry the source_ref. The issue stays open and untouched while the spec is in flight.
+  At spec close: post the spec's high-level content (design and outcome, not the slice
+  breakdown) as an issue comment, then close the issue together with the spec (`gh`).
+- **Golem-origin** (no source_ref): at spec close, create the replica issue on the
+  project's repo with the same high-level content, then close it immediately. It is a
+  durable record for collaborators, not a work item. Deliberate default: no GitHub
+  visibility while the spec is in flight — revisit if collaborators need to see open work.
+- **Append-only on pre-existing issues**: never edit a title or body you did not author —
+  comments, labels, and close only.
+- The spec's closing artifact records the issue URL as evidence.
+
 ## Body Annotations
 
 Inline comments use the same comments table as thread comments. The UI assigns rendered blocks a `block_id`; agents usually write clear Markdown and let the dashboard handle anchoring. If anchoring via MCP, provide `quote`, optional `prefix`/`suffix`, `section`, `section_id`, and `tag`.

@@ -840,6 +840,7 @@ async function main() {
     body: specBody,
     kind: 'spec',
     assignee: SESSION_ID,
+    source_ref: 'github:example/repo#42',
   });
   check('MCP creates a spec with explicit project scope',
     !specCreated.result.isError
@@ -851,6 +852,9 @@ async function main() {
     !persistedSpec.result.isError
       && persistedSpec.json?.body === specBody
       && persistedSpec.json?.project_id === PROJECT_ID,
+    persistedSpec.text);
+  check('GitHub bridge source_ref survives MCP, REST, and SQLite',
+    persistedSpec.json?.source_ref === 'github:example/repo#42',
     persistedSpec.text);
   const scopedSpecs = await callTool('ticket_list', { project: PROJECT_ID, kind: 'spec' });
   check('MCP project-scoped spec list does not widen across projects',
