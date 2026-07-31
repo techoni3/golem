@@ -243,8 +243,8 @@ try {
   const keyboardRole = busy.locator('select');
   await keyboardRole.focus();
   const keyboardRoleResponse = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/sessions/busy-empty/role'));
-  await page.keyboard.press('KeyP');
-  ok((await keyboardRoleResponse).ok() && JSON.parse(readFileSync(path.join(home, 'sessions.json'), 'utf8')).sessions.some((row) => row.session_id === 'busy-empty' && row.role === 'planner'), 'role keyboard mutation also persists through the real endpoint');
+  await page.keyboard.press('KeyR');
+  ok((await keyboardRoleResponse).ok() && JSON.parse(readFileSync(path.join(home, 'sessions.json'), 'utf8')).sessions.some((row) => row.session_id === 'busy-empty' && row.role === 'reviewer'), 'role keyboard mutation also persists through the real endpoint');
 
   const projectAction = busy.locator('.agent-card-project-action');
   await projectAction.click();
