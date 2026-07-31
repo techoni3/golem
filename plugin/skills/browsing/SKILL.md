@@ -54,15 +54,20 @@ Shared-profile rules:
 A login page or expired session on the shared profile is not a dead end. Bring the human in:
 
 1. Close your instance on the shared profile (one instance — the lock must be free).
-2. Relaunch the same command **headed** on the shared profile.
+2. Relaunch **headed and WITHOUT `--remote-debugging-port`** — plain Chrome on the shared
+   profile (`open -na "Google Chrome" --args --user-data-dir="$HOME/.golem/chrome-profile"`
+   on macOS). Google and other identity providers refuse sign-in when a DevTools
+   remote-debugging endpoint is active ("This browser or app may not be secure"), and the
+   login window needs no CDP — you are hands-off during login anyway.
 3. One-line chat ping: which site needs login, and what you'll continue with after. When
    the human is present, chat only — no gate ceremony for a routine login.
 4. **Hands off while they log in.** No CDP navigation, clicks, or keystrokes into that
    window until the target site shows a signed-in state — the window is theirs, and
    credentials are being typed into it.
-5. Signed in (observed, or the human says done) → your choice: keep working in the headed
-   window, or close it and relaunch headless. Bias headless unless the task itself is
-   visual/interactive.
+5. Signed in (observed, or the human says done) → the login window closes, and you
+   relaunch with `--remote-debugging-port` — headless by default, headed only if the task
+   itself is visual/interactive. The no-port login window can never be driven over CDP,
+   so a relaunch is always required.
 
 Running autonomously (night-shift, human away): a missing login is a missing credential —
 follow the credential path in `golem:night-shift`/`golem:gates` (question ticket, thread
@@ -87,6 +92,9 @@ first (`golem:gates`). When unsure whether the mandate covers a write, it doesn'
 
 ## Gotchas
 
+- Identity providers (Google especially) refuse sign-in from a browser with an active
+  remote-debugging endpoint or automation flags — the login handoff window must be plain
+  Chrome, never launched with `--remote-debugging-port` or through playwright/puppeteer.
 - Headless traffic can trip bot detection despite valid cookies. If a site blocks you,
   report it rather than retrying variations — and don't assume headed will fix it.
 - `DevToolsActivePort` survives clean exits **stale**, and a launch that aborts on the
