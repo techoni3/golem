@@ -411,6 +411,25 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
       );
       CREATE INDEX IF NOT EXISTS idx_message_envelopes_ticket ON message_envelopes(ticket_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_message_envelopes_target ON message_envelopes(target_session_id, status);
+      -- Shared retry ownership for non-ticket durable envelopes. This keeps an
+      -- ambiguous typed publish on its original immutable envelope id without
+      -- inventing a harness-specific spool (Pi or otherwise).
+      CREATE TABLE IF NOT EXISTS envelope_delivery_retries (
+        envelope_id        TEXT PRIMARY KEY REFERENCES message_envelopes(id) ON DELETE CASCADE,
+        session_id         TEXT NOT NULL,
+        content            TEXT NOT NULL,
+        legacy_json        TEXT NOT NULL DEFAULT 'null',
+        settlement_json    TEXT NOT NULL DEFAULT 'null',
+        require_typed      INTEGER NOT NULL DEFAULT 1,
+        status             TEXT NOT NULL DEFAULT 'pending', -- pending|publishing|delivered
+        publishing_owner   TEXT,
+        publishing_expires_at TEXT,
+        created_at         TEXT NOT NULL,
+        resolved_at        TEXT,
+        last_error         TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_envelope_delivery_retries_pending
+        ON envelope_delivery_retries(status, session_id, created_at);
       CREATE TABLE IF NOT EXISTS message_acknowledgements (
         envelope_id TEXT NOT NULL REFERENCES message_envelopes(id) ON DELETE CASCADE,
         recipient_session_id TEXT NOT NULL,
@@ -913,6 +932,32 @@ WHERE state_changed_at IS NULL`).run();
       listPendingDispatches: db.prepare(
         "SELECT * FROM dispatch_queue WHERE status IN ('pending','publishing') ORDER BY created_at ASC"
       ),
+      getEnvelopeRetry: db.prepare('SELECT * FROM envelope_delivery_retries WHERE envelope_id = ?'),
+      listPendingEnvelopeRetries: db.prepare(
+        "SELECT * FROM envelope_delivery_retries WHERE status IN ('pending','publishing') ORDER BY created_at ASC"
+      ),
+      insertEnvelopeRetry: db.prepare(`
+        INSERT OR IGNORE INTO envelope_delivery_retries
+          (envelope_id, session_id, content, legacy_json, settlement_json, require_typed, status, created_at)
+        VALUES (@envelope_id, @session_id, @content, @legacy_json, @settlement_json, @require_typed, 'pending', @created_at)
+      `),
+      claimEnvelopeRetry: db.prepare(`
+        UPDATE envelope_delivery_retries
+        SET status = 'publishing', publishing_owner = @owner, publishing_expires_at = @expires
+        WHERE envelope_id = @envelope_id
+          AND (status = 'pending' OR (status = 'publishing' AND publishing_expires_at < @now))
+      `),
+      releaseEnvelopeRetry: db.prepare(`
+        UPDATE envelope_delivery_retries
+        SET status = 'pending', publishing_owner = NULL, publishing_expires_at = NULL, last_error = @last_error
+        WHERE envelope_id = @envelope_id AND status = 'publishing' AND publishing_owner = @owner
+      `),
+      deliverEnvelopeRetry: db.prepare(`
+        UPDATE envelope_delivery_retries
+        SET status = 'delivered', publishing_owner = NULL, publishing_expires_at = NULL,
+            resolved_at = @resolved_at, last_error = NULL
+        WHERE envelope_id = @envelope_id AND status = 'publishing' AND publishing_owner = @owner
+      `),
       listPendingForSession: db.prepare(
         "SELECT * FROM dispatch_queue WHERE session_id = ? AND status IN ('pending','next_turn') ORDER BY created_at ASC"
       ),
@@ -3113,6 +3158,62 @@ WHERE state_changed_at IS NULL`).run();
       return stmts.getQueueRow.get(queueId);
     },
 
+    // A dashboard can die after a typed endpoint has persisted `claimed`,
+    // `accepted`, or a terminal result but before it finalizes its publishing
+    // lease. Reconcile that durable endpoint truth while we own the reclaimed
+    // queue row: accepted/terminal rows finish idempotently; only the explicit
+    // pre-acceptance `claimed` boundary becomes replayable again.
+    reconcileTypedQueuePublishing(queueId, { ownerToken, actor = 'golem-drainer' } = {}) {
+      if (!ownerToken) throw new Error('reconcileTypedQueuePublishing: ownerToken is required');
+      const ts = now();
+      return db.transaction(() => {
+        const row = stmts.getQueueRow.get(queueId);
+        if (!row) throw new Error(`reconcileTypedQueuePublishing: queue row '${queueId}' not found`);
+        if (row.status !== 'publishing' || row.publishing_owner !== ownerToken) {
+          return { action: 'not_owned', queue: row, envelope: row.envelope_id ? stmts.getEnvelope.get(row.envelope_id) : null };
+        }
+        const envelope = row.envelope_id ? stmts.getEnvelope.get(row.envelope_id) : null;
+        if (!envelope) return { action: 'retry', queue: row, envelope: null };
+        const state = envelope.delivery_state || 'pending';
+        if (['accepted', 'settled', 'interrupted', 'recovery_required'].includes(state)) {
+          const finalized = stmts.markQueueDeliveredRow.run({
+            delivered_at: ts, last_error: null, resolved_at: ts, id: queueId, owner: ownerToken,
+          });
+          if (finalized.changes) {
+            recordEvent({
+              ticket_id: row.ticket_id,
+              project_id: row.project_id,
+              type: 'dispatch_delivery_reconciled',
+              actor,
+              data: { queue_id: queueId, envelope_id: envelope.id, delivery_state: state },
+            });
+          }
+          return { action: 'finalized', queue: stmts.getQueueRow.get(queueId), envelope };
+        }
+        if (state === 'claimed') {
+          // No correlated acceptance exists, so this is exactly the one
+          // replayable boundary. Do not erase the historical attempt id; the
+          // next claim atomically supersedes it with a new delivery attempt.
+          db.prepare(`UPDATE message_envelopes
+            SET status = 'delivery_failed', delivery_state = 'pending',
+                delivery_error = ?, last_error = ?, delivery_attempted_at = ?
+            WHERE id = ? AND delivery_state = 'claimed'`).run(
+            'publishing lease recovered before correlated acceptance',
+            'publishing lease recovered before correlated acceptance', ts, envelope.id,
+          );
+          recordEvent({
+            ticket_id: envelope.ticket_id,
+            project_id: envelope.project_id,
+            type: 'dispatch_delivery_pending',
+            actor,
+            data: { envelope_id: envelope.id, target_session_id: envelope.target_session_id, reason: 'stale_publishing_claim_recovered' },
+          });
+          return { action: 'retry', queue: stmts.getQueueRow.get(queueId), envelope: stmts.getEnvelope.get(envelope.id) };
+        }
+        return { action: 'retry', queue: row, envelope };
+      })();
+    },
+
     claimQueuePublishing(queueId, { ownerToken, leaseMs = 30_000, nowMs = Date.now() } = {}) {
       if (!ownerToken) throw new Error('claimQueuePublishing: ownerToken is required');
       const result = stmts.claimQueuePublishingRow.run({ id: queueId, owner: ownerToken, now: new Date(nowMs).toISOString(), expires: new Date(nowMs + leaseMs).toISOString() });
@@ -3122,6 +3223,53 @@ WHERE state_changed_at IS NULL`).run();
     releaseQueuePublishing(queueId, { ownerToken } = {}) {
       if (!ownerToken) throw new Error('releaseQueuePublishing: ownerToken is required');
       return stmts.releaseQueuePublishingRow.run({ id: queueId, owner: ownerToken }).changes === 1;
+    },
+
+    // Durable retry queue for non-ticket envelopes. The first ambiguous typed
+    // result wins the immutable content/settlement record; later failures may
+    // only observe it, never mint a replacement envelope.
+    enqueueEnvelopeRetry(envelopeId, { session_id, content, legacy = null, settlement = null, require_typed = true } = {}) {
+      const envelope = stmts.getEnvelope.get(envelopeId);
+      if (!envelope) throw new Error(`enqueueEnvelopeRetry: envelope '${envelopeId}' not found`);
+      if (!session_id || envelope.target_session_id !== session_id) {
+        throw new Error('enqueueEnvelopeRetry: session must match the canonical envelope target');
+      }
+      const created_at = now();
+      const result = stmts.insertEnvelopeRetry.run({
+        envelope_id: envelopeId,
+        session_id,
+        content: String(content ?? ''),
+        legacy_json: JSON.stringify(legacy ?? null),
+        settlement_json: JSON.stringify(settlement ?? null),
+        require_typed: require_typed ? 1 : 0,
+        created_at,
+      });
+      const retry = stmts.getEnvelopeRetry.get(envelopeId);
+      return { ...retry, queued: result.changes === 1 || retry?.status === 'pending' || retry?.status === 'publishing' };
+    },
+
+    listPendingEnvelopeRetries() {
+      return stmts.listPendingEnvelopeRetries.all();
+    },
+
+    claimEnvelopeRetry(envelopeId, { ownerToken, leaseMs = 30_000, nowMs = Date.now() } = {}) {
+      if (!ownerToken) throw new Error('claimEnvelopeRetry: ownerToken is required');
+      return stmts.claimEnvelopeRetry.run({
+        envelope_id: envelopeId,
+        owner: ownerToken,
+        now: new Date(nowMs).toISOString(),
+        expires: new Date(nowMs + leaseMs).toISOString(),
+      }).changes === 1;
+    },
+
+    releaseEnvelopeRetry(envelopeId, { ownerToken, error = null } = {}) {
+      if (!ownerToken) throw new Error('releaseEnvelopeRetry: ownerToken is required');
+      return stmts.releaseEnvelopeRetry.run({ envelope_id: envelopeId, owner: ownerToken, last_error: error ?? null }).changes === 1;
+    },
+
+    markEnvelopeRetryDelivered(envelopeId, { ownerToken } = {}) {
+      if (!ownerToken) throw new Error('markEnvelopeRetryDelivered: ownerToken is required');
+      return stmts.deliverEnvelopeRetry.run({ envelope_id: envelopeId, owner: ownerToken, resolved_at: now() }).changes === 1;
     },
 
     markDispatchDeliveryAttempted(ticketId, { session_id, actor = 'human', error = null, envelope_id = null } = {}) {

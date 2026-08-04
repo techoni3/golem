@@ -111,12 +111,12 @@ export async function pushBrief(body, sessionId, metadata = null) {
 // that envelope only through its typed /brief adapter; CC/OC intentionally
 // retain their established route-specific channel events (consult, gate, etc).
 // `legacy` is ignored for a Codex target, never smuggled through /brief.
-export async function pushControlEnvelope({ envelope, content, legacy } = {}, sessionId) {
+export async function pushControlEnvelope({ envelope, content, legacy, metadata: suppliedMetadata = null } = {}, sessionId) {
   if (!envelope?.id || !envelope?.sender_session_id || !envelope?.target_session_id) {
     return { ok: false, status: 400, body: '', error: 'durable control envelope is missing canonical sender, target, or id' };
   }
   const { channel } = await resolveBaseUrl(sessionId);
-  const metadata = typedEnvelopeMetadata(envelope);
+  const metadata = suppliedMetadata ?? typedEnvelopeMetadata(envelope);
   if (isTypedWorkerChannel(channel)) {
     const delivery = await pushBrief(content, sessionId, metadata);
     return { ...delivery, typed_attempt_id: metadata.attempt_id };

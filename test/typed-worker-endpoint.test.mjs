@@ -344,6 +344,66 @@ try {
     const reclaimed = tracker.recordTypedEnvelopeLifecycle(retryable.id, { state: 'claimed', attempt_id: 'attempt-b' });
     assert.equal(reclaimed.delivery_attempt_id, 'attempt-b', 'pre-acceptance failures remain replayable');
 
+    // A restart can reclaim an expired publishing lease after the endpoint
+    // state persisted but before the old dashboard finalized its queue row.
+    // Reconciliation happens under the new owner: claimed is replayable;
+    // accepted and terminal evidence finalize the owned row without a second
+    // transport attempt or an illegal accepted -> claimed transition.
+    const restartCases = [
+      { name: 'claimed', state: 'claimed', shouldPush: true },
+      { name: 'accepted', state: 'accepted', shouldPush: false },
+      { name: 'settled', state: 'settled', shouldPush: false },
+      { name: 'interrupted', state: 'interrupted', shouldPush: false },
+      { name: 'recovery-required', state: 'recovery_required', shouldPush: false },
+    ];
+    const restartSessions = new Map();
+    const restartQueueRows = [];
+    for (const item of restartCases) {
+      const sessionId = `typed-restart-${item.name}`;
+      const restartTicket = tracker.createTicket({ project_id: 'typed-test-000000', title: `stale publishing ${item.name}`, created_by: 'test' });
+      const queued = tracker.queueDispatch(restartTicket.id, { session_id: sessionId, payload: `recover ${item.name}`, actor: 'test' });
+      const queuedEnvelope = tracker.getEnvelope(queued.envelope_id);
+      tracker.claimQueuePublishing(queued.id, { ownerToken: `dead-${item.name}` });
+      tracker.recordTypedEnvelopeLifecycle(queuedEnvelope.id, { state: 'claimed', attempt_id: `dead-${item.name}` });
+      if (item.state === 'accepted') tracker.recordTypedEnvelopeLifecycle(queuedEnvelope.id, { state: 'accepted', attempt_id: `dead-${item.name}` });
+      if (['settled', 'interrupted', 'recovery_required'].includes(item.state)) {
+        tracker.recordTypedEnvelopeLifecycle(queuedEnvelope.id, { state: 'accepted', attempt_id: `dead-${item.name}` });
+        tracker.recordTypedEnvelopeLifecycle(queuedEnvelope.id, { state: item.state, attempt_id: `dead-${item.name}` });
+      }
+      tracker.raw().prepare("UPDATE dispatch_queue SET publishing_expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(queued.id);
+      restartSessions.set(sessionId, item);
+      restartQueueRows.push(queued);
+    }
+    let restartNativePublishes = 0;
+    const restartDrainer = initDispatchDrainer({
+      tracker,
+      state: { nativeSessions: () => [...restartSessions.keys()].map((session_id) => ({ session_id, alive: true, status: 'idle' })) },
+      chat: { record: () => {} },
+      pushBrief: async (_content, sessionId, metadata) => {
+        restartNativePublishes += 1;
+        return {
+          ok: true, status: 202, typed_worker: true,
+          body: JSON.stringify({
+            accepted: true, envelope_id: metadata.envelope_id, attempt_id: metadata.attempt_id,
+            accepted_attempt_id: metadata.attempt_id, delivery_state: 'accepted',
+          }),
+        };
+      },
+      buildDispatchBrief: (restartTicket) => restartTicket.title,
+      broadcastWS: () => {},
+      listChannels: async () => [...restartSessions.keys()].map((session_id) => ({ session_id, kind: 'typed-worker', delivery_ready: true })),
+    });
+    await restartDrainer.tick();
+    assert.equal(restartNativePublishes, 1, 'only the pre-acceptance stale claim is republished after restart');
+    for (const queued of restartQueueRows) {
+      assert.equal(tracker.raw().prepare('SELECT status FROM dispatch_queue WHERE id = ?').get(queued.id).status, 'delivered', `stale ${restartSessions.get(queued.session_id).state} publishing row finalizes exactly once`);
+    }
+    assert.equal(tracker.getEnvelope(restartQueueRows[1].envelope_id).delivery_state, 'accepted', 'accepted restart evidence is retained rather than overwritten by a new claim');
+    assert.equal(tracker.getEnvelope(restartQueueRows[2].envelope_id).delivery_state, 'settled', 'terminal restart evidence is retained rather than released to pending');
+    assert.equal(tracker.getEnvelope(restartQueueRows[3].envelope_id).delivery_state, 'interrupted', 'interrupted restart evidence finalizes without automatic replay');
+    assert.equal(tracker.getEnvelope(restartQueueRows[4].envelope_id).delivery_state, 'recovery_required', 'recovery-required restart evidence finalizes without automatic replay');
+    restartDrainer.close();
+
     // Terminal tracker evidence retires only the matching compact tombstone.
     // A live accepted lineage for the same canonical worker remains protected,
     // while a restarted schema-5 supervisor cannot recreate the pruned entry
@@ -681,9 +741,9 @@ try {
       state: { nativeSessions: () => [{ session_id: digestSession, harness: 'pi', alive: true, status: 'idle' }] },
       chat: { record: () => {} },
       pushBrief: async () => { throw new Error('typed digest uses the durable control adapter'); },
-      pushControlEnvelope: async ({ envelope }) => ({
-        ok: false, status: 503, typed_worker: true, typed_attempt_id: 'digest-attempt',
-        body: JSON.stringify({ accepted: true, envelope_id: envelope.id, attempt_id: 'digest-attempt', accepted_attempt_id: 'digest-attempt', delivery_state: 'recovery_required' }),
+      pushControlEnvelope: async ({ envelope, metadata }) => ({
+        ok: false, status: 503, typed_worker: true, typed_attempt_id: metadata.attempt_id,
+        body: JSON.stringify({ accepted: true, envelope_id: envelope.id, attempt_id: metadata.attempt_id, accepted_attempt_id: metadata.attempt_id, delivery_state: 'recovery_required' }),
       }),
       buildDispatchBrief: (ticket) => ticket.title,
       broadcastWS: () => {},
@@ -692,6 +752,64 @@ try {
     await digestDrainer.tick();
     assert.equal(tracker.listSubscriptions({ session_id: digestSession })[0].cursor_seq, digestEvent.id, 'a correlated accepted non-2xx digest advances its durable cursor instead of replaying');
     assert.equal(tracker.getEnvelope(tracker.raw().prepare("SELECT id FROM message_envelopes WHERE kind = 'subscription_digest' ORDER BY created_at DESC LIMIT 1").get().id).delivery_state, 'recovery_required');
+
+    // A lost digest response is the same ambiguous typed boundary as a
+    // notification/control/reply. The production drainer retains its original
+    // envelope and cursor range, then duplicate-retries it once without a
+    // second native start or a newly minted digest envelope.
+    const lostDigestSession = 'typed-subscription-lost-response';
+    const lostDigestTopic = 'test/typed-subscription-lost-response';
+    const lostDigestSubscription = tracker.subscribe({ session_id: lostDigestSession, topic: lostDigestTopic, cursor_seq: 0 });
+    const lostDigestEvent = tracker.recordEvent({ topic: lostDigestTopic, type: 'typed_subscription_lost_response', actor: 'test' });
+    const lostDigestInbox = normalizeTypedWorkerInbox();
+    let lostDigestStarts = 0;
+    let lostDigestRequests = 0;
+    let loseDigestResponse = true;
+    const lostDigestDrainer = initDispatchDrainer({
+      tracker,
+      state: { nativeSessions: () => [{ session_id: lostDigestSession, harness: 'pi', alive: true, status: 'idle' }] },
+      chat: { record: () => {} },
+      pushBrief: async () => { throw new Error('typed digest uses control delivery'); },
+      pushControlEnvelope: async ({ envelope: digestEnvelope, content, metadata }) => {
+        lostDigestRequests += 1;
+        const typed = {
+          protocol_version: TYPED_WORKER_PROTOCOL_VERSION,
+          content,
+          ...metadata,
+          target_session_id: lostDigestSession,
+        };
+        const claim = claimTypedDelivery(lostDigestInbox, typed);
+        if (!claim.duplicate) {
+          lostDigestStarts += 1;
+          acceptTypedDelivery(lostDigestInbox, digestEnvelope.id, { turnId: 'lost-digest-native-turn' });
+          settleTypedDelivery(lostDigestInbox, digestEnvelope.id, { turnId: 'lost-digest-native-turn' });
+        }
+        if (loseDigestResponse) {
+          loseDigestResponse = false;
+          return { ok: false, status: 0, typed_worker: true, typed_attempt_id: metadata.attempt_id, error: 'response lost after native acceptance' };
+        }
+        return typedDeliveryResult(getTypedDelivery(lostDigestInbox, digestEnvelope.id), {
+          duplicate: true,
+          attemptId: metadata.attempt_id,
+        });
+      },
+      buildDispatchBrief: (ticket) => ticket.title,
+      broadcastWS: () => {},
+      listChannels: async () => [{ session_id: lostDigestSession, kind: 'typed-worker', delivery_ready: true }],
+    });
+    await lostDigestDrainer.tick();
+    const lostDigestRetry = tracker.raw().prepare(`SELECT r.* FROM envelope_delivery_retries r
+      JOIN message_envelopes e ON e.id = r.envelope_id
+      WHERE e.target_session_id = ? AND e.kind = 'subscription_digest' ORDER BY r.rowid DESC LIMIT 1`).get(lostDigestSession);
+    assert.equal(lostDigestRetry?.status, 'pending', 'lost digest response retains the original shared envelope retry');
+    assert.equal(tracker.listSubscriptions({ session_id: lostDigestSession })[0].cursor_seq, 0, 'lost response does not advance the cursor before correlated retry reconciliation');
+    assert.equal(lostDigestStarts, 1, 'the initial lost digest response starts one native turn');
+    await lostDigestDrainer.tick();
+    assert.equal(tracker.raw().prepare('SELECT status FROM envelope_delivery_retries WHERE envelope_id = ?').get(lostDigestRetry.envelope_id).status, 'delivered', 'duplicate digest retry finalizes its owned retry row');
+    assert.equal(tracker.listSubscriptions({ session_id: lostDigestSession })[0].cursor_seq, lostDigestEvent.id, 'duplicate digest retry advances the original cursor range exactly once');
+    assert.equal(lostDigestRequests, 2, 'lost digest response is retried once with the original envelope');
+    assert.equal(lostDigestStarts, 1, 'lost digest retry does not create a second native start');
+    lostDigestDrainer.close();
 
     const settledSession = 'typed-fast-settle';
     const settledTicket = tracker.createTicket({ project_id: 'typed-test-000000', title: 'typed fast settle', created_by: 'test' });

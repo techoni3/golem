@@ -34,6 +34,7 @@ import { isChannelDeliveryReady, isTypedWorkerChannel } from './channels.js';
 import { hasTypedWorkerCapability, readEndpointLeases, readSessionFacts } from '../../lib/session-facts.js';
 import { typedEnvelopeMetadata } from '../../lib/typed-worker-endpoint.js';
 import { isLegacyReplayFence, recordTypedEnvelopeOutcome } from './typed-delivery.js';
+import { acceptedDelivery, publishDurableEnvelope } from './envelope-delivery.js';
 
 const TICK_MS = 5_000;
 const COOLDOWN_MS = 60_000;
@@ -93,7 +94,8 @@ export function initDispatchDrainer({
         result = { ok: false, error: String(err?.message ?? err) };
       }
       const typedOutcome = recordTypedEnvelopeOutcome(tracker, child.id, metadata.attempt_id, result);
-      const delivered = !!result?.ok || typedOutcome?.accepted === true;
+      if (typedOutcome?.accepted && !result?.accepted) result = { ...result, accepted: true };
+      const delivered = acceptedDelivery(result);
       const error = delivered ? null : (result?.error || `status ${result?.status ?? '?'}`);
       if (!typedOutcome) tracker.markEnvelopeDelivery(child.id, { error });
       chat.record(delivered ? 'user' : 'system', delivered ? 'brief' : 'error',
@@ -181,6 +183,113 @@ export function initDispatchDrainer({
     return lines.join('\n').trim();
   }
 
+  function retryJson(value, fallback = null) {
+    try { return JSON.parse(value); } catch { return fallback; }
+  }
+
+  // Retry settlement runs before the retry row is resolved. Every operation
+  // is idempotent (CAS subscription cursors, exact passive batch IDs, and
+  // comment dispatch state), so a crash in this window safely repeats it.
+  function settleEnvelopeRetry(retry) {
+    const settlement = retryJson(retry.settlement_json, null);
+    if (!settlement || typeof settlement !== 'object') return true;
+    try {
+      const passive = settlement.passive;
+      if (passive?.session_id && passive?.batch_id) {
+        const claim = tracker.claimPassiveDelta(passive.session_id);
+        if (claim?.lease_id) {
+          if (claim.batch?.id === passive.batch_id) tracker.commitPassiveDelta(passive.session_id, claim.lease_id);
+          else tracker.releasePassiveDelta(passive.session_id, claim.lease_id);
+        }
+      }
+      const comments = settlement.comment_dispatch;
+      if (comments?.ticket_id && comments?.session_id) {
+        tracker.markCommentDispatchesDeliveredForTicket(comments.ticket_id, comments.session_id);
+      }
+      for (const cursor of Array.isArray(settlement.subscription_cursors) ? settlement.subscription_cursors : []) {
+        if (cursor?.id != null) tracker.advanceSubscriptionCursor(cursor.id, cursor.from_seq, cursor.to_seq);
+      }
+      return true;
+    } catch (error) {
+      console.error('[dispatch-drainer] envelope retry settlement failed:', error);
+      return false;
+    }
+  }
+
+  async function drainEnvelopeRetries({ byId, channelsBySession }) {
+    let changed = false;
+    let retries = [];
+    try { retries = tracker.listPendingEnvelopeRetries(); } catch (error) {
+      console.error('[dispatch-drainer] list envelope retries failed:', error);
+      return changed;
+    }
+    for (const retry of retries) {
+      let envelope = tracker.getEnvelope(retry.envelope_id);
+      if (!envelope) {
+        if (tracker.claimEnvelopeRetry(retry.envelope_id, { ownerToken: publishingOwner })) {
+          tracker.releaseEnvelopeRetry(retry.envelope_id, { ownerToken: publishingOwner, error: 'durable envelope missing' });
+        }
+        continue;
+      }
+      const persistedState = envelope.delivery_state || 'pending';
+      // A recorded acceptance is authoritative even when the process/lease is
+      // presently absent. Finalize retry settlement without waiting to route a
+      // second transport attempt through a restarted worker.
+      if (['accepted', 'settled', 'interrupted', 'recovery_required'].includes(persistedState)) {
+        if (!tracker.claimEnvelopeRetry(retry.envelope_id, { ownerToken: publishingOwner })) continue;
+        if (settleEnvelopeRetry(retry)) {
+          tracker.markEnvelopeRetryDelivered(retry.envelope_id, { ownerToken: publishingOwner });
+          changed = true;
+        } else tracker.releaseEnvelopeRetry(retry.envelope_id, { ownerToken: publishingOwner, error: 'settlement retry required' });
+        continue;
+      }
+      const session = byId.get(retry.session_id);
+      const channel = channelsBySession.get(retry.session_id);
+      if (!session?.alive || session.status !== 'idle') continue;
+      // A typed retry never falls through to a similarly named legacy route
+      // while a restarted endpoint has not rebound its lease.
+      if (retry.require_typed && !isTypedWorkerChannel(channel)) continue;
+      if (!tracker.claimEnvelopeRetry(retry.envelope_id, { ownerToken: publishingOwner })) continue;
+      if (persistedState === 'claimed') {
+        // Claim without correlated acceptance is the single replayable state.
+        tracker.recordTypedEnvelopeLifecycle(envelope.id, {
+          state: 'pending',
+          attempt_id: envelope.delivery_attempt_id,
+          error: 'retry publishing lease recovered before correlated acceptance',
+        });
+        envelope = tracker.getEnvelope(envelope.id);
+      }
+      envelope = tracker.renewEnvelopeExpiry(envelope.id);
+      const legacy = retryJson(retry.legacy_json, null);
+      const result = await publishDurableEnvelope({
+        tracker,
+        envelope,
+        sessionId: retry.session_id,
+        content: retry.content,
+        legacy,
+        typedTarget: !!retry.require_typed,
+        settlement: retryJson(retry.settlement_json, null),
+        publish: ({ envelope: targetEnvelope, content, legacy: targetLegacy, metadata }) => (
+          deliverControl({ envelope: targetEnvelope, content, legacy: targetLegacy, metadata }, retry.session_id)
+        ),
+      });
+      if (result.delivered) {
+        if (settleEnvelopeRetry(retry)) {
+          tracker.markEnvelopeRetryDelivered(retry.envelope_id, { ownerToken: publishingOwner });
+          chat.record('user', 'brief', retry.content, { session_id: retry.session_id, delivery: 'retry' });
+          lastDeliveredAt.set(retry.session_id, Date.now());
+          changed = true;
+        } else tracker.releaseEnvelopeRetry(retry.envelope_id, { ownerToken: publishingOwner, error: 'settlement retry required' });
+      } else {
+        tracker.releaseEnvelopeRetry(retry.envelope_id, {
+          ownerToken: publishingOwner,
+          error: result.delivery?.error || `status ${result.delivery?.status ?? '?'}`,
+        });
+      }
+    }
+    return changed;
+  }
+
   async function tick() {
     if (stopped) return;
     let pending;
@@ -203,6 +312,29 @@ export function initDispatchDrainer({
     }
     let queueChanged = await checkUnackedDispatches();
     pending = pending || [];
+
+    // Recover stale typed publishing leases before reachability checks. An
+    // accepted/terminal endpoint fact can finalize its owned queue row even if
+    // the process has not rebound a new channel yet; a claimed-only boundary
+    // is returned to pending and will wait safely for that channel.
+    for (const row of pending) {
+      if (row.status !== 'publishing' || !row.envelope_id) continue;
+      const envelope = tracker.getEnvelope(row.envelope_id);
+      if (!['claimed', 'accepted', 'settled', 'interrupted', 'recovery_required'].includes(envelope?.delivery_state)) continue;
+      try {
+        if (!tracker.claimQueuePublishing(row.id, { ownerToken: publishingOwner })) continue;
+        const recovery = tracker.reconcileTypedQueuePublishing(row.id, { ownerToken: publishingOwner });
+        if (recovery.action === 'retry') tracker.releaseQueuePublishing(row.id, { ownerToken: publishingOwner });
+        if (recovery.action !== 'not_owned') queueChanged = true;
+      } catch (error) {
+        console.error('[dispatch-drainer] stale typed publishing reconciliation failed:', error);
+      }
+    }
+    // Re-read after durable recovery so stale publishing rows are never routed
+    // again through the normal delivery loop in this same tick.
+    if (queueChanged) {
+      try { pending = tracker.listPendingDispatches(); } catch { /* preserve initial snapshot on transient read failure */ }
+    }
 
     const sessions = state.nativeSessions();
     // TKT-0369: sessions whose channel MCP is down are UNREACHABLE — treat
@@ -241,6 +373,7 @@ export function initDispatchDrainer({
     } catch { /* a fact read failure never invents a legacy Pi fallback */ }
     const byId = new Map();
     for (const s of sessions) if (s.session_id) byId.set(s.session_id, s);
+    if (await drainEnvelopeRetries({ byId, channelsBySession })) queueChanged = true;
 
     // Group pending rows by session_id. listPendingDispatches returns FIFO by
     // created_at globally, so within each session the rows are also FIFO.
@@ -367,6 +500,22 @@ export function initDispatchDrainer({
           publishing.add(row.id);
         }
 
+        let envelope = row.envelope_id ? tracker.getEnvelope(row.envelope_id) : null;
+        if (isTypedWorker && row.envelope_id) {
+          // A stale publishing lease is not permission to overwrite durable
+          // endpoint truth. Reconcile accepted/terminal rows first; only a
+          // pre-acceptance claim returns to pending for same-id retry.
+          const reconciliation = tracker.reconcileTypedQueuePublishing(row.id, { ownerToken: publishingOwner });
+          if (reconciliation.action === 'finalized') {
+            queueChanged = true;
+            const refreshed = tracker.getTicket(row.ticket_id);
+            if (refreshed) broadcastWS({ type: 'ticket-updated', ticket: refreshed });
+            continue;
+          }
+          if (reconciliation.action === 'not_owned') continue;
+          envelope = reconciliation.envelope;
+        }
+
         // Durable-first: setDispatched BEFORE pushBrief (crash between →
         // ticket assigned, not lost).
         let assigned = ticket;
@@ -381,7 +530,6 @@ export function initDispatchDrainer({
         if (assigned.revoked_session_id) {
           try { await pushBrief(`Dispatch revoked for ${assigned.display_id || assigned.id}: ${assigned.title || ''}\n\nReason: queued dispatch delivered to another session. Stand down unless you receive a new dispatch.`, assigned.revoked_session_id); } catch { /* best-effort */ }
         }
-        let envelope = row.envelope_id ? tracker.getEnvelope(row.envelope_id) : null;
         // A queued typed envelope may wait behind a busy turn or an earlier
         // wave longer than its original TTL. Extend the durable source before
         // rendering, so the endpoint receives exactly the expiry the tracker
@@ -422,6 +570,8 @@ export function initDispatchDrainer({
           ? recordTypedEnvelopeOutcome(tracker, row.envelope_id, typedAttemptId, pushResult)
           : null;
         const typedAccepted = typedOutcome?.accepted === true;
+        if (typedAccepted && !pushResult?.accepted) pushResult = { ...pushResult, accepted: true };
+        const deliveryAccepted = acceptedDelivery(pushResult);
         if (isTypedWorker && row.envelope_id && !typedAccepted) {
           tracker.recordTypedEnvelopeLifecycle(row.envelope_id, {
             state: 'pending',
@@ -443,7 +593,7 @@ export function initDispatchDrainer({
 
         // Set the outcome from the delivery opportunity before queue/envelope
         // writes: their failure must not replay context that already landed.
-        const passiveCommitted = isTypedWorker ? typedAccepted : !!pushResult?.ok;
+        const passiveCommitted = deliveryAccepted;
         try {
           if (pushResult.queued) {
             if (assigned.dispatched_to !== sessionId) {
@@ -471,11 +621,11 @@ export function initDispatchDrainer({
             } catch { /* a failed settlement leaves the batch replayable */ }
           }
         }
-        if (pushResult && (pushResult.ok || typedAccepted) && !pushResult.queued) {
+        if (pushResult && deliveryAccepted && !pushResult.queued) {
           tracker.markCommentDispatchesDeliveredForTicket(ticket.id, sessionId);
         }
 
-        if (pushResult && (pushResult.ok || typedAccepted)) {
+        if (pushResult && deliveryAccepted) {
           chat.record('user', 'brief', briefString, { session_id: sessionId, delivery: pushResult.queued ? 'next_turn' : 'push' });
         } else {
           const detail = pushResult?.error || `status ${pushResult?.status ?? '?'}`;
@@ -504,6 +654,7 @@ export function initDispatchDrainer({
     try {
       const subsBySession = tracker.activeSubscriptionsBySession();
       const subscriptionDigestEnabled = loadConfig()?.events?.subscriptionDigestEnabled === true;
+      const retrySessions = new Set((tracker.listPendingEnvelopeRetries?.() ?? []).map((retry) => retry.session_id));
       for (const [sessionId, subs] of subsBySession) {
         if (!subscriptionDigestEnabled) {
           // GOL-424: preserve event history but quietly advance each durable
@@ -518,6 +669,10 @@ export function initDispatchDrainer({
           }
           continue;
         }
+        // The durable original digest must resolve before this producer mints
+        // another range for the same cursor. Otherwise a lost typed response
+        // would become a second native turn with a new envelope identity.
+        if (retrySessions.has(sessionId)) continue;
         const s = byId.get(sessionId);
         if (!s || !s.alive || !channelIds.has(sessionId)) continue;
         const last = lastDeliveredAt.get(sessionId);
@@ -537,26 +692,35 @@ export function initDispatchDrainer({
             topics: digests.map((digest) => digest.subscription.topic),
             from_seq: Math.min(...digests.map((digest) => digest.from_seq + 1)),
             to_seq: Math.max(...digests.map((digest) => digest.to_seq)),
+            subscription_cursors: digests.map((digest) => ({
+              id: digest.subscription.id,
+              from_seq: digest.from_seq,
+              to_seq: digest.to_seq,
+            })),
           },
         });
-        let pushResult;
-        try {
-          pushResult = await deliverControl({
-            envelope,
-            content: brief,
-            legacy: { path: '/brief', body: brief },
-          }, sessionId);
-        } catch (err) {
-          pushResult = { ok: false, error: String(err?.message ?? err) };
-        }
-        const typedOutcome = recordTypedEnvelopeOutcome(tracker, envelope.id, pushResult?.typed_attempt_id ?? null, pushResult);
-        const delivered = !!pushResult?.ok || typedOutcome?.accepted === true;
-        if (!typedOutcome) tracker.markEnvelopeDelivery(envelope.id, {
-          error: delivered ? null : (pushResult?.error || `status ${pushResult?.status ?? '?'}`),
+        const result = await publishDurableEnvelope({
+          tracker,
+          envelope,
+          sessionId,
+          content: brief,
+          legacy: { path: '/brief', body: brief },
+          typedTarget: isTypedWorkerChannel(channelsBySession.get(sessionId)),
+          settlement: {
+            subscription_cursors: digests.map((digest) => ({
+              id: digest.subscription.id,
+              from_seq: digest.from_seq,
+              to_seq: digest.to_seq,
+            })),
+          },
+          publish: ({ envelope: targetEnvelope, content, legacy, metadata }) => (
+            deliverControl({ envelope: targetEnvelope, content, legacy, metadata }, sessionId)
+          ),
         });
-        if (!delivered) {
-          const detail = pushResult?.error || `status ${pushResult?.status ?? '?'}`;
+        if (!result.delivered) {
+          const detail = result.delivery?.error || `status ${result.delivery?.status ?? '?'}`;
           chat.record('system', 'error', `subscription digest to ${sessionId} failed — channel ${detail}`, { session_id: sessionId });
+          if (result.retry_queued) retrySessions.add(sessionId);
           continue;
         }
         chat.record('user', 'brief', brief, { session_id: sessionId });
