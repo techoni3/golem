@@ -23,8 +23,6 @@ import { teamAssists } from './team-assist.js';
 import { golemHome, dashboardJsonPath, journalDirFor, sessionsJsonPath } from '../../lib/golem-home.js';
 import { createRole, deleteRole, getRole, listRoleCards, roleChangeBrief, roleMission, setSessionRole, updateRoleMeta, writeRoleCard } from '../../lib/session-role.js';
 import { acceptedDelivery, publishDurableEnvelope } from './envelope-delivery.js';
-import { recordTypedEnvelopeOutcome } from './typed-delivery.js';
-import { typedEnvelopeMetadata } from '../../lib/typed-worker-endpoint.js';
 import { hasTypedWorkerCapability, readSessionFacts } from '../../lib/session-facts.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
@@ -453,7 +451,7 @@ async function deliverControlEnvelope(tracker, {
         || (fact?.harness === 'pi' && !hasExplicitLegacyPiDelivery(fact));
     } catch { /* absent facts preserve legacy behavior without inventing a spool */ }
   }
-  return publishDurableEnvelope({
+  const result = await publishDurableEnvelope({
     tracker,
     envelope,
     sessionId: recipient_session_id,
@@ -465,6 +463,7 @@ async function deliverControlEnvelope(tracker, {
       pushControlEnvelope({ envelope: targetEnvelope, content: targetContent, legacy: targetLegacy, metadata: typedMetadata }, recipient_session_id)
     ),
   });
+  return { ...result, typed_target: typedTarget };
 }
 
 async function notifyGateResolved(tracker, comment, patchBody) {
@@ -944,6 +943,7 @@ async function main() {
     try {
       const passive = appendPassiveDelta(tracker, b.session_id, String(b.text || ''));
       let passiveCommitted = false;
+      let typedRetained = false;
       try {
         const result = await deliverControlEnvelope(tracker, {
           project_id: b.project_id ?? null,
@@ -954,12 +954,13 @@ async function main() {
           metadata: { notification_text: String(b.text || '') },
           legacy: { path: '/brief', body: passive.brief },
           settlement: passive.claim?.batch?.id
-            ? { passive: { session_id: b.session_id, batch_id: passive.claim.batch.id } }
+            ? { passive: { session_id: b.session_id, batch_id: passive.claim.batch.id, lease_id: passive.claim.lease_id } }
             : null,
         });
         // Decide from the delivery opportunity before durable bookkeeping: a
         // bookkeeping failure must not replay context that already reached it.
-        passiveCommitted = result.delivered;
+        typedRetained = result.typed_target;
+        passiveCommitted = !result.typed_target && result.delivered;
         return {
           ok: result.delivered || result.retry_queued,
           queued: result.retry_queued,
@@ -967,7 +968,9 @@ async function main() {
           delivery: result.delivery,
         };
       } finally {
-        settlePassiveDelta(tracker, b.session_id, passive.claim, passiveCommitted);
+        // A typed result retains this exact batch in its owned retry until
+        // settleDurableEnvelope commits it; legacy paths retain old behavior.
+        if (!typedRetained) settlePassiveDelta(tracker, b.session_id, passive.claim, passiveCommitted);
       }
     } catch (err) {
       return reply.code(400).send({ error: String(err?.message ?? err) });
@@ -1787,11 +1790,10 @@ async function main() {
 
     // 3) Best-effort channel push — never fail the request on a push miss.
     let channelResult = null;
-    let typedOutcome = null;
     let immediateTypedTarget = false;
-    let immediateAttemptId = null;
     let retryQueue = null;
     let passiveCommitted = false;
+    let immediateQueueOwner = null;
     try {
       try {
         // A fetch can fail after a typed endpoint has accepted a native turn
@@ -1801,34 +1803,58 @@ async function main() {
         immediateTypedTarget = (await listChannels()).some((channel) => (
           channel.session_id === sessionId && isTypedWorkerChannel(channel)
         ));
-        const metadata = typedEnvelopeMetadata(envelope);
-        immediateAttemptId = metadata.attempt_id;
-        channelResult = await pushBrief(briefString, sessionId, metadata);
-        channelResult.typed_attempt_id = metadata.attempt_id;
+        if (!immediateTypedTarget) {
+          const fact = readSessionFacts().find((entry) => entry?.canonical_id === sessionId);
+          immediateTypedTarget = hasTypedWorkerCapability(fact)
+            || (fact?.harness === 'pi' && !hasExplicitLegacyPiDelivery(fact));
+        }
+        // An immediate typed ticket is still durable work. Reserve both the
+        // queue row and original-envelope retry *before* transport so a
+        // dashboard death after native acceptance is always reclaimable.
+        if (immediateTypedTarget) {
+          retryQueue = tracker.queueDispatch(id, {
+            session_id: sessionId,
+            note,
+            workspace,
+            payload: baseBriefString,
+            envelope_id: envelope.id,
+            actor: senderId || 'human',
+          });
+          immediateQueueOwner = crypto.randomUUID();
+          if (!tracker.claimQueuePublishing(retryQueue.id, { ownerToken: immediateQueueOwner })) {
+            throw new Error('could not reserve immediate typed ticket queue ownership');
+          }
+        }
+        const published = await publishDurableEnvelope({
+          tracker,
+          envelope,
+          sessionId,
+          content: briefString,
+          legacy: { path: '/brief', body: briefString },
+          typedTarget: immediateTypedTarget,
+          retryOwnerToken: immediateQueueOwner ?? crypto.randomUUID(),
+          settlement: {
+            passive: passive.claim?.batch?.id
+              ? { session_id: sessionId, batch_id: passive.claim.batch.id, lease_id: passive.claim.lease_id }
+              : null,
+            comment_dispatch: { ticket_id: id, session_id: sessionId },
+            queue: retryQueue ? { id: retryQueue.id, owner_token: immediateQueueOwner } : null,
+          },
+          publish: ({ content, metadata }) => pushBrief(content, sessionId, metadata),
+        });
+        channelResult = published.delivery;
+        // The helper owns typed passive settlement. A legacy push still uses
+        // the historical synchronous passive lease in this route's finally.
+        passiveCommitted = !immediateTypedTarget && published.delivered;
+        if (immediateTypedTarget && !published.delivered) {
+          tracker.releaseQueuePublishing(retryQueue.id, { ownerToken: immediateQueueOwner });
+        }
       } catch (err) {
         channelResult = { ok: false, error: String(err?.message ?? err) };
       }
-      typedOutcome = recordTypedEnvelopeOutcome(tracker, envelope.id, channelResult?.typed_attempt_id ?? immediateAttemptId, channelResult);
-      if (typedOutcome?.accepted && !channelResult?.accepted) channelResult = { ...channelResult, accepted: true };
       const immediateDelivered = acceptedDelivery(channelResult);
-      // `mode:now` has no pre-existing queue row. A typed response can be
-      // lost only after the worker may already have accepted the envelope, so
-      // retain the original immutable id and let the generic drainer reconcile
-      // it. Do not append the leased passive delta: that claim is released in
-      // finally and the retry acquires the then-current durable batch.
-      if (immediateTypedTarget && typedOutcome?.accepted !== true) {
-        retryQueue = tracker.queueDispatch(id, {
-          session_id: sessionId,
-          note,
-          workspace,
-          payload: baseBriefString,
-          envelope_id: envelope.id,
-          actor: senderId || 'human',
-        });
-      }
       // The push is the delivery opportunity. Set this before chat or tracker
       // writes so their failures cannot release delivered passive context.
-      passiveCommitted = immediateDelivered;
       if (channelResult && immediateDelivered) {
         chat.record('user', 'brief', briefString, { session_id: sessionId, delivery: channelResult.queued ? 'next_turn' : 'push' });
       } else {
@@ -1841,13 +1867,10 @@ async function main() {
         error: channelResult && immediateDelivered ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),
         envelope_id: envelope.id,
       });
-      if (!typedOutcome) tracker.markEnvelopeDelivery(envelope.id, {
-        error: channelResult && immediateDelivered ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),
-      });
     } finally {
-      settlePassiveDelta(tracker, sessionId, passive.claim, passiveCommitted);
+      if (!immediateTypedTarget) settlePassiveDelta(tracker, sessionId, passive.claim, passiveCommitted);
     }
-    if (channelResult && acceptedDelivery(channelResult)) {
+    if (!immediateTypedTarget && channelResult && acceptedDelivery(channelResult)) {
       tracker.markCommentDispatchesDeliveredForTicket(id, sessionId);
     }
 
@@ -1859,9 +1882,9 @@ async function main() {
     // when_idle path that fell through (target was already idle) adds the
     // queued:false / delivered:true hints the plan specifies.
     const delivered = acceptedDelivery(channelResult) && !channelResult?.queued;
-    const queued = !!channelResult?.queued || !!retryQueue;
+    const queued = !!channelResult?.queued || (!!retryQueue && !delivered);
     return { ok: delivered || queued, assignment: { ok: true, ticket }, queued, delivered, envelope_id: envelope.id, ticket,
-      delivery: { ok: delivered || queued, queued, mode: retryQueue ? 'shared_queue' : (queued ? 'next_turn' : 'push'), status: channelResult?.status ?? 0, error: delivered || queued ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`) }, channel: channelResult };
+      delivery: { ok: delivered || queued, queued, mode: retryQueue && !delivered ? 'shared_queue' : (queued ? 'next_turn' : 'push'), status: channelResult?.status ?? 0, error: delivered || queued ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`) }, channel: channelResult };
   });
 
   // GOL-421: channel acknowledgements/replies are correlated to an envelope and
@@ -1892,6 +1915,7 @@ async function main() {
         const baseBrief = `Reply for dispatch ${envelope.ticket_id}: ${String(req.body?.text || '')}`;
         const passive = appendPassiveDelta(tracker, result.reply.recipient_session_id, baseBrief);
         let passiveCommitted = false;
+        let typedRetained = false;
         try {
           const deliveryResult = await deliverControlEnvelope(tracker, {
             recipient_session_id: result.reply.recipient_session_id,
@@ -1899,13 +1923,14 @@ async function main() {
             legacy: { path: '/brief', body: passive.brief },
             envelope: result.reply,
             settlement: passive.claim?.batch?.id
-              ? { passive: { session_id: result.reply.recipient_session_id, batch_id: passive.claim.batch.id } }
-              : null,
+            ? { passive: { session_id: result.reply.recipient_session_id, batch_id: passive.claim.batch.id, lease_id: passive.claim.lease_id } }
+            : null,
           });
           sender_delivery = { ...deliveryResult.delivery, queued: deliveryResult.retry_queued };
-          passiveCommitted = deliveryResult.delivered;
+          typedRetained = deliveryResult.typed_target;
+          passiveCommitted = !deliveryResult.typed_target && deliveryResult.delivered;
         } finally {
-          settlePassiveDelta(tracker, result.reply.recipient_session_id, passive.claim, passiveCommitted);
+          if (!typedRetained) settlePassiveDelta(tracker, result.reply.recipient_session_id, passive.claim, passiveCommitted);
         }
       }
       const ticket = envelope?.ticket_id ? tracker.getTicket(envelope.ticket_id) : null;

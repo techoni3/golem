@@ -401,18 +401,22 @@ try {
   assert.equal(nativeStarts, startsBeforeLeaseGap + 1, 'rebound typed lease accepts the original non-ticket envelope once');
   assert.equal(endpointRequests, requestsBeforeLeaseGap + 1, 'shared retry uses the generic typed endpoint after rebind');
 
-  // The retry ownership is persisted before transport. Kill the real isolated
-  // dashboard after native acceptance but before it can observe the hanging
-  // response; a restarted drainer reclaims that owned lease and duplicate
-  // replays the same envelope without a second native start.
+  // Both an immediate ticket queue and its original-envelope retry are owned
+  // before transport. Kill the real isolated dashboard after native acceptance
+  // but before its response/settlement; restart must finish stored settlement
+  // without a second native turn.
   await restartDashboardForIndependentRetry();
   const startsBeforeCrash = nativeStarts;
   const requestsBeforeCrash = endpointRequests;
   hangingResponse = false;
   hangNextResponse = true;
-  const crashRequest = postJson(dashboard.baseUrl, '/api/messages/notify', {
-    project_id: 'typed-immediate-000000', sender_id: 'typed-crash-window-source', session_id: canonicalId,
-    text: 'crash after native acceptance before response',
+  const crashTicket = await postJson(dashboard.baseUrl, '/api/tickets', {
+    project_id: 'typed-immediate-000000', kind: 'work-item', title: 'typed immediate ticket crash window', body: 'controlled', created_by: 'human',
+  });
+  assert.equal(crashTicket.response.status, 201, crashTicket.text);
+  const crashRequest = fetch(`${dashboard.baseUrl}/api/tickets/${encodeURIComponent(crashTicket.json.id)}/dispatch`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ session_id: canonicalId, note: 'crash after native acceptance before response' }),
   }).catch((error) => ({ error }));
   await waitFor(() => hangingResponse && nativeStarts === startsBeforeCrash + 1, 'native acceptance before dashboard crash');
   const crashEnvelope = new Database(dashboardDb, { readonly: true });
@@ -423,6 +427,9 @@ try {
     crashEnvelopeId = row?.envelope_id;
     assert.equal(row?.status, 'publishing', 'retry ownership is durably leased before transport starts');
     assert.ok(row?.publishing_owner, 'the pre-transport retry row has an owner for crash recovery');
+    const queue = crashEnvelope.prepare('SELECT status, publishing_owner FROM dispatch_queue WHERE envelope_id = ?').get(crashEnvelopeId);
+    assert.equal(queue?.status, 'publishing', 'immediate ticket queue ownership is durably leased before transport starts');
+    assert.ok(queue?.publishing_owner, 'immediate ticket queue retains an owner across the crash window');
   } finally { crashEnvelope.close(); }
   const crashedDashboard = dashboard;
   crashedDashboard.child.kill('SIGKILL');
@@ -440,10 +447,15 @@ try {
     return sessions.find((session) => session.session_id === canonicalId && session.alive) || null;
   }, `typed target restart discovery (${dashboard.stderr()})`);
   await waitForRetry(crashEnvelopeId, `crash-window original-envelope recovery (${dashboard.stderr()})`);
+  const settledCrashQueue = new Database(dashboardDb, { readonly: true });
+  try {
+    assert.equal(settledCrashQueue.prepare('SELECT status FROM dispatch_queue WHERE envelope_id = ?').get(crashEnvelopeId)?.status, 'delivered',
+      'restart applies the owned ticket settlement before resolving its retry');
+  } finally { settledCrashQueue.close(); }
   assert.equal(nativeStarts, startsBeforeCrash + 1, 'crash recovery retries the accepted envelope as a duplicate, never a second native turn');
   assert.equal(endpointRequests, requestsBeforeCrash + 2, 'dashboard restart reclaims and republishes the original owned retry once');
 
-  console.log('typed immediate retry production journey passed: ticket/notification/control/comment/reply lost response -> original shared envelope retry -> one native start; accepted-503, typed lease-gap, and crash-after-accept recovery settle');
+  console.log('typed immediate retry production journey passed: ticket/notification/control/comment/reply lost response -> original shared envelope retry -> one native start; accepted-503, typed lease-gap, and immediate-ticket crash-after-accept settlement recovery');
 } finally {
   await stopProcess(dashboard?.child);
   await closeTypedWorkerEndpoint(endpoint?.server);

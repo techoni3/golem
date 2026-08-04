@@ -12,6 +12,75 @@ export function acceptedDelivery(delivery) {
   return delivery?.typed_worker === true ? false : delivery?.ok === true;
 }
 
+function storedSettlement(retry) {
+  try { return JSON.parse(retry?.settlement_json || 'null'); } catch { return null; }
+}
+
+// A passive batch may be held by the synchronous route which rendered it, or
+// by a restarted drainer after that route died. Commit the exact stored batch
+// when possible; a different active lease is a safe hold, never permission to
+// settle another delivery's context.
+function settlePassive(tracker, passive) {
+  if (!passive?.session_id || !passive?.batch_id) return true;
+  if (passive.lease_id) {
+    try {
+      const result = tracker.commitPassiveDelta(passive.session_id, passive.lease_id);
+      if (result?.committed || result?.missing) return true;
+    } catch { /* reclaim below after an interrupted owner */ }
+  }
+  const claim = tracker.claimPassiveDelta(passive.session_id);
+  if (claim?.busy) return false;
+  if (!claim?.batch) return true;
+  if (claim.batch.id !== passive.batch_id) {
+    if (claim.lease_id) tracker.releasePassiveDelta(passive.session_id, claim.lease_id);
+    return true; // the stored batch was already committed; this is newer work.
+  }
+  tracker.commitPassiveDelta(passive.session_id, claim.lease_id);
+  return true;
+}
+
+// Settlement is deliberately completed while the retry remains owned and
+// publishing. Each operation is idempotent (exact passive batch, pending-only
+// comment state, CAS subscription cursor, guarded queue/root update), so a
+// process death between operations leaves the same original envelope available
+// for restart settlement rather than minting another native turn.
+export function settleDurableEnvelope({ tracker, envelope, retry, retryOwnerToken } = {}) {
+  if (!tracker || !envelope?.id || !retryOwnerToken) throw new Error('settleDurableEnvelope requires tracker, envelope, and retry owner');
+  const settlement = storedSettlement(retry);
+  try {
+    if (!settlePassive(tracker, settlement?.passive)) return false;
+    const comments = settlement?.comment_dispatch;
+    if (comments?.ticket_id && comments?.session_id) {
+      tracker.markCommentDispatchesDeliveredForTicket(comments.ticket_id, comments.session_id);
+    }
+    for (const cursor of Array.isArray(settlement?.subscription_cursors) ? settlement.subscription_cursors : []) {
+      if (cursor?.id != null) tracker.advanceSubscriptionCursor(cursor.id, cursor.from_seq, cursor.to_seq);
+    }
+    const queue = settlement?.queue;
+    if (queue?.id) {
+      let delivered = tracker.markQueueDelivered(queue.id, {
+        envelope_id: envelope.id,
+        ownerToken: queue.owner_token ?? retryOwnerToken,
+      });
+      if (delivered?.status !== 'delivered'
+        && tracker.claimQueuePublishing(queue.id, { ownerToken: retryOwnerToken })) {
+        delivered = tracker.markQueueDelivered(queue.id, {
+          envelope_id: envelope.id,
+          ownerToken: retryOwnerToken,
+        });
+      }
+      if (delivered?.status !== 'delivered') return false;
+    }
+    // Ack-ping/escalation linkage becomes visible only after the child itself
+    // is durably settled. This is also an idempotent legacy delivery fact.
+    tracker.markEnvelopeDelivery(envelope.id, { error: null });
+    return tracker.markEnvelopeRetryDelivered(envelope.id, { ownerToken: retryOwnerToken });
+  } catch (error) {
+    console.error('[envelope-delivery] durable settlement failed:', error);
+    return false;
+  }
+}
+
 // `publish` receives canonical metadata for a typed target and is deliberately
 // injected by the caller. This keeps the durable lifecycle independent of the
 // HTTP/Unix channel transport while giving every producer the same retry rule.
@@ -22,10 +91,10 @@ export async function publishDurableEnvelope({
   content,
   legacy = null,
   typedTarget = false,
+  durableRetry = typedTarget,
   settlement = null,
   retryOwnerToken = crypto.randomUUID(),
   retryAlreadyOwned = false,
-  deferRetrySettlement = false,
   publish,
 } = {}) {
   if (!tracker || !envelope?.id || !sessionId || typeof publish !== 'function') {
@@ -35,15 +104,16 @@ export async function publishDurableEnvelope({
   // Reserve the immutable envelope before transport. If the dashboard dies
   // after native acceptance but before it observes the HTTP response, this
   // owned lease is the durable handoff to a later drainer.
+  const usesRetry = typedTarget || durableRetry;
   let retry = null;
   let retryOwned = false;
-  if (typedTarget) {
+  if (usesRetry) {
     retry = tracker.enqueueEnvelopeRetry(envelope.id, {
       session_id: sessionId,
       content,
       legacy,
       settlement,
-      require_typed: true,
+      require_typed: typedTarget,
     });
     retryOwned = retryAlreadyOwned || tracker.claimEnvelopeRetry(envelope.id, { ownerToken: retryOwnerToken });
     if (!retryOwned) {
@@ -77,12 +147,13 @@ export async function publishDurableEnvelope({
     });
   }
 
-  // A typed non-acceptance is ambiguous until the same immutable envelope is
-  // replayed. Release the pre-transport reservation for reclaim; the drainer
-  // defers marking delivery until its associated settlement is durable.
-  if (typedTarget && retryOwned) {
-    if (delivered && !deferRetrySettlement) {
-      tracker.markEnvelopeRetryDelivered(envelope.id, { ownerToken: retryOwnerToken });
+  // A typed acceptance retains its owned retry until every associated durable
+  // settlement has applied. A typed non-acceptance releases only the exact
+  // pre-transport reservation for a same-envelope retry.
+  let settled = !usesRetry;
+  if (usesRetry && retryOwned) {
+    if (delivered) {
+      settled = settleDurableEnvelope({ tracker, envelope, retry, retryOwnerToken });
     } else if (!delivered) {
       tracker.releaseEnvelopeRetry(envelope.id, {
         ownerToken: retryOwnerToken,
@@ -90,5 +161,13 @@ export async function publishDurableEnvelope({
       });
     }
   }
-  return { envelope, delivery, typedOutcome, delivered, retry_queued: !!retry?.queued && !delivered, retry };
+  return {
+    envelope,
+    delivery,
+    typedOutcome,
+    delivered,
+    settled,
+    retry_queued: !!retry?.queued && (!delivered || !settled),
+    retry,
+  };
 }

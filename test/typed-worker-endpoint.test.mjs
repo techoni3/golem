@@ -247,7 +247,7 @@ try {
     expires_at: '2099-01-01T00:00:00.000Z',
   }));
   assert.equal(fenced.fenced, true, 'schema-2 replay identity older than retained history is fenced before native delivery');
-  const { CodexSupervisor, readCodexSupervisor } = await import('../lib/codex-supervisor.js');
+  const { CodexSupervisor, CodexRpcServerRejection, readCodexSupervisor } = await import('../lib/codex-supervisor.js');
   const legacySupervisor = new CodexSupervisor({
     canonicalId: 'legacy-upgrade-worker',
     registryFile: path.join(tombstoneTemp, 'legacy-supervisors.json'),
@@ -531,6 +531,40 @@ try {
     restartedRaceSupervisor.reconcileTerminalTypedDeliveries(restartedRaceInbox);
     assert.equal(restartedRaceInbox.in_flight_envelope_id, null, 'startup reconciliation clears stale claimed state from the authoritative terminal tombstone');
     assert.equal(getTypedDelivery(restartedRaceInbox, raceEnvelope.envelope_id)?.lifecycle_state, 'settled', 'startup reconciliation preserves the authoritative terminal result');
+
+    // A received JSON-RPC error is a deterministic native refusal, not an
+    // ambiguous lost response. The supervisor must release the exact claim so
+    // the shared queue can retry it instead of manufacturing recovery_required.
+    const rejectionSession = 'typed-server-rejection';
+    const rejectionSupervisor = new CodexSupervisor({
+      canonicalId: rejectionSession,
+      registryFile: path.join(temp, 'server-rejection-supervisors.json'),
+      tombstoneFile: path.join(temp, 'server-rejection-tombstones.db'),
+    });
+    rejectionSupervisor.threadId = 'rejection-thread';
+    rejectionSupervisor.projectId = 'typed-test-000000';
+    rejectionSupervisor.mcp = { state: 'active', binding: rejectionSession };
+    rejectionSupervisor.deliveryReady = () => true;
+    rejectionSupervisor.updateRecord({
+      canonical_id: rejectionSession, thread_id: rejectionSupervisor.threadId,
+      thread_status: { type: 'idle' }, turn: { state: 'idle', turn_id: null },
+      inbox: normalizeTypedWorkerInbox(), health: { state: 'healthy', delivery_ready: true },
+    });
+    rejectionSupervisor.rpc = {
+      request: async () => { throw new CodexRpcServerRejection('turn/start', { code: -32000, message: 'synthetic native rejection' }); },
+    };
+    const rejectedEnvelope = {
+      protocol_version: TYPED_WORKER_PROTOCOL_VERSION,
+      envelope_id: 'deterministic-server-rejection', content: 'must remain retryable',
+      target_session_id: rejectionSession, kind: 'ticket_dispatch', sender_session_id: 'test',
+      created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 60_000).toISOString(), attempt_id: 'rejection-attempt-a',
+    };
+    const rejected = await rejectionSupervisor.acceptDelivery(rejectedEnvelope);
+    assert.equal(rejected.accepted, false, 'a received RPC error is not typed acceptance');
+    assert.equal(rejected.delivery_state, 'pending', 'deterministic RPC rejection releases the exact pre-accept claim');
+    assert.equal(readCodexSupervisor(rejectionSession, { file: rejectionSupervisor.registryFile })?.inbox?.in_flight_envelope_id, null);
+    assert.equal(readCodexSupervisor(rejectionSession, { file: rejectionSupervisor.registryFile })?.inbox?.deliveries?.some((row) => row.envelope_id === rejectedEnvelope.envelope_id), false,
+      'server rejection leaves no recovery-required or accepted delivery mapping');
 
     let status = 'idle';
     let pushes = 0;
@@ -987,6 +1021,47 @@ try {
     } finally {
       tracker.waveGateForTicket = originalWaveGate;
     }
+
+    // Reminder children use the same pre-transport original-envelope retry
+    // lifecycle as every other typed producer. Their root linkage appears only
+    // when the child settles, so a lost response cannot strand or duplicate a
+    // ping/escalation lineage.
+    const reminderTicket = tracker.createTicket({ project_id: 'typed-test-000000', title: 'typed reminder retry lifecycle', created_by: 'test' });
+    const reminderRoot = tracker.createDispatchEnvelope(reminderTicket.id, {
+      session_id: 'typed-reminder-target', actor: 'test', sender_id: 'typed-reminder-sender',
+    });
+    tracker.markEnvelopeDelivery(reminderRoot.id);
+    tracker.raw().prepare("UPDATE message_envelopes SET ack_deadline_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(reminderRoot.id);
+    const reminderPublishes = [];
+    const reminderDrainer = initDispatchDrainer({
+      tracker,
+      state: { nativeSessions: () => [] },
+      chat: { record: () => {} },
+      pushBrief: async (_content, _sessionId, metadata) => {
+        reminderPublishes.push(metadata.envelope_id);
+        return { ok: true, status: 202, typed_worker: true, body: JSON.stringify({
+          accepted: true, envelope_id: metadata.envelope_id, attempt_id: metadata.attempt_id,
+          accepted_attempt_id: metadata.attempt_id, delivery_state: 'accepted',
+        }) };
+      },
+      buildDispatchBrief: (ticket) => ticket.title,
+      broadcastWS: () => {},
+      listChannels: async () => [
+        { session_id: 'typed-reminder-target', kind: 'typed-worker', delivery_ready: true },
+        { session_id: 'typed-reminder-sender', kind: 'typed-worker', delivery_ready: true },
+      ],
+    });
+    await reminderDrainer.tick();
+    const pingedRoot = tracker.getEnvelope(reminderRoot.id);
+    assert.ok(pingedRoot.ping_envelope_id, 'typed accepted ping links to its root only after durable child settlement');
+    assert.equal(tracker.getEnvelopeRetry(pingedRoot.ping_envelope_id)?.status, 'delivered', 'accepted ping resolves its original retry idempotently');
+    tracker.raw().prepare("UPDATE message_envelopes SET escalate_after = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(reminderRoot.id);
+    await reminderDrainer.tick();
+    const escalatedRoot = tracker.getEnvelope(reminderRoot.id);
+    assert.ok(escalatedRoot.escalation_envelope_id, 'typed accepted escalation links to root only after durable child settlement');
+    assert.equal(tracker.getEnvelopeRetry(escalatedRoot.escalation_envelope_id)?.status, 'delivered', 'accepted escalation resolves its original retry idempotently');
+    assert.equal(reminderPublishes.length, 2, 'one ping and one escalation receive one native opportunity each');
+    reminderDrainer.close();
 
     const offlineTicket = tracker.createTicket({ project_id: 'typed-test-000000', title: 'typed offline hold', created_by: 'test' });
     const offlineQueued = tracker.queueDispatch(offlineTicket.id, { session_id: 'typed-offline', payload: 'offline', actor: 'test' });

@@ -3018,10 +3018,15 @@ WHERE state_changed_at IS NULL`).run();
       const deadline = new Date(Date.parse(ts) + minutes * 60_000).toISOString();
       return db.transaction(() => {
         stmts.markEnvelopeDelivery.run({ id: envelopeId, delivered_at: ts, ack_deadline_at: deadline, error: error ?? null });
-        if (existing.kind === 'ack_ping') {
-          db.prepare(`UPDATE message_envelopes SET escalate_after = ? WHERE id = ?
-            AND ping_envelope_id = ? AND escalation_envelope_id IS NULL AND acknowledged_at IS NULL`)
-            .run(error == null ? deadline : ts, existing.root_id || existing.parent_id, envelopeId);
+        if (existing.kind === 'ack_ping' && error == null) {
+          db.prepare(`UPDATE message_envelopes SET ping_envelope_id = ?, escalate_after = ? WHERE id = ?
+            AND ping_envelope_id IS NULL AND escalation_envelope_id IS NULL AND acknowledged_at IS NULL`)
+            .run(envelopeId, deadline, existing.root_id || existing.parent_id);
+        }
+        if (existing.kind === 'escalation' && error == null) {
+          db.prepare(`UPDATE message_envelopes SET escalation_envelope_id = ? WHERE id = ?
+            AND escalation_envelope_id IS NULL AND acknowledged_at IS NULL`)
+            .run(envelopeId, existing.root_id || existing.parent_id);
         }
         return stmts.getEnvelope.get(envelopeId);
       })();
@@ -3252,6 +3257,10 @@ WHERE state_changed_at IS NULL`).run();
       return stmts.listPendingEnvelopeRetries.all();
     },
 
+    getEnvelopeRetry(envelopeId) {
+      return stmts.getEnvelopeRetry.get(envelopeId) ?? null;
+    },
+
     claimEnvelopeRetry(envelopeId, { ownerToken, leaseMs = 30_000, nowMs = Date.now() } = {}) {
       if (!ownerToken) throw new Error('claimEnvelopeRetry: ownerToken is required');
       return stmts.claimEnvelopeRetry.run({
@@ -3398,12 +3407,12 @@ WHERE state_changed_at IS NULL`).run();
         const root = db.prepare(`SELECT * FROM message_envelopes
           WHERE kind = 'ticket_dispatch' AND delivery_opportunity_at IS NOT NULL
             AND ack_deadline_at <= ? AND acknowledged_at IS NULL AND completed_at IS NULL
-            AND ping_envelope_id IS NULL ORDER BY ack_deadline_at ASC LIMIT 1`).get(ts);
+            AND ping_envelope_id IS NULL
+            AND NOT EXISTS (SELECT 1 FROM message_envelopes c
+              WHERE c.root_id = message_envelopes.id AND c.kind = 'ack_ping')
+            ORDER BY ack_deadline_at ASC LIMIT 1`).get(ts);
         if (!root) return null;
         const childId = crypto.randomUUID();
-        const claimed = db.prepare(`UPDATE message_envelopes SET ping_envelope_id = ?
-          WHERE id = ? AND ping_envelope_id IS NULL AND acknowledged_at IS NULL AND completed_at IS NULL`).run(childId, root.id);
-        if (!claimed.changes) return null;
         const ageMinutes = Math.max(0, Math.floor((Date.parse(ts) - Date.parse(root.delivery_opportunity_at)) / 60_000));
         const child = { id: childId, root_id: root.id, parent_id: root.id, ticket_id: root.ticket_id, project_id: root.project_id,
           sender_id: root.sender_id, reply_to_session_id: root.reply_to_session_id, recipient_session_id: root.recipient_session_id,
@@ -3422,12 +3431,12 @@ WHERE state_changed_at IS NULL`).run();
         const root = db.prepare(`SELECT * FROM message_envelopes
           WHERE kind = 'ticket_dispatch' AND ping_envelope_id IS NOT NULL AND escalate_after IS NOT NULL
             AND escalate_after <= ? AND acknowledged_at IS NULL AND completed_at IS NULL
-            AND escalation_envelope_id IS NULL ORDER BY escalate_after ASC LIMIT 1`).get(ts);
+            AND escalation_envelope_id IS NULL
+            AND NOT EXISTS (SELECT 1 FROM message_envelopes c
+              WHERE c.root_id = message_envelopes.id AND c.kind = 'escalation')
+            ORDER BY escalate_after ASC LIMIT 1`).get(ts);
         if (!root) return null;
         const childId = crypto.randomUUID();
-        const claimed = db.prepare(`UPDATE message_envelopes SET escalation_envelope_id = ?
-          WHERE id = ? AND escalation_envelope_id IS NULL AND acknowledged_at IS NULL AND completed_at IS NULL`).run(childId, root.id);
-        if (!claimed.changes) return null;
         const child = { id: childId, root_id: root.id, parent_id: root.id, ticket_id: root.ticket_id, project_id: root.project_id,
           sender_id: root.sender_id, reply_to_session_id: root.reply_to_session_id, recipient_session_id: root.reply_to_session_id,
           sender_session_id: root.sender_session_id, target_session_id: root.reply_to_session_id, kind: 'escalation',
