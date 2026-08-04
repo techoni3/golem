@@ -16,7 +16,7 @@ npx golem <command>
 
 | Command | What it does |
 | --- | --- |
-| `golem claude [-- <claude args...>]` | Launch native Claude Code with Golem's push-capable development channel and exact argument passthrough. |
+| `golem claude|cc [--backend native|ollama] [--model <id>] [-- <claude args...>]` | Launch Claude Code with Golem's channel; optionally use Ollama and select its model. |
 | `golem dashboard [--public]` | Start the admin dashboard on `http://dashboard.golem.localhost:7420`. Pass extra args through to `npm start`. |
 | `golem doctor` | Sanity-check the environment. |
 | `golem status [--json]` | Probe the dashboard `/api/health` endpoint and print the canonical URL. |

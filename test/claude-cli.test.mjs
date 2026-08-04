@@ -29,11 +29,11 @@ try {
   };
   const globalHelp = run(['help'], { env: baseEnv });
   assert.equal(globalHelp.status, 0, globalHelp.stderr);
-  assert.match(globalHelp.stdout, /claude \[-- <claude args\.\.\.>\]/);
+  assert.match(globalHelp.stdout, /claude\|cc \[--backend native\|ollama\] \[--model <id>\]/);
 
   const wrapperHelp = run(['claude', '--help'], { env: baseEnv });
   assert.equal(wrapperHelp.status, 0, wrapperHelp.stderr);
-  assert.match(wrapperHelp.stdout, /Usage: golem claude \[-- <claude args\.\.\.>\]/);
+  assert.match(wrapperHelp.stdout, /Usage: golem claude \[--backend native\|ollama\] \[--model <id>\]/);
   assert.match(wrapperHelp.stdout, new RegExp(`${channelFlag} ${channel}`));
   assert.match(wrapperHelp.stdout, /golem claude -- --help/);
 
@@ -75,6 +75,57 @@ exit "\${GOLEM_FAKE_CLAUDE_EXIT:-0}"
   ]);
 
   fs.rmSync(capture);
+  const nativeModel = run(['cc', '--model', 'claude-opus', '--', '--verbose'], { cwd: project, env });
+  assert.equal(nativeModel.status, 0, nativeModel.stderr);
+  assert.deepEqual(fs.readFileSync(capture, 'utf8').trim().split('\n'), [
+    fs.realpathSync(project),
+    channelFlag,
+    channel,
+    '--model',
+    'claude-opus',
+    '--verbose',
+  ]);
+
+  const ollamaCapture = path.join(temp, 'ollama-argv.txt');
+  fs.writeFileSync(path.join(bin, 'ollama'), `#!/bin/sh
+printf '%s\\n' "$PWD" > "$GOLEM_OLLAMA_CAPTURE"
+printf '%s\\n' "$@" >> "$GOLEM_OLLAMA_CAPTURE"
+exit "\${GOLEM_FAKE_OLLAMA_EXIT:-0}"
+`, { mode: 0o700 });
+  const ollamaEnv = { ...env, GOLEM_OLLAMA_CAPTURE: ollamaCapture };
+  const ollamaLaunch = run([
+    'claude', '--backend', 'ollama', '--model', 'deepseek-v4-flash:0731-cloud', '--', '--verbose',
+  ], { cwd: project, env: ollamaEnv });
+  assert.equal(ollamaLaunch.status, 0, ollamaLaunch.stderr);
+  assert.deepEqual(fs.readFileSync(ollamaCapture, 'utf8').trim().split('\n'), [
+    fs.realpathSync(project),
+    'launch',
+    'claude',
+    '--model',
+    'deepseek-v4-flash:0731-cloud',
+    '--',
+    channelFlag,
+    channel,
+    '--verbose',
+  ]);
+
+  const invalidBackend = run(['claude', '--backend', 'not-real'], { cwd: project, env });
+  assert.equal(invalidBackend.status, 2, invalidBackend.stderr);
+  assert.match(invalidBackend.stderr, /unknown backend 'not-real'/);
+
+  for (const missingValue of [
+    ['--backend'],
+    ['--backend', '--model', 'deepseek-v4-flash:0731-cloud'],
+    ['--model'],
+    ['--model', '--verbose'],
+    ['--model', '-h'],
+  ]) {
+    const rejectedValue = run(['claude', ...missingValue], { cwd: project, env });
+    assert.equal(rejectedValue.status, 2, rejectedValue.stderr);
+    assert.match(rejectedValue.stderr, /requires a value for --(?:backend|model)/);
+  }
+
+  fs.rmSync(capture);
   const rejected = run([
     'claude',
     `${channelFlag}=plugin:other@example`,
@@ -106,4 +157,4 @@ exit "\${GOLEM_FAKE_CLAUDE_EXIT:-0}"
   fs.rmSync(temp, { recursive: true, force: true });
 }
 
-console.log('Claude CLI journey passed: push channel injection, exact passthrough, reserved ownership, native exit propagation, and missing-binary diagnostics.');
+console.log('Claude CLI journey passed: native/Ollama backend selection, model forwarding, cc alias, push channel injection, exact passthrough, reserved ownership, exit propagation, and diagnostics.');

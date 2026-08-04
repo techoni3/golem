@@ -11,7 +11,7 @@
 //   codex-supervisor
 //                Run one managed, headless Codex App Server lifecycle process.
 //   codex        Open one managed interactive Codex TUI.
-//   claude       Open Claude Code as a Golem channel consumer.
+//   claude / cc  Open Claude Code as a Golem channel consumer, optionally via Ollama.
 //   doctor       Sanity-check the environment.
 //   status       Dashboard health + canonical URL.
 //   help         Show this message.
@@ -443,14 +443,21 @@ const CLAUDE_CHANNEL_FLAG = '--dangerously-load-development-channels';
 const GOLEM_CLAUDE_CHANNEL = 'plugin:golem@golem-workspace';
 
 function claudeLauncherHelp() {
-  log(`Usage: golem claude [-- <claude args...>]
+  log(`Usage: golem claude [--backend native|ollama] [--model <id>] [-- <claude args...>]
+       golem cc [--backend native|ollama] [--model <id>] [-- <claude args...>]
 
-Open native Claude Code in the current directory as a push-capable Golem
-channel consumer. Golem injects:
+Open Claude Code in the current directory as a push-capable Golem
+channel consumer. The default backend is native. With --backend ollama, Golem
+runs \`ollama launch claude\`, preserving the old golemx launch contract.
+
+Golem injects:
 
   ${CLAUDE_CHANNEL_FLAG} ${GOLEM_CLAUDE_CHANNEL}
 
-All other Claude Code arguments are passed through unchanged. Use
+--model selects the native Claude Code model or the Ollama launch model,
+depending on the backend. All arguments after -- are passed to Claude Code
+unchanged. Other unrecognised arguments remain native Claude Code passthrough
+for backwards compatibility. Use
 \`golem claude -- --help\` for native Claude Code help. The development-channel
 flag is reserved because this wrapper owns the Golem channel identity.`);
 }
@@ -466,10 +473,29 @@ async function cmdClaude(args) {
   }
 
   const passthrough = [];
+  let backend = 'native';
+  let model = null;
   let separatorSeen = false;
-  for (const arg of args) {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
     if (!separatorSeen && arg === '--') {
       separatorSeen = true;
+      continue;
+    }
+    if (!separatorSeen && (arg === '--backend' || arg === '--model')) {
+      const value = args[index + 1];
+      if (!value || value.startsWith('-')) fatal(2, `golem claude requires a value for ${arg}`);
+      if (arg === '--backend') backend = value;
+      else model = value;
+      index += 1;
+      continue;
+    }
+    if (!separatorSeen && arg.startsWith('--backend=')) {
+      backend = arg.slice('--backend='.length);
+      continue;
+    }
+    if (!separatorSeen && arg.startsWith('--model=')) {
+      model = arg.slice('--model='.length);
       continue;
     }
     if (isReservedClaudeArgument(arg)) {
@@ -478,11 +504,17 @@ async function cmdClaude(args) {
     passthrough.push(arg);
   }
 
-  const child = spawn('claude', [
-    CLAUDE_CHANNEL_FLAG,
-    GOLEM_CLAUDE_CHANNEL,
-    ...passthrough,
-  ], {
+  if (!['native', 'ollama'].includes(backend)) {
+    fatal(2, `golem claude: unknown backend '${backend}' (known: native, ollama)`);
+  }
+  if (model === '') fatal(2, 'golem claude requires a non-empty --model value');
+
+  const executable = backend === 'ollama' ? 'ollama' : 'claude';
+  const launchArgs = backend === 'ollama'
+    ? ['launch', 'claude', ...(model ? ['--model', model] : []), '--', CLAUDE_CHANNEL_FLAG, GOLEM_CLAUDE_CHANNEL, ...passthrough]
+    : [CLAUDE_CHANNEL_FLAG, GOLEM_CLAUDE_CHANNEL, ...(model ? ['--model', model] : []), ...passthrough];
+
+  const child = spawn(executable, launchArgs, {
     cwd: process.cwd(),
     env: process.env,
     stdio: 'inherit',
@@ -516,7 +548,7 @@ async function cmdClaude(args) {
 
     if (outcome.error) {
       const detail = outcome.error.code === 'ENOENT'
-        ? "the 'claude' executable was not found on PATH"
+        ? `the '${executable}' executable was not found on PATH`
         : outcome.error.message;
       err(`golem claude could not start Claude Code: ${detail}`);
       process.exitCode = 1;
@@ -1750,9 +1782,9 @@ Run:
                        Open a normal interactive Codex TUI through Golem's
                        private App Server bridge; no flags are required.
                        --thread resumes a Codex thread by its native id.
-  claude [-- <claude args...>]
-                       Open native Claude Code with Golem's push-capable
-                       development channel loaded.
+  claude|cc [--backend native|ollama] [--model <id>] [-- <claude args...>]
+                       Open Claude Code with Golem's development channel loaded;
+                       optionally launch through Ollama with an explicit model.
   role <role|clear> [--session <id-or-name>]
                          Set or clear a session role (${SESSION_ROLES.join(', ')}).
   sessions dedup [--apply]
@@ -1840,6 +1872,7 @@ async function main() {
       await cmdCodex(rest);
       break;
     case 'claude':
+    case 'cc':
       await cmdClaude(rest);
       break;
     case 'role':
