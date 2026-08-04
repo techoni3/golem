@@ -1296,7 +1296,7 @@ function AnnoComposer({ quote, hideTag, currentAuthor, onSend, onSendAndDispatch
   return (
     <div className="anno-composer">
       {quote && <div className="quote">{esc(quote)}</div>}
-      <textarea ref={taRef} value={text} onChange={(e) => setText(e.target.value)} placeholder="Comment — Markdown (+ ```mermaid; > [!NOTE]/[!WARNING]/[!IMPORTANT])"
+      <textarea ref={taRef} rows={5} value={text} onChange={(e) => setText(e.target.value)} placeholder="Comment — Markdown (+ ```mermaid; > [!NOTE]/[!WARNING]/[!IMPORTANT])"
         onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); fire(); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onCancel && onCancel(); } }}/>
       <div className="row">
         {!hideTag && <TagChipRow current={tag} onPick={setTag}/>}

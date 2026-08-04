@@ -130,7 +130,7 @@ function IdeasDrawer({ open, onClose }) {
           <textarea
             ref={taRef}
             className="ideas-input"
-            rows={3}
+            rows={5}
             placeholder="What's on your mind? (Enter posts · Shift+Enter newline)"
             value={text}
             onChange={(e) => setText(e.target.value)}
