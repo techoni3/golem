@@ -31,6 +31,10 @@ const {
   CodexSupervisor,
   readCodexSupervisor,
 } = await import('../lib/codex-supervisor.js');
+const {
+  TYPED_WORKER_PROTOCOL_VERSION,
+  typedEnvelopeMetadata,
+} = await import('../lib/typed-worker-endpoint.js');
 const { readChannels } = await import('../dashboard/server/channels.js');
 const { openTrackerDb } = await import('../dashboard/server/tracker-db.js');
 const { readEndpointLeases, readSessionFacts } = await import('../lib/session-facts.js');
@@ -264,6 +268,18 @@ async function waitForNativeStatus(sessionId, status) {
 
 async function typedBrief(record, envelope, { ownerToken = record.health.owner_token } = {}) {
   const payload = JSON.parse(envelope.payload);
+  // Keep the direct authenticated retry on the exact same wire contract as
+  // dashboard publication. This journey intentionally bypasses the dashboard
+  // route to prove a restart duplicate against the endpoint itself, so it must
+  // never recreate a partial pre-versioned payload here.
+  const metadata = typedEnvelopeMetadata(envelope);
+  const wireEnvelope = {
+    ...metadata,
+    content: payload.content,
+    // Pin this last just as pushBrief() does: direct callers cannot downgrade
+    // the endpoint contract by smuggling a stale protocol version.
+    protocol_version: TYPED_WORKER_PROTOCOL_VERSION,
+  };
   const response = await fetch(`http://${record.health.host}:${record.health.port}/brief`, {
     method: 'POST',
     headers: {
@@ -272,14 +288,9 @@ async function typedBrief(record, envelope, { ownerToken = record.health.owner_t
       'x-golem-target-session': record.canonical_id,
       'x-golem-endpoint-owner': ownerToken,
     },
-    body: JSON.stringify({
-      envelope_id: envelope.id,
-      content: payload.content,
-      sender_session_id: envelope.sender_session_id,
-      target_session_id: envelope.target_session_id,
-    }),
+    body: JSON.stringify(wireEnvelope),
   });
-  return { response, body: await response.json() };
+  return { response, body: await response.json(), wireEnvelope };
 }
 
 const CONTROLLED_NOTE = 'CONTROLLED GOL-475 MATRIX: acknowledge the tracker envelope, write no files, make no external calls, reply with one sentence only, then stop.';
@@ -464,6 +475,18 @@ try {
   codexTarget.persistLease(codexTarget.healthAddress);
   const retried = await typedBrief(readCodexSupervisor(codexTarget.canonicalId), retryEnvelope);
   assert.equal(retried.response.status, 202, JSON.stringify(retried.body));
+  assert.equal(retried.wireEnvelope.protocol_version, TYPED_WORKER_PROTOCOL_VERSION,
+    'first retry uses the pinned typed-worker protocol version');
+  assert.equal(retried.wireEnvelope.kind, retryEnvelope.kind,
+    'first retry preserves the durable envelope kind');
+  assert.equal(retried.wireEnvelope.target_session_id, codexTarget.canonicalId,
+    'first retry preserves the canonical worker target');
+  assert.equal(retried.wireEnvelope.created_at, retryEnvelope.created_at,
+    'first retry preserves durable creation time');
+  assert.equal(retried.wireEnvelope.expires_at, retryEnvelope.expires_at,
+    'first retry preserves durable expiry');
+  assert.ok(retried.wireEnvelope.attempt_id,
+    'first retry includes a fresh correlated delivery attempt id');
   await waitForCodexCompletion(codexTarget, retryEnvelope.id, 'retry App Server turn completion');
   assert.equal(readCodexSupervisor(codexTarget.canonicalId).inbox.deliveries.length, turnCountBeforeRetry + 1,
     'failed delivery retry creates one persisted Codex turn mapping');
@@ -478,6 +501,12 @@ try {
   const duplicate = await typedBrief(restarted, retryEnvelope);
   assert.equal(duplicate.response.status, 200, JSON.stringify(duplicate.body));
   assert.equal(duplicate.body.duplicate, true, 'supervisor restart reuses the durable envelope mapping');
+  assert.equal(duplicate.wireEnvelope.protocol_version, TYPED_WORKER_PROTOCOL_VERSION,
+    'restart duplicate uses the same pinned typed-worker protocol version');
+  assert.equal(duplicate.wireEnvelope.envelope_id, retryEnvelope.id,
+    'restart duplicate retains immutable envelope identity while issuing a new attempt');
+  assert.notEqual(duplicate.wireEnvelope.attempt_id, retried.wireEnvelope.attempt_id,
+    'restart duplicate carries a distinct delivery-attempt correlation');
   await sleep(250);
   assert.equal(readCodexSupervisor(codexTarget.canonicalId).inbox.deliveries.length, turnCountBeforeRetry + 1,
     'restart retry never starts a second Codex turn');
