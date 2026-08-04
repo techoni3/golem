@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-08-04 @ f0ad1bc — maintained via golem:docs-maintenance.
+> Last verified: 2026-08-04 @ 903b01a — maintained via golem:docs-maintenance.
 ## Directory structure
 - `substrate/` — plugin source; `plugin/` is its generated CC render, never hand-edited. Roles
   have one source: `instructions/AGENTS.md`; cards and skills point to it.
