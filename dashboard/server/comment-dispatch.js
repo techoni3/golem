@@ -183,6 +183,44 @@ export function createCommentDispatchService({ db, now, recordEvent, actorFormsF
     return { delivered: info.changes };
   }
 
+  // A durable typed envelope owns an immutable set of comment-dispatch rows.
+  // Never turn a later settlement into a ticket/session-wide sweep: another
+  // human comment can be queued for the same target while the older envelope
+  // is waiting on a lost response or restart. The pending-state predicate is
+  // the CAS guard; addressed/cancelled/newer rows cannot be advanced here.
+  function markDeliveredDispatches(dispatchIds) {
+    const ids = [...new Set((Array.isArray(dispatchIds) ? dispatchIds : [dispatchIds])
+      .filter((id) => typeof id === 'string' && id))];
+    if (ids.length === 0) return { delivered: 0, dispatches: [] };
+    const ts = now();
+    const select = db.prepare('SELECT id, comment_id FROM comment_dispatches WHERE id = ?');
+    const deliver = db.prepare(`
+      UPDATE comment_dispatches
+      SET status = 'delivered', delivered_at = @ts
+      WHERE id = @id AND status = 'pending'
+    `);
+    const rows = ids.map((id) => select.get(id)).filter(Boolean);
+    const changed = [];
+    const txn = db.transaction(() => {
+      for (const row of rows) {
+        if (deliver.run({ id: row.id, ts }).changes) changed.push(row);
+      }
+      for (const commentId of new Set(changed.map((row) => row.comment_id))) recomputeState(commentId);
+      return { delivered: changed.length, dispatches: changed.map((row) => row.id) };
+    });
+    return txn();
+  }
+
+  function listPendingDispatchesForTicket(ticketId, sessionId) {
+    if (!ticketId || !sessionId) return [];
+    return db.prepare(`
+      SELECT id, batch_id
+      FROM comment_dispatches
+      WHERE ticket_id = @ticket_id AND session_id = @session_id AND status = 'pending'
+      ORDER BY created_at ASC, id ASC
+    `).all({ ticket_id: ticketId, session_id: sessionId });
+  }
+
   function matchingSessionIdForAuthor(author, rows) {
     for (const row of rows) {
       const forms = new Set(actorFormsForSession(row.session_id));
@@ -241,6 +279,8 @@ export function createCommentDispatchService({ db, now, recordEvent, actorFormsF
     markAddressedByComment,
     markAddressedForTicketActivity,
     markDeliveredForTicket,
+    markDeliveredDispatches,
+    listPendingDispatchesForTicket,
     listUndispatchedForTicket,
     recomputeState,
     recomputeAll,

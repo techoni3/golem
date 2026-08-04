@@ -1484,7 +1484,12 @@ async function main() {
         content: brief,
         legacy: { path: '/brief', body: brief },
         envelope,
-        settlement: { comment_dispatch: { ticket_id: ticket.id, session_id: sessionId } },
+        settlement: {
+          comment_dispatch: {
+            dispatch_ids: dispatches.map((dispatch) => dispatch?.id).filter(Boolean),
+            batch_id: batchId ?? null,
+          },
+        },
       });
       channelResult = result.delivery;
       delivered = result.delivered;
@@ -1495,7 +1500,7 @@ async function main() {
     let rolledBack = 0;
     if (delivered) {
       chat.record('user', 'brief', brief, { session_id: sessionId });
-      tracker.markCommentDispatchesDeliveredForTicket(ticket.id, sessionId);
+      tracker.markCommentDispatchesDelivered(dispatches.map((dispatch) => dispatch?.id).filter(Boolean));
     } else if (retryQueued) {
       chat.record('system', 'info', `comment dispatch of ${ticket.id} to ${sessionId} retained for duplicate-safe typed retry`);
     } else {
@@ -1787,6 +1792,11 @@ async function main() {
     const passive = appendPassiveDelta(tracker, sessionId, baseBriefString);
     const briefString = passive.brief;
     tracker.setEnvelopePayload(envelope.id, { content: briefString, envelope_id: envelope.id, sender_id: envelope.sender_id, reply_to_session_id: envelope.reply_to_session_id, recipient_session_id: envelope.recipient_session_id });
+    // Snapshot only the comment dispatches that existed when this immutable
+    // ticket envelope was prepared. A later batch for the same ticket/session
+    // belongs to its own delivery opportunity.
+    const immediateCommentDispatches = tracker.listPendingCommentDispatchesForTicket(id, sessionId);
+    const immediateCommentDispatchIds = immediateCommentDispatches.map((dispatch) => dispatch.id);
 
     // 3) Best-effort channel push — never fail the request on a push miss.
     let channelResult = null;
@@ -1837,7 +1847,12 @@ async function main() {
             passive: passive.claim?.batch?.id
               ? { session_id: sessionId, batch_id: passive.claim.batch.id, lease_id: passive.claim.lease_id }
               : null,
-            comment_dispatch: { ticket_id: id, session_id: sessionId },
+            comment_dispatch: immediateCommentDispatchIds.length
+              ? {
+                  dispatch_ids: immediateCommentDispatchIds,
+                  batch_ids: [...new Set(immediateCommentDispatches.map((dispatch) => dispatch.batch_id).filter(Boolean))],
+                }
+              : null,
             queue: retryQueue ? { id: retryQueue.id, owner_token: immediateQueueOwner } : null,
           },
           publish: ({ content, metadata }) => pushBrief(content, sessionId, metadata),
@@ -1871,7 +1886,7 @@ async function main() {
       if (!immediateTypedTarget) settlePassiveDelta(tracker, sessionId, passive.claim, passiveCommitted);
     }
     if (!immediateTypedTarget && channelResult && acceptedDelivery(channelResult)) {
-      tracker.markCommentDispatchesDeliveredForTicket(id, sessionId);
+      tracker.markCommentDispatchesDelivered(immediateCommentDispatchIds);
     }
 
     const ticket = tracker.getTicket(id);

@@ -3562,6 +3562,14 @@ WHERE state_changed_at IS NULL`).run();
       return commentDispatch.markDeliveredForTicket(ticketId, sessionId);
     },
 
+    markCommentDispatchesDelivered(dispatchIds) {
+      return commentDispatch.markDeliveredDispatches(dispatchIds);
+    },
+
+    listPendingCommentDispatchesForTicket(ticketId, sessionId) {
+      return commentDispatch.listPendingDispatchesForTicket(ticketId, sessionId);
+    },
+
     updateComment(ticket_id, comment_id, patch = {}) {
       const existingTicket = stmts.getTicket.get(ticket_id);
       if (!existingTicket) throw new Error(`updateComment: ticket '${ticket_id}' not found`);

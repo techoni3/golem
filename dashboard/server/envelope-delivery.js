@@ -50,8 +50,13 @@ export function settleDurableEnvelope({ tracker, envelope, retry, retryOwnerToke
   try {
     if (!settlePassive(tracker, settlement?.passive)) return false;
     const comments = settlement?.comment_dispatch;
-    if (comments?.ticket_id && comments?.session_id) {
-      tracker.markCommentDispatchesDeliveredForTicket(comments.ticket_id, comments.session_id);
+    const commentDispatchIds = Array.isArray(comments?.dispatch_ids)
+      ? comments.dispatch_ids.filter((id) => typeof id === 'string' && id)
+      : [];
+    if (commentDispatchIds.length > 0) {
+      // Exact immutable ids only. An older retry must never sweep a newer
+      // comment batch merely because both address the same ticket/session.
+      tracker.markCommentDispatchesDelivered(commentDispatchIds);
     }
     for (const cursor of Array.isArray(settlement?.subscription_cursors) ? settlement.subscription_cursors : []) {
       if (cursor?.id != null) tracker.advanceSubscriptionCursor(cursor.id, cursor.from_seq, cursor.to_seq);
@@ -127,6 +132,15 @@ export async function publishDurableEnvelope({
       };
     }
   }
+  // Typed lifecycle state is durable before bytes leave the dashboard. A
+  // deterministic refusal returns this exact attempt to pending below; a
+  // timeout/crash keeps the retry owner as the recovery handoff.
+  if (typedTarget && metadata?.attempt_id) {
+    tracker.recordTypedEnvelopeLifecycle(envelope.id, {
+      state: 'claimed',
+      attempt_id: metadata.attempt_id,
+    });
+  }
   let delivery;
   try {
     delivery = await publish({ envelope, sessionId, content, legacy, metadata });
@@ -155,6 +169,13 @@ export async function publishDurableEnvelope({
     if (delivered) {
       settled = settleDurableEnvelope({ tracker, envelope, retry, retryOwnerToken });
     } else if (!delivered) {
+      if (typedTarget && metadata?.attempt_id) {
+        tracker.recordTypedEnvelopeLifecycle(envelope.id, {
+          state: 'pending',
+          attempt_id: metadata.attempt_id,
+          error: delivery?.error || `status ${delivery?.status ?? '?'}`,
+        });
+      }
       tracker.releaseEnvelopeRetry(envelope.id, {
         ownerToken: retryOwnerToken,
         error: delivery?.error || `status ${delivery?.status ?? '?'}`,

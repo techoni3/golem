@@ -127,6 +127,9 @@ let hangNextResponse = false;
 let hangingResponse = false;
 let releaseHangingResponse = null;
 let nextResponseStatus = 202;
+let forceBusy = false;
+let pauseAfterNativeAcceptance = false;
+let forceBusyAfterDuplicateEnvelopeId = null;
 let endpoint;
 let dashboard;
 
@@ -134,13 +137,18 @@ async function acceptNative(envelope) {
   const claim = claimTypedDelivery(inbox, envelope, {
     lookupTombstone: (envelopeId) => readTypedDeliveryTombstone(canonicalId, envelopeId),
   });
-  if (claim.duplicate) return typedDeliveryResult(claim.delivery, { duplicate: true, attemptId: envelope.attempt_id });
+  if (claim.duplicate) {
+    const result = typedDeliveryResult(claim.delivery, { duplicate: true, attemptId: envelope.attempt_id });
+    if (forceBusyAfterDuplicateEnvelopeId === envelope.envelope_id) forceBusy = true;
+    return result;
+  }
   assert.equal(claim.busy, false, 'the controlled native worker is idle for its initial acceptance');
   nativeStarts += 1;
   const accepted = acceptTypedDelivery(inbox, envelope.envelope_id, { turnId: `native-${nativeStarts}` });
   upsertTypedDeliveryTombstone(canonicalId, accepted.delivery);
   const settled = settleTypedDelivery(inbox, envelope.envelope_id, { turnId: accepted.delivery.turn_id });
   upsertTypedDeliveryTombstone(canonicalId, settled.delivery);
+  if (pauseAfterNativeAcceptance) forceBusy = true;
   return typedDeliveryResult(settled.delivery, { httpStatus: 202, attemptId: envelope.attempt_id });
 }
 
@@ -149,7 +157,7 @@ try {
     canonicalId,
     ownerToken,
     kind: 'typed-worker',
-    deliveryReady: () => !inbox.in_flight_envelope_id,
+    deliveryReady: () => !inbox.in_flight_envelope_id && !forceBusy,
     acceptDelivery: acceptNative,
     // The production endpoint owns authentication and schema validation. This
     // test-only response-loss seam runs after the authenticated health path so
@@ -455,7 +463,135 @@ try {
   assert.equal(nativeStarts, startsBeforeCrash + 1, 'crash recovery retries the accepted envelope as a duplicate, never a second native turn');
   assert.equal(endpointRequests, requestsBeforeCrash + 2, 'dashboard restart reclaims and republishes the original owned retry once');
 
-  console.log('typed immediate retry production journey passed: ticket/notification/control/comment/reply lost response -> original shared envelope retry -> one native start; accepted-503, typed lease-gap, and immediate-ticket crash-after-accept settlement recovery');
+  // The regular `when_idle` queue has the same pre-transport ownership as
+  // immediate dispatch. Keep it unreachable long enough to create a durable
+  // queued row, then kill the real dashboard after its later native acceptance
+  // but before the response/settlement. Restart must settle queue + retry once.
+  await restartDashboardForIndependentRetry();
+  const startsBeforeQueuedCrash = nativeStarts;
+  const requestsBeforeQueuedCrash = endpointRequests;
+  releaseEndpointLeases(ownerToken, { canonicalId });
+  const queuedCrashTicket = await postJson(dashboard.baseUrl, '/api/tickets', {
+    project_id: 'typed-immediate-000000', kind: 'work-item', title: 'typed queued ticket crash window', body: 'controlled', created_by: 'human',
+  });
+  assert.equal(queuedCrashTicket.response.status, 201, queuedCrashTicket.text);
+  const queuedCrashDispatch = await postJson(
+    dashboard.baseUrl,
+    `/api/tickets/${encodeURIComponent(queuedCrashTicket.json.id)}/dispatch`,
+    { session_id: canonicalId, mode: 'when_idle', note: 'queued crash after native acceptance before response' },
+  );
+  assert.equal(queuedCrashDispatch.response.status, 200, queuedCrashDispatch.text);
+  assert.equal(queuedCrashDispatch.json?.queued, true, queuedCrashDispatch.text);
+  assert.equal(nativeStarts, startsBeforeQueuedCrash, 'unreachable when_idle ticket remains queued before the endpoint rebinds');
+  hangNextResponse = true;
+  renewEndpointLease({
+    canonical_id: canonicalId, owner_token: ownerToken, host: endpoint.host, port: endpoint.port,
+    kind: 'typed-worker', harness: 'codex',
+  });
+  await waitFor(() => hangingResponse && nativeStarts === startsBeforeQueuedCrash + 1,
+    'queued ticket native acceptance before dashboard crash');
+  const queuedCrashDb = new Database(dashboardDb, { readonly: true });
+  let queuedCrashEnvelopeId;
+  try {
+    queuedCrashEnvelopeId = queuedCrashDispatch.json?.envelope_id;
+    const retry = queuedCrashDb.prepare('SELECT status, publishing_owner, settlement_json FROM envelope_delivery_retries WHERE envelope_id = ?').get(queuedCrashEnvelopeId);
+    assert.equal(retry?.status, 'publishing', 'queued typed ticket reserves original retry ownership before endpoint transport');
+    assert.ok(retry?.publishing_owner, 'queued typed retry retains its crash-recovery owner');
+    const settlement = JSON.parse(retry.settlement_json);
+    assert.equal(settlement?.queue?.id, queuedCrashDispatch.json?.queue_id, 'queued retry stores the exact queue owner for post-acceptance settlement');
+    const queue = queuedCrashDb.prepare('SELECT status, publishing_owner FROM dispatch_queue WHERE id = ?').get(queuedCrashDispatch.json?.queue_id);
+    assert.equal(queue?.status, 'publishing', 'ordinary queued ticket remains publishing until durable settlement');
+    assert.ok(queue?.publishing_owner, 'ordinary queued ticket keeps its pre-transport queue owner');
+  } finally { queuedCrashDb.close(); }
+  const queuedCrashedDashboard = dashboard;
+  queuedCrashedDashboard.child.kill('SIGKILL');
+  await waitFor(() => queuedCrashedDashboard.child.exitCode !== null || queuedCrashedDashboard.child.signalCode != null, 'queued isolated dashboard crash');
+  releaseHangingResponse?.();
+  const expireQueuedCrash = new Database(dashboardDb);
+  try {
+    expireQueuedCrash.prepare("UPDATE envelope_delivery_retries SET publishing_expires_at = '2000-01-01T00:00:00.000Z' WHERE envelope_id = ?").run(queuedCrashEnvelopeId);
+    expireQueuedCrash.prepare("UPDATE dispatch_queue SET publishing_expires_at = '2000-01-01T00:00:00.000Z' WHERE envelope_id = ?").run(queuedCrashEnvelopeId);
+  } finally { expireQueuedCrash.close(); }
+  dashboard = await startDashboard(await unusedPort());
+  await waitFor(async () => {
+    const response = await fetch(`${dashboard.baseUrl}/api/native-sessions`);
+    const sessions = response.ok ? await response.json() : [];
+    return sessions.find((session) => session.session_id === canonicalId && session.alive) || null;
+  }, `queued typed target restart discovery (${dashboard.stderr()})`);
+  await waitForRetry(queuedCrashEnvelopeId, `queued ticket crash-window recovery (${dashboard.stderr()})`);
+  const settledQueuedCrash = new Database(dashboardDb, { readonly: true });
+  try {
+    assert.equal(settledQueuedCrash.prepare('SELECT status FROM dispatch_queue WHERE id = ?').get(queuedCrashDispatch.json?.queue_id)?.status, 'delivered',
+      'settleDurableEnvelope delivers the ordinary queued row only after retained settlement completes');
+  } finally { settledQueuedCrash.close(); }
+  assert.equal(nativeStarts, startsBeforeQueuedCrash + 1, 'queued crash recovery preserves one native turn');
+  assert.equal(endpointRequests, requestsBeforeQueuedCrash + 2, 'queued crash recovery retries the original immutable ticket envelope once');
+
+  // An older comment retry must only CAS its own immutable dispatch id. Queue
+  // a newer comment for the same ticket/session while the first accepted
+  // response is lost, then allow only the older retry to settle.
+  await restartDashboardForIndependentRetry();
+  const exactCommentTicket = await postJson(dashboard.baseUrl, '/api/tickets', {
+    project_id: 'typed-immediate-000000', kind: 'work-item', title: 'typed exact comment settlement', body: 'controlled', created_by: 'human',
+  });
+  assert.equal(exactCommentTicket.response.status, 201, exactCommentTicket.text);
+  const olderComment = await postJson(dashboard.baseUrl, `/api/tickets/${encodeURIComponent(exactCommentTicket.json.id)}/comments`, {
+    author: 'human', body: 'older lost-response comment', tag: 'note', status: 'open',
+  });
+  assert.equal(olderComment.response.status, 201, olderComment.text);
+  pauseAfterNativeAcceptance = true;
+  dropNextResponse = true;
+  const olderDispatch = await postJson(dashboard.baseUrl, `/api/comments/${encodeURIComponent(olderComment.json.id)}/dispatch`, { session_id: canonicalId });
+  assert.equal(olderDispatch.response.status, 502, olderDispatch.text);
+  assert.equal(olderDispatch.json?.rolled_back, 0, olderDispatch.text);
+  assert.equal(forceBusy, true, 'the fixture holds the worker after the older native acceptance so its retry cannot settle before the newer batch exists');
+  const newerComment = await postJson(dashboard.baseUrl, `/api/tickets/${encodeURIComponent(exactCommentTicket.json.id)}/comments`, {
+    author: 'human', body: 'newer pending comment', tag: 'note', status: 'open',
+  });
+  assert.equal(newerComment.response.status, 201, newerComment.text);
+  const newerDispatch = await postJson(dashboard.baseUrl, `/api/comments/${encodeURIComponent(newerComment.json.id)}/dispatch`, { session_id: canonicalId });
+  assert.equal(newerDispatch.response.status, 502, newerDispatch.text);
+  assert.equal(newerDispatch.json?.rolled_back, 0, newerDispatch.text);
+  const exactCommentDb = new Database(dashboardDb, { readonly: true });
+  let olderEnvelopeId;
+  let olderDispatchId;
+  let newerDispatchId;
+  try {
+    olderEnvelopeId = exactCommentDb.prepare(`SELECT envelope_id FROM envelope_delivery_retries
+      WHERE content LIKE ? ORDER BY rowid DESC LIMIT 1`).get('%older lost-response comment%')?.envelope_id;
+    olderDispatchId = exactCommentDb.prepare('SELECT id FROM comment_dispatches WHERE comment_id = ?').get(olderComment.json.id)?.id;
+    newerDispatchId = exactCommentDb.prepare('SELECT id FROM comment_dispatches WHERE comment_id = ?').get(newerComment.json.id)?.id;
+    const settlement = JSON.parse(exactCommentDb.prepare('SELECT settlement_json FROM envelope_delivery_retries WHERE envelope_id = ?').get(olderEnvelopeId)?.settlement_json || 'null');
+    assert.deepEqual(settlement?.comment_dispatch?.dispatch_ids, [olderDispatchId], 'older retry records only its exact comment-dispatch id');
+    assert.equal(settlement?.comment_dispatch?.batch_id, null, 'single-comment settlement preserves its exact no-batch identity');
+  } finally { exactCommentDb.close(); }
+  pauseAfterNativeAcceptance = false;
+  forceBusy = false;
+  forceBusyAfterDuplicateEnvelopeId = olderEnvelopeId;
+  await waitForRetry(olderEnvelopeId, `older exact comment retry (${dashboard.stderr()})`);
+  const exactAfterOlder = new Database(dashboardDb, { readonly: true });
+  try {
+    assert.equal(exactAfterOlder.prepare('SELECT status FROM comment_dispatches WHERE id = ?').get(olderDispatchId)?.status, 'delivered',
+      'older retry settles its own immutable comment-dispatch row');
+    assert.equal(exactAfterOlder.prepare('SELECT status FROM comment_dispatches WHERE id = ?').get(newerDispatchId)?.status, 'pending',
+      'older retry cannot advance a newer pending comment dispatch for the same ticket/session');
+  } finally { exactAfterOlder.close(); }
+  forceBusyAfterDuplicateEnvelopeId = null;
+  forceBusy = false;
+  // The shared drainer correctly applies its 60s one-opportunity cooldown
+  // after the older retry. Restart the isolated dashboard to verify the newer
+  // pending retry independently without weakening that production scheduler.
+  await restartDashboardForIndependentRetry();
+  const newerEnvelopeId = (() => {
+    const db = new Database(dashboardDb, { readonly: true });
+    try {
+      return db.prepare(`SELECT envelope_id FROM envelope_delivery_retries
+        WHERE content LIKE ? ORDER BY rowid DESC LIMIT 1`).get('%newer pending comment%')?.envelope_id;
+    } finally { db.close(); }
+  })();
+  await waitForRetry(newerEnvelopeId, `newer exact comment retry (${dashboard.stderr()})`);
+
+  console.log('typed immediate retry production journey passed: ticket/notification/control/comment/reply lost response -> original shared envelope retry -> one native start; accepted-503, typed lease-gap, immediate+queued-ticket crash-after-accept settlement recovery, and exact older-comment CAS');
 } finally {
   await stopProcess(dashboard?.child);
   await closeTypedWorkerEndpoint(endpoint?.server);

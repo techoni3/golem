@@ -32,8 +32,7 @@ import crypto from 'node:crypto';
 import { checkpointPiPickupAck, claimPiPickupAcks, completePiPickupAck, enqueuePiBrief } from '../../lib/pi-inbox.js';
 import { isChannelDeliveryReady, isTypedWorkerChannel } from './channels.js';
 import { hasTypedWorkerCapability, readEndpointLeases, readSessionFacts } from '../../lib/session-facts.js';
-import { typedEnvelopeMetadata } from '../../lib/typed-worker-endpoint.js';
-import { isLegacyReplayFence, recordTypedEnvelopeOutcome } from './typed-delivery.js';
+import { isLegacyReplayFence } from './typed-delivery.js';
 import { acceptedDelivery, publishDurableEnvelope, settleDurableEnvelope } from './envelope-delivery.js';
 
 const TICK_MS = 5_000;
@@ -557,13 +556,6 @@ export function initDispatchDrainer({
         // rendering, so the endpoint receives exactly the expiry the tracker
         // now authorizes rather than a synthetic or stale timestamp.
         if (isTypedWorker && envelope) envelope = tracker.renewEnvelopeExpiry(envelope.id);
-        const typedAttemptId = isTypedWorker ? crypto.randomUUID() : null;
-        const deliveryMetadata = envelope
-          ? typedEnvelopeMetadata(envelope, { attemptId: typedAttemptId ?? crypto.randomUUID() })
-          : null;
-        if (isTypedWorker && row.envelope_id) {
-          tracker.recordTypedEnvelopeLifecycle(row.envelope_id, { state: 'claimed', attempt_id: typedAttemptId });
-        }
         let briefString = buildDispatchBrief(ticket, row.note, row.workspace || undefined, row.envelope_id || null);
         try {
           const payload = envelope?.payload ? JSON.parse(envelope.payload) : null;
@@ -580,31 +572,70 @@ export function initDispatchDrainer({
           } catch { /* passive delivery must not hold a queued dispatch */ }
         }
 
+        // Freeze the exact comment rows alongside this queued envelope before
+        // transport. A later batch for the same ticket/session must remain
+        // pending when this older retry settles after a lost response.
+        const commentDispatches = !usesLegacyPiSpool
+          ? (tracker.listPendingCommentDispatchesForTicket?.(ticket.id, sessionId) ?? [])
+          : [];
+        const commentDispatchIds = commentDispatches.map((dispatch) => dispatch.id);
+
         let pushResult;
+        let typedPublication = null;
         try {
-          pushResult = usesLegacyPiSpool
-            ? enqueuePiBrief(sessionId, briefString, { queue_id: row.id, envelope_id: row.envelope_id || null, ticket_id: ticket.id, session_id: sessionId, passive_lease_id: passive?.lease_id || null }, { messageId: row.id })
-            : await pushBrief(briefString, sessionId, deliveryMetadata);
+          if (isTypedWorker) {
+            if (!envelope) throw new Error(`typed queued dispatch ${row.id} is missing its durable envelope`);
+            // The queue lease and original-envelope retry are both reserved
+            // before the endpoint sees bytes. The helper is the sole writer
+            // for this typed queue's delivered state after passive/comment
+            // settlement has completed.
+            typedPublication = await publishDurableEnvelope({
+              tracker,
+              envelope,
+              sessionId,
+              content: briefString,
+              legacy: { path: '/brief', body: briefString },
+              typedTarget: true,
+              retryOwnerToken: publishingOwner,
+              settlement: {
+                passive: passive?.batch?.id
+                  ? { session_id: sessionId, batch_id: passive.batch.id, lease_id: passive.lease_id }
+                  : null,
+                comment_dispatch: commentDispatchIds.length
+                  ? {
+                      dispatch_ids: commentDispatchIds,
+                      batch_ids: [...new Set(commentDispatches.map((dispatch) => dispatch.batch_id).filter(Boolean))],
+                    }
+                  : null,
+                queue: { id: row.id, owner_token: publishingOwner },
+              },
+              publish: ({ content, metadata }) => pushBrief(content, sessionId, metadata),
+            });
+            pushResult = typedPublication.delivery;
+          } else {
+            pushResult = usesLegacyPiSpool
+              ? enqueuePiBrief(sessionId, briefString, { queue_id: row.id, envelope_id: row.envelope_id || null, ticket_id: ticket.id, session_id: sessionId, passive_lease_id: passive?.lease_id || null }, { messageId: row.id })
+              : await pushBrief(briefString, sessionId);
+          }
         } catch (err) {
           pushResult = { ok: false, error: String(err?.message ?? err) };
         }
-        const typedOutcome = isTypedWorker
-          ? recordTypedEnvelopeOutcome(tracker, row.envelope_id, typedAttemptId, pushResult)
-          : null;
+        const typedOutcome = typedPublication?.typedOutcome ?? null;
         const typedAccepted = typedOutcome?.accepted === true;
         if (typedAccepted && !pushResult?.accepted) pushResult = { ...pushResult, accepted: true };
-        const deliveryAccepted = acceptedDelivery(pushResult);
+        const deliveryAccepted = isTypedWorker ? !!typedPublication?.delivered : acceptedDelivery(pushResult);
         if (isTypedWorker && row.envelope_id && !typedAccepted) {
-          tracker.recordTypedEnvelopeLifecycle(row.envelope_id, {
-            state: 'pending',
-            attempt_id: typedAttemptId,
-            error: pushResult?.error || `status ${pushResult?.status ?? '?'}`,
-          });
           if (isLegacyReplayFence(pushResult)) {
             const replacement = tracker.rotatePendingEnvelope(row.envelope_id, {
               actor: 'golem-drainer',
               reason: 'legacy typed replay fence before native acceptance',
             });
+            // The shared helper reserved the old identity before learning of
+            // the fence. Retire only that now-superseded retry; the rotated
+            // queue/envelope remains the replayable source of truth.
+            if (tracker.claimEnvelopeRetry(row.envelope_id, { ownerToken: publishingOwner })) {
+              tracker.markEnvelopeRetryDelivered(row.envelope_id, { ownerToken: publishingOwner });
+            }
             pushResult = {
               ...pushResult,
               reissued_envelope_id: replacement.id,
@@ -615,7 +646,7 @@ export function initDispatchDrainer({
 
         // Set the outcome from the delivery opportunity before queue/envelope
         // writes: their failure must not replay context that already landed.
-        const passiveCommitted = deliveryAccepted;
+        const passiveCommitted = !isTypedWorker && deliveryAccepted;
         try {
           if (pushResult.queued) {
             if (assigned.dispatched_to !== sessionId) {
@@ -626,16 +657,17 @@ export function initDispatchDrainer({
             }
             tracker.markQueueNextTurn(row.id, { ownerToken: publishingOwner });
           }
-          else if (isTypedWorker && typedAccepted) {
-            tracker.markQueueDelivered(row.id, { envelope_id: row.envelope_id || null, ownerToken: publishingOwner });
-          }
+          // Typed queue completion belongs exclusively to
+          // settleDurableEnvelope(). It runs while the retry is still owned,
+          // after the immutable passive/comment settlement has succeeded.
+          else if (isTypedWorker && typedAccepted) { /* retained for durable settlement */ }
           else if (requiresPublishingLease) tracker.releaseQueuePublishing(row.id, { ownerToken: publishingOwner });
           else {
             tracker.markQueueDelivered(row.id, { error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}`, envelope_id: row.envelope_id || null });
             if (row.envelope_id) tracker.markEnvelopeDelivery(row.envelope_id, { error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}` });
           }
         } finally {
-          if (passive?.lease_id) {
+          if (passive?.lease_id && !isTypedWorker) {
             try {
               if (passiveCommitted && !pushResult.queued) tracker.commitPassiveDelta(sessionId, passive.lease_id);
               else if (pushResult.queued) { /* pickup ack settles this lease */ }
@@ -643,8 +675,8 @@ export function initDispatchDrainer({
             } catch { /* a failed settlement leaves the batch replayable */ }
           }
         }
-        if (pushResult && deliveryAccepted && !pushResult.queued) {
-          tracker.markCommentDispatchesDeliveredForTicket(ticket.id, sessionId);
+        if (!isTypedWorker && pushResult && deliveryAccepted && !pushResult.queued) {
+          tracker.markCommentDispatchesDelivered(commentDispatchIds);
         }
 
         if (pushResult && deliveryAccepted) {
