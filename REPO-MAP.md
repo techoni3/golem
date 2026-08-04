@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-07-30 @ f1758a6 — maintained via golem:docs-maintenance.
+> Last verified: 2026-08-04 @ aeaf727 — maintained via golem:docs-maintenance.
 ## Directory structure
 - `substrate/` — plugin source; `plugin/` is its generated CC render, never hand-edited.
   `instructions/AGENTS.md` § Roles is the single source of role ownership; cards and skills point
@@ -12,11 +12,13 @@
 - `test/` — journey tests.
 
 ## Key modules
-### `dashboard/server/` — `index.js`, `tracker-db.js`, `phase-machine.js`, `comment-dispatch.js`
+### `dashboard/server/` — `index.js`, `tracker-db.js`, `typed-delivery.js`, `phase-machine.js`, `comment-dispatch.js`
 - Agents use HTTP/MCP, never direct DB writes. Phase is truth; `state` derives from it.
 - `planning → planned` needs children **and** waves — a single child still needs `wave: 1`.
 - Dispatch is durable-first, rolled back to `undispatched` on an undelivered push. The reaper
   suspends subscriptions for sessions off the roster.
+- Typed-worker responses advance a correlated envelope/attempt lifecycle; an accepted non-2xx
+  response is durable work, while a mismatched reply remains retryable.
 ### `lib/session-role.js`
 - `BUILTIN_ROLES` is the only place role names are hardcoded. `ROLE_MIGRATIONS` retires a name by
   mapping it forward; the registry self-prunes on next `readRoleRegistry()`.

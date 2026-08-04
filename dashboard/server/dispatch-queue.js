@@ -31,7 +31,9 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { checkpointPiPickupAck, claimPiPickupAcks, completePiPickupAck, enqueuePiBrief } from '../../lib/pi-inbox.js';
 import { isChannelDeliveryReady, isTypedWorkerChannel } from './channels.js';
-import { parseTypedDeliveryResponse } from '../../lib/typed-worker-endpoint.js';
+import { readEndpointLeases } from '../../lib/session-facts.js';
+import { typedEnvelopeMetadata } from '../../lib/typed-worker-endpoint.js';
+import { recordTypedEnvelopeOutcome } from './typed-delivery.js';
 
 const TICK_MS = 5_000;
 const COOLDOWN_MS = 60_000;
@@ -46,6 +48,7 @@ export function initDispatchDrainer({
   buildDispatchBrief,
   broadcastWS,
   listChannels,
+  listEndpointLeases = () => readEndpointLeases({ includeExpired: true }),
 }) {
   // Older isolated drainer journeys provide only pushBrief. Production passes
   // the typed control adapter; the fallback preserves their legacy generic
@@ -74,19 +77,18 @@ export function initDispatchDrainer({
       let content = '';
       try { content = JSON.parse(child.payload || '{}').content || ''; } catch { /* durable fallback below */ }
       let result;
+      const metadata = typedEnvelopeMetadata(child);
       try {
-        result = await pushBrief(content, child.recipient_session_id, {
-          envelope_id: child.id,
-          sender_session_id: child.sender_session_id || null,
-          target_session_id: child.target_session_id || child.recipient_session_id,
-        });
+        result = await pushBrief(content, child.recipient_session_id, metadata);
       } catch (err) {
         result = { ok: false, error: String(err?.message ?? err) };
       }
-      const error = result?.ok ? null : (result?.error || `status ${result?.status ?? '?'}`);
-      tracker.markEnvelopeDelivery(child.id, { error });
-      chat.record(result?.ok ? 'user' : 'system', result?.ok ? 'brief' : 'error',
-        result?.ok ? content : `${purpose} for ${claimed.root.ticket_id} failed — ${error}`,
+      const typedOutcome = recordTypedEnvelopeOutcome(tracker, child.id, metadata.attempt_id, result);
+      const delivered = !!result?.ok || typedOutcome?.accepted === true;
+      const error = delivered ? null : (result?.error || `status ${result?.status ?? '?'}`);
+      if (!typedOutcome) tracker.markEnvelopeDelivery(child.id, { error });
+      chat.record(delivered ? 'user' : 'system', delivered ? 'brief' : 'error',
+        delivered ? content : `${purpose} for ${claimed.root.ticket_id} failed — ${error}`,
         { session_id: child.recipient_session_id || null, ticket_id: claimed.root.ticket_id });
       const ticket = tracker.getTicket(claimed.root.ticket_id);
       if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
@@ -201,6 +203,7 @@ export function initDispatchDrainer({
     // (safe), not burn.
     let channelIds = new Set();
     let channelsBySession = new Map();
+    let typedCapableSessionIds = new Set();
     try {
       // A managed Codex supervisor can keep a healthy loopback lease while it
       // is busy/recovering. Treat delivery_ready:false exactly like an absent
@@ -210,6 +213,12 @@ export function initDispatchDrainer({
       channelIds = new Set(readyChannels.map((channel) => channel.session_id));
       channelsBySession = new Map(readyChannels.map((channel) => [channel.session_id, channel]));
     } catch { /* transient → everyone waits a tick */ }
+    try {
+      typedCapableSessionIds = new Set((await listEndpointLeases())
+        .filter(isTypedWorkerChannel)
+        .map((lease) => lease.canonical_id || lease.session_id)
+        .filter(Boolean));
+    } catch { /* a registry read failure never falls back to the Pi spool */ }
     const byId = new Map();
     for (const s of sessions) if (s.session_id) byId.set(s.session_id, s);
 
@@ -228,10 +237,11 @@ export function initDispatchDrainer({
       const s = byId.get(sessionId);
       const isPi = s?.harness === 'pi';
       const isTypedWorker = isTypedWorkerChannel(channelsBySession.get(sessionId));
+      const isTypedCapable = isTypedWorker || typedCapableSessionIds.has(sessionId);
       // Pi stays on the migration-only next-turn spool only until it has
       // registered the shared typed endpoint. A first-class Pi lease follows
       // the same generic channel path as any other typed worker.
-      const usesLegacyPiSpool = isPi && !isTypedWorker;
+      const usesLegacyPiSpool = isPi && !isTypedCapable;
 
       const waveGate = (row) => {
         try {
@@ -246,7 +256,7 @@ export function initDispatchDrainer({
 
       // Session unknown, dead, OR unreachable (channel MCP down — TKT-0369):
       // hold rows pending (60m expiry), never burn one on a push that can't land.
-      if (!s || !s.alive || (!isPi && !channelIds.has(sessionId))) {
+      if (!s || !s.alive || (!usesLegacyPiSpool && !channelIds.has(sessionId))) {
         const oldest = rows.find((row) => !isWaveHeld(row));
         if (!oldest) continue; // all rows are wave-held; do not expire them as offline.
         const createdMs = Date.parse(oldest.created_at);
@@ -343,6 +353,9 @@ export function initDispatchDrainer({
         }
         const envelope = row.envelope_id ? tracker.getEnvelope(row.envelope_id) : null;
         const typedAttemptId = isTypedWorker ? crypto.randomUUID() : null;
+        const deliveryMetadata = envelope
+          ? typedEnvelopeMetadata(envelope, { attemptId: typedAttemptId ?? crypto.randomUUID() })
+          : null;
         if (isTypedWorker && row.envelope_id) {
           tracker.recordTypedEnvelopeLifecycle(row.envelope_id, { state: 'claimed', attempt_id: typedAttemptId });
         }
@@ -366,36 +379,20 @@ export function initDispatchDrainer({
         try {
           pushResult = usesLegacyPiSpool
             ? enqueuePiBrief(sessionId, briefString, { queue_id: row.id, envelope_id: row.envelope_id || null, ticket_id: ticket.id, session_id: sessionId, passive_lease_id: passive?.lease_id || null }, { messageId: row.id })
-            : await pushBrief(briefString, sessionId, { envelope_id: row.envelope_id || undefined, sender_session_id: null, target_session_id: sessionId });
+            : await pushBrief(briefString, sessionId, deliveryMetadata);
         } catch (err) {
           pushResult = { ok: false, error: String(err?.message ?? err) };
         }
-        const typedOutcome = isTypedWorker ? parseTypedDeliveryResponse(pushResult) : null;
+        const typedOutcome = isTypedWorker
+          ? recordTypedEnvelopeOutcome(tracker, row.envelope_id, typedAttemptId, pushResult)
+          : null;
         const typedAccepted = typedOutcome?.accepted === true;
-        if (isTypedWorker && row.envelope_id) {
-          if (typedAccepted) {
-            // The native worker can settle in the narrow window between its
-            // correlated start and this HTTP response. Preserve the immutable
-            // acceptance boundary before recording that fast terminal state.
-            if (['settled', 'interrupted'].includes(typedOutcome.delivery_state)
-              && tracker.getEnvelope(row.envelope_id)?.delivery_state === 'claimed') {
-              tracker.recordTypedEnvelopeLifecycle(row.envelope_id, {
-                state: 'accepted',
-                attempt_id: typedAttemptId,
-              });
-            }
-            tracker.recordTypedEnvelopeLifecycle(row.envelope_id, {
-              state: typedOutcome.delivery_state,
-              attempt_id: typedAttemptId,
-              error: pushResult?.ok ? null : (typedOutcome.error || pushResult?.error || null),
-            });
-          } else {
+        if (isTypedWorker && row.envelope_id && !typedAccepted) {
             tracker.recordTypedEnvelopeLifecycle(row.envelope_id, {
               state: 'pending',
               attempt_id: typedAttemptId,
               error: pushResult?.error || `status ${pushResult?.status ?? '?'}`,
             });
-          }
         }
 
         // Set the outcome from the delivery opportunity before queue/envelope
@@ -504,10 +501,12 @@ export function initDispatchDrainer({
         } catch (err) {
           pushResult = { ok: false, error: String(err?.message ?? err) };
         }
-        tracker.markEnvelopeDelivery(envelope.id, {
-          error: pushResult?.ok ? null : (pushResult?.error || `status ${pushResult?.status ?? '?'}`),
+        const typedOutcome = recordTypedEnvelopeOutcome(tracker, envelope.id, pushResult?.typed_attempt_id ?? null, pushResult);
+        const delivered = !!pushResult?.ok || typedOutcome?.accepted === true;
+        if (!typedOutcome) tracker.markEnvelopeDelivery(envelope.id, {
+          error: delivered ? null : (pushResult?.error || `status ${pushResult?.status ?? '?'}`),
         });
-        if (!pushResult?.ok) {
+        if (!delivered) {
           const detail = pushResult?.error || `status ${pushResult?.status ?? '?'}`;
           chat.record('system', 'error', `subscription digest to ${sessionId} failed — channel ${detail}`, { session_id: sessionId });
           continue;

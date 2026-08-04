@@ -22,7 +22,8 @@ import { registerSubstrateRoutes } from './substrate.js';
 import { teamAssists } from './team-assist.js';
 import { golemHome, dashboardJsonPath, journalDirFor, sessionsJsonPath } from '../../lib/golem-home.js';
 import { createRole, deleteRole, getRole, listRoleCards, roleChangeBrief, roleMission, setSessionRole, updateRoleMeta, writeRoleCard } from '../../lib/session-role.js';
-import { parseTypedDeliveryResponse } from '../../lib/typed-worker-endpoint.js';
+import { typedEnvelopeMetadata } from '../../lib/typed-worker-endpoint.js';
+import { recordTypedEnvelopeOutcome } from './typed-delivery.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const WEB_SOURCE_ROOT = path.resolve(__dirname, '..', 'web');
@@ -94,30 +95,6 @@ function isProcessAlive(pid) {
 /** Short sleep helper for polling during graceful shutdown waits. */
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// Keep the legacy envelope status for existing channel consumers, while a
-// typed endpoint's response advances the shared native-worker lifecycle. A
-// 503 recovery-required response is still accepted work and must never be
-// converted into a retryable socket failure.
-function recordTypedEnvelopeOutcome(tracker, envelopeId, delivery) {
-  const outcome = parseTypedDeliveryResponse(delivery);
-  if (!outcome?.accepted) return null;
-  const error = delivery?.ok ? null : (outcome.error || delivery?.error || null);
-  const current = tracker.getEnvelope(envelopeId)?.delivery_state || 'pending';
-  // Queue-drained delivery records `claimed` before the request. Direct
-  // dashboard routes can receive an immediate native terminal response before
-  // they have observed that claim. Materialize the omitted prefix rather than
-  // allowing a fast settlement to erase the immutable acceptance boundary.
-  if (['pending', 'published'].includes(current) && ['accepted', 'settled', 'interrupted', 'recovery_required'].includes(outcome.delivery_state)) {
-    tracker.recordTypedEnvelopeLifecycle(envelopeId, { state: 'claimed' });
-  }
-  const afterClaim = tracker.getEnvelope(envelopeId)?.delivery_state;
-  if (afterClaim === 'claimed' && ['settled', 'interrupted'].includes(outcome.delivery_state)) {
-    tracker.recordTypedEnvelopeLifecycle(envelopeId, { state: 'accepted' });
-  }
-  tracker.recordTypedEnvelopeLifecycle(envelopeId, { state: outcome.delivery_state, error });
-  return outcome;
 }
 
 /** Look up the command name of a process for clearer error messages. */
@@ -451,7 +428,8 @@ async function deliverControlEnvelope(tracker, {
   let delivery;
   try {
     delivery = await pushControlEnvelope({ envelope, content, legacy }, recipient_session_id);
-    const typedOutcome = recordTypedEnvelopeOutcome(tracker, envelope.id, delivery);
+    const typedOutcome = recordTypedEnvelopeOutcome(tracker, envelope.id, delivery?.typed_attempt_id ?? null, delivery);
+    if (typedOutcome?.accepted && !delivery.ok) delivery.accepted = true;
     if (!typedOutcome) tracker.markEnvelopeDelivery(envelope.id, {
       error: delivery.ok ? null : (delivery.error || `status ${delivery.status}`),
     });
@@ -1458,17 +1436,15 @@ async function main() {
         kind: 'session_notify',
         payload: { content: brief, ticket_id: ticket.id, batch_id: batchId },
       });
-      channelResult = await pushBrief(brief, sessionId, {
-        envelope_id: envelope.id,
-        sender_session_id: envelope.sender_session_id,
-        target_session_id: sessionId,
-      });
+      const metadata = typedEnvelopeMetadata(envelope);
+      channelResult = await pushBrief(brief, sessionId, metadata);
+      channelResult.typed_attempt_id = metadata.attempt_id;
     } catch (err) {
       channelResult = { ok: false, error: String(err?.message ?? err) };
     }
     if (envelope) {
       try {
-        typedOutcome = recordTypedEnvelopeOutcome(tracker, envelope.id, channelResult);
+        typedOutcome = recordTypedEnvelopeOutcome(tracker, envelope.id, channelResult?.typed_attempt_id ?? null, channelResult);
         if (!typedOutcome) tracker.markEnvelopeDelivery(envelope.id, {
           error: channelResult?.ok ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),
         });
@@ -1498,7 +1474,7 @@ async function main() {
         broadcastWS({ type: 'ticket-comment-updated', ticket_id: updated.id, comment });
       }
     }
-    return { channel: channelResult, ticket: updated, delivered: !!channelResult?.ok, rolled_back: rolledBack };
+    return { channel: channelResult, ticket: updated, delivered: !!channelResult?.ok || typedOutcome?.accepted === true, rolled_back: rolledBack };
   }
 
   // POST /api/comments/:id/dispatch — enqueue and deliver one comment as a
@@ -1772,14 +1748,17 @@ async function main() {
 
     // 3) Best-effort channel push — never fail the request on a push miss.
     let channelResult = null;
+    let typedOutcome = null;
     let passiveCommitted = false;
     try {
       try {
-        channelResult = await pushBrief(briefString, sessionId, { envelope_id: envelope.id, sender_session_id: envelope.sender_session_id, target_session_id: sessionId });
+        const metadata = typedEnvelopeMetadata(envelope);
+        channelResult = await pushBrief(briefString, sessionId, metadata);
+        channelResult.typed_attempt_id = metadata.attempt_id;
       } catch (err) {
         channelResult = { ok: false, error: String(err?.message ?? err) };
       }
-      const typedOutcome = recordTypedEnvelopeOutcome(tracker, envelope.id, channelResult);
+      typedOutcome = recordTypedEnvelopeOutcome(tracker, envelope.id, channelResult?.typed_attempt_id ?? null, channelResult);
       // The push is the delivery opportunity. Set this before chat or tracker
       // writes so their failures cannot release delivered passive context.
       passiveCommitted = !!channelResult?.ok || typedOutcome?.accepted === true;
@@ -1792,16 +1771,16 @@ async function main() {
       tracker.markDispatchDeliveryAttempted(id, {
         session_id: sessionId,
         actor: 'human',
-        error: channelResult && channelResult.ok ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),
+        error: channelResult && (channelResult.ok || typedOutcome?.accepted) ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),
         envelope_id: envelope.id,
       });
       if (!typedOutcome) tracker.markEnvelopeDelivery(envelope.id, {
-        error: channelResult && channelResult.ok ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),
+        error: channelResult && (channelResult.ok || typedOutcome?.accepted) ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),
       });
     } finally {
       settlePassiveDelta(tracker, sessionId, passive.claim, passiveCommitted);
     }
-    if (channelResult && (channelResult.ok || parseTypedDeliveryResponse(channelResult)?.accepted)) {
+    if (channelResult && (channelResult.ok || typedOutcome?.accepted)) {
       tracker.markCommentDispatchesDeliveredForTicket(id, sessionId);
     }
 
@@ -1812,7 +1791,7 @@ async function main() {
     // existing callers (MCP ticket_dispatch, older UI) are untouched. The
     // when_idle path that fell through (target was already idle) adds the
     // queued:false / delivered:true hints the plan specifies.
-    const delivered = !!channelResult?.ok && !channelResult?.queued;
+    const delivered = (!!channelResult?.ok || typedOutcome?.accepted === true) && !channelResult?.queued;
     const queued = !!channelResult?.queued;
     return { ok: delivered || queued, assignment: { ok: true, ticket }, queued, delivered, envelope_id: envelope.id, ticket,
       delivery: { ok: delivered || queued, queued, mode: queued ? 'next_turn' : 'push', status: channelResult?.status ?? 0, error: delivered || queued ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`) }, channel: channelResult };
@@ -1847,12 +1826,13 @@ async function main() {
         const passive = appendPassiveDelta(tracker, result.reply.recipient_session_id, baseBrief);
         let passiveCommitted = false;
         try {
+          const metadata = typedEnvelopeMetadata(result.reply);
           sender_delivery = await pushBrief(
             passive.brief,
             result.reply.recipient_session_id,
-            { envelope_id: result.reply.id, sender_session_id: trustedCaller || null, target_session_id: result.reply.recipient_session_id },
+            metadata,
           );
-          const typedOutcome = recordTypedEnvelopeOutcome(tracker, result.reply.id, sender_delivery);
+          const typedOutcome = recordTypedEnvelopeOutcome(tracker, result.reply.id, metadata.attempt_id, sender_delivery);
           passiveCommitted = !!sender_delivery?.ok || typedOutcome?.accepted === true;
           if (!typedOutcome) tracker.markEnvelopeDelivery(result.reply.id, {
             error: sender_delivery.ok ? null : (sender_delivery.error || `status ${sender_delivery.status}`),

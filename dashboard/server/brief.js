@@ -14,7 +14,7 @@
 
 import { CONFIG } from './config.js';
 import { channelDeliveryError, isChannelDeliveryReady, isTypedWorkerChannel, readChannels } from './channels.js';
-import { TYPED_WORKER_PROTOCOL_VERSION } from '../../lib/typed-worker-endpoint.js';
+import { TYPED_WORKER_PROTOCOL_VERSION, typedEnvelopeMetadata } from '../../lib/typed-worker-endpoint.js';
 
 const DEFAULT_TIMEOUT_MS = 5000;
 
@@ -64,7 +64,8 @@ async function forward(method, pathSuffix, body, sessionId, metadata = null) {
   // current private lease credential. Codex remains one concrete adapter;
   // future native workers inherit this contract without a new branch here.
   if (isTypedWorkerChannel(channel)) {
-    if (pathSuffix !== '/brief' || !metadata?.envelope_id) {
+    if (pathSuffix !== '/brief' || !metadata?.envelope_id || !metadata?.target_session_id
+      || !metadata?.kind || !metadata?.created_at || !metadata?.expires_at || !metadata?.attempt_id) {
       return { ok: false, status: 400, body: '', error: 'typed worker delivery requires a durable /brief envelope', target: baseUrl };
     }
     if (!channel.owner_token) {
@@ -79,7 +80,9 @@ async function forward(method, pathSuffix, body, sessionId, metadata = null) {
       headers['Content-Type'] = 'text/plain';
     } else {
       bodyToSend = JSON.stringify(isTypedWorkerChannel(channel)
-        ? { protocol_version: TYPED_WORKER_PROTOCOL_VERSION, ...body }
+        // Version comes last so a caller cannot downgrade/override the
+        // pinned endpoint contract by smuggling protocol_version in metadata.
+        ? { ...body, protocol_version: TYPED_WORKER_PROTOCOL_VERSION }
         : body);
       headers['Content-Type'] = 'application/json';
     }
@@ -113,12 +116,11 @@ export async function pushControlEnvelope({ envelope, content, legacy } = {}, se
     return { ok: false, status: 400, body: '', error: 'durable control envelope is missing canonical sender, target, or id' };
   }
   const { channel } = await resolveBaseUrl(sessionId);
-  const metadata = {
-    envelope_id: envelope.id,
-    sender_session_id: envelope.sender_session_id,
-    target_session_id: envelope.target_session_id,
-  };
-  if (isTypedWorkerChannel(channel)) return pushBrief(content, sessionId, metadata);
+  const metadata = typedEnvelopeMetadata(envelope);
+  if (isTypedWorkerChannel(channel)) {
+    const delivery = await pushBrief(content, sessionId, metadata);
+    return { ...delivery, typed_attempt_id: metadata.attempt_id };
+  }
   if (!legacy?.path) return { ok: false, status: 400, body: '', error: 'legacy control route is required for a non-Codex target' };
   return forward('POST', legacy.path, legacy.body, sessionId);
 }

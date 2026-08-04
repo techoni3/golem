@@ -221,6 +221,10 @@ try {
     content: dispatchBrief(ticket, note, dispatched.envelope_id),
     sender_session_id: 'human',
     target_session_id: canonicalId,
+    kind: afterTurn.delivery.kind,
+    created_at: afterTurn.delivery.created_at,
+    expires_at: afterTurn.delivery.expires_at,
+    attempt_id: afterTurn.delivery.attempt_id,
   };
   const completedBeforeRetry = supervisor.rpc.notifications.filter((message) => (
     message.method === 'turn/completed' && message.params?.turn?.id === afterTurn.delivery.turn_id

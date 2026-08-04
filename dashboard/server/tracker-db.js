@@ -21,7 +21,7 @@ import { loadConfig } from '../../lib/golem-config.js';
 import { createCommentDispatchService, defaultDispatchStateForComment } from './comment-dispatch.js';
 import { canonicalStateForPhase, initialPhaseForKind, isKnownPhase, legalNextPhases, phaseFromLegacyState, requirementsForPhase } from './phase-machine.js';
 
-const SCHEMA_VERSION = 15;
+const SCHEMA_VERSION = 16;
 
 const KINDS = new Set(['work-item', 'decision', 'spec', 'question', 'fix']);
 const STATES = new Set(['todo', 'in_progress', 'blocked', 'review', 'done', 'archived']);
@@ -34,6 +34,10 @@ const SUBSCRIPTION_BACKLOG_CAP = 500;
 const PASSIVE_GROUP_CAP = 20;
 const PASSIVE_BYTE_CAP = 4096;
 const PASSIVE_LEASE_MS = 30_000;
+// Typed endpoints reject stale envelopes before their native primitive runs.
+// Keep this durable value on every envelope so all routes render one canonical
+// protocol body rather than inventing per-adapter expiry metadata.
+const MESSAGE_ENVELOPE_TTL_MS = 60 * 60_000;
 const LIFECYCLE_EVENTS = new Set(['session-start', 'session-end', 'user-prompt', 'stop', 'subagent-stop', 'pre-compact', 'notification']);
 const ACTIVITY_EVENTS = new Set(['tool-pre', 'tool-post', 'agent-spawn', 'agent-return', 'send-message', 'send-message-post']);
 
@@ -44,6 +48,10 @@ export function defaultDbPath() {
 
 function now() {
   return new Date().toISOString();
+}
+
+function expiresAt(createdAt) {
+  return new Date(Date.parse(createdAt) + MESSAGE_ENVELOPE_TTL_MS).toISOString();
 }
 
 function parseLabels(raw) {
@@ -393,6 +401,7 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
         ack_via_envelope_id TEXT,
         status            TEXT NOT NULL DEFAULT 'pending',
         created_at        TEXT NOT NULL,
+        expires_at        TEXT NOT NULL,
         delivered_at      TEXT,
         acknowledged_at   TEXT,
         replied_at        TEXT,
@@ -748,6 +757,11 @@ WHERE state_changed_at IS NULL`).run();
       ['claimed_at', 'TEXT'], ['accepted_at', 'TEXT'], ['settled_at', 'TEXT'],
       ['interrupted_at', 'TEXT'], ['recovery_required_at', 'TEXT'],
     ]) if (!envelopeCols124.includes(col)) db.exec(`ALTER TABLE message_envelopes ADD COLUMN ${col} ${def}`);
+    const envelopeColsExpiry = db.prepare('PRAGMA table_info(message_envelopes)').all().map((c) => c.name);
+    if (!envelopeColsExpiry.includes('expires_at')) db.exec('ALTER TABLE message_envelopes ADD COLUMN expires_at TEXT');
+    for (const row of db.prepare('SELECT id, created_at FROM message_envelopes WHERE expires_at IS NULL').all()) {
+      db.prepare('UPDATE message_envelopes SET expires_at = ? WHERE id = ?').run(expiresAt(row.created_at), row.id);
+    }
 
     // Schema migration v14 -> v15 (GOL-423): preserve which subscriptions were
     // explicitly manual even when lifecycle resume later replaces their reason.
@@ -917,8 +931,8 @@ WHERE state_changed_at IS NULL`).run();
       `),
       insertEnvelope: db.prepare(`
         INSERT INTO message_envelopes
-          (id, root_id, parent_id, ticket_id, project_id, sender_id, reply_to_session_id, recipient_session_id, sender_session_id, target_session_id, kind, payload, status, ack_deadline_at, created_at)
-        VALUES (@id, @root_id, @parent_id, @ticket_id, @project_id, @sender_id, @reply_to_session_id, @recipient_session_id, @sender_session_id, @target_session_id, @kind, @payload, @status, @ack_deadline_at, @created_at)
+          (id, root_id, parent_id, ticket_id, project_id, sender_id, reply_to_session_id, recipient_session_id, sender_session_id, target_session_id, kind, payload, status, ack_deadline_at, created_at, expires_at)
+        VALUES (@id, @root_id, @parent_id, @ticket_id, @project_id, @sender_id, @reply_to_session_id, @recipient_session_id, @sender_session_id, @target_session_id, @kind, @payload, @status, @ack_deadline_at, @created_at, @expires_at)
       `),
       getEnvelope: db.prepare('SELECT * FROM message_envelopes WHERE id = ?'),
       setEnvelopePayload: db.prepare(`UPDATE message_envelopes SET payload = @payload
@@ -2677,6 +2691,7 @@ WHERE state_changed_at IS NULL`).run();
           status: 'queued',
           ack_deadline_at: null,
           created_at: ts,
+          expires_at: expiresAt(ts),
         });
         recordEvent({
           ticket_id: ticketId,
@@ -2695,6 +2710,7 @@ WHERE state_changed_at IS NULL`).run();
       if (!ticket) throw new Error(`createDispatchEnvelope: ticket '${ticketId}' not found`);
       if (!session_id) throw new Error('createDispatchEnvelope: session_id is required');
       const sender = sender_id || (actor === 'human' ? null : actor);
+      const created_at = now();
       const row = {
         id: crypto.randomUUID(),
         root_id: null,
@@ -2710,7 +2726,8 @@ WHERE state_changed_at IS NULL`).run();
         payload: JSON.stringify({ content: String(payload || '') }),
         status: 'pending',
         ack_deadline_at: null,
-        created_at: now(),
+        created_at,
+        expires_at: expiresAt(created_at),
       };
       row.root_id = row.id;
       stmts.insertEnvelope.run(row);
@@ -2765,10 +2782,11 @@ WHERE state_changed_at IS NULL`).run();
       const body = payload && typeof payload === 'object' && !Array.isArray(payload)
         ? { ...payload, content: String(payload.content ?? '') }
         : { content: String(payload) };
+      const created_at = now();
       const row = { id: crypto.randomUUID(), root_id: null, parent_id: null, ticket_id: null, project_id,
         sender_id, reply_to_session_id: sender_id, recipient_session_id, sender_session_id: sender_id,
         target_session_id: recipient_session_id, kind, payload: JSON.stringify(body),
-        status: 'pending', ack_deadline_at: null, created_at: now() };
+        status: 'pending', ack_deadline_at: null, created_at, expires_at: expiresAt(created_at) };
       row.root_id = row.id;
       stmts.insertEnvelope.run(row);
       return stmts.getEnvelope.get(row.id);
@@ -2779,10 +2797,11 @@ WHERE state_changed_at IS NULL`).run();
       const body = payload && typeof payload === 'object' && !Array.isArray(payload)
         ? { ...payload, content: String(payload.content ?? '') }
         : { content: String(payload) };
+      const created_at = now();
       const row = { id: crypto.randomUUID(), root_id: null, parent_id: null, ticket_id: null, project_id,
         sender_id, reply_to_session_id: sender_id, recipient_session_id, sender_session_id: sender_id,
         target_session_id: recipient_session_id, kind: 'session_notify', payload: JSON.stringify(body),
-        status: 'pending', ack_deadline_at: null, created_at: now() };
+        status: 'pending', ack_deadline_at: null, created_at, expires_at: expiresAt(created_at) };
       row.root_id = row.id;
       stmts.insertEnvelope.run(row);
       return stmts.getEnvelope.get(row.id);
@@ -2801,8 +2820,8 @@ WHERE state_changed_at IS NULL`).run();
       const prior = existing.delivery_state || 'pending';
       if (prior === state) return existing;
       const transitions = {
-        pending: new Set(['claimed', 'accepted', 'recovery_required']),
-        published: new Set(['claimed', 'accepted', 'recovery_required']),
+        pending: new Set(['claimed']),
+        published: new Set(['claimed']),
         claimed: new Set(['pending', 'accepted', 'recovery_required']),
         accepted: new Set(['settled', 'interrupted', 'recovery_required']),
         settled: new Set(),
@@ -2904,7 +2923,7 @@ WHERE state_changed_at IS NULL`).run();
         ticket_id: existing.ticket_id, project_id: existing.project_id, sender_id: target_session_id,
         reply_to_session_id: target_session_id, recipient_session_id: existing.reply_to_session_id,
         sender_session_id: target_session_id, target_session_id: existing.reply_to_session_id,
-        kind: 'reply', payload: JSON.stringify({ text: String(text), kind }), status: 'pending', ack_deadline_at: null, created_at: ts };
+        kind: 'reply', payload: JSON.stringify({ text: String(text), kind }), status: 'pending', ack_deadline_at: null, created_at: ts, expires_at: expiresAt(ts) };
       if (!child.recipient_session_id) throw new Error('replyEnvelope: envelope has no reply route');
       stmts.insertEnvelope.run(child);
       stmts.replyEnvelope.run({ id: envelopeId, target_session_id, reply_envelope_id: child.id, ts });
@@ -3144,7 +3163,7 @@ WHERE state_changed_at IS NULL`).run();
           sender_id: root.sender_id, reply_to_session_id: root.reply_to_session_id, recipient_session_id: root.recipient_session_id,
           sender_session_id: root.sender_session_id, target_session_id: root.target_session_id, kind: 'ack_ping',
           payload: JSON.stringify({ content: `Acknowledgement reminder for dispatch ${root.id}\n\nTicket: ${root.ticket_id}\nDispatch age: ${ageMinutes}m\nPlease acknowledge the original dispatch by acknowledging this ping message_id: ${childId}.` }),
-          status: 'pending', ack_deadline_at: null, created_at: ts };
+          status: 'pending', ack_deadline_at: null, created_at: ts, expires_at: expiresAt(ts) };
         stmts.insertEnvelope.run(child);
         return { root: stmts.getEnvelope.get(root.id), envelope: stmts.getEnvelope.get(childId) };
       });
@@ -3167,7 +3186,7 @@ WHERE state_changed_at IS NULL`).run();
           sender_id: root.sender_id, reply_to_session_id: root.reply_to_session_id, recipient_session_id: root.reply_to_session_id,
           sender_session_id: root.sender_session_id, target_session_id: root.reply_to_session_id, kind: 'escalation',
           payload: JSON.stringify({ content: `Dispatch escalation for ${root.ticket_id}\n\nOriginal message_id: ${root.id}\nPing message_id: ${root.ping_envelope_id}\nNo acknowledgement after delivery and one reminder.` }),
-          status: 'pending', ack_deadline_at: null, created_at: ts };
+          status: 'pending', ack_deadline_at: null, created_at: ts, expires_at: expiresAt(ts) };
         stmts.insertEnvelope.run(child);
         return { root: stmts.getEnvelope.get(root.id), envelope: stmts.getEnvelope.get(childId) };
       });
