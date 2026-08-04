@@ -64,13 +64,19 @@ Claude Code hooks and the opencode shim both normalize into the same script stdi
 GOL-473–477 add a distinct, Golem-owned Codex App Server path for managed
 headless sessions and the private `golem codex` TUI. `lib/codex-supervisor.js` writes the durable thread/process
 recovery map, then starts a required Golem MCP child with a supervisor-owned
-canonical actor binding. Once the pinned App Server handshake, MCP status
-check, authenticated loopback typed `/brief` adapter, and idle thread are all
-valid, the health lease is `delivery_ready:true`. Dashboard dispatch sends a
-durable envelope to that typed endpoint; acceptance is persisted before exactly
-one `turn/start`, and retries reuse the saved mapping. A process loss or stop
-releases the lease and writes a terminal fact before dashboard refreshes. An
-ambiguous in-flight delivery stays recovery-pending rather than being replayed.
+canonical actor binding. GOL-124 factors the loopback transport and delivery
+lifecycle into `lib/typed-worker-endpoint.js`: every typed lease authenticates
+the canonical session and owner token, reports a protocol version and live
+readiness, bounds envelope bytes, and rejects a stale owner or duplicate
+envelope. Dashboard records `claimed → accepted → settled|interrupted|
+recovery_required` separately from the legacy transport status. Only
+pre-acceptance failure returns work to the shared queue; accepted work is never
+automatically replayed. Codex remains one adapter: it claims before `turn/start`
+and records a correlated accepted mapping only after the native start result.
+An ambiguous start outcome is recovery-required and releases neither the
+canonical mapping nor a second delivery attempt. Once the pinned App Server
+handshake, MCP status check, typed endpoint, and idle thread are all valid, the
+health lease is `delivery_ready:true`.
 The same envelope path carries managed-Codex notifications, consults,
 subscription digests, and gate resolutions; CC/OC retain their generic
 route-specific channel events. Role activation and interrupt/halt are visibly

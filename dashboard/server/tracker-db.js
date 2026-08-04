@@ -370,6 +370,16 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
         target_session_id TEXT,
         kind              TEXT NOT NULL DEFAULT 'ticket_dispatch',
         payload           TEXT NOT NULL DEFAULT '{}',
+        -- Canonical typed-worker delivery lifecycle. The status field remains
+        -- legacy transport/ack compatibility field; it must not collapse a
+        -- claimed or accepted native turn back into a socket-write claim.
+        delivery_state    TEXT NOT NULL DEFAULT 'pending',
+        delivery_attempt_id TEXT,
+        claimed_at        TEXT,
+        accepted_at       TEXT,
+        settled_at        TEXT,
+        interrupted_at    TEXT,
+        recovery_required_at TEXT,
         delivery_attempted_at TEXT,
         delivery_opportunity_at TEXT,
         delivery_error    TEXT,
@@ -728,6 +738,17 @@ WHERE state_changed_at IS NULL`).run();
       ['escalation_envelope_id', 'TEXT'], ['ack_via_envelope_id', 'TEXT'],
     ]) if (!envelopeCols14.includes(col)) db.exec(`ALTER TABLE message_envelopes ADD COLUMN ${col} ${def}`);
 
+    // GOL-124: typed native workers distinguish publication, slot claim,
+    // correlated acceptance, settlement, interruption, and recovery-required
+    // outcomes. Existing rows start as `pending`; the old status field stays
+    // readable for CC/OC and historical dashboard clients.
+    const envelopeCols124 = db.prepare('PRAGMA table_info(message_envelopes)').all().map((c) => c.name);
+    for (const [col, def] of [
+      ['delivery_state', "TEXT NOT NULL DEFAULT 'pending'"], ['delivery_attempt_id', 'TEXT'],
+      ['claimed_at', 'TEXT'], ['accepted_at', 'TEXT'], ['settled_at', 'TEXT'],
+      ['interrupted_at', 'TEXT'], ['recovery_required_at', 'TEXT'],
+    ]) if (!envelopeCols124.includes(col)) db.exec(`ALTER TABLE message_envelopes ADD COLUMN ${col} ${def}`);
+
     // Schema migration v14 -> v15 (GOL-423): preserve which subscriptions were
     // explicitly manual even when lifecycle resume later replaces their reason.
     const subscriptionCols15 = db.prepare('PRAGMA table_info(subscriptions)').all().map((c) => c.name);
@@ -861,7 +882,7 @@ WHERE state_changed_at IS NULL`).run();
         "UPDATE dispatch_queue SET status = 'expired', last_error = @last_error, resolved_at = @resolved_at WHERE id = @id AND status = 'pending'"
       ),
       markQueueDeliveredRow: db.prepare(
-        "UPDATE dispatch_queue SET status = 'delivered', delivered_at = @delivered_at, last_error = @last_error, resolved_at = @resolved_at WHERE id = @id AND status IN ('pending','next_turn')"
+        "UPDATE dispatch_queue SET status = 'delivered', delivered_at = @delivered_at, last_error = @last_error, resolved_at = @resolved_at, publishing_owner = NULL, publishing_expires_at = NULL WHERE id = @id AND status IN ('pending','next_turn','publishing') AND (status != 'publishing' OR publishing_owner = @owner)"
       ),
       markQueueNextTurnRow: db.prepare("UPDATE dispatch_queue SET status = 'next_turn', publishing_owner = NULL, publishing_expires_at = NULL WHERE id = @id AND status = 'publishing' AND publishing_owner = @owner"),
       claimQueuePublishingRow: db.prepare("UPDATE dispatch_queue SET status = 'publishing', publishing_owner = @owner, publishing_expires_at = @expires WHERE id = @id AND (status = 'pending' OR (status = 'publishing' AND publishing_expires_at < @now))"),
@@ -911,11 +932,37 @@ WHERE state_changed_at IS NULL`).run();
       markEnvelopeDelivery: db.prepare(`
         UPDATE message_envelopes
         SET status = CASE WHEN @error IS NULL THEN 'delivered' ELSE 'delivery_failed' END,
+            delivery_state = CASE
+              WHEN delivery_state IN ('accepted', 'settled', 'interrupted', 'recovery_required') THEN delivery_state
+              WHEN @error IS NULL THEN 'published'
+              ELSE 'pending'
+            END,
             delivered_at = @delivered_at, delivery_attempted_at = @delivered_at,
             delivery_error = @error, last_error = @error,
             delivery_opportunity_at = CASE WHEN @error IS NULL THEN COALESCE(delivery_opportunity_at, @delivered_at) ELSE delivery_opportunity_at END,
             ack_deadline_at = CASE WHEN @error IS NULL AND kind = 'ticket_dispatch' THEN COALESCE(ack_deadline_at, @ack_deadline_at) ELSE ack_deadline_at END
         WHERE id = @id AND status IN ('pending', 'queued', 'delivery_failed')
+      `),
+      updateTypedEnvelopeLifecycle: db.prepare(`
+        UPDATE message_envelopes
+        SET status = @status,
+            delivery_state = @delivery_state,
+            delivery_attempt_id = COALESCE(@delivery_attempt_id, delivery_attempt_id),
+            delivery_attempted_at = COALESCE(@delivery_attempted_at, delivery_attempted_at),
+            delivery_error = @delivery_error,
+            last_error = @delivery_error,
+            delivered_at = CASE WHEN @delivery_state IN ('accepted', 'settled', 'interrupted', 'recovery_required')
+              THEN COALESCE(delivered_at, @delivery_attempted_at) ELSE delivered_at END,
+            delivery_opportunity_at = CASE WHEN @delivery_state = 'accepted'
+              THEN COALESCE(delivery_opportunity_at, @delivery_attempted_at) ELSE delivery_opportunity_at END,
+            ack_deadline_at = CASE WHEN @delivery_state = 'accepted' AND kind = 'ticket_dispatch'
+              THEN COALESCE(ack_deadline_at, @ack_deadline_at) ELSE ack_deadline_at END,
+            claimed_at = CASE WHEN @delivery_state = 'claimed' THEN COALESCE(claimed_at, @delivery_attempted_at) ELSE claimed_at END,
+            accepted_at = CASE WHEN @delivery_state = 'accepted' THEN COALESCE(accepted_at, @delivery_attempted_at) ELSE accepted_at END,
+            settled_at = CASE WHEN @delivery_state = 'settled' THEN COALESCE(settled_at, @delivery_attempted_at) ELSE settled_at END,
+            interrupted_at = CASE WHEN @delivery_state = 'interrupted' THEN COALESCE(interrupted_at, @delivery_attempted_at) ELSE interrupted_at END,
+            recovery_required_at = CASE WHEN @delivery_state = 'recovery_required' THEN COALESCE(recovery_required_at, @delivery_attempted_at) ELSE recovery_required_at END
+        WHERE id = @id
       `),
       acknowledgeEnvelope: db.prepare(`
         UPDATE message_envelopes SET acknowledged_at = COALESCE(acknowledged_at, @ts),
@@ -2741,6 +2788,66 @@ WHERE state_changed_at IS NULL`).run();
       return stmts.getEnvelope.get(row.id);
     },
 
+    // The shared typed-endpoint protocol deliberately stores lifecycle beside
+    // the legacy transport status. This is the source of truth for replay
+    // safety: a claimed-but-unaccepted attempt may return to pending; an
+    // accepted interruption/recovery-required outcome can never be claimed
+    // again automatically.
+    recordTypedEnvelopeLifecycle(envelopeId, { state, attempt_id = null, error = null } = {}) {
+      const allowed = new Set(['pending', 'claimed', 'accepted', 'settled', 'interrupted', 'recovery_required']);
+      if (!allowed.has(state)) throw new Error(`recordTypedEnvelopeLifecycle: unsupported state '${state}'`);
+      const existing = stmts.getEnvelope.get(envelopeId);
+      if (!existing) throw new Error(`recordTypedEnvelopeLifecycle: envelope '${envelopeId}' not found`);
+      const prior = existing.delivery_state || 'pending';
+      if (prior === state) return existing;
+      const transitions = {
+        pending: new Set(['claimed', 'accepted', 'recovery_required']),
+        published: new Set(['claimed', 'accepted', 'recovery_required']),
+        claimed: new Set(['pending', 'accepted', 'recovery_required']),
+        accepted: new Set(['settled', 'interrupted', 'recovery_required']),
+        settled: new Set(),
+        interrupted: new Set(),
+        recovery_required: new Set(),
+      };
+      if (!transitions[prior]?.has(state)) {
+        throw new Error(`recordTypedEnvelopeLifecycle: illegal transition ${prior} -> ${state}`);
+      }
+      const ts = now();
+      const minutes = Math.max(0, Number(loadConfig()?.dispatch?.unackedWindowMinutes) || 5);
+      const deadline = new Date(Date.parse(ts) + minutes * 60_000).toISOString();
+      const status = state === 'pending'
+        ? 'delivery_failed'
+        : state === 'claimed'
+          ? existing.status
+          : 'delivered';
+      const txn = db.transaction(() => {
+        stmts.updateTypedEnvelopeLifecycle.run({
+          id: envelopeId,
+          status,
+          delivery_state: state,
+          delivery_attempt_id: attempt_id,
+          delivery_attempted_at: ts,
+          delivery_error: error ?? null,
+          ack_deadline_at: deadline,
+        });
+        const updated = stmts.getEnvelope.get(envelopeId);
+        recordEvent({
+          ticket_id: existing.ticket_id,
+          project_id: existing.project_id,
+          type: `dispatch_delivery_${state}`,
+          actor: 'golem-typed-endpoint',
+          data: {
+            envelope_id: envelopeId,
+            target_session_id: existing.target_session_id,
+            attempt_id: attempt_id ?? existing.delivery_attempt_id ?? null,
+            error: error ?? null,
+          },
+        });
+        return updated;
+      });
+      return txn();
+    },
+
     markEnvelopeDelivery(envelopeId, { error = null } = {}) {
       const existing = stmts.getEnvelope.get(envelopeId);
       if (!existing) throw new Error(`markEnvelopeDelivery: envelope '${envelopeId}' not found`);
@@ -2859,14 +2966,15 @@ WHERE state_changed_at IS NULL`).run();
 
     // Used by the drainer after a delivery attempt. Idempotent on a non-pending
     // row (a concurrent cancel must not throw here).
-    markQueueDelivered(queueId, { error = null, envelope_id = null } = {}) {
+    markQueueDelivered(queueId, { error = null, envelope_id = null, ownerToken = null } = {}) {
       const row = stmts.getQueueRow.get(queueId);
       if (!row) throw new Error(`markQueueDelivered: queue row '${queueId}' not found`);
-      if (!['pending', 'next_turn'].includes(row.status)) return row;
+      if (!['pending', 'next_turn', 'publishing'].includes(row.status)) return row;
+      if (row.status === 'publishing' && (!ownerToken || row.publishing_owner !== ownerToken)) return row;
       const ts = now();
       const txn = db.transaction(() => {
         stmts.markQueueDeliveredRow.run({
-          delivered_at: ts, last_error: error ?? null, resolved_at: ts, id: queueId,
+          delivered_at: ts, last_error: error ?? null, resolved_at: ts, id: queueId, owner: ownerToken,
         });
         recordEvent({
           ticket_id: row.ticket_id,

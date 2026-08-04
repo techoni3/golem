@@ -6,8 +6,19 @@
 import fs from 'node:fs/promises';
 import { channelsJsonPath } from '../../lib/golem-home.js';
 import { readEndpointLeases } from '../../lib/session-facts.js';
+import { TYPED_WORKER_PROTOCOL_VERSION } from '../../lib/typed-worker-endpoint.js';
 
 const CHANNELS_REGISTRY = channelsJsonPath();
+
+// A typed worker has an authenticated, lease-backed /brief endpoint and owns
+// its own native-turn readiness gate. `codex-supervisor` remains a concrete
+// adapter kind during the migration; future adapters register `typed-worker`
+// rather than requiring another dashboard special case.
+export function isTypedWorkerChannel(channel) {
+  return channel?.kind === 'codex-supervisor'
+    || channel?.kind === 'typed-worker'
+    || channel?.typed_worker === true;
+}
 
 // Reachability means the endpoint's target transport is currently eligible,
 // not merely that its PID/HTTP listener exists. Managed Codex owns its typed
@@ -16,7 +27,7 @@ const CHANNELS_REGISTRY = channelsJsonPath();
 // stay non-deliverable until their plugin process restarts and republishes.
 export function isChannelDeliveryReady(channel) {
   if (!channel) return false;
-  if (channel.kind === 'codex-supervisor') return channel.delivery_ready === true;
+  if (isTypedWorkerChannel(channel)) return channel.delivery_ready === true;
   if (channel.harness === 'opencode' || channel.kind === 'opencode-bridge') {
     return channel.delivery_ready !== false;
   }
@@ -25,6 +36,7 @@ export function isChannelDeliveryReady(channel) {
 
 export function channelDeliveryError(channel) {
   if (channel?.kind === 'codex-supervisor') return 'managed Codex target is not delivery-ready';
+  if (isTypedWorkerChannel(channel)) return 'typed worker target is not delivery-ready';
   if (String(channel?.consumer_reason || '').startsWith('unsupported_')) {
     return 'Claude Code channel is ineligible under this provider configuration. Claude Channels require Anthropic authentication through claude.ai or a Console API key; unset Bedrock/Vertex/Foundry or non-default ANTHROPIC_BASE_URL configuration, then restart with --dangerously-load-development-channels plugin:golem@golem-workspace.';
   }
@@ -85,7 +97,9 @@ export async function readChannels() {
       const query = new URLSearchParams({ session_id: lease.canonical_id, owner_token: lease.owner_token });
       const response = await fetch(`http://${lease.host}:${lease.port}/healthz?${query}`, { signal: controller.signal });
       const body = response.ok ? await response.json() : null;
-      if (!(response.ok && body?.canonical_id === lease.canonical_id && body?.owner_token === lease.owner_token)) return null;
+      const typedWorker = isTypedWorkerChannel(lease);
+      if (!(response.ok && body?.canonical_id === lease.canonical_id && body?.owner_token === lease.owner_token
+        && (!typedWorker || (body?.protocol_version === TYPED_WORKER_PROTOCOL_VERSION && body?.kind === lease.kind)))) return null;
       const { owner_token, ...publicLease } = lease;
       return withPrivateOwnerToken({
           ...publicLease,
@@ -100,7 +114,8 @@ export async function readChannels() {
           consumer_ready: body.consumer_ready ?? lease.consumer_ready ?? null,
           consumer_reason: body.consumer_reason ?? lease.consumer_reason ?? null,
           consumer_transport: body.consumer_transport ?? lease.consumer_transport ?? null,
-          delivery_ready: lease.kind === 'codex-supervisor'
+          typed_worker: typedWorker,
+          delivery_ready: typedWorker
             ? body.delivery_ready === true
             : (lease.harness === 'opencode' || lease.kind === 'opencode-bridge')
               ? body.delivery_ready !== false

@@ -13,7 +13,8 @@
 // /api/channel/health, but is no longer used for brief routing.
 
 import { CONFIG } from './config.js';
-import { channelDeliveryError, isChannelDeliveryReady, readChannels } from './channels.js';
+import { channelDeliveryError, isChannelDeliveryReady, isTypedWorkerChannel, readChannels } from './channels.js';
+import { TYPED_WORKER_PROTOCOL_VERSION } from '../../lib/typed-worker-endpoint.js';
 
 const DEFAULT_TIMEOUT_MS = 5000;
 
@@ -59,15 +60,15 @@ async function forward(method, pathSuffix, body, sessionId, metadata = null) {
   const url = `${baseUrl.replace(/\/$/, '')}${pathSuffix}`;
   const headers = { 'X-Sender': 'dashboard' };
   if (sessionId) headers['X-Golem-Target-Session'] = sessionId;
-  // GOL-474: the managed Codex App Server is a typed target adapter, not a
-  // generic channel notification endpoint. Its supervisor exposes only a
-  // durable envelope route and requires the current private lease credential.
-  if (channel?.kind === 'codex-supervisor') {
+  // Typed workers expose only a durable envelope route and require the
+  // current private lease credential. Codex remains one concrete adapter;
+  // future native workers inherit this contract without a new branch here.
+  if (isTypedWorkerChannel(channel)) {
     if (pathSuffix !== '/brief' || !metadata?.envelope_id) {
-      return { ok: false, status: 400, body: '', error: 'managed Codex delivery requires a durable /brief envelope', target: baseUrl };
+      return { ok: false, status: 400, body: '', error: 'typed worker delivery requires a durable /brief envelope', target: baseUrl };
     }
     if (!channel.owner_token) {
-      return { ok: false, status: 503, body: '', error: 'managed Codex delivery lease has no owner credential', target: baseUrl };
+      return { ok: false, status: 503, body: '', error: 'typed worker delivery lease has no owner credential', target: baseUrl };
     }
     headers['X-Golem-Endpoint-Owner'] = channel.owner_token;
   }
@@ -77,7 +78,9 @@ async function forward(method, pathSuffix, body, sessionId, metadata = null) {
       bodyToSend = body;
       headers['Content-Type'] = 'text/plain';
     } else {
-      bodyToSend = JSON.stringify(body);
+      bodyToSend = JSON.stringify(isTypedWorkerChannel(channel)
+        ? { protocol_version: TYPED_WORKER_PROTOCOL_VERSION, ...body }
+        : body);
       headers['Content-Type'] = 'application/json';
     }
   }
@@ -86,7 +89,7 @@ async function forward(method, pathSuffix, body, sessionId, metadata = null) {
   try {
     const resp = await fetch(url, { method, headers, body: bodyToSend, signal: ctl.signal });
     const text = await resp.text();
-    return { ok: resp.ok, status: resp.status, body: text, target: baseUrl };
+    return { ok: resp.ok, status: resp.status, body: text, target: baseUrl, typed_worker: isTypedWorkerChannel(channel) };
   } catch (err) {
     return { ok: false, status: 0, body: '', error: String(err?.message ?? err), target: baseUrl };
   } finally {
@@ -115,7 +118,7 @@ export async function pushControlEnvelope({ envelope, content, legacy } = {}, se
     sender_session_id: envelope.sender_session_id,
     target_session_id: envelope.target_session_id,
   };
-  if (channel?.kind === 'codex-supervisor') return pushBrief(content, sessionId, metadata);
+  if (isTypedWorkerChannel(channel)) return pushBrief(content, sessionId, metadata);
   if (!legacy?.path) return { ok: false, status: 400, body: '', error: 'legacy control route is required for a non-Codex target' };
   return forward('POST', legacy.path, legacy.body, sessionId);
 }

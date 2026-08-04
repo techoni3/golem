@@ -30,7 +30,8 @@ import { loadConfig } from '../../lib/golem-config.js';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { checkpointPiPickupAck, claimPiPickupAcks, completePiPickupAck, enqueuePiBrief } from '../../lib/pi-inbox.js';
-import { isChannelDeliveryReady } from './channels.js';
+import { isChannelDeliveryReady, isTypedWorkerChannel } from './channels.js';
+import { parseTypedDeliveryResponse } from '../../lib/typed-worker-endpoint.js';
 
 const TICK_MS = 5_000;
 const COOLDOWN_MS = 60_000;
@@ -54,7 +55,7 @@ export function initDispatchDrainer({
   // cooldown check so we never deliver twice to a session within 60s.
   const lastDeliveredAt = new Map();
   const waveHoldLogged = new Set();
-  const piPublishing = new Set();
+  const publishing = new Set();
   const publishingOwner = crypto.randomUUID();
   const ackOwner = crypto.randomUUID();
   let timer = null;
@@ -199,14 +200,15 @@ export function initDispatchDrainer({
     // per tick so a transient readChannels failure makes everyone wait one tick
     // (safe), not burn.
     let channelIds = new Set();
+    let channelsBySession = new Map();
     try {
       // A managed Codex supervisor can keep a healthy loopback lease while it
       // is busy/recovering. Treat delivery_ready:false exactly like an absent
       // channel here so a queued envelope is held, never burned on a 409.
       // Legacy CC/OC rows remain eligible by their established presence rule.
-      channelIds = new Set((await listChannels())
-        .filter((channel) => isChannelDeliveryReady(channel))
-        .map((channel) => channel.session_id));
+      const readyChannels = (await listChannels()).filter((channel) => isChannelDeliveryReady(channel));
+      channelIds = new Set(readyChannels.map((channel) => channel.session_id));
+      channelsBySession = new Map(readyChannels.map((channel) => [channel.session_id, channel]));
     } catch { /* transient → everyone waits a tick */ }
     const byId = new Map();
     for (const s of sessions) if (s.session_id) byId.set(s.session_id, s);
@@ -225,6 +227,11 @@ export function initDispatchDrainer({
     for (const [sessionId, rows] of bySession) {
       const s = byId.get(sessionId);
       const isPi = s?.harness === 'pi';
+      const isTypedWorker = isTypedWorkerChannel(channelsBySession.get(sessionId));
+      // Pi stays on the migration-only next-turn spool only until it has
+      // registered the shared typed endpoint. A first-class Pi lease follows
+      // the same generic channel path as any other typed worker.
+      const usesLegacyPiSpool = isPi && !isTypedWorker;
 
       const waveGate = (row) => {
         try {
@@ -291,6 +298,7 @@ export function initDispatchDrainer({
         }
       }
       if (!row) continue;
+      const requiresPublishingLease = usesLegacyPiSpool || isTypedWorker;
       try {
         const ticket = tracker.getTicket(row.ticket_id);
         if (!ticket) {
@@ -320,20 +328,24 @@ export function initDispatchDrainer({
           }
         }
 
-        if (isPi) {
-          if (piPublishing.has(row.id)) continue;
+        if (requiresPublishingLease) {
+          if (publishing.has(row.id)) continue;
           if (!tracker.claimQueuePublishing(row.id, { ownerToken: publishingOwner })) continue;
-          piPublishing.add(row.id);
+          publishing.add(row.id);
         }
 
         // Durable-first: setDispatched BEFORE pushBrief (crash between →
         // ticket assigned, not lost).
         let assigned = ticket;
-        if (!isPi) assigned = tracker.setDispatched(ticket.id, { session_id: sessionId, actor: 'golem-drainer' });
+        if (!usesLegacyPiSpool) assigned = tracker.setDispatched(ticket.id, { session_id: sessionId, actor: 'golem-drainer' });
         if (assigned.revoked_session_id) {
           try { await pushBrief(`Dispatch revoked for ${assigned.display_id || assigned.id}: ${assigned.title || ''}\n\nReason: queued dispatch delivered to another session. Stand down unless you receive a new dispatch.`, assigned.revoked_session_id); } catch { /* best-effort */ }
         }
         const envelope = row.envelope_id ? tracker.getEnvelope(row.envelope_id) : null;
+        const typedAttemptId = isTypedWorker ? crypto.randomUUID() : null;
+        if (isTypedWorker && row.envelope_id) {
+          tracker.recordTypedEnvelopeLifecycle(row.envelope_id, { state: 'claimed', attempt_id: typedAttemptId });
+        }
         let briefString = buildDispatchBrief(ticket, row.note, row.workspace || undefined, row.envelope_id || null);
         try {
           const payload = envelope?.payload ? JSON.parse(envelope.payload) : null;
@@ -352,16 +364,43 @@ export function initDispatchDrainer({
 
         let pushResult;
         try {
-          pushResult = isPi
+          pushResult = usesLegacyPiSpool
             ? enqueuePiBrief(sessionId, briefString, { queue_id: row.id, envelope_id: row.envelope_id || null, ticket_id: ticket.id, session_id: sessionId, passive_lease_id: passive?.lease_id || null }, { messageId: row.id })
             : await pushBrief(briefString, sessionId, { envelope_id: row.envelope_id || undefined, sender_session_id: null, target_session_id: sessionId });
         } catch (err) {
           pushResult = { ok: false, error: String(err?.message ?? err) };
         }
+        const typedOutcome = isTypedWorker ? parseTypedDeliveryResponse(pushResult) : null;
+        const typedAccepted = typedOutcome?.accepted === true;
+        if (isTypedWorker && row.envelope_id) {
+          if (typedAccepted) {
+            // The native worker can settle in the narrow window between its
+            // correlated start and this HTTP response. Preserve the immutable
+            // acceptance boundary before recording that fast terminal state.
+            if (['settled', 'interrupted'].includes(typedOutcome.delivery_state)
+              && tracker.getEnvelope(row.envelope_id)?.delivery_state === 'claimed') {
+              tracker.recordTypedEnvelopeLifecycle(row.envelope_id, {
+                state: 'accepted',
+                attempt_id: typedAttemptId,
+              });
+            }
+            tracker.recordTypedEnvelopeLifecycle(row.envelope_id, {
+              state: typedOutcome.delivery_state,
+              attempt_id: typedAttemptId,
+              error: pushResult?.ok ? null : (typedOutcome.error || pushResult?.error || null),
+            });
+          } else {
+            tracker.recordTypedEnvelopeLifecycle(row.envelope_id, {
+              state: 'pending',
+              attempt_id: typedAttemptId,
+              error: pushResult?.error || `status ${pushResult?.status ?? '?'}`,
+            });
+          }
+        }
 
         // Set the outcome from the delivery opportunity before queue/envelope
         // writes: their failure must not replay context that already landed.
-        const passiveCommitted = !!pushResult?.ok;
+        const passiveCommitted = isTypedWorker ? typedAccepted : !!pushResult?.ok;
         try {
           if (pushResult.queued) {
             assigned = tracker.setDispatched(ticket.id, { session_id: sessionId, actor: 'golem-drainer' });
@@ -370,7 +409,10 @@ export function initDispatchDrainer({
             }
             tracker.markQueueNextTurn(row.id, { ownerToken: publishingOwner });
           }
-          else if (isPi) tracker.releaseQueuePublishing(row.id, { ownerToken: publishingOwner });
+          else if (isTypedWorker && typedAccepted) {
+            tracker.markQueueDelivered(row.id, { envelope_id: row.envelope_id || null, ownerToken: publishingOwner });
+          }
+          else if (requiresPublishingLease) tracker.releaseQueuePublishing(row.id, { ownerToken: publishingOwner });
           else {
             tracker.markQueueDelivered(row.id, { error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}`, envelope_id: row.envelope_id || null });
             if (row.envelope_id) tracker.markEnvelopeDelivery(row.envelope_id, { error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}` });
@@ -384,11 +426,11 @@ export function initDispatchDrainer({
             } catch { /* a failed settlement leaves the batch replayable */ }
           }
         }
-        if (pushResult && pushResult.ok && !pushResult.queued) {
+        if (pushResult && (pushResult.ok || typedAccepted) && !pushResult.queued) {
           tracker.markCommentDispatchesDeliveredForTicket(ticket.id, sessionId);
         }
 
-        if (pushResult && pushResult.ok) {
+        if (pushResult && (pushResult.ok || typedAccepted)) {
           chat.record('user', 'brief', briefString, { session_id: sessionId, delivery: pushResult.queued ? 'next_turn' : 'push' });
         } else {
           const detail = pushResult?.error || `status ${pushResult?.status ?? '?'}`;
@@ -407,10 +449,10 @@ export function initDispatchDrainer({
         queueChanged = true;
         lastDeliveredAt.set(sessionId, Date.now());
       } catch (err) {
-        if (isPi) { try { tracker.releaseQueuePublishing(row.id, { ownerToken: publishingOwner }); } catch {} }
+        if (requiresPublishingLease) { try { tracker.releaseQueuePublishing(row.id, { ownerToken: publishingOwner }); } catch {} }
         console.error(`[dispatch-drainer] delivery for ${row.id} failed:`, err);
       } finally {
-        if (isPi) piPublishing.delete(row.id);
+        if (requiresPublishingLease) publishing.delete(row.id);
       }
     }
     let digestChanged = false;

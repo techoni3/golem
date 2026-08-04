@@ -22,6 +22,7 @@ import { registerSubstrateRoutes } from './substrate.js';
 import { teamAssists } from './team-assist.js';
 import { golemHome, dashboardJsonPath, journalDirFor, sessionsJsonPath } from '../../lib/golem-home.js';
 import { createRole, deleteRole, getRole, listRoleCards, roleChangeBrief, roleMission, setSessionRole, updateRoleMeta, writeRoleCard } from '../../lib/session-role.js';
+import { parseTypedDeliveryResponse } from '../../lib/typed-worker-endpoint.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const WEB_SOURCE_ROOT = path.resolve(__dirname, '..', 'web');
@@ -93,6 +94,30 @@ function isProcessAlive(pid) {
 /** Short sleep helper for polling during graceful shutdown waits. */
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Keep the legacy envelope status for existing channel consumers, while a
+// typed endpoint's response advances the shared native-worker lifecycle. A
+// 503 recovery-required response is still accepted work and must never be
+// converted into a retryable socket failure.
+function recordTypedEnvelopeOutcome(tracker, envelopeId, delivery) {
+  const outcome = parseTypedDeliveryResponse(delivery);
+  if (!outcome?.accepted) return null;
+  const error = delivery?.ok ? null : (outcome.error || delivery?.error || null);
+  const current = tracker.getEnvelope(envelopeId)?.delivery_state || 'pending';
+  // Queue-drained delivery records `claimed` before the request. Direct
+  // dashboard routes can receive an immediate native terminal response before
+  // they have observed that claim. Materialize the omitted prefix rather than
+  // allowing a fast settlement to erase the immutable acceptance boundary.
+  if (['pending', 'published'].includes(current) && ['accepted', 'settled', 'interrupted', 'recovery_required'].includes(outcome.delivery_state)) {
+    tracker.recordTypedEnvelopeLifecycle(envelopeId, { state: 'claimed' });
+  }
+  const afterClaim = tracker.getEnvelope(envelopeId)?.delivery_state;
+  if (afterClaim === 'claimed' && ['settled', 'interrupted'].includes(outcome.delivery_state)) {
+    tracker.recordTypedEnvelopeLifecycle(envelopeId, { state: 'accepted' });
+  }
+  tracker.recordTypedEnvelopeLifecycle(envelopeId, { state: outcome.delivery_state, error });
+  return outcome;
 }
 
 /** Look up the command name of a process for clearer error messages. */
@@ -426,7 +451,8 @@ async function deliverControlEnvelope(tracker, {
   let delivery;
   try {
     delivery = await pushControlEnvelope({ envelope, content, legacy }, recipient_session_id);
-    tracker.markEnvelopeDelivery(envelope.id, {
+    const typedOutcome = recordTypedEnvelopeOutcome(tracker, envelope.id, delivery);
+    if (!typedOutcome) tracker.markEnvelopeDelivery(envelope.id, {
       error: delivery.ok ? null : (delivery.error || `status ${delivery.status}`),
     });
   } catch (error) {
@@ -1423,6 +1449,7 @@ async function main() {
     // escaping as a 400 with the comments left `dispatched`.
     let envelope = null;
     let channelResult = null;
+    let typedOutcome = null;
     try {
       envelope = tracker.createControlEnvelope({
         project_id: ticket.project_id ?? null,
@@ -1441,7 +1468,8 @@ async function main() {
     }
     if (envelope) {
       try {
-        tracker.markEnvelopeDelivery(envelope.id, {
+        typedOutcome = recordTypedEnvelopeOutcome(tracker, envelope.id, channelResult);
+        if (!typedOutcome) tracker.markEnvelopeDelivery(envelope.id, {
           error: channelResult?.ok ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),
         });
       } catch (err) {
@@ -1449,7 +1477,7 @@ async function main() {
       }
     }
     let rolledBack = 0;
-    if (channelResult?.ok) {
+    if (channelResult?.ok || typedOutcome?.accepted) {
       chat.record('user', 'brief', brief, { session_id: sessionId });
       tracker.markCommentDispatchesDeliveredForTicket(ticket.id, sessionId);
     } else {
@@ -1751,10 +1779,11 @@ async function main() {
       } catch (err) {
         channelResult = { ok: false, error: String(err?.message ?? err) };
       }
+      const typedOutcome = recordTypedEnvelopeOutcome(tracker, envelope.id, channelResult);
       // The push is the delivery opportunity. Set this before chat or tracker
       // writes so their failures cannot release delivered passive context.
-      passiveCommitted = !!channelResult?.ok;
-      if (channelResult && channelResult.ok) {
+      passiveCommitted = !!channelResult?.ok || typedOutcome?.accepted === true;
+      if (channelResult && (channelResult.ok || typedOutcome?.accepted)) {
         chat.record('user', 'brief', briefString, { session_id: sessionId, delivery: channelResult.queued ? 'next_turn' : 'push' });
       } else {
         const detail = channelResult?.error || `status ${channelResult?.status ?? '?'}`;
@@ -1766,13 +1795,13 @@ async function main() {
         error: channelResult && channelResult.ok ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),
         envelope_id: envelope.id,
       });
-      tracker.markEnvelopeDelivery(envelope.id, {
+      if (!typedOutcome) tracker.markEnvelopeDelivery(envelope.id, {
         error: channelResult && channelResult.ok ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),
       });
     } finally {
       settlePassiveDelta(tracker, sessionId, passive.claim, passiveCommitted);
     }
-    if (channelResult && channelResult.ok) {
+    if (channelResult && (channelResult.ok || parseTypedDeliveryResponse(channelResult)?.accepted)) {
       tracker.markCommentDispatchesDeliveredForTicket(id, sessionId);
     }
 
@@ -1823,8 +1852,11 @@ async function main() {
             result.reply.recipient_session_id,
             { envelope_id: result.reply.id, sender_session_id: trustedCaller || null, target_session_id: result.reply.recipient_session_id },
           );
-          passiveCommitted = !!sender_delivery?.ok;
-          tracker.markEnvelopeDelivery(result.reply.id, { error: sender_delivery.ok ? null : (sender_delivery.error || `status ${sender_delivery.status}`) });
+          const typedOutcome = recordTypedEnvelopeOutcome(tracker, result.reply.id, sender_delivery);
+          passiveCommitted = !!sender_delivery?.ok || typedOutcome?.accepted === true;
+          if (!typedOutcome) tracker.markEnvelopeDelivery(result.reply.id, {
+            error: sender_delivery.ok ? null : (sender_delivery.error || `status ${sender_delivery.status}`),
+          });
         } finally {
           settlePassiveDelta(tracker, result.reply.recipient_session_id, passive.claim, passiveCommitted);
         }
