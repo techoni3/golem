@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-08-04 @ 959e245 — maintained via golem:docs-maintenance.
+> Last verified: 2026-08-04 @ 510e80d — maintained via golem:docs-maintenance.
 ## Directory structure
 - `substrate/` — plugin source; `plugin/` is its generated CC render, never hand-edited. Roles
   have one source: `instructions/AGENTS.md`; cards and skills point to it.
@@ -18,11 +18,11 @@
 ### `lib/session-role.js`
 - `BUILTIN_ROLES` is the hardcoded role source; migrations map a retired name forward.
 ### `lib/typed-worker-endpoint.js`, `lib/typed-delivery-tombstones.js`
-- Shared native-worker protocol validates authenticated, versioned envelopes. Bounded supervisor
-  history is not the replay ledger: compact SQLite tombstones preserve immutable first acceptance
-  until explicit tracker-terminal retirement; wire expiry is renewable. Ambiguous typed pushes use
-  original-envelope shared retry, typed capability stays sticky across lease reloads, and legacy
-  pre-upgrade pending identities atomically reissue after the replay fence.
+- Shared protocol validates authenticated, versioned envelopes; rich supervisor history is never the
+  replay ledger. Terminal tracker retirement prunes lifecycle detail only after a non-evicting
+  compact rejection is durable; wire expiry is renewable. Original retries reserve before
+  transport, respect per-session FIFO/cooldown, and typed capability survives lease rebind; legacy
+  Pi requires an explicit Tier-B fact.
 ### `substrate/hooks/tracker-context.sh`
 - Builds bounded, derived SessionStart/project-context payloads. Its Node block is in command
   substitution: a bare dollar-paren pair or apostrophe in a JS comment breaks the shell.

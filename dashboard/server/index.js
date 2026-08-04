@@ -25,6 +25,7 @@ import { createRole, deleteRole, getRole, listRoleCards, roleChangeBrief, roleMi
 import { acceptedDelivery, publishDurableEnvelope } from './envelope-delivery.js';
 import { recordTypedEnvelopeOutcome } from './typed-delivery.js';
 import { typedEnvelopeMetadata } from '../../lib/typed-worker-endpoint.js';
+import { hasTypedWorkerCapability, readSessionFacts } from '../../lib/session-facts.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const WEB_SOURCE_ROOT = path.resolve(__dirname, '..', 'web');
@@ -410,6 +411,13 @@ function gateVerdictFromText(text) {
   return null;
 }
 
+function hasExplicitLegacyPiDelivery(fact) {
+  return fact?.harness === 'pi'
+    && !hasTypedWorkerCapability(fact)
+    && fact?.delivery?.mode === 'next_turn'
+    && fact?.delivery?.push === false;
+}
+
 async function deliverControlEnvelope(tracker, {
   project_id = null,
   sender_id,
@@ -433,7 +441,18 @@ async function deliverControlEnvelope(tracker, {
     typedTarget = (await listChannels()).some((channel) => (
       channel.session_id === recipient_session_id && isTypedWorkerChannel(channel)
     ));
-  } catch { /* an unavailable registry cannot claim a typed retry path */ }
+  } catch { /* a registry read failure does not erase durable capability */ }
+  // A live lease is transport reachability, not the definition of a worker's
+  // delivery contract. During reload/rebind a typed native worker still needs
+  // its original durable envelope held in the generic retry queue. Only an
+  // explicitly legacy Tier-B Pi fact may use its old compatibility route.
+  if (!typedTarget) {
+    try {
+      const fact = readSessionFacts().find((entry) => entry?.canonical_id === recipient_session_id);
+      typedTarget = hasTypedWorkerCapability(fact)
+        || (fact?.harness === 'pi' && !hasExplicitLegacyPiDelivery(fact));
+    } catch { /* absent facts preserve legacy behavior without inventing a spool */ }
+  }
   return publishDurableEnvelope({
     tracker,
     envelope,

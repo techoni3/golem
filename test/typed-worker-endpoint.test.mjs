@@ -21,6 +21,7 @@ import {
   typedDeliveryResult,
 } from '../lib/typed-worker-endpoint.js';
 import {
+  countTypedDeliveryRejections,
   countTypedDeliveryTombstones,
   pruneTypedDeliveryTombstones,
   readTypedDeliveryTombstone,
@@ -404,10 +405,10 @@ try {
     assert.equal(tracker.getEnvelope(restartQueueRows[4].envelope_id).delivery_state, 'recovery_required', 'recovery-required restart evidence finalizes without automatic replay');
     restartDrainer.close();
 
-    // Terminal tracker evidence retires only the matching compact tombstone.
-    // A live accepted lineage for the same canonical worker remains protected,
-    // while a restarted schema-5 supervisor cannot recreate the pruned entry
-    // from its stale rich JSON inspection history.
+    // Terminal tracker evidence reclaims only its matching rich tombstone. A
+    // compact non-evicting rejection identity still protects the endpoint
+    // after bounded inbox rollover, while a live accepted sibling remains
+    // independently protected.
     const productionTombstoneFile = path.join(process.env.GOLEM_HOME, 'typed-delivery-tombstones.db');
     const mixedSession = 'typed-mixed-retirement';
     const activeMixed = {
@@ -432,7 +433,10 @@ try {
       }),
     });
     assert.equal(terminalOutcome?.delivery_state, 'settled');
-    assert.equal(readTypedDeliveryTombstone(mixedSession, terminalMixed.id, { file: productionTombstoneFile }), null, 'tracker-owned terminal evidence prunes only its explicit replay tombstone');
+    const terminalReplayGuard = readTypedDeliveryTombstone(mixedSession, terminalMixed.id, { file: productionTombstoneFile });
+    assert.equal(terminalReplayGuard?.lifecycle_state, 'settled', 'tracker terminal settlement retains a compact endpoint replay refusal');
+    assert.equal(countTypedDeliveryTombstones({ file: productionTombstoneFile }), 1, 'the active sibling is the only rich tombstone left after terminal retirement');
+    assert.equal(countTypedDeliveryRejections({ file: productionTombstoneFile }), 1, 'the terminal lineage moves to the durable rejection index');
     assert.equal(readTypedDeliveryTombstone(mixedSession, activeMixed.envelope_id, { file: productionTombstoneFile })?.lifecycle_state, 'accepted', 'an active sibling lineage is never retired by another envelope terminal result');
     const staleMixedSupervisor = new CodexSupervisor({
       canonicalId: mixedSession,
@@ -447,7 +451,36 @@ try {
         expires_at: new Date(Date.now() + 120_000).toISOString(),
       }],
     });
-    assert.equal(readTypedDeliveryTombstone(mixedSession, terminalMixed.id, { file: productionTombstoneFile }), null, 'stale schema-5 JSON cannot repopulate a tracker-retired tombstone after restart');
+    assert.equal(readTypedDeliveryTombstone(mixedSession, terminalMixed.id, { file: productionTombstoneFile })?.lifecycle_state, 'settled', 'stale schema-5 JSON cannot replace the tracker-terminal replay refusal after restart');
+    const rolloverProbe = normalizeTypedWorkerInbox();
+    for (let n = 0; n < 257; n += 1) {
+      const created_at = new Date().toISOString();
+      const row = {
+        protocol_version: TYPED_WORKER_PROTOCOL_VERSION,
+        envelope_id: `terminal-rollover-${n}`,
+        content: `terminal rollover ${n}`,
+        target_session_id: mixedSession,
+        kind: 'ticket_dispatch',
+        created_at,
+        expires_at: new Date(Date.parse(created_at) + 60_000).toISOString(),
+        attempt_id: `terminal-rollover-attempt-${n}`,
+      };
+      claimTypedDelivery(rolloverProbe, row);
+      acceptTypedDelivery(rolloverProbe, row.envelope_id);
+      settleTypedDelivery(rolloverProbe, row.envelope_id);
+    }
+    assert.equal(getTypedDelivery(rolloverProbe, terminalMixed.id), null, 'terminal acceptance falls out of the bounded rich history before replay probe');
+    const terminalRolloverReplay = claimTypedDelivery(rolloverProbe, {
+      envelope_id: terminalMixed.id,
+      target_session_id: mixedSession,
+      sender_session_id: 'test', kind: 'ticket_dispatch', content: 'must not execute after tracker terminal retirement',
+      created_at: terminalMixed.created_at, expires_at: terminalMixed.expires_at,
+      attempt_id: 'mixed-terminal-replay-attempt',
+    }, {
+      lookupTombstone: (envelopeId) => readTypedDeliveryTombstone(mixedSession, envelopeId, { file: productionTombstoneFile }),
+    });
+    assert.equal(terminalRolloverReplay.duplicate, true, 'tracker-settled envelope remains a duplicate after rich-history rollover');
+    assert.equal(terminalRolloverReplay.delivery.lifecycle_state, 'settled', 'rollover replay returns the terminal outcome instead of claiming a native turn');
 
     // A terminal notification can win the race with a rejected/lost turn/start
     // response. The supervisor must re-read that durable terminal fact instead
@@ -810,6 +843,52 @@ try {
     assert.equal(lostDigestRequests, 2, 'lost digest response is retried once with the original envelope');
     assert.equal(lostDigestStarts, 1, 'lost digest retry does not create a second native start');
     lostDigestDrainer.close();
+
+    // Retry draining shares the queue's one-opportunity/cooldown rule. Two
+    // already-pending controls for one idle worker must not both become native
+    // turns merely because the first settles quickly in the same poll.
+    const retryFifoSession = 'typed-retry-fifo';
+    const retryFifoOne = tracker.createControlEnvelope({
+      project_id: 'typed-test-000000', sender_id: 'test', recipient_session_id: retryFifoSession,
+      kind: 'session_notify', payload: { content: 'retry fifo one' },
+    });
+    const retryFifoTwo = tracker.createControlEnvelope({
+      project_id: 'typed-test-000000', sender_id: 'test', recipient_session_id: retryFifoSession,
+      kind: 'session_notify', payload: { content: 'retry fifo two' },
+    });
+    tracker.enqueueEnvelopeRetry(retryFifoOne.id, { session_id: retryFifoSession, content: 'retry fifo one', require_typed: true });
+    tracker.enqueueEnvelopeRetry(retryFifoTwo.id, { session_id: retryFifoSession, content: 'retry fifo two', require_typed: true });
+    let retryFifoClock = 10_000;
+    const retryFifoPublishes = [];
+    const retryFifoDrainer = initDispatchDrainer({
+      tracker,
+      state: { nativeSessions: () => [{ session_id: retryFifoSession, harness: 'pi', alive: true, status: 'idle' }] },
+      chat: { record: () => {} },
+      pushBrief: async () => { throw new Error('typed retry FIFO uses the control adapter'); },
+      pushControlEnvelope: async ({ envelope: controlEnvelope, metadata }) => {
+        retryFifoPublishes.push(controlEnvelope.id);
+        return {
+          ok: true, status: 202, typed_worker: true, typed_attempt_id: metadata.attempt_id,
+          body: JSON.stringify({
+            accepted: true, envelope_id: controlEnvelope.id, attempt_id: metadata.attempt_id,
+            accepted_attempt_id: metadata.attempt_id, delivery_state: 'settled',
+          }),
+        };
+      },
+      buildDispatchBrief: (queuedTicket) => queuedTicket.title,
+      broadcastWS: () => {},
+      listChannels: async () => [{ session_id: retryFifoSession, kind: 'typed-worker', delivery_ready: true }],
+      nowMs: () => retryFifoClock,
+    });
+    await retryFifoDrainer.tick();
+    assert.deepEqual(retryFifoPublishes, [retryFifoOne.id], 'one retry opportunity publishes only the FIFO head in a tick');
+    assert.equal(tracker.raw().prepare('SELECT status FROM envelope_delivery_retries WHERE envelope_id = ?').get(retryFifoTwo.id).status, 'pending', 'the second retry remains pending behind the FIFO head');
+    await retryFifoDrainer.tick();
+    assert.deepEqual(retryFifoPublishes, [retryFifoOne.id], 'same-session retry cooldown holds the next retry after a fast settlement');
+    retryFifoClock += 60_001;
+    await retryFifoDrainer.tick();
+    assert.deepEqual(retryFifoPublishes, [retryFifoOne.id, retryFifoTwo.id], 'the next FIFO retry publishes after the shared cooldown');
+    retryFifoDrainer.close();
 
     const settledSession = 'typed-fast-settle';
     const settledTicket = tracker.createTicket({ project_id: 'typed-test-000000', title: 'typed fast settle', created_by: 'test' });

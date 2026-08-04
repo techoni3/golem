@@ -17,7 +17,7 @@ import {
   typedDeliveryResult,
 } from '../lib/typed-worker-endpoint.js';
 import { readTypedDeliveryTombstone, upsertTypedDeliveryTombstone } from '../lib/typed-delivery-tombstones.js';
-import { renewEndpointLease, upsertSessionFact } from '../lib/session-facts.js';
+import { releaseEndpointLeases, renewEndpointLease, upsertSessionFact } from '../lib/session-facts.js';
 
 // GOL-124 round-four production journey: a real dashboard's immediate route
 // loses the first typed response after native acceptance. It must queue the
@@ -123,6 +123,9 @@ let nativeStarts = 0;
 let endpointRequests = 0;
 let dropFirstResponse = true;
 let dropNextResponse = false;
+let hangNextResponse = false;
+let hangingResponse = false;
+let releaseHangingResponse = null;
 let nextResponseStatus = 202;
 let endpoint;
 let dashboard;
@@ -165,6 +168,10 @@ try {
         dropFirstResponse = false;
         dropNextResponse = false;
         response.destroy();
+      } else if (hangNextResponse) {
+        hangNextResponse = false;
+        hangingResponse = true;
+        await new Promise((resolve) => { releaseHangingResponse = resolve; });
       } else {
         sendJson(nextResponseStatus, result);
         nextResponseStatus = 202;
@@ -197,6 +204,20 @@ try {
     const sessions = response.ok ? await response.json() : [];
     return sessions.find((session) => session.session_id === canonicalId && session.alive) || null;
   }, `typed target discovery (${dashboard.stderr()})`);
+
+  // The shared drainer deliberately applies a 60s per-session retry cooldown.
+  // Each independent producer scenario below therefore gets a fresh temporary
+  // dashboard process; this keeps the journey fast without weakening the
+  // production scheduling rule that is covered separately by the drainer test.
+  async function restartDashboardForIndependentRetry() {
+    await stopProcess(dashboard?.child);
+    dashboard = await startDashboard(await unusedPort());
+    await waitFor(async () => {
+      const response = await fetch(`${dashboard.baseUrl}/api/native-sessions`);
+      const sessions = response.ok ? await response.json() : [];
+      return sessions.find((session) => session.session_id === canonicalId && session.alive) || null;
+    }, `typed target rediscovery (${dashboard.stderr()})`);
+  }
 
   const created = await fetch(`${dashboard.baseUrl}/api/tickets`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
@@ -242,6 +263,8 @@ try {
   assert.equal(nativeStarts, 1, 'the duplicate-safe retry did not start a second native turn');
   assert.equal(inbox.deliveries.filter((delivery) => delivery.envelope_id === first.envelope_id).length, 1, 'one native delivery mapping survives the lost response and retry');
 
+  await restartDashboardForIndependentRetry();
+
   // The same original-envelope path serves every non-ticket producer. These
   // are real dashboard requests; the endpoint drops each first response only
   // after accepting and settling the native turn.
@@ -271,6 +294,8 @@ try {
   assert.equal(notification.result.response.status, 200, notification.result.text);
   assert.equal(notification.result.json?.queued, true, notification.result.text);
 
+  await restartDashboardForIndependentRetry();
+
   const control = await assertOriginalRetry('control', () => postJson(dashboard.baseUrl, '/api/messages/control', {
     project_id: 'typed-immediate-000000', sender_id: 'typed-control-source', session_id: canonicalId,
     kind: 'consult_request', content: 'lost response control', metadata: { consult_id: 'lost-control' },
@@ -278,6 +303,8 @@ try {
   }), ({ json }) => json?.envelope_id);
   assert.equal(control.result.response.status, 200, control.result.text);
   assert.equal(control.result.json?.queued, true, control.result.text);
+
+  await restartDashboardForIndependentRetry();
 
   const commentTicket = await postJson(dashboard.baseUrl, '/api/tickets', {
     project_id: 'typed-immediate-000000', kind: 'work-item', title: 'typed comment retry', body: 'controlled', created_by: 'human',
@@ -306,6 +333,8 @@ try {
   commentRetryDb.close();
   assert.equal(commentAfterRetry.comments.find((entry) => entry.id === createdComment.json.id)?.dispatch_state, 'dispatched', 'comment stays visibly dispatched until the worker addresses it');
   assert.deepEqual(commentDispatchDebug.map((row) => row.status), ['delivered'], 'comment retry settles its original dispatch after correlated acceptance');
+
+  await restartDashboardForIndependentRetry();
 
   // Seed a durable reply route, then drop the reply's typed response. It must
   // retry the child reply envelope, not create another reply lineage.
@@ -343,7 +372,78 @@ try {
   assert.equal(accepted503Control.json?.ok, true, accepted503Control.text);
   assert.equal(accepted503Control.json?.queued, false, accepted503Control.text);
 
-  console.log('typed immediate retry production journey passed: ticket/notification/control/comment/reply lost response -> original shared envelope retry -> one native start; accepted-503 notify/control settle');
+  // A typed capability survives a clean lease-release/rebind gap. Non-ticket
+  // controls retain their original durable envelope instead of trying a
+  // legacy route, then deliver once the same worker re-registers its lease.
+  await restartDashboardForIndependentRetry();
+  const startsBeforeLeaseGap = nativeStarts;
+  const requestsBeforeLeaseGap = endpointRequests;
+  releaseEndpointLeases(ownerToken, { canonicalId });
+  const leaseGap = await postJson(dashboard.baseUrl, '/api/messages/notify', {
+    project_id: 'typed-immediate-000000', sender_id: 'typed-lease-gap-source', session_id: canonicalId,
+    text: 'typed capability lease gap notification',
+  });
+  assert.equal(leaseGap.response.status, 200, leaseGap.text);
+  assert.equal(leaseGap.json?.queued, true, leaseGap.text);
+  const leaseGapRetry = new Database(dashboardDb, { readonly: true });
+  try {
+    const row = leaseGapRetry.prepare('SELECT status, require_typed FROM envelope_delivery_retries WHERE envelope_id = ?').get(leaseGap.json?.envelope_id);
+    assert.equal(row?.status, 'pending', 'lease-gap control retains the original envelope while no endpoint is reachable');
+    assert.equal(row?.require_typed, 1, 'sticky typed capability fences the retry from a legacy fallback');
+  } finally { leaseGapRetry.close(); }
+  assert.equal(nativeStarts, startsBeforeLeaseGap, 'no native turn starts while the typed lease is absent');
+  assert.equal(endpointRequests, requestsBeforeLeaseGap, 'no endpoint request is attempted through the lease gap');
+  renewEndpointLease({
+    canonical_id: canonicalId, owner_token: ownerToken, host: endpoint.host, port: endpoint.port,
+    kind: 'typed-worker', harness: 'codex',
+  });
+  await waitForRetry(leaseGap.json.envelope_id, `lease-gap typed retry (${dashboard.stderr()})`);
+  assert.equal(nativeStarts, startsBeforeLeaseGap + 1, 'rebound typed lease accepts the original non-ticket envelope once');
+  assert.equal(endpointRequests, requestsBeforeLeaseGap + 1, 'shared retry uses the generic typed endpoint after rebind');
+
+  // The retry ownership is persisted before transport. Kill the real isolated
+  // dashboard after native acceptance but before it can observe the hanging
+  // response; a restarted drainer reclaims that owned lease and duplicate
+  // replays the same envelope without a second native start.
+  await restartDashboardForIndependentRetry();
+  const startsBeforeCrash = nativeStarts;
+  const requestsBeforeCrash = endpointRequests;
+  hangingResponse = false;
+  hangNextResponse = true;
+  const crashRequest = postJson(dashboard.baseUrl, '/api/messages/notify', {
+    project_id: 'typed-immediate-000000', sender_id: 'typed-crash-window-source', session_id: canonicalId,
+    text: 'crash after native acceptance before response',
+  }).catch((error) => ({ error }));
+  await waitFor(() => hangingResponse && nativeStarts === startsBeforeCrash + 1, 'native acceptance before dashboard crash');
+  const crashEnvelope = new Database(dashboardDb, { readonly: true });
+  let crashEnvelopeId;
+  try {
+    const row = crashEnvelope.prepare(`SELECT envelope_id, status, publishing_owner
+      FROM envelope_delivery_retries WHERE content LIKE ? ORDER BY rowid DESC LIMIT 1`).get('%crash after native acceptance%');
+    crashEnvelopeId = row?.envelope_id;
+    assert.equal(row?.status, 'publishing', 'retry ownership is durably leased before transport starts');
+    assert.ok(row?.publishing_owner, 'the pre-transport retry row has an owner for crash recovery');
+  } finally { crashEnvelope.close(); }
+  const crashedDashboard = dashboard;
+  crashedDashboard.child.kill('SIGKILL');
+  await waitFor(() => crashedDashboard.child.exitCode !== null || crashedDashboard.child.signalCode != null, 'isolated dashboard crash');
+  releaseHangingResponse?.();
+  await crashRequest;
+  const expireCrashLease = new Database(dashboardDb);
+  try {
+    expireCrashLease.prepare("UPDATE envelope_delivery_retries SET publishing_expires_at = '2000-01-01T00:00:00.000Z' WHERE envelope_id = ?").run(crashEnvelopeId);
+  } finally { expireCrashLease.close(); }
+  dashboard = await startDashboard(await unusedPort());
+  await waitFor(async () => {
+    const response = await fetch(`${dashboard.baseUrl}/api/native-sessions`);
+    const sessions = response.ok ? await response.json() : [];
+    return sessions.find((session) => session.session_id === canonicalId && session.alive) || null;
+  }, `typed target restart discovery (${dashboard.stderr()})`);
+  await waitForRetry(crashEnvelopeId, `crash-window original-envelope recovery (${dashboard.stderr()})`);
+  assert.equal(nativeStarts, startsBeforeCrash + 1, 'crash recovery retries the accepted envelope as a duplicate, never a second native turn');
+  assert.equal(endpointRequests, requestsBeforeCrash + 2, 'dashboard restart reclaims and republishes the original owned retry once');
+
+  console.log('typed immediate retry production journey passed: ticket/notification/control/comment/reply lost response -> original shared envelope retry -> one native start; accepted-503, typed lease-gap, and crash-after-accept recovery settle');
 } finally {
   await stopProcess(dashboard?.child);
   await closeTypedWorkerEndpoint(endpoint?.server);

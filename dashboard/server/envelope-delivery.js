@@ -1,6 +1,7 @@
 // Shared durable-envelope publication. A typed endpoint can accept a native
 // turn and lose the HTTP response afterwards, so every non-ticket caller must
 // retain and retry its *original* envelope rather than minting a lookalike.
+import crypto from 'node:crypto';
 import { typedEnvelopeMetadata } from '../../lib/typed-worker-endpoint.js';
 import { recordTypedEnvelopeOutcome } from './typed-delivery.js';
 
@@ -22,12 +23,40 @@ export async function publishDurableEnvelope({
   legacy = null,
   typedTarget = false,
   settlement = null,
+  retryOwnerToken = crypto.randomUUID(),
+  retryAlreadyOwned = false,
+  deferRetrySettlement = false,
   publish,
 } = {}) {
   if (!tracker || !envelope?.id || !sessionId || typeof publish !== 'function') {
     throw new Error('publishDurableEnvelope requires tracker, envelope, sessionId, and publish');
   }
   const metadata = typedTarget ? typedEnvelopeMetadata(envelope) : null;
+  // Reserve the immutable envelope before transport. If the dashboard dies
+  // after native acceptance but before it observes the HTTP response, this
+  // owned lease is the durable handoff to a later drainer.
+  let retry = null;
+  let retryOwned = false;
+  if (typedTarget) {
+    retry = tracker.enqueueEnvelopeRetry(envelope.id, {
+      session_id: sessionId,
+      content,
+      legacy,
+      settlement,
+      require_typed: true,
+    });
+    retryOwned = retryAlreadyOwned || tracker.claimEnvelopeRetry(envelope.id, { ownerToken: retryOwnerToken });
+    if (!retryOwned) {
+      return {
+        envelope,
+        delivery: { ok: false, status: 409, typed_worker: true, error: 'original typed envelope is already publishing' },
+        typedOutcome: null,
+        delivered: false,
+        retry_queued: !!retry?.queued,
+        retry,
+      };
+    }
+  }
   let delivery;
   try {
     delivery = await publish({ envelope, sessionId, content, legacy, metadata });
@@ -49,15 +78,17 @@ export async function publishDurableEnvelope({
   }
 
   // A typed non-acceptance is ambiguous until the same immutable envelope is
-  // replayed. The retry table is harness-neutral tracker state, not a Pi inbox.
-  const retry = typedTarget && !delivered
-    ? tracker.enqueueEnvelopeRetry(envelope.id, {
-      session_id: sessionId,
-      content,
-      legacy,
-      settlement,
-      require_typed: true,
-    })
-    : null;
-  return { envelope, delivery, typedOutcome, delivered, retry_queued: !!retry?.queued, retry };
+  // replayed. Release the pre-transport reservation for reclaim; the drainer
+  // defers marking delivery until its associated settlement is durable.
+  if (typedTarget && retryOwned) {
+    if (delivered && !deferRetrySettlement) {
+      tracker.markEnvelopeRetryDelivered(envelope.id, { ownerToken: retryOwnerToken });
+    } else if (!delivered) {
+      tracker.releaseEnvelopeRetry(envelope.id, {
+        ownerToken: retryOwnerToken,
+        error: delivery?.error || `status ${delivery?.status ?? '?'}`,
+      });
+    }
+  }
+  return { envelope, delivery, typedOutcome, delivered, retry_queued: !!retry?.queued && !delivered, retry };
 }

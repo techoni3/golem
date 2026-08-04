@@ -59,6 +59,7 @@ export function initDispatchDrainer({
   listChannels,
   listEndpointLeases = () => readEndpointLeases({ includeExpired: true }),
   listSessionFacts = () => readSessionFacts(),
+  nowMs = () => Date.now(),
 }) {
   // Older isolated drainer journeys provide only pushBrief. Production passes
   // the typed control adapter; the fallback preserves their legacy generic
@@ -223,7 +224,11 @@ export function initDispatchDrainer({
       console.error('[dispatch-drainer] list envelope retries failed:', error);
       return changed;
     }
+    // Retries are delivery work too: preserve FIFO and never stack multiple
+    // native opportunities onto one session in the same tick.
+    const blockedRetrySessions = new Set();
     for (const retry of retries) {
+      if (blockedRetrySessions.has(retry.session_id)) continue;
       let envelope = tracker.getEnvelope(retry.envelope_id);
       if (!envelope) {
         if (tracker.claimEnvelopeRetry(retry.envelope_id, { ownerToken: publishingOwner })) {
@@ -236,20 +241,41 @@ export function initDispatchDrainer({
       // presently absent. Finalize retry settlement without waiting to route a
       // second transport attempt through a restarted worker.
       if (['accepted', 'settled', 'interrupted', 'recovery_required'].includes(persistedState)) {
-        if (!tracker.claimEnvelopeRetry(retry.envelope_id, { ownerToken: publishingOwner })) continue;
+        if (!tracker.claimEnvelopeRetry(retry.envelope_id, { ownerToken: publishingOwner })) {
+          blockedRetrySessions.add(retry.session_id);
+          continue;
+        }
         if (settleEnvelopeRetry(retry)) {
           tracker.markEnvelopeRetryDelivered(retry.envelope_id, { ownerToken: publishingOwner });
           changed = true;
-        } else tracker.releaseEnvelopeRetry(retry.envelope_id, { ownerToken: publishingOwner, error: 'settlement retry required' });
+        } else {
+          tracker.releaseEnvelopeRetry(retry.envelope_id, { ownerToken: publishingOwner, error: 'settlement retry required' });
+          blockedRetrySessions.add(retry.session_id);
+        }
         continue;
       }
       const session = byId.get(retry.session_id);
       const channel = channelsBySession.get(retry.session_id);
-      if (!session?.alive || session.status !== 'idle') continue;
+      if (!session?.alive || session.status !== 'idle') {
+        blockedRetrySessions.add(retry.session_id);
+        continue;
+      }
       // A typed retry never falls through to a similarly named legacy route
       // while a restarted endpoint has not rebound its lease.
-      if (retry.require_typed && !isTypedWorkerChannel(channel)) continue;
-      if (!tracker.claimEnvelopeRetry(retry.envelope_id, { ownerToken: publishingOwner })) continue;
+      if (retry.require_typed && !isTypedWorkerChannel(channel)) {
+        blockedRetrySessions.add(retry.session_id);
+        continue;
+      }
+      const last = lastDeliveredAt.get(retry.session_id);
+      if (last != null && nowMs() - last < COOLDOWN_MS) {
+        blockedRetrySessions.add(retry.session_id);
+        continue;
+      }
+      if (!tracker.claimEnvelopeRetry(retry.envelope_id, { ownerToken: publishingOwner })) {
+        blockedRetrySessions.add(retry.session_id);
+        continue;
+      }
+      blockedRetrySessions.add(retry.session_id);
       if (persistedState === 'claimed') {
         // Claim without correlated acceptance is the single replayable state.
         tracker.recordTypedEnvelopeLifecycle(envelope.id, {
@@ -269,6 +295,9 @@ export function initDispatchDrainer({
         legacy,
         typedTarget: !!retry.require_typed,
         settlement: retryJson(retry.settlement_json, null),
+        retryOwnerToken: publishingOwner,
+        retryAlreadyOwned: true,
+        deferRetrySettlement: true,
         publish: ({ envelope: targetEnvelope, content, legacy: targetLegacy, metadata }) => (
           deliverControl({ envelope: targetEnvelope, content, legacy: targetLegacy, metadata }, retry.session_id)
         ),
@@ -277,7 +306,7 @@ export function initDispatchDrainer({
         if (settleEnvelopeRetry(retry)) {
           tracker.markEnvelopeRetryDelivered(retry.envelope_id, { ownerToken: publishingOwner });
           chat.record('user', 'brief', retry.content, { session_id: retry.session_id, delivery: 'retry' });
-          lastDeliveredAt.set(retry.session_id, Date.now());
+          lastDeliveredAt.set(retry.session_id, nowMs());
           changed = true;
         } else tracker.releaseEnvelopeRetry(retry.envelope_id, { ownerToken: publishingOwner, error: 'settlement retry required' });
       } else {
@@ -384,7 +413,7 @@ export function initDispatchDrainer({
       bySession.set(row.session_id, arr);
     }
 
-    const now = Date.now();
+    const now = nowMs();
     // TKT-0286: broadcast dispatch-queue-updated once if any row transitioned this tick.
     for (const [sessionId, rows] of bySession) {
       const s = byId.get(sessionId);
