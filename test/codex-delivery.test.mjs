@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '../mcp/channel/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js';
 import { StdioClientTransport } from '../mcp/channel/node_modules/@modelcontextprotocol/sdk/dist/esm/client/stdio.js';
+import { TYPED_WORKER_PROTOCOL_VERSION } from '../lib/typed-worker-endpoint.js';
 
 // GOL-474 is intentionally one real journey: a dashboard creates and dispatches
 // a ticket, the authenticated supervisor adapter maps its durable envelope to
@@ -94,7 +95,7 @@ async function typedRetry(record, payload) {
       'x-golem-target-session': record.canonical_id,
       'x-golem-endpoint-owner': record.health.owner_token,
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, protocol_version: TYPED_WORKER_PROTOCOL_VERSION }),
   });
   return { response, body: await response.json() };
 }
