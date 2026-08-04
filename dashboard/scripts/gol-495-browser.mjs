@@ -42,7 +42,9 @@ const session = (overrides = {}) => ({
   ...overrides,
 });
 const sessionRows = [
-  session({ session_id: 'busy-empty', status: 'busy', name: 'H1 Busy Without Ticket' }),
+  session({ session_id: 'busy-empty', status: 'busy', name: 'H1 Busy Without Ticket', model: 'deepseek-v4-flash:0731-cloud[1m]' }),
+  session({ session_id: 'deepseek-cloud-bare', status: 'idle', name: 'H1 DeepSeek Cloud Bare', model: 'deepseek-v4-flash:0731-cloud' }),
+  session({ session_id: 'deepseek-cloud-qualified', status: 'idle', name: 'H1 DeepSeek Cloud Qualified', model: 'ollama/deepseek-v4-flash:0731-cloud[1m]' }),
   session({ session_id: 'ticket-owner', status: 'busy', name: 'H1 Ticket Owner' }),
   session({ session_id: 'waiting-ack', status: 'waiting', name: 'H1 Waiting Acknowledgement' }),
   session({ session_id: 'idle-static', status: 'idle', name: 'H1 Idle Static' }),
@@ -176,6 +178,8 @@ try {
   const waiting = card('H1 Waiting Acknowledgement');
   const offline = card('H1 Offline With Queue');
   const unknown = card('H1 Unknown Static');
+  const deepseekBare = card('H1 DeepSeek Cloud Bare');
+  const deepseekQualified = card('H1 DeepSeek Cloud Qualified');
 
   const passportGeometry = await sessionsSection.evaluate((section) => {
     const grid = section.querySelector('.native-sessions');
@@ -206,6 +210,9 @@ try {
   ok((await busy.locator('.agent-card-field').last().innerText()).includes('Queue clear'), 'busy no-ticket card renders the deliberate queue-clear empty state');
   const knownImages = busy.locator('.agent-harness-icon img, .agent-model-icon img');
   ok(await knownImages.count() === 2 && await knownImages.evaluateAll((images) => images.every((image) => image.complete && image.naturalWidth > 0)), 'known harness and provider artwork load in the H1 icon slots');
+  ok(await busy.locator('.agent-model-icon.provider-deepseek img').count() === 1 && (await busy.locator('.agent-model-pill').getAttribute('title')) === 'DeepSeek: deepseek-v4-flash:0731-cloud[1m]', 'DeepSeek V4 Flash cloud [1m] resolves to the DeepSeek provider');
+  ok(await deepseekBare.locator('.agent-model-icon.provider-deepseek img').count() === 1 && (await deepseekBare.locator('.agent-model-pill').getAttribute('title')) === 'DeepSeek: deepseek-v4-flash:0731-cloud', 'DeepSeek V4 Flash cloud bare id resolves to the DeepSeek provider');
+  ok(await deepseekQualified.locator('.agent-model-icon.provider-deepseek img').count() === 1 && (await deepseekQualified.locator('.agent-model-pill').getAttribute('title')) === 'DeepSeek: ollama/deepseek-v4-flash:0731-cloud[1m]', 'Ollama-qualified DeepSeek V4 Flash cloud [1m] resolves to the DeepSeek provider');
   ok((await busy.locator('.agent-card-time').innerText()).includes('old') && (await busy.locator('.agent-card-time').innerText()).includes('seen'), 'known lifetime and observation freshness share the signed line');
   ok(await unknown.locator('.agent-harness-icon.harness-unknown svg').count() === 1 && await unknown.locator('.agent-model-icon.provider-fallback svg').count() === 1 && await unknown.locator('.agent-harness-icon').getAttribute('aria-label') === 'Harness: mystery-harness', 'explicit unknown harness and provider retain visible generic icon slots with an accessible raw harness name');
 

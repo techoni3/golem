@@ -16,7 +16,9 @@ import zaiIcon from '@lobehub/icons-static-svg/icons/zai.svg?url';
     { id: 'anthropic', label: 'Anthropic', pattern: /^claude/i, iconSrc: anthropicIcon },
     { id: 'minimax', label: 'MiniMax', pattern: /^minimax/i, iconSrc: minimaxIcon },
     { id: 'z-ai', label: 'Z.ai', pattern: /^glm/i, iconSrc: zaiIcon },
-    { id: 'deepseek', label: 'DeepSeek', pattern: /^deepseek/i, iconSrc: deepSeekIcon },
+    // Claude Code normally reports the bare model id. Ollama-compatible tools
+    // can retain an `ollama/` or `ollama:` qualifier, so accept both forms.
+    { id: 'deepseek', label: 'DeepSeek', pattern: /^(?:ollama[/:])?deepseek/i, iconSrc: deepSeekIcon },
     { id: 'gemma', label: 'Gemma', pattern: /^gemma/i, iconSrc: gemmaIcon },
     { id: 'google', label: 'Google', pattern: /^gemini/i, iconSrc: geminiIcon },
     { id: 'tencent', label: 'Tencent', pattern: /^hy3/i, iconSrc: tencentIcon },
