@@ -31,13 +31,21 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { checkpointPiPickupAck, claimPiPickupAcks, completePiPickupAck, enqueuePiBrief } from '../../lib/pi-inbox.js';
 import { isChannelDeliveryReady, isTypedWorkerChannel } from './channels.js';
-import { hasTypedWorkerCapability, isSessionFactTerminal, readEndpointLeases, readSessionFacts } from '../../lib/session-facts.js';
+import { hasTypedWorkerCapability, readEndpointLeases, readSessionFacts } from '../../lib/session-facts.js';
 import { typedEnvelopeMetadata } from '../../lib/typed-worker-endpoint.js';
 import { isLegacyReplayFence, recordTypedEnvelopeOutcome } from './typed-delivery.js';
 
 const TICK_MS = 5_000;
 const COOLDOWN_MS = 60_000;
 const OFFLINE_EXPIRY_MS = 60 * 60_000; // 60 min
+
+// Pi's old Tier-B extension names its delivery boundary explicitly. Absence of
+// a fact or a temporarily released typed lease is not evidence that a session
+// may receive a new filesystem spool; only this legacy declaration permits it.
+function hasExplicitLegacyPiDelivery(fact) {
+  if (fact?.harness !== 'pi' || hasTypedWorkerCapability(fact)) return false;
+  return fact?.delivery?.mode === 'next_turn' && fact?.delivery?.push === false;
+}
 
 export function initDispatchDrainer({
   tracker,
@@ -205,6 +213,7 @@ export function initDispatchDrainer({
     let channelIds = new Set();
     let channelsBySession = new Map();
     let typedCapableSessionIds = new Set();
+    let legacyPiSessionIds = new Set();
     try {
       // A managed Codex supervisor can keep a healthy loopback lease while it
       // is busy/recovering. Treat delivery_ready:false exactly like an absent
@@ -222,9 +231,12 @@ export function initDispatchDrainer({
     } catch { /* a registry read failure never falls back to the Pi spool */ }
     try {
       for (const fact of await listSessionFacts()) {
-        if (fact?.canonical_id && !isSessionFactTerminal(fact) && hasTypedWorkerCapability(fact)) {
-          typedCapableSessionIds.add(fact.canonical_id);
-        }
+        if (!fact?.canonical_id) continue;
+        // Capability is sticky across terminal fact -> restart -> pre-lease
+        // ticks. A lease is reachability; it must not decide whether a typed
+        // worker is silently demoted to Pi's compatibility spool.
+        if (hasTypedWorkerCapability(fact)) typedCapableSessionIds.add(fact.canonical_id);
+        else if (hasExplicitLegacyPiDelivery(fact)) legacyPiSessionIds.add(fact.canonical_id);
       }
     } catch { /* a fact read failure never invents a legacy Pi fallback */ }
     const byId = new Map();
@@ -249,7 +261,7 @@ export function initDispatchDrainer({
       // Pi stays on the migration-only next-turn spool only until it has
       // registered the shared typed endpoint. A first-class Pi lease follows
       // the same generic channel path as any other typed worker.
-      const usesLegacyPiSpool = isPi && !isTypedCapable;
+      const usesLegacyPiSpool = isPi && !isTypedCapable && legacyPiSessionIds.has(sessionId);
 
       const waveGate = (row) => {
         try {
@@ -358,7 +370,14 @@ export function initDispatchDrainer({
         // Durable-first: setDispatched BEFORE pushBrief (crash between →
         // ticket assigned, not lost).
         let assigned = ticket;
-        if (!usesLegacyPiSpool) assigned = tracker.setDispatched(ticket.id, { session_id: sessionId, actor: 'golem-drainer' });
+        // An immediate typed publish can lose its response after native
+        // acceptance. Its original envelope is queued for the shared retry
+        // below, but the ticket is already dispatched to this same session.
+        // Repeating setDispatched would cancel that very queue row before the
+        // duplicate-safe retry reaches the endpoint.
+        if (!usesLegacyPiSpool && ticket.dispatched_to !== sessionId) {
+          assigned = tracker.setDispatched(ticket.id, { session_id: sessionId, actor: 'golem-drainer' });
+        }
         if (assigned.revoked_session_id) {
           try { await pushBrief(`Dispatch revoked for ${assigned.display_id || assigned.id}: ${assigned.title || ''}\n\nReason: queued dispatch delivered to another session. Stand down unless you receive a new dispatch.`, assigned.revoked_session_id); } catch { /* best-effort */ }
         }
@@ -427,7 +446,9 @@ export function initDispatchDrainer({
         const passiveCommitted = isTypedWorker ? typedAccepted : !!pushResult?.ok;
         try {
           if (pushResult.queued) {
-            assigned = tracker.setDispatched(ticket.id, { session_id: sessionId, actor: 'golem-drainer' });
+            if (assigned.dispatched_to !== sessionId) {
+              assigned = tracker.setDispatched(ticket.id, { session_id: sessionId, actor: 'golem-drainer' });
+            }
             if (assigned.revoked_session_id) {
               try { await pushBrief(`Dispatch revoked for ${assigned.display_id || assigned.id}: ${assigned.title || ''}\n\nReason: queued dispatch delivered to another session. Stand down unless you receive a new dispatch.`, assigned.revoked_session_id); } catch { /* best-effort */ }
             }

@@ -2,6 +2,12 @@
 // still mean the native turn accepted work (for example recovery_required),
 // but only when the response proves the exact durable envelope *and* attempt.
 import { parseTypedDeliveryResponse } from '../../lib/typed-worker-endpoint.js';
+import {
+  pruneTypedDeliveryTombstones,
+  retireTypedDeliveryTombstones,
+} from '../../lib/typed-delivery-tombstones.js';
+
+const TERMINAL_DELIVERY_STATES = new Set(['settled', 'interrupted', 'recovery_required']);
 
 export function recordTypedEnvelopeOutcome(tracker, envelopeId, attemptId, delivery) {
   if (!envelopeId || !attemptId) return null;
@@ -22,12 +28,21 @@ export function recordTypedEnvelopeOutcome(tracker, envelopeId, attemptId, deliv
       accepted_attempt_id: outcome.accepted_attempt_id,
     });
   }
-  tracker.recordTypedEnvelopeLifecycle(envelopeId, {
+  const persisted = tracker.recordTypedEnvelopeLifecycle(envelopeId, {
     state: outcome.delivery_state,
     attempt_id: attemptId,
     accepted_attempt_id: outcome.accepted_attempt_id,
     error,
   });
+  // The tracker is authoritative once a typed lineage becomes terminal: it
+  // cannot be renewed or replayed through the shared queue. Reclaim only this
+  // explicit local replay record (never every tombstone for a session), then
+  // prune it immediately. Schema-5 supervisor recovery deliberately does not
+  // re-import its own stale JSON after this tracker-owned retirement.
+  if (TERMINAL_DELIVERY_STATES.has(outcome.delivery_state) && persisted?.target_session_id) {
+    retireTypedDeliveryTombstones(persisted.target_session_id, envelopeId);
+    pruneTypedDeliveryTombstones();
+  }
   return outcome;
 }
 

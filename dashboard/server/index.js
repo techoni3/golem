@@ -13,7 +13,7 @@ import { pushBrief, pushInterrupt, pushHalt, pushControlEnvelope, channelHealth,
 import { createChat } from './chat.js';
 import { readNativeSessionPeek } from './native-session-peek.js';
 import { openTrackerDb } from './tracker-db.js';
-import { isChannelDeliveryReady, readChannels } from './channels.js';
+import { isChannelDeliveryReady, isTypedWorkerChannel, readChannels } from './channels.js';
 import { applyGateVerdict, createGate } from './projects.js';
 import { listIdeas, createIdea, popIdea, readIdea } from './ideas.js';
 import { initDispatchDrainer } from './dispatch-queue.js';
@@ -1749,16 +1749,42 @@ async function main() {
     // 3) Best-effort channel push — never fail the request on a push miss.
     let channelResult = null;
     let typedOutcome = null;
+    let immediateTypedTarget = false;
+    let immediateAttemptId = null;
+    let retryQueue = null;
     let passiveCommitted = false;
     try {
       try {
+        // A fetch can fail after a typed endpoint has accepted a native turn
+        // but before its response reaches us. Preserve the target kind before
+        // the request so that ambiguous result still retains this exact
+        // tracker envelope for duplicate-safe shared-queue reconciliation.
+        immediateTypedTarget = (await listChannels()).some((channel) => (
+          channel.session_id === sessionId && isTypedWorkerChannel(channel)
+        ));
         const metadata = typedEnvelopeMetadata(envelope);
+        immediateAttemptId = metadata.attempt_id;
         channelResult = await pushBrief(briefString, sessionId, metadata);
         channelResult.typed_attempt_id = metadata.attempt_id;
       } catch (err) {
         channelResult = { ok: false, error: String(err?.message ?? err) };
       }
-      typedOutcome = recordTypedEnvelopeOutcome(tracker, envelope.id, channelResult?.typed_attempt_id ?? null, channelResult);
+      typedOutcome = recordTypedEnvelopeOutcome(tracker, envelope.id, channelResult?.typed_attempt_id ?? immediateAttemptId, channelResult);
+      // `mode:now` has no pre-existing queue row. A typed response can be
+      // lost only after the worker may already have accepted the envelope, so
+      // retain the original immutable id and let the generic drainer reconcile
+      // it. Do not append the leased passive delta: that claim is released in
+      // finally and the retry acquires the then-current durable batch.
+      if (immediateTypedTarget && typedOutcome?.accepted !== true) {
+        retryQueue = tracker.queueDispatch(id, {
+          session_id: sessionId,
+          note,
+          workspace,
+          payload: baseBriefString,
+          envelope_id: envelope.id,
+          actor: senderId || 'human',
+        });
+      }
       // The push is the delivery opportunity. Set this before chat or tracker
       // writes so their failures cannot release delivered passive context.
       passiveCommitted = !!channelResult?.ok || typedOutcome?.accepted === true;
@@ -1792,9 +1818,9 @@ async function main() {
     // when_idle path that fell through (target was already idle) adds the
     // queued:false / delivered:true hints the plan specifies.
     const delivered = (!!channelResult?.ok || typedOutcome?.accepted === true) && !channelResult?.queued;
-    const queued = !!channelResult?.queued;
+    const queued = !!channelResult?.queued || !!retryQueue;
     return { ok: delivered || queued, assignment: { ok: true, ticket }, queued, delivered, envelope_id: envelope.id, ticket,
-      delivery: { ok: delivered || queued, queued, mode: queued ? 'next_turn' : 'push', status: channelResult?.status ?? 0, error: delivered || queued ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`) }, channel: channelResult };
+      delivery: { ok: delivered || queued, queued, mode: retryQueue ? 'shared_queue' : (queued ? 'next_turn' : 'push'), status: channelResult?.status ?? 0, error: delivered || queued ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`) }, channel: channelResult };
   });
 
   // GOL-421: channel acknowledgements/replies are correlated to an envelope and

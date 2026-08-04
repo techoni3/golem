@@ -27,6 +27,7 @@ import {
   retireTypedDeliveryTombstones,
   upsertTypedDeliveryTombstone,
 } from '../lib/typed-delivery-tombstones.js';
+import { recordTypedEnvelopeOutcome } from '../dashboard/server/typed-delivery.js';
 
 const canonicalId = 'typed-worker-journey';
 const ownerToken = 'typed-worker-owner-token';
@@ -175,7 +176,12 @@ try {
   assert.equal(probeInbox.deliveries.length, 256, 'rich supervisor history stays bounded');
   assert.equal(countTypedDeliveryTombstones({ file: tombstoneFile }), 260, 'compact durable tombstones hold replay identity outside the JSON registry');
   assert.equal(pruneTypedDeliveryTombstones({ file: tombstoneFile, now: Date.now() + 120_000 }), 0, 'transport expiry alone never discards replay identity');
-  assert.equal(retireTypedDeliveryTombstones(canonicalId, { file: tombstoneFile }), 260, 'reclamation requires explicit tracker-authoritative retirement');
+  const retainedIds = [
+    'first',
+    'second',
+    ...Array.from({ length: 258 }, (_value, n) => `tombstone-${n}`),
+  ];
+  assert.equal(retireTypedDeliveryTombstones(canonicalId, retainedIds, { file: tombstoneFile }), 260, 'reclamation requires explicit tracker-authoritative envelope retirement');
   assert.equal(upsertTypedDeliveryTombstone(canonicalId, oldReplay.delivery, { file: tombstoneFile }), null, 'stale adapter JSON cannot reactivate a tracker-retired lineage');
   assert.equal(pruneTypedDeliveryTombstones({ file: tombstoneFile, now: Date.now() + 120_000 }), 260, 'retired compact tombstones are reclaimed without rewriting supervisor JSON');
   assert.equal(countTypedDeliveryTombstones({ file: tombstoneFile }), 0, 'reclaimed tombstone storage remains bounded by explicit terminal retirement');
@@ -240,7 +246,7 @@ try {
     expires_at: '2099-01-01T00:00:00.000Z',
   }));
   assert.equal(fenced.fenced, true, 'schema-2 replay identity older than retained history is fenced before native delivery');
-  const { CodexSupervisor } = await import('../lib/codex-supervisor.js');
+  const { CodexSupervisor, readCodexSupervisor } = await import('../lib/codex-supervisor.js');
   const legacySupervisor = new CodexSupervisor({
     canonicalId: 'legacy-upgrade-worker',
     registryFile: path.join(tombstoneTemp, 'legacy-supervisors.json'),
@@ -337,6 +343,101 @@ try {
     tracker.recordTypedEnvelopeLifecycle(retryable.id, { state: 'pending', attempt_id: 'attempt-a', error: 'pre-acceptance refusal' });
     const reclaimed = tracker.recordTypedEnvelopeLifecycle(retryable.id, { state: 'claimed', attempt_id: 'attempt-b' });
     assert.equal(reclaimed.delivery_attempt_id, 'attempt-b', 'pre-acceptance failures remain replayable');
+
+    // Terminal tracker evidence retires only the matching compact tombstone.
+    // A live accepted lineage for the same canonical worker remains protected,
+    // while a restarted schema-5 supervisor cannot recreate the pruned entry
+    // from its stale rich JSON inspection history.
+    const productionTombstoneFile = path.join(process.env.GOLEM_HOME, 'typed-delivery-tombstones.db');
+    const mixedSession = 'typed-mixed-retirement';
+    const activeMixed = {
+      envelope_id: 'mixed-active', target_session_id: mixedSession,
+      attempt_id: 'mixed-active-attempt', accepted_attempt_id: 'mixed-active-attempt',
+      lifecycle_state: 'accepted', accepted_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    };
+    upsertTypedDeliveryTombstone(mixedSession, activeMixed, { file: productionTombstoneFile });
+    const terminalMixed = tracker.createDispatchEnvelope(ticket.id, { session_id: mixedSession, actor: 'test' });
+    upsertTypedDeliveryTombstone(mixedSession, {
+      envelope_id: terminalMixed.id, target_session_id: mixedSession,
+      attempt_id: 'mixed-terminal-attempt', accepted_attempt_id: 'mixed-terminal-attempt',
+      lifecycle_state: 'settled', accepted_at: new Date().toISOString(), settled_at: new Date().toISOString(),
+      expires_at: terminalMixed.expires_at,
+    }, { file: productionTombstoneFile });
+    const terminalOutcome = recordTypedEnvelopeOutcome(tracker, terminalMixed.id, 'mixed-terminal-attempt', {
+      ok: true, status: 202, typed_worker: true,
+      body: JSON.stringify({
+        accepted: true, envelope_id: terminalMixed.id, attempt_id: 'mixed-terminal-attempt',
+        accepted_attempt_id: 'mixed-terminal-attempt', delivery_state: 'settled',
+      }),
+    });
+    assert.equal(terminalOutcome?.delivery_state, 'settled');
+    assert.equal(readTypedDeliveryTombstone(mixedSession, terminalMixed.id, { file: productionTombstoneFile }), null, 'tracker-owned terminal evidence prunes only its explicit replay tombstone');
+    assert.equal(readTypedDeliveryTombstone(mixedSession, activeMixed.envelope_id, { file: productionTombstoneFile })?.lifecycle_state, 'accepted', 'an active sibling lineage is never retired by another envelope terminal result');
+    const staleMixedSupervisor = new CodexSupervisor({
+      canonicalId: mixedSession,
+      registryFile: path.join(temp, 'mixed-retirement-supervisors.json'),
+      tombstoneFile: productionTombstoneFile,
+    });
+    staleMixedSupervisor.migrateTypedDeliveryTombstones({
+      schema: 5,
+      deliveries: [{
+        envelope_id: terminalMixed.id, target_session_id: mixedSession,
+        attempt_id: 'mixed-terminal-attempt', state: 'started', lifecycle_state: 'accepted',
+        expires_at: new Date(Date.now() + 120_000).toISOString(),
+      }],
+    });
+    assert.equal(readTypedDeliveryTombstone(mixedSession, terminalMixed.id, { file: productionTombstoneFile }), null, 'stale schema-5 JSON cannot repopulate a tracker-retired tombstone after restart');
+
+    // A terminal notification can win the race with a rejected/lost turn/start
+    // response. The supervisor must re-read that durable terminal fact instead
+    // of overwriting it with a stale recovery-pending claim.
+    const raceSession = 'typed-notification-start-race';
+    const raceRegistry = path.join(temp, 'notification-race-supervisors.json');
+    const raceTombstones = path.join(temp, 'notification-race-tombstones.db');
+    const raceSupervisor = new CodexSupervisor({ canonicalId: raceSession, registryFile: raceRegistry, tombstoneFile: raceTombstones });
+    raceSupervisor.threadId = 'race-thread';
+    raceSupervisor.projectId = 'typed-test-000000';
+    raceSupervisor.mcp = { state: 'active', binding: raceSession };
+    raceSupervisor.deliveryReady = () => true;
+    raceSupervisor.updateRecord({
+      canonical_id: raceSession, thread_id: raceSupervisor.threadId,
+      thread_status: { type: 'idle' }, turn: { state: 'idle', turn_id: null },
+      inbox: normalizeTypedWorkerInbox(), health: { state: 'healthy', delivery_ready: true },
+    });
+    raceSupervisor.rpc = {
+      request: async (method) => {
+        assert.equal(method, 'turn/start');
+        raceSupervisor.handleNotification({
+          method: 'turn/completed',
+          params: { threadId: raceSupervisor.threadId, turn: { id: 'race-native-turn', status: 'completed' } },
+        });
+        throw new Error('turn/start response lost after terminal notification');
+      },
+    };
+    const raceEnvelope = {
+      protocol_version: TYPED_WORKER_PROTOCOL_VERSION,
+      envelope_id: 'notification-before-start-response', content: 'one native start',
+      target_session_id: raceSession, kind: 'ticket_dispatch', sender_session_id: 'test',
+      created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 60_000).toISOString(), attempt_id: 'race-attempt-a',
+    };
+    const raceResult = await raceSupervisor.acceptDelivery(raceEnvelope);
+    assert.equal(raceResult.accepted, true, 'a terminal notification remains an accepted result after the start response is lost');
+    assert.equal(raceResult.delivery_state, 'settled');
+    assert.equal(readCodexSupervisor(raceSession, { file: raceRegistry })?.inbox?.in_flight_envelope_id, null, 'lost start response never restores an already-settled in-flight claim');
+    assert.equal(readCodexSupervisor(raceSession, { file: raceRegistry })?.inbox?.deliveries?.find((row) => row.envelope_id === raceEnvelope.envelope_id)?.lifecycle_state, 'settled');
+    const staleRaceRecord = readCodexSupervisor(raceSession, { file: raceRegistry });
+    staleRaceRecord.inbox = normalizeTypedWorkerInbox({
+      schema: 5,
+      in_flight_envelope_id: raceEnvelope.envelope_id,
+      deliveries: [{ ...raceEnvelope, state: 'claimed', lifecycle_state: 'claimed', claimed_at: new Date().toISOString() }],
+    });
+    raceSupervisor.updateRecord({ inbox: staleRaceRecord.inbox, turn: { state: 'starting', envelope_id: raceEnvelope.envelope_id } });
+    const restartedRaceSupervisor = new CodexSupervisor({ canonicalId: raceSession, registryFile: raceRegistry, tombstoneFile: raceTombstones });
+    const restartedRaceInbox = normalizeTypedWorkerInbox(readCodexSupervisor(raceSession, { file: raceRegistry })?.inbox);
+    restartedRaceSupervisor.reconcileTerminalTypedDeliveries(restartedRaceInbox);
+    assert.equal(restartedRaceInbox.in_flight_envelope_id, null, 'startup reconciliation clears stale claimed state from the authoritative terminal tombstone');
+    assert.equal(getTypedDelivery(restartedRaceInbox, raceEnvelope.envelope_id)?.lifecycle_state, 'settled', 'startup reconciliation preserves the authoritative terminal result');
 
     let status = 'idle';
     let pushes = 0;
@@ -524,6 +625,31 @@ try {
     await capabilityDrainer.tick();
     assert.equal(tracker.raw().prepare('SELECT status FROM dispatch_queue WHERE id = ?').get(capabilityQueued.id).status, 'pending', 'typed capability persists when its live lease is temporarily unready');
     assert.equal(fs.existsSync(path.join(process.env.GOLEM_HOME, 'pi-inbox', capabilitySession)), false, 'typed-capable Pi never falls back to a new legacy spool');
+
+    // A clean terminal fact can precede the replacement lease during restart.
+    // Capability is still typed in that gap, so holding the shared queue is
+    // safe; publishing a new Pi compatibility inbox file is not.
+    const terminalCapabilitySession = 'typed-terminal-restart';
+    const terminalCapabilityTicket = tracker.createTicket({ project_id: 'typed-test-000000', title: 'typed terminal restart gap', created_by: 'test' });
+    const terminalCapabilityQueued = tracker.queueDispatch(terminalCapabilityTicket.id, { session_id: terminalCapabilitySession, payload: 'wait for replacement lease', actor: 'test' });
+    const terminalCapabilityDrainer = initDispatchDrainer({
+      tracker,
+      state: { nativeSessions: () => [{ session_id: terminalCapabilitySession, harness: 'pi', alive: true, status: 'idle' }] },
+      chat: { record: () => {} },
+      pushBrief: async () => { throw new Error('terminal typed capability must wait for its replacement lease'); },
+      buildDispatchBrief: (queuedTicket) => queuedTicket.title,
+      broadcastWS: () => {},
+      listChannels: async () => [],
+      listEndpointLeases: async () => [],
+      listSessionFacts: async () => [{
+        canonical_id: terminalCapabilitySession, harness: 'pi', status: 'stopped', ended_at: new Date().toISOString(),
+        delivery: { mode: 'supervisor-pending', push: false },
+        capabilities: { typed_worker: true, typed_worker_protocol: 1 },
+      }],
+    });
+    await terminalCapabilityDrainer.tick();
+    assert.equal(tracker.raw().prepare('SELECT status FROM dispatch_queue WHERE id = ?').get(terminalCapabilityQueued.id).status, 'pending', 'terminal typed fact keeps the shared queue pending through restart before lease rebind');
+    assert.equal(fs.existsSync(path.join(process.env.GOLEM_HOME, 'pi-inbox', terminalCapabilitySession)), false, 'terminal typed fact never regresses to a Pi spool before the new lease arrives');
 
     const recoverySession = 'typed-recovery';
     const recoveryTicket = tracker.createTicket({ project_id: 'typed-test-000000', title: 'typed recovery hold', created_by: 'test' });
