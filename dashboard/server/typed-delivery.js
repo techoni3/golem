@@ -16,11 +16,16 @@ export function recordTypedEnvelopeOutcome(tracker, envelopeId, attemptId, deliv
   }
   if (tracker.getEnvelope(envelopeId)?.delivery_state === 'claimed'
     && ['settled', 'interrupted'].includes(outcome.delivery_state)) {
-    tracker.recordTypedEnvelopeLifecycle(envelopeId, { state: 'accepted', attempt_id: attemptId });
+    tracker.recordTypedEnvelopeLifecycle(envelopeId, {
+      state: 'accepted',
+      attempt_id: attemptId,
+      accepted_attempt_id: outcome.accepted_attempt_id,
+    });
   }
   tracker.recordTypedEnvelopeLifecycle(envelopeId, {
     state: outcome.delivery_state,
     attempt_id: attemptId,
+    accepted_attempt_id: outcome.accepted_attempt_id,
     error,
   });
   return outcome;

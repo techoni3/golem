@@ -229,10 +229,13 @@ try {
   const completedBeforeRetry = supervisor.rpc.notifications.filter((message) => (
     message.method === 'turn/completed' && message.params?.turn?.id === afterTurn.delivery.turn_id
   )).length;
-  const duplicate = await typedRetry(afterTurn.record, payload);
+  const retryAttempt = `${payload.attempt_id}-lost-response-retry`;
+  const duplicate = await typedRetry(afterTurn.record, { ...payload, attempt_id: retryAttempt });
   assert.equal(duplicate.response.status, 200, JSON.stringify(duplicate.body));
   assert.equal(duplicate.body.accepted, true);
   assert.equal(duplicate.body.duplicate, true);
+  assert.equal(duplicate.body.attempt_id, retryAttempt, 'duplicate response is correlated to the current lost-response retry attempt');
+  assert.equal(duplicate.body.accepted_attempt_id, payload.attempt_id, 'duplicate response preserves immutable first-accept lineage');
   assert.equal(duplicate.body.turn_id, afterTurn.delivery.turn_id, 'retry returns the original accepted turn mapping');
   await sleep(250);
   assert.equal(
@@ -248,9 +251,12 @@ try {
   const resumedRecord = await resumed.start();
   assert.equal(resumedRecord.thread_id, first.thread_id, 'restart resumes the original Codex thread');
   assert.equal(resumedRecord.health.delivery_ready, true);
-  const restartedDuplicate = await typedRetry(resumedRecord, payload);
+  const restartedAttempt = `${payload.attempt_id}-restart-retry`;
+  const restartedDuplicate = await typedRetry(resumedRecord, { ...payload, attempt_id: restartedAttempt });
   assert.equal(restartedDuplicate.response.status, 200, JSON.stringify(restartedDuplicate.body));
   assert.equal(restartedDuplicate.body.duplicate, true);
+  assert.equal(restartedDuplicate.body.attempt_id, restartedAttempt, 'restarted duplicate remains correlated to its current retry');
+  assert.equal(restartedDuplicate.body.accepted_attempt_id, payload.attempt_id, 'restart retains immutable first-accept lineage');
   assert.equal(restartedDuplicate.body.turn_id, afterTurn.delivery.turn_id);
   await sleep(250);
   assert.equal(

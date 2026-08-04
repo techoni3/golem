@@ -21,7 +21,7 @@ import { loadConfig } from '../../lib/golem-config.js';
 import { createCommentDispatchService, defaultDispatchStateForComment } from './comment-dispatch.js';
 import { canonicalStateForPhase, initialPhaseForKind, isKnownPhase, legalNextPhases, phaseFromLegacyState, requirementsForPhase } from './phase-machine.js';
 
-const SCHEMA_VERSION = 16;
+const SCHEMA_VERSION = 17;
 
 const KINDS = new Set(['work-item', 'decision', 'spec', 'question', 'fix']);
 const STATES = new Set(['todo', 'in_progress', 'blocked', 'review', 'done', 'archived']);
@@ -383,6 +383,7 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
         -- claimed or accepted native turn back into a socket-write claim.
         delivery_state    TEXT NOT NULL DEFAULT 'pending',
         delivery_attempt_id TEXT,
+        accepted_attempt_id TEXT,
         claimed_at        TEXT,
         accepted_at       TEXT,
         settled_at        TEXT,
@@ -753,10 +754,18 @@ WHERE state_changed_at IS NULL`).run();
     // readable for CC/OC and historical dashboard clients.
     const envelopeCols124 = db.prepare('PRAGMA table_info(message_envelopes)').all().map((c) => c.name);
     for (const [col, def] of [
-      ['delivery_state', "TEXT NOT NULL DEFAULT 'pending'"], ['delivery_attempt_id', 'TEXT'],
+      ['delivery_state', "TEXT NOT NULL DEFAULT 'pending'"], ['delivery_attempt_id', 'TEXT'], ['accepted_attempt_id', 'TEXT'],
       ['claimed_at', 'TEXT'], ['accepted_at', 'TEXT'], ['settled_at', 'TEXT'],
       ['interrupted_at', 'TEXT'], ['recovery_required_at', 'TEXT'],
     ]) if (!envelopeCols124.includes(col)) db.exec(`ALTER TABLE message_envelopes ADD COLUMN ${col} ${def}`);
+    // v16 stored only the then-current attempt. For an already accepted row,
+    // that value is the only durable first-acceptance lineage available; copy
+    // it before later duplicate publishes begin updating current attempts.
+    db.prepare(`UPDATE message_envelopes
+      SET accepted_attempt_id = delivery_attempt_id
+      WHERE accepted_attempt_id IS NULL
+        AND delivery_attempt_id IS NOT NULL
+        AND delivery_state IN ('accepted', 'settled', 'interrupted', 'recovery_required')`).run();
     const envelopeColsExpiry = db.prepare('PRAGMA table_info(message_envelopes)').all().map((c) => c.name);
     if (!envelopeColsExpiry.includes('expires_at')) db.exec('ALTER TABLE message_envelopes ADD COLUMN expires_at TEXT');
     for (const row of db.prepare('SELECT id, created_at FROM message_envelopes WHERE expires_at IS NULL').all()) {
@@ -937,6 +946,10 @@ WHERE state_changed_at IS NULL`).run();
       getEnvelope: db.prepare('SELECT * FROM message_envelopes WHERE id = ?'),
       setEnvelopePayload: db.prepare(`UPDATE message_envelopes SET payload = @payload
         WHERE id = @id AND status = 'pending' AND delivery_attempted_at IS NULL`),
+      renewEnvelopeExpiry: db.prepare(`UPDATE message_envelopes SET expires_at = @expires_at
+        WHERE id = @id AND completed_at IS NULL
+          AND status IN ('pending', 'queued', 'delivery_failed')
+          AND delivery_state IN ('pending', 'published')`),
       insertEnvelopeFact: db.prepare(`INSERT OR IGNORE INTO message_acknowledgements
         (envelope_id, recipient_session_id, kind, summary, acknowledged_at)
         VALUES (@envelope_id, @recipient_session_id, @kind, @summary, @acknowledged_at)`),
@@ -962,6 +975,7 @@ WHERE state_changed_at IS NULL`).run();
         SET status = @status,
             delivery_state = @delivery_state,
             delivery_attempt_id = COALESCE(@delivery_attempt_id, delivery_attempt_id),
+            accepted_attempt_id = COALESCE(accepted_attempt_id, @accepted_attempt_id),
             delivery_attempted_at = COALESCE(@delivery_attempted_at, delivery_attempted_at),
             delivery_error = @delivery_error,
             last_error = @delivery_error,
@@ -2812,13 +2826,15 @@ WHERE state_changed_at IS NULL`).run();
     // safety: a claimed-but-unaccepted attempt may return to pending; an
     // accepted interruption/recovery-required outcome can never be claimed
     // again automatically.
-    recordTypedEnvelopeLifecycle(envelopeId, { state, attempt_id = null, error = null } = {}) {
+    recordTypedEnvelopeLifecycle(envelopeId, { state, attempt_id = null, accepted_attempt_id = null, error = null } = {}) {
       const allowed = new Set(['pending', 'claimed', 'accepted', 'settled', 'interrupted', 'recovery_required']);
       if (!allowed.has(state)) throw new Error(`recordTypedEnvelopeLifecycle: unsupported state '${state}'`);
       const existing = stmts.getEnvelope.get(envelopeId);
       if (!existing) throw new Error(`recordTypedEnvelopeLifecycle: envelope '${envelopeId}' not found`);
       const prior = existing.delivery_state || 'pending';
-      if (prior === state) return existing;
+      if (prior === state
+        && (attempt_id == null || attempt_id === existing.delivery_attempt_id)
+        && (accepted_attempt_id == null || accepted_attempt_id === existing.accepted_attempt_id)) return existing;
       const transitions = {
         pending: new Set(['claimed']),
         published: new Set(['claimed']),
@@ -2828,12 +2844,14 @@ WHERE state_changed_at IS NULL`).run();
         interrupted: new Set(),
         recovery_required: new Set(),
       };
-      if (!transitions[prior]?.has(state)) {
+      if (prior !== state && !transitions[prior]?.has(state)) {
         throw new Error(`recordTypedEnvelopeLifecycle: illegal transition ${prior} -> ${state}`);
       }
       const ts = now();
       const minutes = Math.max(0, Number(loadConfig()?.dispatch?.unackedWindowMinutes) || 5);
       const deadline = new Date(Date.parse(ts) + minutes * 60_000).toISOString();
+      const firstAcceptedAttempt = accepted_attempt_id
+        ?? (['accepted', 'settled', 'interrupted', 'recovery_required'].includes(state) ? attempt_id : null);
       const status = state === 'pending'
         ? 'delivery_failed'
         : state === 'claimed'
@@ -2845,6 +2863,7 @@ WHERE state_changed_at IS NULL`).run();
           status,
           delivery_state: state,
           delivery_attempt_id: attempt_id,
+          accepted_attempt_id: firstAcceptedAttempt,
           delivery_attempted_at: ts,
           delivery_error: error ?? null,
           ack_deadline_at: deadline,
@@ -2859,12 +2878,28 @@ WHERE state_changed_at IS NULL`).run();
             envelope_id: envelopeId,
             target_session_id: existing.target_session_id,
             attempt_id: attempt_id ?? existing.delivery_attempt_id ?? null,
+            accepted_attempt_id: firstAcceptedAttempt ?? existing.accepted_attempt_id ?? null,
             error: error ?? null,
           },
         });
         return updated;
       });
       return txn();
+    },
+
+    // Busy and wave-held work can legitimately outlive the original TTL. A
+    // typed endpoint still validates expiry strictly, so renew only the durable
+    // pending envelope immediately before a new publish attempt and render that
+    // same persisted expiry into the protocol metadata.
+    renewEnvelopeExpiry(envelopeId, { minimumValidityMs = MESSAGE_ENVELOPE_TTL_MS } = {}) {
+      const existing = stmts.getEnvelope.get(envelopeId);
+      if (!existing) throw new Error(`renewEnvelopeExpiry: envelope '${envelopeId}' not found`);
+      const ms = Math.max(0, Number(minimumValidityMs) || MESSAGE_ENVELOPE_TTL_MS);
+      const floor = Date.now() + ms;
+      const prior = Date.parse(existing.expires_at || '') || 0;
+      const expires_at = new Date(Math.max(prior, floor)).toISOString();
+      stmts.renewEnvelopeExpiry.run({ id: envelopeId, expires_at });
+      return stmts.getEnvelope.get(envelopeId);
     },
 
     markEnvelopeDelivery(envelopeId, { error = null } = {}) {

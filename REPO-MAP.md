@@ -1,11 +1,9 @@
 # REPO-MAP.md
-> Last verified: 2026-08-04 @ aeaf727 — maintained via golem:docs-maintenance.
+> Last verified: 2026-08-04 @ 9128474 — maintained via golem:docs-maintenance.
 ## Directory structure
-- `substrate/` — plugin source; `plugin/` is its generated CC render, never hand-edited.
-  `instructions/AGENTS.md` § Roles is the single source of role ownership; cards and skills point
-  at it, never restate it.
-- `.claude/skills/` — repo-only, not shipped; `substrate-doctrine` is a must-load before editing
-  instructions, roles, or skills.
+- `substrate/` — plugin source; `plugin/` is its generated CC render, never hand-edited. Roles
+  have one source: `instructions/AGENTS.md`; cards and skills point to it.
+- `.claude/skills/` — repo-only doctrine for instructions, roles, and skills.
 - `cli/` `lib/` — entry point; runtime, role, compiler, managed-harness helpers.
 - `dashboard/server/` — Fastify API and tracker owner. `dashboard/web/` → `dashboard/dist/`.
 - `mcp/channel/` — channel server. `shims/{opencode,codex}/` — harness events onto hooks.
@@ -13,20 +11,18 @@
 
 ## Key modules
 ### `dashboard/server/` — `index.js`, `tracker-db.js`, `typed-delivery.js`, `phase-machine.js`, `comment-dispatch.js`
-- Agents use HTTP/MCP, never direct DB writes. Phase is truth; `state` derives from it.
-- `planning → planned` needs children **and** waves — a single child still needs `wave: 1`.
-- Dispatch is durable-first, rolled back to `undispatched` on an undelivered push. The reaper
-  suspends subscriptions for sessions off the roster.
-- Typed-worker responses advance a correlated envelope/attempt lifecycle; an accepted non-2xx
-  response is durable work, while a mismatched reply remains retryable.
+- Agents use HTTP/MCP, never direct DB writes. Phase is truth; `state` derives from it; planned
+  work needs children and waves. Dispatch is durable-first. Correlated accepted non-2xx typed
+  replies are durable work; mismatches remain retryable.
 ### `lib/session-role.js`
-- `BUILTIN_ROLES` is the only place role names are hardcoded. `ROLE_MIGRATIONS` retires a name by
-  mapping it forward; the registry self-prunes on next `readRoleRegistry()`.
+- `BUILTIN_ROLES` is the hardcoded role source; migrations map a retired name forward.
+### `lib/typed-worker-endpoint.js`, `lib/typed-delivery-tombstones.js`
+- Shared native-worker protocol validates authenticated, versioned envelopes. Bounded supervisor
+  history is not the replay ledger: compact SQLite tombstones preserve immutable first acceptance
+  only through the envelope expiry; legacy pre-upgrade identities are fenced before readiness.
 ### `substrate/hooks/tracker-context.sh`
-- Builds the SessionStart payload — role card, roster, LSP, recently-closed pointers, recent
-  commits. All derived; fail-open per field; per-field and aggregate caps. Also via `project_context`.
-- Its node block sits inside a command substitution: a bare dollar-paren pair or a lone apostrophe
-  in a JS comment breaks it, with an EOF error pointing at the last line.
+- Builds bounded, derived SessionStart/project-context payloads. Its Node block is in command
+  substitution: a bare dollar-paren pair or apostrophe in a JS comment breaks the shell.
 
 ## Data flow
 Hooks/shims write `~/.golem/` registries; the dashboard owns routes. Native rows mean presence,

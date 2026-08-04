@@ -31,7 +31,7 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { checkpointPiPickupAck, claimPiPickupAcks, completePiPickupAck, enqueuePiBrief } from '../../lib/pi-inbox.js';
 import { isChannelDeliveryReady, isTypedWorkerChannel } from './channels.js';
-import { readEndpointLeases } from '../../lib/session-facts.js';
+import { hasTypedWorkerCapability, isSessionFactTerminal, readEndpointLeases, readSessionFacts } from '../../lib/session-facts.js';
 import { typedEnvelopeMetadata } from '../../lib/typed-worker-endpoint.js';
 import { recordTypedEnvelopeOutcome } from './typed-delivery.js';
 
@@ -49,6 +49,7 @@ export function initDispatchDrainer({
   broadcastWS,
   listChannels,
   listEndpointLeases = () => readEndpointLeases({ includeExpired: true }),
+  listSessionFacts = () => readSessionFacts(),
 }) {
   // Older isolated drainer journeys provide only pushBrief. Production passes
   // the typed control adapter; the fallback preserves their legacy generic
@@ -219,6 +220,13 @@ export function initDispatchDrainer({
         .map((lease) => lease.canonical_id || lease.session_id)
         .filter(Boolean));
     } catch { /* a registry read failure never falls back to the Pi spool */ }
+    try {
+      for (const fact of await listSessionFacts()) {
+        if (fact?.canonical_id && !isSessionFactTerminal(fact) && hasTypedWorkerCapability(fact)) {
+          typedCapableSessionIds.add(fact.canonical_id);
+        }
+      }
+    } catch { /* a fact read failure never invents a legacy Pi fallback */ }
     const byId = new Map();
     for (const s of sessions) if (s.session_id) byId.set(s.session_id, s);
 
@@ -351,7 +359,12 @@ export function initDispatchDrainer({
         if (assigned.revoked_session_id) {
           try { await pushBrief(`Dispatch revoked for ${assigned.display_id || assigned.id}: ${assigned.title || ''}\n\nReason: queued dispatch delivered to another session. Stand down unless you receive a new dispatch.`, assigned.revoked_session_id); } catch { /* best-effort */ }
         }
-        const envelope = row.envelope_id ? tracker.getEnvelope(row.envelope_id) : null;
+        let envelope = row.envelope_id ? tracker.getEnvelope(row.envelope_id) : null;
+        // A queued typed envelope may wait behind a busy turn or an earlier
+        // wave longer than its original TTL. Extend the durable source before
+        // rendering, so the endpoint receives exactly the expiry the tracker
+        // now authorizes rather than a synthetic or stale timestamp.
+        if (isTypedWorker && envelope) envelope = tracker.renewEnvelopeExpiry(envelope.id);
         const typedAttemptId = isTypedWorker ? crypto.randomUUID() : null;
         const deliveryMetadata = envelope
           ? typedEnvelopeMetadata(envelope, { attemptId: typedAttemptId ?? crypto.randomUUID() })
