@@ -2902,6 +2902,69 @@ WHERE state_changed_at IS NULL`).run();
       return stmts.getEnvelope.get(envelopeId);
     },
 
+    // A schema-2/3 worker may safely fence a pre-upgrade pending envelope: it
+    // cannot prove whether a forgotten old identity ever ran. Rotate only that
+    // unaccepted tracker row in one transaction, keep its root/parent lineage
+    // and queue ownership, and let the next typed attempt carry a post-fence
+    // envelope id + created_at. Accepted/recovery rows are never eligible.
+    rotatePendingEnvelope(envelopeId, { actor = 'golem-drainer', reason = 'legacy typed replay fence' } = {}) {
+      const ts = now();
+      const nextId = crypto.randomUUID();
+      const txn = db.transaction(() => {
+        // Re-read and validate inside the ownership transaction. A concurrent
+        // accepted result must win rather than being rotated underneath it.
+        const existing = stmts.getEnvelope.get(envelopeId);
+        if (!existing) throw new Error(`rotatePendingEnvelope: envelope '${envelopeId}' not found`);
+        if (existing.delivery_state !== 'pending' || !['queued', 'pending', 'delivery_failed'].includes(existing.status)) {
+          throw new Error(`rotatePendingEnvelope: envelope '${envelopeId}' is not an unaccepted pending lineage`);
+        }
+        const queueRows = db.prepare(`SELECT id FROM dispatch_queue WHERE envelope_id = ?
+          AND status IN ('pending', 'publishing')`).all(envelopeId);
+        if (!queueRows.length) throw new Error(`rotatePendingEnvelope: no actionable queue row for '${envelopeId}'`);
+        const replacement = {
+          id: nextId,
+          root_id: existing.root_id || existing.id,
+          parent_id: existing.id,
+          ticket_id: existing.ticket_id,
+          project_id: existing.project_id,
+          sender_id: existing.sender_id,
+          reply_to_session_id: existing.reply_to_session_id,
+          recipient_session_id: existing.recipient_session_id,
+          sender_session_id: existing.sender_session_id,
+          target_session_id: existing.target_session_id,
+          kind: existing.kind,
+          payload: existing.payload,
+          status: 'queued',
+          ack_deadline_at: null,
+          created_at: ts,
+          expires_at: expiresAt(ts),
+        };
+        stmts.insertEnvelope.run(replacement);
+        db.prepare(`UPDATE message_envelopes
+          SET status = 'superseded', completed_at = ?, delivery_error = ?, last_error = ?
+          WHERE id = ? AND delivery_state = 'pending'
+            AND status IN ('queued', 'pending', 'delivery_failed')`).run(ts, reason, reason, envelopeId);
+        const updated = db.prepare(`UPDATE dispatch_queue SET envelope_id = ?
+          WHERE envelope_id = ? AND status IN ('pending', 'publishing')`).run(nextId, envelopeId);
+        if (updated.changes !== queueRows.length) throw new Error(`rotatePendingEnvelope: queue ownership changed for '${envelopeId}'`);
+        recordEvent({
+          ticket_id: existing.ticket_id,
+          project_id: existing.project_id,
+          type: 'dispatch_envelope_reissued',
+          actor,
+          data: {
+            prior_envelope_id: envelopeId,
+            envelope_id: nextId,
+            root_id: replacement.root_id,
+            target_session_id: existing.target_session_id,
+            reason,
+          },
+        });
+        return stmts.getEnvelope.get(nextId);
+      });
+      return txn();
+    },
+
     markEnvelopeDelivery(envelopeId, { error = null } = {}) {
       const existing = stmts.getEnvelope.get(envelopeId);
       if (!existing) throw new Error(`markEnvelopeDelivery: envelope '${envelopeId}' not found`);

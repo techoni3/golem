@@ -33,7 +33,7 @@ import { checkpointPiPickupAck, claimPiPickupAcks, completePiPickupAck, enqueueP
 import { isChannelDeliveryReady, isTypedWorkerChannel } from './channels.js';
 import { hasTypedWorkerCapability, isSessionFactTerminal, readEndpointLeases, readSessionFacts } from '../../lib/session-facts.js';
 import { typedEnvelopeMetadata } from '../../lib/typed-worker-endpoint.js';
-import { recordTypedEnvelopeOutcome } from './typed-delivery.js';
+import { isLegacyReplayFence, recordTypedEnvelopeOutcome } from './typed-delivery.js';
 
 const TICK_MS = 5_000;
 const COOLDOWN_MS = 60_000;
@@ -327,9 +327,12 @@ export function initDispatchDrainer({
           if (refreshed) broadcastWS({ type: 'ticket-updated', ticket: refreshed });
           continue;
         }
-        // Ticket dispatched elsewhere meanwhile (dispatched_at newer than the
-        // queue row's created_at) → the queue row is stale; cancel it.
-        if (ticket.dispatched_at) {
+        // Ticket dispatched to another session meanwhile (dispatched_at newer
+        // than the queue row's created_at) → the queue row is stale; cancel
+        // it. A typed pre-acceptance retry is already dispatched to *this*
+        // session, so retaining its queue row is what makes the guarded retry
+        // and legacy-fence reissue replayable.
+        if (ticket.dispatched_at && ticket.dispatched_to !== sessionId) {
           const dispatchedMs = Date.parse(ticket.dispatched_at);
           const createdMs = Date.parse(row.created_at);
           if (
@@ -401,11 +404,22 @@ export function initDispatchDrainer({
           : null;
         const typedAccepted = typedOutcome?.accepted === true;
         if (isTypedWorker && row.envelope_id && !typedAccepted) {
-            tracker.recordTypedEnvelopeLifecycle(row.envelope_id, {
-              state: 'pending',
-              attempt_id: typedAttemptId,
-              error: pushResult?.error || `status ${pushResult?.status ?? '?'}`,
+          tracker.recordTypedEnvelopeLifecycle(row.envelope_id, {
+            state: 'pending',
+            attempt_id: typedAttemptId,
+            error: pushResult?.error || `status ${pushResult?.status ?? '?'}`,
+          });
+          if (isLegacyReplayFence(pushResult)) {
+            const replacement = tracker.rotatePendingEnvelope(row.envelope_id, {
+              actor: 'golem-drainer',
+              reason: 'legacy typed replay fence before native acceptance',
             });
+            pushResult = {
+              ...pushResult,
+              reissued_envelope_id: replacement.id,
+              error: `legacy replay fence; atomically reissued pending envelope ${replacement.id}`,
+            };
+          }
         }
 
         // Set the outcome from the delivery opportunity before queue/envelope

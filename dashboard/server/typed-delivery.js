@@ -34,3 +34,12 @@ export function recordTypedEnvelopeOutcome(tracker, envelopeId, attemptId, deliv
 export function acceptedTypedDelivery(tracker, envelopeId, attemptId, delivery) {
   return recordTypedEnvelopeOutcome(tracker, envelopeId, attemptId, delivery)?.accepted === true;
 }
+
+// A schema-2/3 worker deliberately refuses pre-fence unknown identities. This
+// is not a generic delivery failure: the tracker can atomically reissue its
+// still-pending lineage with a new envelope id/created_at and retry safely.
+export function isLegacyReplayFence(delivery) {
+  if (delivery?.legacy_replay_fenced === true) return true;
+  if (typeof delivery?.body !== 'string') return false;
+  try { return JSON.parse(delivery.body)?.legacy_replay_fenced === true; } catch { return false; }
+}

@@ -17,12 +17,14 @@ import {
   requireTypedDeliveryRecovery,
   settleTypedDelivery,
   startTypedWorkerEndpoint,
+  TYPED_WORKER_PROTOCOL_VERSION,
   typedDeliveryResult,
 } from '../lib/typed-worker-endpoint.js';
 import {
   countTypedDeliveryTombstones,
   pruneTypedDeliveryTombstones,
   readTypedDeliveryTombstone,
+  retireTypedDeliveryTombstones,
   upsertTypedDeliveryTombstone,
 } from '../lib/typed-delivery-tombstones.js';
 
@@ -35,7 +37,7 @@ const tombstoneFile = path.join(tombstoneTemp, 'typed-delivery-tombstones.db');
 function envelope(envelope_id, content, overrides = {}) {
   const created_at = overrides.created_at ?? new Date().toISOString();
   return {
-    protocol_version: 1,
+    protocol_version: TYPED_WORKER_PROTOCOL_VERSION,
     envelope_id,
     content,
     target_session_id: canonicalId,
@@ -51,6 +53,12 @@ async function accept(envelope) {
   const claim = claimTypedDelivery(inbox, envelope, {
     lookupTombstone: (envelopeId) => readTypedDeliveryTombstone(canonicalId, envelopeId, { file: tombstoneFile }),
   });
+  if (claim.fenced) {
+    return {
+      ok: false, accepted: false, http_status: 409, legacy_replay_fenced: true,
+      error: 'legacy typed replay history is fenced; dashboard must atomically reissue the still-pending envelope',
+    };
+  }
   if (claim.duplicate) return typedDeliveryResult(claim.delivery, { duplicate: true, attemptId: envelope.attempt_id });
   if (claim.busy) return { ok: false, accepted: false, http_status: 409, error: 'worker is busy' };
   const { delivery } = acceptTypedDelivery(inbox, envelope.envelope_id, { turnId: `turn-${envelope.envelope_id}` });
@@ -166,8 +174,59 @@ try {
   assert.equal(oldReplay.delivery.lifecycle_state, 'settled');
   assert.equal(probeInbox.deliveries.length, 256, 'rich supervisor history stays bounded');
   assert.equal(countTypedDeliveryTombstones({ file: tombstoneFile }), 260, 'compact durable tombstones hold replay identity outside the JSON registry');
-  assert.equal(pruneTypedDeliveryTombstones({ file: tombstoneFile, now: Date.now() + 120_000 }), 260, 'expired tombstones are pruned instead of growing the supervisor registry forever');
-  assert.equal(countTypedDeliveryTombstones({ file: tombstoneFile }), 0, 'tombstone storage remains bounded by valid envelope lifetime');
+  assert.equal(pruneTypedDeliveryTombstones({ file: tombstoneFile, now: Date.now() + 120_000 }), 0, 'transport expiry alone never discards replay identity');
+  assert.equal(retireTypedDeliveryTombstones(canonicalId, { file: tombstoneFile }), 260, 'reclamation requires explicit tracker-authoritative retirement');
+  assert.equal(upsertTypedDeliveryTombstone(canonicalId, oldReplay.delivery, { file: tombstoneFile }), null, 'stale adapter JSON cannot reactivate a tracker-retired lineage');
+  assert.equal(pruneTypedDeliveryTombstones({ file: tombstoneFile, now: Date.now() + 120_000 }), 260, 'retired compact tombstones are reclaimed without rewriting supervisor JSON');
+  assert.equal(countTypedDeliveryTombstones({ file: tombstoneFile }), 0, 'reclaimed tombstone storage remains bounded by explicit terminal retirement');
+
+  // A tracker can renew an unacknowledged lineage after the worker's original
+  // HTTP reply was lost. Roll over rich history and simulate a worker restart:
+  // retry B must still find immutable acceptance A after A's wire TTL passes.
+  const lostResponseInbox = normalizeTypedWorkerInbox();
+  const lostResponseEnvelope = envelope('lost-response-renewed-lineage', 'native turn starts once', {
+    attempt_id: 'lost-response-attempt-a',
+    expires_at: new Date(Date.now() + 1_000).toISOString(),
+  });
+  claimTypedDelivery(lostResponseInbox, lostResponseEnvelope);
+  const { delivery: lostResponseAccepted } = acceptTypedDelivery(lostResponseInbox, lostResponseEnvelope.envelope_id, { turnId: 'native-turn-a' });
+  upsertTypedDeliveryTombstone(canonicalId, lostResponseAccepted, { file: tombstoneFile });
+  // The native turn can settle while its HTTP response is lost. Its immutable
+  // acceptance tombstone remains required for the queue's later retry.
+  const { delivery: lostResponseSettled } = settleTypedDelivery(lostResponseInbox, lostResponseEnvelope.envelope_id);
+  upsertTypedDeliveryTombstone(canonicalId, lostResponseSettled, { file: tombstoneFile });
+  for (let n = 0; n < 257; n += 1) {
+    const rollover = envelope(`restart-rollover-${n}`, `rollover ${n}`);
+    claimTypedDelivery(lostResponseInbox, rollover);
+    acceptTypedDelivery(lostResponseInbox, rollover.envelope_id);
+    settleTypedDelivery(lostResponseInbox, rollover.envelope_id);
+  }
+  assert.equal(getTypedDelivery(lostResponseInbox, lostResponseEnvelope.envelope_id), null, 'restart rollover removes the rich first-attempt inspection row');
+  const renewedRetry = claimTypedDelivery(normalizeTypedWorkerInbox(), {
+    ...lostResponseEnvelope,
+    attempt_id: 'lost-response-attempt-b',
+    expires_at: new Date(Date.now() + 60_000).toISOString(),
+  }, {
+    lookupTombstone: (envelopeId) => readTypedDeliveryTombstone(canonicalId, envelopeId, { file: tombstoneFile, now: Date.now() + 120_000 }),
+  });
+  assert.equal(renewedRetry.duplicate, true, 'lost-response → expiry → restart/rollover → tracker-renewed retry never starts a second native turn');
+  assert.equal(renewedRetry.delivery.accepted_attempt_id, 'lost-response-attempt-a');
+
+  // Durable tombstone state is monotonic: a stale JSON recovery row cannot
+  // erase a terminal SQLite outcome written immediately before a crash.
+  for (const terminalState of ['settled', 'interrupted', 'recovery_required']) {
+    const envelopeId = `monotonic-${terminalState}`;
+    upsertTypedDeliveryTombstone(canonicalId, {
+      envelope_id: envelopeId, target_session_id: canonicalId, attempt_id: 'attempt-a', accepted_attempt_id: 'attempt-a',
+      lifecycle_state: terminalState, expires_at: new Date(Date.now() + 60_000).toISOString(),
+      accepted_at: new Date().toISOString(), [`${terminalState}_at`]: new Date().toISOString(),
+    }, { file: tombstoneFile });
+    upsertTypedDeliveryTombstone(canonicalId, {
+      envelope_id: envelopeId, target_session_id: canonicalId, attempt_id: 'attempt-a', accepted_attempt_id: 'attempt-a',
+      lifecycle_state: 'accepted', expires_at: new Date(Date.now() + 120_000).toISOString(), accepted_at: new Date().toISOString(),
+    }, { file: tombstoneFile });
+    assert.equal(readTypedDeliveryTombstone(canonicalId, envelopeId, { file: tombstoneFile })?.lifecycle_state, terminalState, `stale accepted JSON cannot regress ${terminalState}`);
+  }
 
   const schemaTwo = normalizeTypedWorkerInbox({
     schema: 2,
@@ -199,6 +258,24 @@ try {
     readTypedDeliveryTombstone('legacy-upgrade-worker', 'retained-schema-two-acceptance', { file: tombstoneFile })?.accepted_attempt_id,
     'schema-two-attempt',
     'supervisor upgrade migrates retained schema-2 acceptance lineage into durable tombstones before readiness',
+  );
+  upsertTypedDeliveryTombstone('legacy-upgrade-worker', {
+    envelope_id: 'stale-json-after-settlement', target_session_id: 'legacy-upgrade-worker',
+    attempt_id: 'attempt-a', accepted_attempt_id: 'attempt-a', lifecycle_state: 'settled',
+    accepted_at: new Date().toISOString(), settled_at: new Date().toISOString(), expires_at: new Date(Date.now() + 60_000).toISOString(),
+  }, { file: tombstoneFile });
+  legacySupervisor.migrateTypedDeliveryTombstones({
+    schema: 5,
+    deliveries: [{
+      envelope_id: 'stale-json-after-settlement', target_session_id: 'legacy-upgrade-worker',
+      attempt_id: 'attempt-a', state: 'started', lifecycle_state: 'accepted', accepted_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 120_000).toISOString(),
+    }],
+  });
+  assert.equal(
+    readTypedDeliveryTombstone('legacy-upgrade-worker', 'stale-json-after-settlement', { file: tombstoneFile })?.lifecycle_state,
+    'settled',
+    'supervisor recovery migration cannot regress a newer terminal tombstone from stale JSON',
   );
 
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'golem-typed-worker-'));
@@ -314,6 +391,94 @@ try {
     await preacceptDrainer.tick();
     assert.equal(tracker.raw().prepare('SELECT status FROM dispatch_queue WHERE id = ?').get(preacceptQueued.id).status, 'pending', 'pre-acceptance refusal releases the shared queue row');
     assert.equal(tracker.getEnvelope(preacceptQueued.envelope_id).delivery_state, 'pending');
+
+    // A genuine schema-2 worker fence must not strand an otherwise valid
+    // queued row. Publish the legacy identity through a real authenticated
+    // endpoint, atomically rotate it in tracker storage, then deliver the
+    // post-fence replacement through the same shared queue (no Pi spool).
+    const upgradeSession = 'typed-schema-upgrade';
+    const upgradeOwner = 'typed-schema-upgrade-owner';
+    let upgradeInbox = normalizeTypedWorkerInbox({
+      schema: 2,
+      deliveries: [{
+        envelope_id: 'pre-upgrade-history', target_session_id: upgradeSession,
+        attempt_id: 'old-attempt', state: 'completed',
+      }],
+    });
+    let nativeUpgradeStarts = 0;
+    const upgradeEndpoint = await startTypedWorkerEndpoint({
+      canonicalId: upgradeSession,
+      ownerToken: upgradeOwner,
+      deliveryReady: () => !upgradeInbox.in_flight_envelope_id,
+      acceptDelivery: async (nativeEnvelope) => {
+        const claim = claimTypedDelivery(upgradeInbox, nativeEnvelope, {
+          lookupTombstone: (envelopeId) => readTypedDeliveryTombstone(upgradeSession, envelopeId, { file: tombstoneFile }),
+        });
+        if (claim.fenced) {
+          return {
+            ok: false, accepted: false, http_status: 409, legacy_replay_fenced: true,
+            error: 'legacy typed replay history is fenced; dashboard must atomically reissue the still-pending envelope',
+          };
+        }
+        if (claim.duplicate) return typedDeliveryResult(claim.delivery, { duplicate: true, attemptId: nativeEnvelope.attempt_id });
+        if (claim.busy) return { ok: false, accepted: false, http_status: 409, error: 'worker is busy' };
+        nativeUpgradeStarts += 1;
+        const { delivery } = acceptTypedDelivery(upgradeInbox, nativeEnvelope.envelope_id, { turnId: `turn-${nativeEnvelope.envelope_id}` });
+        upsertTypedDeliveryTombstone(upgradeSession, delivery, { file: tombstoneFile });
+        return typedDeliveryResult(delivery, { httpStatus: 202, attemptId: nativeEnvelope.attempt_id });
+      },
+    });
+    try {
+      const upgradeTicket = tracker.createTicket({ project_id: 'typed-test-000000', title: 'schema-2 queue reissue', created_by: 'test' });
+      const upgradeQueued = tracker.queueDispatch(upgradeTicket.id, { session_id: upgradeSession, payload: 'deliver only after reissue', actor: 'test' });
+      const originalUpgradeEnvelope = tracker.getEnvelope(upgradeQueued.envelope_id);
+      const preFenceCreatedAt = new Date(Date.parse(upgradeInbox.replay_fence_at) - 1_000).toISOString();
+      tracker.raw().prepare('UPDATE message_envelopes SET created_at = ?, expires_at = ? WHERE id = ?')
+        .run(preFenceCreatedAt, new Date(Date.now() + 60_000).toISOString(), originalUpgradeEnvelope.id);
+      const pushUpgrade = async (content, _sessionId, metadata) => {
+        const response = await fetch(`http://${upgradeEndpoint.host}:${upgradeEndpoint.port}/brief`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-sender': 'dashboard',
+            'x-golem-target-session': upgradeSession,
+            'x-golem-endpoint-owner': upgradeOwner,
+          },
+          body: JSON.stringify({ protocol_version: TYPED_WORKER_PROTOCOL_VERSION, content, ...metadata }),
+        });
+        return { ok: response.ok, status: response.status, typed_worker: true, body: await response.text() };
+      };
+      const createUpgradeDrainer = () => initDispatchDrainer({
+        tracker,
+        state: { nativeSessions: () => [{ session_id: upgradeSession, harness: 'pi', alive: true, status: 'idle' }] },
+        chat: { record: () => {} },
+        pushBrief: pushUpgrade,
+        buildDispatchBrief: (ticket) => ticket.title,
+        broadcastWS: () => {},
+        listChannels: async () => [{ session_id: upgradeSession, kind: 'typed-worker', delivery_ready: true }],
+      });
+      await createUpgradeDrainer().tick();
+      const rotatedQueue = tracker.raw().prepare('SELECT * FROM dispatch_queue WHERE id = ?').get(upgradeQueued.id);
+      const superseded = tracker.getEnvelope(originalUpgradeEnvelope.id);
+      const replacement = tracker.getEnvelope(rotatedQueue.envelope_id);
+      assert.equal(nativeUpgradeStarts, 0, 'pre-fence identity never creates a native turn');
+      assert.equal(rotatedQueue.status, 'pending', 'atomic reissue keeps the original shared queue row pending');
+      assert.equal(superseded.status, 'superseded', 'only the unaccepted source envelope is retired');
+      assert.equal(replacement.parent_id, originalUpgradeEnvelope.id, 'reissue preserves direct envelope lineage');
+      assert.equal(replacement.root_id, originalUpgradeEnvelope.root_id || originalUpgradeEnvelope.id, 'reissue preserves the immutable logical root');
+      assert.ok(Date.parse(replacement.created_at) >= Date.parse(upgradeInbox.replay_fence_at), 'replacement is born after the legacy replay fence');
+      assert.equal(fs.existsSync(path.join(process.env.GOLEM_HOME, 'pi-inbox', upgradeSession)), false, 'schema upgrade continues on the generic typed channel without a Pi spool');
+
+      // A fresh drainer has no cooldown from the fenced attempt. It receives
+      // the replacement in the next queue pass and starts exactly one turn.
+      await createUpgradeDrainer().tick();
+      assert.equal(nativeUpgradeStarts, 1, 'tracker-authoritative reissue delivers exactly one post-fence native turn');
+      assert.equal(tracker.raw().prepare('SELECT status FROM dispatch_queue WHERE id = ?').get(upgradeQueued.id).status, 'delivered');
+      assert.equal(tracker.getEnvelope(replacement.id).delivery_state, 'accepted');
+      settleTypedDelivery(upgradeInbox, replacement.id);
+    } finally {
+      await closeTypedWorkerEndpoint(upgradeEndpoint.server);
+    }
 
     const mismatchSession = 'typed-mismatch';
     const mismatchTicket = tracker.createTicket({ project_id: 'typed-test-000000', title: 'typed response mismatch', created_by: 'test' });
