@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-08-04 @ 9128474 — maintained via golem:docs-maintenance.
+> Last verified: 2026-08-04 @ dca21cb — maintained via golem:docs-maintenance.
 ## Directory structure
 - `substrate/` — plugin source; `plugin/` is its generated CC render, never hand-edited. Roles
   have one source: `instructions/AGENTS.md`; cards and skills point to it.
@@ -19,7 +19,8 @@
 ### `lib/typed-worker-endpoint.js`, `lib/typed-delivery-tombstones.js`
 - Shared native-worker protocol validates authenticated, versioned envelopes. Bounded supervisor
   history is not the replay ledger: compact SQLite tombstones preserve immutable first acceptance
-  only through the envelope expiry; legacy pre-upgrade identities are fenced before readiness.
+  until explicit tracker retirement; wire expiry is renewable. Legacy pre-upgrade pending
+  identities atomically reissue on the shared queue after the replay fence.
 ### `substrate/hooks/tracker-context.sh`
 - Builds bounded, derived SessionStart/project-context payloads. Its Node block is in command
   substitution: a bare dollar-paren pair or apostrophe in a JS comment breaks the shell.
