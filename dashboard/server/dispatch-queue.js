@@ -219,11 +219,10 @@ export function initDispatchDrainer({
 
   async function drainEnvelopeRetries({ byId, channelsBySession }) {
     let changed = false;
-    let retries = [];
-    try { retries = tracker.listPendingEnvelopeRetries(); } catch (error) {
-      console.error('[dispatch-drainer] list envelope retries failed:', error);
-      return changed;
-    }
+    // This is a required shared-tracker capability. Do not downgrade a missing
+    // dependency to a noisy successful tick: callers/tests must see the error
+    // rather than silently skipping durable typed retries.
+    const retries = tracker.listPendingEnvelopeRetries();
     // Retries are delivery work too: preserve FIFO and never stack multiple
     // native opportunities onto one session in the same tick.
     const blockedRetrySessions = new Set();
