@@ -39,7 +39,7 @@
   <div class="shell">
     <nav aria-label="Field guide sections">
       <a class="brand" href="#top" aria-label="Back to top">Session<br>Architecture<i>.</i></a>
-      <div class="sub">Golem v5.0.16 | field guide</div>
+      <div class="sub">Golem v5.0.16 | historical / superseded field guide</div>
       <ol class="toc">
         <li class="toc-label">Control plane</li>
         <li><a href="#compass">01. Compass</a></li>
@@ -47,7 +47,7 @@
         <li class="toc-label">Reliable coordination</li>
         <li><a href="#identity">03. Identity and reachability</a></li>
         <li><a href="#envelopes">04. Actionable envelopes</a></li>
-        <li><a href="#passive">05. Passive observation</a></li>
+        <li><a href="#passive">05. Historical passive observation</a></li>
         <li><a href="#health">06. Communication health</a></li>
         <li class="toc-label">Operate</li>
         <li><a href="#lifecycle">07. Evidence and closure</a></li>
@@ -60,6 +60,7 @@
         <p class="eyebrow">Architecture field guide · 11 July 2026</p>
         <h1>Two harnesses.<span>One accountable control plane.</span></h1>
         <p class="lede">Golem v5.0.16 gives Claude Code and OpenCode one durable operating surface: normalized session identity, a dashboard-owned tracker, addressed delivery, quiet observation, and evidence-backed work completion. The adapters differ at the runtime edge; authority and coordination converge in the middle.</p>
+        <aside class="callout warning"><strong>Superseded historical snapshot</strong><p>This guide predates GOL-132 and retains the passive-coordination design as historical context. It is not the current implementation contract. Read <a href="../../docs/substrate-events.md">docs/substrate-events.md</a> for the active event-ledger and <code>session_notify</code> model.</p></aside>
         <div class="legend" aria-label="Actor colour key">
           <span class="pill"><i class="dot" style="background:var(--cc)"></i>Claude Code</span>
           <span class="pill"><i class="dot" style="background:var(--oc)"></i>OpenCode</span>
@@ -127,7 +128,7 @@
           <tbody>
             <tr><td>Claude Code</td><td><code>~/.golem/renders/cc-plugin/</code> plus its marketplace render</td><td>Installed plugin cache loads hooks, MCP configuration, skills, and bundled channel dependencies.</td><td>Sync, update the plugin cache when needed, then reload or create a session.</td></tr>
             <tr><td>OpenCode</td><td>Agents in its XDG config directory; skills in <code>~/.golem/renders/opencode/skills/</code>; managed global instructions</td><td><code>opencode.jsonc</code> supplies the skill path, checkout-backed channel MCP, and file-URL shim.</td><td>The optional harness is disabled by default; enable before syncing and retain a valid config merge.</td></tr>
-            <tr><td>Both</td><td>Root <code>package.json</code> supplies the current package version to compiler output.</td><td>The dashboard URL is discovered from <code>~/.golem/dashboard.json</code> by the channel client.</td><td>Run the dashboard for tracker tools, envelopes, and passive-delta coordination.</td></tr>
+            <tr><td>Both</td><td>Root <code>package.json</code> supplies the current package version to compiler output.</td><td>The dashboard URL is discovered from <code>~/.golem/dashboard.json</code> by the channel client.</td><td>Run the dashboard for tracker tools, durable envelopes, and active session notifications.</td></tr>
           </tbody>
         </table></div>
         <aside class="callout warning"><strong>Version and activation are different checks</strong><p>For Claude Code, the plugin cache and running session are distinct from the workspace render. For OpenCode, the rendered paths and managed config point at an active checkout. Verify the actual harness route, not only a source-file edit.</p></aside>
@@ -196,9 +197,9 @@
       </section>
 
       <section id="passive">
-        <p class="eyebrow">05 · model-free observation</p>
-        <h2>Observe quietly; settle only when context actually lands</h2>
-        <p class="lead">Tracker history is durable, but it does not independently wake a model. Passive observation distills a narrow set of actionable changes into a per-session buffer and attaches it only to a next real turn or an already-actionable accepted delivery.</p>
+        <p class="eyebrow">05 · superseded model-free observation</p>
+        <h2>Historical passive design (retired)</h2>
+        <p class="lead">This section records the pre-GOL-132 design only. Passive observation, subscriptions, and next-turn context injection were retired; current sessions use durable reports plus active <code>session_notify</code> messages.</p>
         <div class="grid3">
           <article class="card"><h3 class="tr">Allowed facts</h3><p>Canonical tracker events project phase, assignment, blocker state, and result. Ordinary comments, activity telemetry, and mirrored spec-tree rows do not become prompt context.</p></article>
           <article class="card"><h3 class="st">Slot and cursor</h3><p>One slot per recipient, ticket, and category coalesces baseline to latest value. A per-session cursor preserves a claimed batch for replay if the lease is not settled.</p></article>
@@ -303,21 +304,20 @@
       <section id="sources">
         <p class="eyebrow">09 · implementation source map</p>
         <h2>Read the boundary that owns the fact</h2>
-        <p class="lead">This guide is grounded in the current repository paths below. The map favors ownership boundaries and runtime seams over exhaustive implementation detail.</p>
+        <p class="lead">This historical guide was grounded in the repository at the 5.0.16 snapshot. The map below is retained for archaeology only; current ownership and delivery semantics live in <a href="../../docs/substrate-events.md">docs/substrate-events.md</a>.</p>
         <div class="source-grid">
-          <div class="source"><a href="../../dashboard/server/tracker-db.js">dashboard/server/tracker-db.js</a><span>SQLite schema, phase-derived events, passive slots/cursors, envelopes, and derived communication health.</span></div>
-          <div class="source"><a href="../../dashboard/server/dispatch-queue.js">dashboard/server/dispatch-queue.js</a><span>Idle delivery drain, acknowledgement reminder and escalation delivery, quiet subscription behavior.</span></div>
-          <div class="source"><a href="../../dashboard/server/index.js">dashboard/server/index.js</a><span>Dashboard REST and WebSocket boundary, dispatch route, envelope correlation, passive-delta endpoints.</span></div>
+          <div class="source"><a href="../../dashboard/server/tracker-db.js">dashboard/server/tracker-db.js</a><span>Historical SQLite schema, phase-derived events, envelopes, and derived communication health.</span></div>
+          <div class="source"><a href="../../dashboard/server/dispatch-queue.js">dashboard/server/dispatch-queue.js</a><span>Historical idle delivery drain, acknowledgement reminder and escalation delivery.</span></div>
+          <div class="source"><a href="../../dashboard/server/index.js">dashboard/server/index.js</a><span>Historical dashboard REST and WebSocket boundary, dispatch route, and envelope correlation.</span></div>
           <div class="source"><a href="../../dashboard/server/native-sessions.js">dashboard/server/native-sessions.js</a><span>Cross-source native session merge, liveness rules, and OpenCode bridge/channel checks.</span></div>
           <div class="source"><a href="../../mcp/channel/index.js">mcp/channel/index.js</a><span>Per-session channel process, registry registration, channel events, acknowledgement/reply tool handling.</span></div>
           <div class="source"><a href="../../mcp/channel/identity.js">mcp/channel/identity.js</a><span>OpenCode sibling attribution and the fail-closed caller-resolution policy.</span></div>
           <div class="source"><a href="../../mcp/channel/tracker-client.js">mcp/channel/tracker-client.js</a><span>HTTP-only tracker client and current session/project identity helpers.</span></div>
-          <div class="source"><a href="../../shims/opencode/index.js">shims/opencode/index.js</a><span>OpenCode lifecycle shim, SDK bridge, real-message passive injection, and trusted per-call identity injection.</span></div>
-          <div class="source"><a href="../../substrate/hooks/hooks.json">substrate/hooks/hooks.json</a><span>Claude Code hook wiring, including session lifecycle and UserPromptSubmit passive observation.</span></div>
-          <div class="source"><a href="../../substrate/hooks/passive-delta.sh">substrate/hooks/passive-delta.sh</a><span>Claude Code lease claim, additional-context serialization, and fail-open settlement path.</span></div>
+          <div class="source"><a href="../../shims/opencode/index.js">shims/opencode/index.js</a><span>Historical OpenCode lifecycle shim, SDK bridge, and trusted per-call identity injection.</span></div>
+          <div class="source"><a href="../../substrate/hooks/hooks.json">substrate/hooks/hooks.json</a><span>Historical Claude Code hook wiring and session lifecycle.</span></div>
           <div class="source"><a href="../../lib/compiler/adapters/cc.js">lib/compiler/adapters/cc.js</a><span>Claude Code render plan, bundled channel source, plugin metadata versioning, and marketplace render.</span></div>
           <div class="source"><a href="../../lib/compiler/adapters/opencode.js">lib/compiler/adapters/opencode.js</a><span>OpenCode render paths, frontmatter translation, and managed configuration merge.</span></div>
-          <div class="source"><a href="../../lib/golem-config.js">lib/golem-config.js</a><span>Harness enablement defaults and quiet subscription-digest default.</span></div>
+          <div class="source"><a href="../../lib/golem-config.js">lib/golem-config.js</a><span>Historical harness enablement defaults.</span></div>
           <div class="source"><a href="../../dashboard/web/src/communication-drawer.jsx">dashboard/web/src/communication-drawer.jsx</a><span>Factual envelope drill-down and derived Needs You presentation.</span></div>
           <div class="source"><a href="../../dashboard/web/src/other-pages.jsx">dashboard/web/src/other-pages.jsx</a><span>Agents-page communication health indicator and severity language.</span></div>
           <div class="source"><a href="../../dashboard/web/src/store.js">dashboard/web/src/store.js</a><span>Snapshot boot, WebSocket invalidations, and revision-driven client refresh.</span></div>

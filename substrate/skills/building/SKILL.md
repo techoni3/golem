@@ -47,6 +47,14 @@ is stale, wrong, or missing; that comment is how the next slice gets a better ti
    - Not-done / deferred
 7. Move to `built` only once that brief exists.
 
+## Return the handoff actively
+
+When this slice came from another live session, the dispatch brief carries an authenticated
+delegating `session_id`. Post the durable closing brief/comment first, then call
+`session_notify` with the exact captured id and a concise outcome, report location, and next action.
+Do not discover a lead by label/name, and do not wait for an event or subscription to wake it. A
+human-originated dispatch has no peer return target.
+
 ## You merge into the spec branch, never into `main`
 
 When a spec branch is open it is the **integration target**: merge your slice into it once your

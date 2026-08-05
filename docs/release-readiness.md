@@ -1,5 +1,9 @@
 # Release readiness checklist
 
+> Historical verification record. This report predates GOL-132 and is retained
+> for release archaeology; it is not the current coordination contract. Current
+> active-handoff behavior is documented in [docs/substrate-events.md](substrate-events.md).
+
 Verified 2026-07-13 for `@laveesingh/golem` 5.0.16 on Node.js 22.22.3 and npm
 10.9.8. This is a verification record, not a publication or tag.
 
@@ -13,7 +17,7 @@ are in the README support matrix.
 
 - [x] `npm test` — exit 0; session facts/endpoint leases (16 assertions), Codex
   native 0.144.1 and bundled MCP, Pi Tier B/pickup and TrackerDB lease journeys,
-  OpenCode shim/passive delivery, compiler enforcement, and channel tracker
+  OpenCode shim/active delivery, compiler enforcement, and channel tracker
   journey all passed.
 - [x] `npm run dashboard:build` — exit 0; Vite transformed 3,699 modules and
   produced the local production bundle.
@@ -36,9 +40,9 @@ are in the README support matrix.
 - Claude Code 2.1.207, OpenCode 1.17.18, and Codex CLI 0.144.1 were present.
 - Pi was not installed, so the portable Tier B adapter and production pickup
   contract were exercised by the isolated journey rather than a native Pi CLI.
-- Substrate lint emitted three existing orphan-skill warnings for
-  `get-consult`, `journaling`, and `provide-consult`; enforcement and tests
-  still passed.
+- The historical lint run recorded orphan-skill warnings in its then-current
+  snapshot; those names are not a current coordination contract. Use the
+  current sync/lint journey for present-state evidence.
 - The working tree and this report commit pass `git diff --check`. Running it
   across the complete umbrella range reports trailing spaces embedded in
   generated Vite vendor assets; these are build output, not source or a

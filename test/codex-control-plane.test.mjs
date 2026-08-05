@@ -20,7 +20,7 @@ process.env.GOLEM_HOME = home;
 process.env.XDG_CONFIG_HOME = xdg;
 process.env.GOLEM_TRACKER_DB = dbPath;
 fs.mkdirSync(home, { recursive: true });
-fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ events: { subscriptionDigestEnabled: true } }));
+fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({}));
 
 const { CodexSupervisor, readCodexSupervisor } = await import('../lib/codex-supervisor.js');
 
@@ -168,19 +168,6 @@ try {
   await awaitControl(supervisor, notify.json.envelope_id, 'session notification');
   assert.equal(readCodexSupervisor(sessionId).inbox.deliveries.find((row) => row.envelope_id === notify.json.envelope_id)?.sender_session_id, 'cc-control-source');
 
-  const consult = await post(dashboard.base, '/api/messages/control', {
-    project_id: first.project_id,
-    sender_id: 'oc-control-source',
-    session_id: sessionId,
-    kind: 'consult_request',
-    content: 'CONSULT REQUEST (cns-control): Reply exactly CONTROL_CONSULT_OK. Do not call tools or access files.',
-    metadata: { consult_id: 'cns-control', from_session: 'oc-control-source' },
-    legacy: { path: '/consult', body: { consult_id: 'cns-control', from_session: 'oc-control-source', question: 'controlled journey' } },
-  });
-  assert.equal(consult.response.status, 200, consult.text);
-  assert.equal(consult.json.ok, true, consult.text);
-  await awaitControl(supervisor, consult.json.envelope_id, 'consult request');
-
   const ticketCreate = await post(dashboard.base, '/api/tickets', {
     project_id: first.project_id, kind: 'work-item', title: 'GOL-476 gate control journey', body: 'controlled', created_by: 'human',
   });
@@ -199,20 +186,6 @@ try {
       || record?.inbox?.deliveries?.find((row) => row.sender_session_id === 'human:dashboard' && row.target_session_id === sessionId);
   }, 'gate resolution envelope');
   await awaitControl(supervisor, gateEnvelope.envelope_id, 'gate resolution');
-
-  const subscription = await post(dashboard.base, '/api/bus/subscribe', {
-    session_id: sessionId, topic: `ticket/${ticketCreate.json.display_id}`,
-  });
-  assert.equal(subscription.response.status, 201, subscription.text);
-  const comment = await post(dashboard.base, `/api/tickets/${encodeURIComponent(ticketCreate.json.id)}/comments`, {
-    author: 'cc-control-source', tag: 'note', status: 'open', body: 'subscription event',
-  });
-  assert.equal(comment.response.status, 201, comment.text);
-  const subscriptionEnvelope = await waitFor(() => {
-    const record = readCodexSupervisor(sessionId);
-    return record?.inbox?.deliveries?.find((row) => row.sender_session_id === 'golem-drainer' && row.target_session_id === sessionId) || null;
-  }, 'subscription digest envelope', 20_000);
-  await awaitControl(supervisor, subscriptionEnvelope.envelope_id, 'subscription digest');
 
   const threadName = 'sol:codex-control-plane';
   await supervisor.rpc.request('thread/name/set', { threadId: first.thread_id, name: threadName });

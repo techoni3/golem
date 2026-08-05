@@ -55,6 +55,11 @@ implementation, because it never implements.
 4. `PASS` → the lead may move `verifying → verified`. `FAIL` → `verifying → rejected`, with the
    report travelling on the re-dispatch.
 
+After posting the verification report, actively notify the exact authenticated delegating
+`session_id` from the dispatch brief with `session_notify`. Include the verdict, report location,
+and the next action. Never route by a renamed label/name or wait on a subscription; a human-originated
+verification request has no peer return target.
+
 ## Reports
 
 Attach to the spec as a supporting document. A finding that lives only in a session transcript is a

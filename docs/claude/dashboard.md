@@ -87,10 +87,9 @@ treats an all-cancelled row set as "never delivered", not as `addressed`. The
 push carries a durable `session_notify` envelope because a managed Codex
 supervisor rejects any brief without one.
 
-There is no subscription short-circuit. Delivery used to be skipped when the
-target held an active `ticket/<display_id>` subscription; subscriptions are
-passive (`events.subscriptionDigestEnabled` defaults false) and never wake a
-session, so that silently dropped every such dispatch.
+Delivery is active. The durable comment/report is written first, then the dashboard sends a
+`session_notify` envelope to the exact target session id. The event ledger remains audit and
+lifecycle history; it is not a subscription or wake-up path.
 
 The ticket drawer shows an `undispatched: N` badge, dispatch-state chips on
 comment cards for non-`n/a` states, and composer actions: plain Save, Save &
@@ -101,25 +100,6 @@ updated comment payloads so chips flip live when replies mark work addressed.
 Both dispatch actions surface delivery failure — neither reports success on an
 undelivered push, and a disabled batch button always states which precondition
 is missing.
-
-## Subscription Reaper
-
-`dashboard/server/subscription-reaper.js` suspends bus subscriptions whose owning
-session is gone. The lifecycle path it backstops (`applySubscriptionLifecycle`)
-only fires on a graceful Claude Code `SessionEnd`; the Codex adapter renders no
-such hook, a killed session runs none, and `expires_at` is never enforced — so
-stale subscriptions accumulated indefinitely.
-
-It reconciles against `state.nativeSessions()` on a 5-minute tick, suspending an
-owner only after it has been continuously absent for 60 minutes, and no-ops
-entirely on an empty roster (unreadable ≠ everyone died). The absence clock is
-in-memory, so a dashboard restart restarts it — a dashboard that never runs an
-uninterrupted hour never auto-reaps, and the `force` route exists partly for that
-reason. Suspension is
-reversible: re-subscribing reactivates, as does `hook_session_start` for Claude
-Code. `POST /api/bus/subscriptions/reap` runs it on demand, with optional
-`{ force: true }` to skip the grace window and `{ session_id }` to scope the
-sweep to one owner.
 
 Spec ticket dispatches use a full-context brief builder (`buildSpecBrief`) via
 the same `/api/tickets/:id/dispatch` and dispatch-queue paths. Work-item briefs
@@ -144,16 +124,16 @@ endpoint for designed→planning and the server-enforced phase artifacts instead
 ## Phase Machine And Event Bus
 
 Tracker schema version 10 adds `tickets.phase`; version 11 adds hook-ingest UUID
-idempotency; version 12 adds dispatch-queue workspace fields. `dashboard/server/phase-machine.js` is the workflow source of truth.
+idempotency; version 12 adds dispatch-queue workspace fields; version 16 retires passive
+coordination tables. `dashboard/server/phase-machine.js` is the workflow source of truth.
 The DB layer derives board `state` from phase and rejects illegal transitions or
 missing artifacts such as closing briefs, dispatch evidence (the phase machine key is `managerDispatch`; the role is now `lead`), verification
 reports, child waves, and spec close requirements.
 
-Tracker mutations emit bus events on `ticket/<display_id>`. Child ticket events
-mirror to `spec/<parent-display-id>/tree`, which is the lead subscription
-surface for via-lead verification. Hook ingest writes lifecycle/activity/custom
-events through `/api/bus/ingest`; subscriptions are managed through
-`/api/bus/subscribe`, `/api/bus/unsubscribe`, and `/api/bus/subscriptions`.
+Tracker mutations emit durable event-ledger rows on `ticket/<display_id>`. Child ticket events
+mirror to `spec/<parent-display-id>/tree` for audit and UI history. Hook ingest writes
+lifecycle/activity/custom events through `/api/bus/ingest`; no subscription or passive wake path
+exists. Reports and handoffs use tracker comments plus active `session_notify`.
 
 The dispatchable-session route marks the least-loaded live same-project lead
 with `suggested: "lead"`, ranking by in-progress work then pending queue. The

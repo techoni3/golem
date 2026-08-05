@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # GENERATED: hooks/tracker-context.sh — rendered by `golem sync` from substrate/ — edit the source, not this file.
-# SessionStart hook — assemble tracker context, team hints, and a compact role
+# SessionStart hook — assemble tracker context and a compact role
 # card. Fail-open: emit the rendered tracker context, or the substrate source if
 # sync is stale, rather than breaking session start.
 
@@ -73,11 +73,9 @@ const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 const [home, start, cardPath] = process.argv.slice(2);
 // Shed order, by RE-FETCHABILITY rather than size: commits are one
-// dependency-free command a session can run itself, recently-closed needs
-// node:sqlite plus the tracker schema, and the roster needs three registry files
-// plus liveness checks. Shed what the session can rebuild alone, first. The order
-// is enforced by the shed sequence at the bottom of this block; it was previously
-// also declared as a const that nothing read.
+// dependency-free command a session can run itself and recently-closed needs
+// node:sqlite plus the tracker schema. The live recipient pool is deliberately
+// absent from boot context; live-team flows fetch it just in time.
 const sections = new Map();
 function rootFrom(dir) {
   let cur = path.resolve(dir);
@@ -121,63 +119,6 @@ try {
   const servers = Array.isArray(project?.lsp?.servers) ? project.lsp.servers : [];
   if (project?.lsp?.available && servers.length) lines.push(`LSP: ${servers.join(', ')}`);
 } catch {}
-try {
-  const sessions = JSON.parse(fs.readFileSync(path.join(home, 'sessions.json'), 'utf8')).sessions || [];
-  const channels = JSON.parse(fs.readFileSync(path.join(home, 'channels.json'), 'utf8')).channels || [];
-  const rootResolved = path.resolve(root);
-  function pidAlive(pid) {
-    if (!pid || Number(pid) <= 0) return false;
-    try {
-      process.kill(Number(pid), 0);
-      return true;
-    } catch (err) {
-      return err?.code === 'EPERM';
-    }
-  }
-  const liveChannelIds = new Set(channels.filter((c) => pidAlive(c?.pid)).map((c) => c.session_id));
-  const live = sessions.filter((s) => {
-    if (!s || s.ended_at || s.status === 'ended') return false;
-    // A registry row without a live channel or parent process is stale. The
-    // channel is the dispatchable-session authority; hook_ppid covers the
-    // brief interval before a newly started channel registers.
-    if (!liveChannelIds.has(s.session_id) && !pidAlive(s.hook_ppid)) return false;
-    if (s.project_id && (s.project_id === registryId || s.project_id === derivedId)) return true;
-    if (s.project_path && path.resolve(s.project_path) === rootResolved) return true;
-    return false;
-  });
-  // Prefer freshest rows per session_id
-  const byId = new Map();
-  for (const s of live) {
-    const prev = byId.get(s.session_id);
-    const t = Date.parse(s.last_seen_at || s.status_updated_at || s.boot_time || 0) || 0;
-    const pt = prev ? (Date.parse(prev.last_seen_at || prev.status_updated_at || prev.boot_time || 0) || 0) : -1;
-    if (!prev || t >= pt) byId.set(s.session_id, s);
-  }
-  const rows = [...byId.values()].sort((a, b) => {
-    const ra = String(a.role || '—');
-    const rb = String(b.role || '—');
-    if (ra !== rb) return ra.localeCompare(rb);
-    return String(a.name || a.session_id).localeCompare(String(b.name || b.session_id));
-  });
-  if (rows.length) {
-    // Capped like the commit list. This was the last unbounded field: 20 live
-    // sessions with long names produced a 1,200-char line on their own.
-    const ROSTER_MAX = 12;
-    const shown = rows.slice(0, ROSTER_MAX);
-    const parts = shown.map((s) => {
-      const role = s.role || 'unassigned';
-      const status = s.status || 'unknown';
-      const label = String(s.name || String(s.session_id || '').slice(0, 12)).slice(0, 24);
-      return `${role}:${status}:${label}`;
-    });
-    const more = rows.length > shown.length ? ` (+${rows.length - shown.length} more)` : '';
-    lines.push(`Team on ${registryId}: ${parts.join(' · ')}${more}`);
-    lines.push('Roster is informational. Cross-session dispatch is off by default — see golem:live-team.');
-  } else {
-    lines.push(`Team on ${registryId}: (no live sessions)`);
-  }
-} catch {}
-
 // Recently closed work, as POINTERS ONLY — id plus one-line title, never body.
 // Summarising these into prose would reintroduce exactly the lossy re-encoding
 // the reference model exists to remove; an id is something the agent can pull.
@@ -312,7 +253,7 @@ const build = (commits) => [
 // one — that is the inversion this used to have.
 //
 // The commits-gone case is unreachable while every other section stays capped
-// (card 1200, roster 12 rows, closes 8 rows): the fixed part maxes near 2,790
+// (card 1200, closes 8 rows): the fixed part stays well below 3,600
 // against 3,600, so at least a few entries always fit. It stays as a backstop
 // precisely because its unreachability rests on a conjunction of separately
 // maintained caps, which is the invariant a future field would break silently.

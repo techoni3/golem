@@ -51,9 +51,10 @@ svg text{font-family:"IBM Plex Mono",monospace}svg .serif{font-family:"Bodoni Mo
 </nav>
 <main>
 <header class="hero">
-  <div class="kicker">Architecture field guide | 10 July 2026</div>
+  <div class="kicker">Architecture field guide | historical / superseded | 10 July 2026</div>
   <h1>Two harnesses.<span>One durable control plane.</span></h1>
   <p class="blurb">OpenCode and Claude Code begin with different identities, lifecycle APIs, and last-mile delivery mechanisms. Golem translates both into the same session registry, channel protocol, dashboard state, durable message envelopes, tracker phases, and evidence-backed closing brief.</p>
+  <div class="note warn"><b>Superseded historical snapshot</b><p>This guide predates GOL-132 and retains passive coordination, subscription, and correlated-reply diagrams as historical context only. It is not the current implementation contract. Read <a href="../../docs/substrate-events.md">docs/substrate-events.md</a> for the active event-ledger and <code>session_notify</code> behavior.</p></div>
   <div class="legend">
     <span class="pill"><i class="swatch" style="background:var(--oc)"></i>OpenCode runtime</span><span class="pill"><i class="swatch" style="background:var(--cc)"></i>Claude Code runtime</span><span class="pill"><i class="swatch" style="background:var(--bridge)"></i>OpenCode bridge</span><span class="pill"><i class="swatch" style="background:var(--channel)"></i>Shared channel</span><span class="pill"><i class="swatch" style="background:var(--dashboard)"></i>Dashboard</span><span class="pill"><i class="swatch" style="background:var(--tracker)"></i>Tracker lifecycle</span><span class="pill"><i class="swatch" style="background:var(--store)"></i>Durable registries</span>
   </div>
@@ -257,9 +258,9 @@ svg text{font-family:"IBM Plex Mono",monospace}svg .serif{font-family:"Bodoni Mo
   <div class="kicker">12 | upstream and downstream impact</div><h2>Where a change propagates</h2>
   <p class="lead">The most expensive mistakes come from changing one plane while reasoning about another. This matrix shows which runtime must restart, which registries change, and where users see the consequence.</p>
   <div class="impact">
-    <article class="impact-card" style="border-top-color:var(--oc)"><h3 class="oc">OpenCode shim</h3><div class="path">shims/opencode/index.js</div><p><strong>Upstream:</strong> OpenCode plugin API and SDK. <strong>Downstream:</strong> events, bridge rows, session state, passive context and caller identity. New/restarted OpenCode process required.</p></article>
+    <article class="impact-card" style="border-top-color:var(--oc)"><h3 class="oc">OpenCode shim</h3><div class="path">shims/opencode/index.js</div><p><strong>Upstream:</strong> OpenCode plugin API and SDK. <strong>Downstream:</strong> events, bridge rows, session state, active notifications and caller identity. New/restarted OpenCode process required.</p></article>
     <article class="impact-card" style="border-top-color:var(--cc)"><h3 class="cc">Claude hooks</h3><div class="path">substrate/hooks/* -> render -> cache</div><p><strong>Upstream:</strong> hook manifest and compiler. <strong>Downstream:</strong> registries, journals, context and status. Sync alone is not activation; update plus reload/new session may be required.</p></article>
-    <article class="impact-card" style="border-top-color:var(--channel)"><h3 class="ch">Shared channel</h3><div class="path">mcp/channel/index.js</div><p><strong>Upstream:</strong> host MCP transport and parent identity. <strong>Downstream:</strong> both harnesses' tools, HTTP delivery, SSE, consults and routing. Running children keep loaded bytes.</p></article>
+    <article class="impact-card" style="border-top-color:var(--channel)"><h3 class="ch">Shared channel</h3><div class="path">mcp/channel/index.js</div><p><strong>Upstream:</strong> host MCP transport and parent identity. <strong>Downstream:</strong> both harnesses' tools, HTTP delivery, SSE, active notifications and routing. Running children keep loaded bytes.</p></article>
     <article class="impact-card"><h3 class="st">Registry schema</h3><div class="path">sessions | bridges | channels | projects</div><p><strong>Upstream:</strong> hook/shim writers. <strong>Downstream:</strong> discovery, context, liveness, project identity, dispatchability and consult lookup.</p></article>
     <article class="impact-card" style="border-top-color:var(--dashboard)"><h3 class="db">Dashboard state</h3><div class="path">native-sessions | state | index | chat</div><p><strong>Upstream:</strong> registries and events. <strong>Downstream:</strong> card latency, reachability, queue decisions, SSE consumers and browser WS. Polling changes affect both harnesses.</p></article>
     <article class="impact-card" style="border-top-color:var(--tracker)"><h3 class="tr">Tracker and phases</h3><div class="path">tracker-db | phase-machine | role skills</div><p><strong>Upstream:</strong> tools and dashboard actions. <strong>Downstream:</strong> assignment, comments, passive deltas, gates, verification, completion and board state.</p></article>
@@ -279,7 +280,7 @@ svg text{font-family:"IBM Plex Mono",monospace}svg .serif{font-family:"Bodoni Mo
   <div class="grid3"><article class="card"><h3>Session</h3><p>A logical agent actor with harness, project, role, status and lifecycle identity.</p></article><article class="card"><h3>Envelope</h3><p>A durable delivery record binding sender, recipient, payload, reply route, deadlines, acks and completion.</p></article><article class="card"><h3>Closing brief</h3><p>The evidence-bearing tracker comment that opens built and hands work to independent verification.</p></article></div>
 </section>
 
-<footer id="document-footer">Golem session architecture | grounded at repository HEAD 44bd061 plus the full current working tree | 2026-07-10</footer>
+<footer id="document-footer">Golem session architecture | historical snapshot superseded by GOL-132 active-handoff guidance | 2026-07-10</footer>
 </main></div>
 <script>
 const links=[...document.querySelectorAll('nav a')],map=new Map(links.map(a=>[a.getAttribute('href').slice(1),a]));

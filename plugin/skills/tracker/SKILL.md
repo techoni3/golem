@@ -1,6 +1,6 @@
 ---
 name: tracker
-description: Read when picking up a dispatched or assigned ticket, decomposing work into sub-tickets, or transitioning phase. Covers the MCP ticket tools and the phases, streams, and subscriptions model. The tracker is the source of truth, not PLAN.md. Cross-session dispatch lives in golem:live-team.
+description: Read when picking up a dispatched or assigned ticket, decomposing work into sub-tickets, or transitioning phase. Covers the MCP ticket tools and phase/stream model. The tracker is the source of truth, not PLAN.md. Active cross-session messaging lives in golem:live-team.
 ---
 <!-- GENERATED: skills/tracker/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 
@@ -46,16 +46,16 @@ Prefer `ticket_transition({id, phase, reason?, skip_reason?})` over `ticket_upda
 3. The lead routes verification with `ticket_transition({id, phase:'verifying'})`: `built -> verifying`.
 4. Verifiers do not claim. The lead has already set `verifying`; the explorer posts its PASS/FAIL report, then calls `ticket_transition({id, phase:'verified'})` for PASS or `ticket_transition({id, phase:'rejected'})` for FAIL. A verifier never writes legacy state.
 5. The lead closes verified work with `ticket_transition({id, phase:'done'})`: `verified -> done`.
-6. Subscribe when you are waiting on handoffs: use `ticket/<display_id>` for one ticket or `spec/<display_id>/tree` for a spec and its children. This is quiet next-turn interest, not a wake-up: the four passive ticket deltas appear only on your next real user turn or actionable envelope.
+6. When a handoff or consultation is ready, write the durable report/comment first, then actively notify the exact authenticated session id with `session_notify`. Do not wait on a bus subscription.
 7. Do the work. Comment milestones with mechanical evidence: commands and real output, not claims.
 8. Verify before advancing to `built`, `verified`, `rejected`, or `done`; read `golem:verify-done`.
 
-## Bus Topics
+## Event Ledger
 
 - Ticket mutations emit tracker events on `ticket/<display_id>`.
 - Child ticket mutations also mirror to `spec/<parent-display-id>/tree`.
-- Subscriptions preserve durable event history/cursors; normal delivery is disabled by default, so they never create a standalone model turn.
-- Manual exact ticket/spec subscriptions contribute only passive phase, assignment, blocker, and result deltas. Activity/raw history is never injected into a prompt.
+- Events remain durable audit, lifecycle, activity, and spec-tree history. They do not wake sessions and there is no subscription or passive-delta delivery path.
+- Use ticket comments for large reports and `session_notify` for the active prompt-level handoff; the recipient can fetch the report with `ticket_get`.
 
 ## The Spec Is The Intent Record
 

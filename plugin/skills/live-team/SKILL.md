@@ -51,12 +51,13 @@ absent.
 
 When a spec reaches `planned`:
 
-1. `sessions_dispatchable` — confirm live targets.
+1. `sessions_dispatchable` — confirm live targets immediately before choosing a recipient.
 2. Dispatch child work items to live builders, least-loaded first.
 3. Parallel builders in one repo → an explicit worktree directive per builder
    (`golem:git-conventions`).
-4. Subscribe to `spec/<display_id>/tree` and the relevant `ticket/<display_id>` topics. Quiet
-   next-turn interest — never poll.
+4. Do not carry a boot-time roster forward. Re-run `sessions_dispatchable` immediately before
+   every new recipient or fallback decision. After a durable report/comment, call
+   `session_notify({to: exact_session_id, text: concise pointer + next action})`.
 
 ## Lead: built event loop
 
@@ -87,10 +88,18 @@ the integration branch, and never resolve a builder's conflicts for them. Full l
 
 ## Outbound consults
 
-`consult_request({to, question, context})` — fire-and-forget when you are stuck after a real
-attempt, suspect tunnel vision, or the user names a session. Keep working; do not poll.
-`consult_status` nudges. The reply is advice: keep what holds up, discard the rest, you keep
-final say.
+Consultation uses the same `session_notify` primitive. Send a
+`CONSULT REQUEST — ADVISORY ONLY` message with a unique reference, question, and context to the
+exact current session id. The consultant replies with `CONSULT REPLY` (or `CONSULT STATUS`) over
+`session_notify`, echoing the reference. It is advice, not delegation; keep what holds up and keep
+final say. No dedicated consult tools, routes, or subscriptions exist.
+
+## Return identity
+
+Every delegated brief carries an authenticated sender/delegator `session_id`. A builder, explorer,
+or reviewer writes its durable report first, then calls `session_notify` to that exact id. Never
+route a return by a `/rename` label, display name, or a fresh peer search; the lead may have been
+renamed since dispatch. Human-originated work has no peer return target.
 
 Do not use a consult as cheap task hand-off — that is a dispatch. Answering an inbound consult
 needs no opt-in and lives in `golem:consulting`.

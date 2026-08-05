@@ -21,7 +21,7 @@ import { loadConfig } from '../../lib/golem-config.js';
 import { createCommentDispatchService, defaultDispatchStateForComment } from './comment-dispatch.js';
 import { canonicalStateForPhase, initialPhaseForKind, isKnownPhase, legalNextPhases, phaseFromLegacyState, requirementsForPhase } from './phase-machine.js';
 
-const SCHEMA_VERSION = 15;
+const SCHEMA_VERSION = 16;
 
 const KINDS = new Set(['work-item', 'decision', 'spec', 'question', 'fix']);
 const STATES = new Set(['todo', 'in_progress', 'blocked', 'review', 'done', 'archived']);
@@ -29,11 +29,6 @@ const STREAM_MODES = new Set(['sequential', 'parallel']);
 const LINK_TYPES = new Set(['blocks', 'relates', 'duplicates']);
 const COMMENT_TAGS = new Set(['confirmed', 'partial', 'disputed', 'fix', 'risk', 'question', 'note']);
 const EVENT_CLASSES = new Set(['tracker', 'lifecycle', 'activity', 'custom']);
-const DEFAULT_SUBSCRIPTION_CLASSES = ['tracker', 'lifecycle', 'custom'];
-const SUBSCRIPTION_BACKLOG_CAP = 500;
-const PASSIVE_GROUP_CAP = 20;
-const PASSIVE_BYTE_CAP = 4096;
-const PASSIVE_LEASE_MS = 30_000;
 const LIFECYCLE_EVENTS = new Set(['session-start', 'session-end', 'user-prompt', 'stop', 'subagent-stop', 'pre-compact', 'notification']);
 const ACTIVITY_EVENTS = new Set(['tool-pre', 'tool-post', 'agent-spawn', 'agent-return', 'send-message', 'send-message-post']);
 
@@ -99,27 +94,6 @@ function eventUuid(input) {
   const raw = input?.uuid ?? input?.event_uuid ?? input?.id ?? input?.event_id ?? null;
   const s = raw == null ? '' : String(raw).trim();
   return s || null;
-}
-
-function normalizeClassFilter(value) {
-  if (value == null) return DEFAULT_SUBSCRIPTION_CLASSES;
-  const raw = Array.isArray(value) ? value : String(value).split(',');
-  const classes = [...new Set(raw.map((x) => String(x || '').trim()).filter(Boolean))];
-  for (const cls of classes) normalizeEventClass(cls);
-  return classes.length ? classes : DEFAULT_SUBSCRIPTION_CLASSES;
-}
-
-function serializeClasses(classes) {
-  return JSON.stringify(normalizeClassFilter(classes));
-}
-
-function parseClasses(raw) {
-  try {
-    const parsed = JSON.parse(raw);
-    return normalizeClassFilter(parsed);
-  } catch {
-    return normalizeClassFilter(raw);
-  }
 }
 
 function actorKind(actor) {
@@ -313,22 +287,6 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
       -- idx_events_uuid depends on the v11 event_uuid column. It is created in
       -- the migration block after the ALTER TABLE for existing DBs.
 
-      CREATE TABLE IF NOT EXISTS subscriptions (
-        id             TEXT PRIMARY KEY,
-        session_id     TEXT NOT NULL,
-        topic          TEXT NOT NULL,
-        classes_filter TEXT NOT NULL DEFAULT '["tracker","lifecycle","custom"]',
-        status         TEXT NOT NULL DEFAULT 'active',
-        manual         INTEGER NOT NULL DEFAULT 0,
-        cursor_seq     INTEGER NOT NULL DEFAULT 0,
-        created_at     TEXT NOT NULL,
-        expires_at     TEXT,
-        reason         TEXT,
-        UNIQUE(session_id, topic)
-      );
-      CREATE INDEX IF NOT EXISTS idx_subscriptions_session ON subscriptions(session_id, status);
-      CREATE INDEX IF NOT EXISTS idx_subscriptions_topic ON subscriptions(topic, status);
-
       CREATE TABLE IF NOT EXISTS meta (
         key   TEXT PRIMARY KEY,
         value TEXT NOT NULL
@@ -398,35 +356,6 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
         summary TEXT NOT NULL DEFAULT '',
         acknowledged_at TEXT NOT NULL,
         PRIMARY KEY (envelope_id, recipient_session_id)
-      );
-
-      -- GOL-423: model-free, per-session deltas. A slot is coalesced by the
-      -- recipient/ticket/category key; a cursor owns at most one replayable
-      -- claimed batch, so an interrupted next-turn hook cannot lose it.
-      CREATE TABLE IF NOT EXISTS passive_slots (
-        session_id     TEXT NOT NULL,
-        ticket_id      TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
-        category       TEXT NOT NULL,
-        baseline       TEXT NOT NULL,
-        value          TEXT NOT NULL,
-        first_event_id INTEGER NOT NULL,
-        last_event_id  INTEGER NOT NULL,
-        created_at     TEXT NOT NULL,
-        updated_at     TEXT NOT NULL,
-        PRIMARY KEY (session_id, ticket_id, category)
-      );
-      CREATE INDEX IF NOT EXISTS idx_passive_slots_session ON passive_slots(session_id, ticket_id, category);
-      CREATE TABLE IF NOT EXISTS passive_cursors (
-        session_id          TEXT PRIMARY KEY,
-        cursor_seq          INTEGER NOT NULL DEFAULT 0,
-        pending_batch_id    TEXT,
-        pending_body        TEXT,
-        pending_slots       TEXT,
-        pending_to_seq      INTEGER,
-        lease_id            TEXT,
-        lease_expires_at    TEXT,
-        pending_created_at  TEXT,
-        updated_at          TEXT NOT NULL
       );
 
       -- TKT-0266: durable session-name labels. One row per session_id with a
@@ -630,8 +559,8 @@ WHERE state_changed_at IS NULL`).run();
       `).run();
     }
 
-    // Schema migration v8 -> v9 (GOL-311): tracker events become the named bus
-    // with topic/class/actor metadata plus durable per-session subscriptions.
+    // Schema migration v8 -> v9 (GOL-311): tracker events gain topic/class
+    // metadata so the ledger can support audit, lifecycle, and tree views.
     const eventCols9 = db.prepare('PRAGMA table_info(events)').all().map((c) => c.name);
     for (const [col, def] of [
       ['topic', 'TEXT'],
@@ -644,20 +573,6 @@ WHERE state_changed_at IS NULL`).run();
     db.exec(`
       CREATE INDEX IF NOT EXISTS idx_events_topic ON events(topic, id);
       CREATE INDEX IF NOT EXISTS idx_events_class ON events(class, id);
-      CREATE TABLE IF NOT EXISTS subscriptions (
-        id             TEXT PRIMARY KEY,
-        session_id     TEXT NOT NULL,
-        topic          TEXT NOT NULL,
-        classes_filter TEXT NOT NULL DEFAULT '["tracker","lifecycle","custom"]',
-        status         TEXT NOT NULL DEFAULT 'active',
-        cursor_seq     INTEGER NOT NULL DEFAULT 0,
-        created_at     TEXT NOT NULL,
-        expires_at     TEXT,
-        reason         TEXT,
-        UNIQUE(session_id, topic)
-      );
-      CREATE INDEX IF NOT EXISTS idx_subscriptions_session ON subscriptions(session_id, status);
-      CREATE INDEX IF NOT EXISTS idx_subscriptions_topic ON subscriptions(topic, status);
     `);
     db.prepare(`
       UPDATE events
@@ -728,37 +643,13 @@ WHERE state_changed_at IS NULL`).run();
       ['escalation_envelope_id', 'TEXT'], ['ack_via_envelope_id', 'TEXT'],
     ]) if (!envelopeCols14.includes(col)) db.exec(`ALTER TABLE message_envelopes ADD COLUMN ${col} ${def}`);
 
-    // Schema migration v14 -> v15 (GOL-423): preserve which subscriptions were
-    // explicitly manual even when lifecycle resume later replaces their reason.
-    const subscriptionCols15 = db.prepare('PRAGMA table_info(subscriptions)').all().map((c) => c.name);
-    if (!subscriptionCols15.includes('manual')) db.exec("ALTER TABLE subscriptions ADD COLUMN manual INTEGER NOT NULL DEFAULT 0");
-    db.prepare("UPDATE subscriptions SET manual = 1 WHERE manual = 0 AND reason = 'manual'").run();
+    // Schema migration v15 -> v16 (GOL-132): retire passive coordination.
+    // The event ledger remains durable for audit and lifecycle telemetry, but
+    // subscriptions and next-turn projections are no longer runtime state.
     db.exec(`
-      CREATE TABLE IF NOT EXISTS passive_slots (
-        session_id     TEXT NOT NULL,
-        ticket_id      TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
-        category       TEXT NOT NULL,
-        baseline       TEXT NOT NULL,
-        value          TEXT NOT NULL,
-        first_event_id INTEGER NOT NULL,
-        last_event_id  INTEGER NOT NULL,
-        created_at     TEXT NOT NULL,
-        updated_at     TEXT NOT NULL,
-        PRIMARY KEY (session_id, ticket_id, category)
-      );
-      CREATE INDEX IF NOT EXISTS idx_passive_slots_session ON passive_slots(session_id, ticket_id, category);
-      CREATE TABLE IF NOT EXISTS passive_cursors (
-        session_id          TEXT PRIMARY KEY,
-        cursor_seq          INTEGER NOT NULL DEFAULT 0,
-        pending_batch_id    TEXT,
-        pending_body        TEXT,
-        pending_slots       TEXT,
-        pending_to_seq      INTEGER,
-        lease_id            TEXT,
-        lease_expires_at    TEXT,
-        pending_created_at  TEXT,
-        updated_at          TEXT NOT NULL
-      );
+      DROP TABLE IF EXISTS passive_cursors;
+      DROP TABLE IF EXISTS passive_slots;
+      DROP TABLE IF EXISTS subscriptions;
     `);
 
     // Indexes that depend on lifecycle columns. Idempotent: no-op on fresh
@@ -810,36 +701,6 @@ WHERE state_changed_at IS NULL`).run();
         VALUES (@event_uuid, @ticket_id, @project_id, @topic, @class, @type, @actor, @actor_kind, @actor_label, @data, @created_at)
       `),
       getEventByUuid: db.prepare('SELECT * FROM events WHERE event_uuid = ?'),
-      upsertSubscription: db.prepare(`
-        INSERT INTO subscriptions (id, session_id, topic, classes_filter, status, manual, cursor_seq, created_at, expires_at, reason)
-        VALUES (@id, @session_id, @topic, @classes_filter, 'active', @manual, @cursor_seq, @created_at, @expires_at, @reason)
-        ON CONFLICT(session_id, topic) DO UPDATE SET
-          classes_filter = excluded.classes_filter,
-          status = 'active',
-          manual = CASE WHEN subscriptions.manual = 1 OR excluded.manual = 1 THEN 1 ELSE 0 END,
-          expires_at = excluded.expires_at,
-          reason = excluded.reason
-      `),
-      suspendSubscription: db.prepare(`
-        UPDATE subscriptions
-        SET status = 'suspended', reason = @reason
-        WHERE session_id = @session_id AND topic = @topic AND status = 'active'
-      `),
-      suspendSubscriptionsForSession: db.prepare(`
-        UPDATE subscriptions
-        SET status = 'suspended', reason = @reason
-        WHERE session_id = @session_id AND status = 'active'
-      `),
-      reactivateSubscriptionsForSession: db.prepare(`
-        UPDATE subscriptions
-        SET status = 'active', reason = @reason
-        WHERE session_id = @session_id AND status = 'suspended'
-      `),
-      deleteSubscriptionsForSession: db.prepare('DELETE FROM subscriptions WHERE session_id = ?'),
-      getSubscriptionById: db.prepare('SELECT * FROM subscriptions WHERE id = ?'),
-      listSubscriptions: db.prepare('SELECT * FROM subscriptions WHERE (@session_id IS NULL OR session_id = @session_id) ORDER BY created_at ASC, id ASC'),
-      listActiveSubscriptions: db.prepare("SELECT * FROM subscriptions WHERE status = 'active' ORDER BY created_at ASC, id ASC"),
-      advanceSubscriptionCursor: db.prepare("UPDATE subscriptions SET cursor_seq = @to_seq WHERE id = @id AND cursor_seq = @from_seq AND status = 'active'"),
       getMeta: db.prepare('SELECT value FROM meta WHERE key = ?'),
       setMeta: db.prepare('INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'),
       // TKT-0245: dispatch_queue prepared statements.
@@ -922,10 +783,6 @@ WHERE state_changed_at IS NULL`).run();
             picked_up_at = COALESCE(picked_up_at, @ts)
         WHERE id = @id AND recipient_session_id = @target_session_id
       `),
-      replyEnvelope: db.prepare(`
-        UPDATE message_envelopes SET replied_at = COALESCE(replied_at, @ts), reply_envelope_id = COALESCE(reply_envelope_id, @reply_envelope_id)
-        WHERE id = @id AND recipient_session_id = @target_session_id
-      `),
       resolveEnvelope: db.prepare(`
         UPDATE message_envelopes SET status = @status, completed_at = @ts, last_error = @last_error
         WHERE id = @id AND status IN ('pending', 'queued', 'delivery_failed')
@@ -952,42 +809,12 @@ WHERE state_changed_at IS NULL`).run();
     return a || kind;
   }
 
-  function maxEventSeqForTopic(topic) {
-    if (!topic) return 0;
-    return Number(db.prepare('SELECT MAX(id) AS m FROM events WHERE topic = ?').get(topic)?.m ?? 0);
-  }
-
   // recordEvent — internal, also exported on the returned object. Persists one
-  // bus row; `data` is JSON-serialized. Ticket-scoped tracker events default to
-  // `ticket/<display_id>` and child tickets mirror onto `spec/<parent>/tree` so
-  // managers/planners can subscribe to a whole spec tree without joins.
+  // audit row; `data` is JSON-serialized. Ticket-scoped tracker events default
+  // to `ticket/<display_id>` and child tickets mirror onto `spec/<parent>/tree`
+  // so managers can inspect a whole spec tree without joins.
   function hydrateEvent(row) {
     return row ? { ...row, data: safeParse(row.data) } : null;
-  }
-
-  function applySubscriptionLifecycle({ session_id, type, actor = 'system:lifecycle' } = {}) {
-    if (!session_id || !type) return { suspended: 0, reactivated: 0, purged: 0 };
-    if (type === 'hook_session_end' || type === 'session_end') {
-      const info = stmts.suspendSubscriptionsForSession.run({ session_id, reason: 'session_end' });
-      return { suspended: info.changes, reactivated: 0, purged: 0 };
-    }
-    if (type === 'hook_session_start' || type === 'session_start' || type === 'session_resume') {
-      const info = stmts.reactivateSubscriptionsForSession.run({ session_id, reason: 'session_active' });
-      return { suspended: 0, reactivated: info.changes, purged: 0 };
-    }
-    if (type === 'session_purged') {
-      const info = stmts.deleteSubscriptionsForSession.run(session_id);
-      recordEvent({
-        project_id: null,
-        topic: `session/${session_id}`,
-        class: 'lifecycle',
-        type: 'session_subscriptions_purged',
-        actor,
-        data: { session_id, purged: info.changes },
-      });
-      return { suspended: 0, reactivated: 0, purged: info.changes };
-    }
-    return { suspended: 0, reactivated: 0, purged: 0 };
   }
 
   function recordEvent({ event_uuid = null, ticket_id = null, project_id = null, topic = null, class: eventClass = 'tracker', type, actor = null, actor_kind = null, actor_label = null, data = {}, created_at = null } = {}) {
@@ -1016,12 +843,6 @@ WHERE state_changed_at IS NULL`).run();
     };
     const info = stmts.insertEvent.run(row);
     const out = { id: Number(info.lastInsertRowid), ...row, data: safeParse(row.data) };
-    // GOL-423 deliberately projects only the canonical ticket event. Spec-tree
-    // mirrors are written below as separate rows and must never duplicate a
-    // recipient's passive delta; activity/lifecycle telemetry is excluded too.
-    if (ticket && cls === 'tracker' && derivedTopic === ticketTopic(ticket)) {
-      projectPassiveEvent({ event: out, ticket });
-    }
     const mirrorTopic = !topic && cls === 'tracker' ? specTreeTopicForTicket(ticket) : null;
     if (mirrorTopic && mirrorTopic !== derivedTopic) {
       const mirror = {
@@ -1030,9 +851,6 @@ WHERE state_changed_at IS NULL`).run();
         data: JSON.stringify({ ...safeParse(row.data), mirrored_from_seq: out.id, mirrored_from_topic: derivedTopic }),
       };
       stmts.insertEvent.run({ ...mirror, event_uuid: null });
-    }
-    if (cls === 'lifecycle') {
-      out.subscription_lifecycle = applySubscriptionLifecycle({ session_id: safeParse(row.data).session_id, type, actor });
     }
     return out;
   }
@@ -1109,289 +927,6 @@ WHERE state_changed_at IS NULL`).run();
     }
   }
 
-  // ---- GOL-423 passive next-turn deltas ----------------------------------
-  // These helpers intentionally live beside recordEvent: the event ledger is
-  // the one durable source from which we can project a deterministic, bounded
-  // recipient view without turning ordinary tracker activity into a push.
-  function passiveJson(value) {
-    return JSON.stringify(value ?? null);
-  }
-
-  function parsePassiveJson(raw, fallback = null) {
-    try { return JSON.parse(raw); } catch { return fallback; }
-  }
-
-  function passiveText(value) {
-    const text = value == null || value === '' ? 'none' : String(value);
-    return text.length > 160 ? `${text.slice(0, 157)}…` : text;
-  }
-
-  function passiveIsBlocked(phase) {
-    return phase === 'blocked' || phase === 'parked';
-  }
-
-  function resultForPhase(phase) {
-    if (!['built', 'verified', 'rejected', 'done'].includes(phase)) return null;
-    return {
-      built: phase === 'built',
-      verdict: phase === 'rejected' ? 'FAIL' : (phase === 'verified' ? 'PASS' : null),
-      terminal: phase === 'done' ? 'done' : null,
-    };
-  }
-
-  function mergePassiveResult(previous, next) {
-    const prev = previous && typeof previous === 'object' ? previous : {};
-    const value = {
-      built: !!prev.built || !!next?.built,
-      // FAIL wins if both verdicts were observed before a batch is consumed.
-      verdict: prev.verdict === 'FAIL' || next?.verdict === 'FAIL'
-        ? 'FAIL'
-        : (prev.verdict === 'PASS' || next?.verdict === 'PASS' ? 'PASS' : null),
-      terminal: prev.terminal === 'done' || next?.terminal === 'done' ? 'done' : null,
-    };
-    return value;
-  }
-
-  function passiveChangesForEvent(event) {
-    const data = event.data && typeof event.data === 'object' ? event.data : {};
-    const changes = [];
-    const phaseEvent = event.type === 'phase_change' || event.type === 'state_change' || event.type === 'auto_archived';
-    const fromPhase = data.from_phase ?? data.from ?? null;
-    const toPhase = data.to_phase ?? data.to ?? null;
-    if (phaseEvent && toPhase != null && fromPhase !== toPhase) {
-      changes.push({ category: 'phase', baseline: fromPhase, value: toPhase });
-      const fromBlocked = passiveIsBlocked(fromPhase);
-      const toBlocked = passiveIsBlocked(toPhase);
-      if (fromBlocked !== toBlocked) {
-        changes.push({ category: 'blocker', baseline: fromBlocked ? 'blocked' : 'clear', value: toBlocked ? 'blocked' : 'clear' });
-      }
-      const result = resultForPhase(toPhase);
-      if (result) changes.push({ category: 'result', baseline: { built: false, verdict: null, terminal: null }, value: result });
-    }
-    if (event.type === 'assigned') {
-      changes.push({ category: 'assignment', baseline: data.from ?? null, value: data.to ?? null });
-    } else if (event.type === 'dispatched' || event.type === 'dispatch_queued') {
-      changes.push({ category: 'assignment', baseline: data.from ?? null, value: data.to ?? data.session_id ?? null });
-    } else if (event.type === 'dispatch_revoked') {
-      changes.push({ category: 'assignment', baseline: data.previous_session_id ?? null, value: data.next_session_id ?? null });
-    }
-    return changes;
-  }
-
-  function passiveRecipientAllowed(sessionId, actor) {
-    const id = String(sessionId || '').trim();
-    if (!id || id === String(actor || '').trim()) return false;
-    if (id === 'human' || id === 'you' || id === 'unattributed' || id === 'system' || id.startsWith('human:')) return false;
-    return true;
-  }
-
-  function passiveRelationshipRecipients(ticket, actor) {
-    const contexts = [ticket];
-    const parent = ticket?.parent_id ? stmts.getTicket.get(ticket.parent_id) : null;
-    if (parent?.kind === 'spec') contexts.push(parent);
-    const candidates = new Set();
-    const topics = new Set();
-    for (const context of contexts) {
-      if (!context) continue;
-      candidates.add(context.assignee);
-      candidates.add(context.dispatched_to);
-      const envelope = db.prepare(`SELECT sender_id, reply_to_session_id, recipient_session_id, sender_session_id, target_session_id
-        FROM message_envelopes
-        WHERE ticket_id = ? AND status != 'superseded'
-        ORDER BY created_at DESC, id DESC LIMIT 1`).get(context.id);
-      if (envelope) {
-        for (const key of ['sender_id', 'reply_to_session_id', 'recipient_session_id', 'sender_session_id', 'target_session_id']) candidates.add(envelope[key]);
-      }
-      const topic = ticketTopic(context);
-      if (topic) topics.add(topic);
-      if (context.kind === 'spec') topics.add(`spec/${context.display_id || context.id}/tree`);
-    }
-    if (topics.size) {
-      const placeholders = [...topics].map(() => '?').join(', ');
-      for (const row of db.prepare(`SELECT session_id FROM subscriptions
-        WHERE status = 'active' AND manual = 1 AND topic IN (${placeholders})`).all(...topics)) {
-        candidates.add(row.session_id);
-      }
-    }
-    return [...candidates].filter((sessionId) => passiveRecipientAllowed(sessionId, actor));
-  }
-
-  function upsertPassiveSlot({ sessionId, ticketId, category, baseline, value, eventId, ts }) {
-    const existing = db.prepare(`SELECT * FROM passive_slots
-      WHERE session_id = ? AND ticket_id = ? AND category = ?`).get(sessionId, ticketId, category);
-    const firstBaseline = existing ? parsePassiveJson(existing.baseline) : baseline;
-    const nextValue = category === 'result'
-      ? mergePassiveResult(existing ? parsePassiveJson(existing.value, {}) : {}, value)
-      : value;
-    if (category !== 'result' && passiveJson(firstBaseline) === passiveJson(nextValue)) {
-      if (existing) db.prepare('DELETE FROM passive_slots WHERE session_id = ? AND ticket_id = ? AND category = ?').run(sessionId, ticketId, category);
-      return;
-    }
-    if (existing) {
-      db.prepare(`UPDATE passive_slots SET value = ?, last_event_id = ?, updated_at = ?
-        WHERE session_id = ? AND ticket_id = ? AND category = ?`).run(
-        passiveJson(nextValue), eventId, ts, sessionId, ticketId, category,
-      );
-      return;
-    }
-    db.prepare(`INSERT INTO passive_slots
-      (session_id, ticket_id, category, baseline, value, first_event_id, last_event_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-      sessionId, ticketId, category, passiveJson(firstBaseline), passiveJson(nextValue), eventId, eventId, ts, ts,
-    );
-  }
-
-  function projectPassiveEvent({ event, ticket }) {
-    const changes = passiveChangesForEvent(event);
-    if (!changes.length) return;
-    const recipients = passiveRelationshipRecipients(ticket, event.actor);
-    if (!recipients.length) return;
-    for (const sessionId of recipients) {
-      for (const change of changes) {
-        upsertPassiveSlot({
-          sessionId,
-          ticketId: ticket.id,
-          category: change.category,
-          baseline: change.baseline,
-          value: change.value,
-          eventId: event.id,
-          ts: event.created_at,
-        });
-      }
-    }
-  }
-
-  function passiveCategoryLine(category, baseline, value) {
-    if (category === 'result') {
-      const result = value && typeof value === 'object' ? value : {};
-      return `result: ${[result.built ? 'built' : null, result.verdict, result.terminal].filter(Boolean).join('; ') || 'updated'}`;
-    }
-    const from = passiveText(baseline);
-    const to = passiveText(value);
-    return from === to ? `${category}: ${to}` : `${category}: ${from} → ${to}`;
-  }
-
-  function buildPassiveBatch(sessionId) {
-    const rows = db.prepare(`SELECT s.*, t.display_id, t.seq
-      FROM passive_slots s JOIN tickets t ON t.id = s.ticket_id
-      WHERE s.session_id = ?
-      ORDER BY t.seq ASC, t.id ASC,
-        CASE s.category WHEN 'phase' THEN 1 WHEN 'assignment' THEN 2 WHEN 'blocker' THEN 3 WHEN 'result' THEN 4 ELSE 99 END ASC`).all(sessionId);
-    if (!rows.length) return null;
-    const byTicket = new Map();
-    for (const row of rows) {
-      const group = byTicket.get(row.ticket_id) ?? { ticket_id: row.ticket_id, label: row.display_id || row.ticket_id, slots: [] };
-      group.slots.push(row);
-      byTicket.set(row.ticket_id, group);
-    }
-    const groups = [];
-    let body = 'Since your last turn:';
-    for (const group of byTicket.values()) {
-      if (groups.length >= PASSIVE_GROUP_CAP) break;
-      const lines = [`- ${passiveText(group.label)}`];
-      for (const slot of group.slots) {
-        lines.push(`  ${passiveCategoryLine(slot.category, parsePassiveJson(slot.baseline), parsePassiveJson(slot.value))}`);
-      }
-      const candidate = `${body}\n${lines.join('\n')}`;
-      if (Buffer.byteLength(candidate, 'utf8') > PASSIVE_BYTE_CAP) break;
-      body = candidate;
-      groups.push(group);
-    }
-    if (!groups.length) return null;
-    const slots = groups.flatMap((group) => group.slots.map((slot) => ({
-      ticket_id: slot.ticket_id,
-      category: slot.category,
-      last_event_id: Number(slot.last_event_id),
-    })));
-    return {
-      id: crypto.randomUUID(),
-      body,
-      slots,
-      ticket_count: groups.length,
-      to_seq: Math.max(...slots.map((slot) => slot.last_event_id)),
-    };
-  }
-
-  function claimPassiveDelta(sessionId, { leaseMs = PASSIVE_LEASE_MS } = {}) {
-    if (!sessionId) throw new Error('claimPassiveDelta: session_id is required');
-    const ts = now();
-    const safeLeaseMs = Math.max(1_000, Math.min(120_000, Number(leaseMs) || PASSIVE_LEASE_MS));
-    return db.transaction(() => {
-      const cursor = db.prepare('SELECT * FROM passive_cursors WHERE session_id = ?').get(sessionId);
-      const leaseActive = cursor?.lease_id && Date.parse(cursor.lease_expires_at || '') > Date.parse(ts);
-      if (cursor?.pending_batch_id) {
-        if (leaseActive) return { busy: true, retry_at: cursor.lease_expires_at };
-        const lease_id = crypto.randomUUID();
-        const lease_expires_at = new Date(Date.parse(ts) + safeLeaseMs).toISOString();
-        db.prepare('UPDATE passive_cursors SET lease_id = ?, lease_expires_at = ?, updated_at = ? WHERE session_id = ?')
-          .run(lease_id, lease_expires_at, ts, sessionId);
-        const slots = parsePassiveJson(cursor.pending_slots, []);
-        return {
-          lease_id,
-          replayed: true,
-          batch: { id: cursor.pending_batch_id, body: cursor.pending_body, ticket_count: new Set(slots.map((slot) => slot.ticket_id)).size, to_seq: cursor.pending_to_seq },
-        };
-      }
-      const batch = buildPassiveBatch(sessionId);
-      if (!batch) {
-        if (!cursor) db.prepare('INSERT INTO passive_cursors (session_id, cursor_seq, updated_at) VALUES (?, 0, ?)').run(sessionId, ts);
-        return { batch: null };
-      }
-      const lease_id = crypto.randomUUID();
-      const lease_expires_at = new Date(Date.parse(ts) + safeLeaseMs).toISOString();
-      if (cursor) {
-        db.prepare(`UPDATE passive_cursors SET pending_batch_id = ?, pending_body = ?, pending_slots = ?, pending_to_seq = ?,
-          lease_id = ?, lease_expires_at = ?, pending_created_at = ?, updated_at = ? WHERE session_id = ?`).run(
-          batch.id, batch.body, passiveJson(batch.slots), batch.to_seq, lease_id, lease_expires_at, ts, ts, sessionId,
-        );
-      } else {
-        db.prepare(`INSERT INTO passive_cursors
-          (session_id, cursor_seq, pending_batch_id, pending_body, pending_slots, pending_to_seq, lease_id, lease_expires_at, pending_created_at, updated_at)
-          VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-          sessionId, batch.id, batch.body, passiveJson(batch.slots), batch.to_seq, lease_id, lease_expires_at, ts, ts,
-        );
-      }
-      return { lease_id, replayed: false, batch: { id: batch.id, body: batch.body, ticket_count: batch.ticket_count, to_seq: batch.to_seq } };
-    })();
-  }
-
-  function commitPassiveDelta(sessionId, leaseId) {
-    if (!sessionId || !leaseId) throw new Error('commitPassiveDelta: session_id and lease_id are required');
-    const ts = now();
-    return db.transaction(() => {
-      const cursor = db.prepare('SELECT * FROM passive_cursors WHERE session_id = ?').get(sessionId);
-      if (!cursor?.pending_batch_id) return { committed: false, missing: true };
-      if (cursor.lease_id !== leaseId) throw new Error('commitPassiveDelta: lease does not match current claim');
-      const slots = parsePassiveJson(cursor.pending_slots, []);
-      const remove = db.prepare(`DELETE FROM passive_slots
-        WHERE session_id = ? AND ticket_id = ? AND category = ? AND last_event_id <= ?`);
-      let removed = 0;
-      for (const slot of slots) {
-        removed += remove.run(sessionId, slot.ticket_id, slot.category, Number(slot.last_event_id) || 0).changes;
-      }
-      db.prepare(`UPDATE passive_cursors SET cursor_seq = MAX(cursor_seq, ?), pending_batch_id = NULL, pending_body = NULL,
-        pending_slots = NULL, pending_to_seq = NULL, lease_id = NULL, lease_expires_at = NULL, pending_created_at = NULL, updated_at = ?
-        WHERE session_id = ?`).run(Number(cursor.pending_to_seq) || 0, ts, sessionId);
-      return { committed: true, removed, cursor_seq: Math.max(Number(cursor.cursor_seq) || 0, Number(cursor.pending_to_seq) || 0) };
-    })();
-  }
-
-  function releasePassiveDelta(sessionId, leaseId) {
-    if (!sessionId || !leaseId) throw new Error('releasePassiveDelta: session_id and lease_id are required');
-    return db.transaction(() => {
-      // Compare-and-swap the lease in the UPDATE itself. A release that was
-      // delayed behind an expired/reclaimed cursor must never clear its newer
-      // lease after the caller's initial view became stale.
-      const info = db.prepare(`UPDATE passive_cursors
-        SET lease_id = NULL, lease_expires_at = NULL, updated_at = ?
-        WHERE session_id = ? AND lease_id = ? AND pending_batch_id IS NOT NULL`).run(now(), sessionId, leaseId);
-      if (info.changes) return { released: true };
-      const cursor = db.prepare('SELECT pending_batch_id FROM passive_cursors WHERE session_id = ?').get(sessionId);
-      if (!cursor?.pending_batch_id) return { released: false, missing: true };
-      throw new Error('releasePassiveDelta: lease does not match current claim');
-    })();
-  }
-
   // TKT-0266: resolve an assignee/dispatched_to value to its persisted durable
   // label from session_labels. Returns null for 'human' (the UI renders "You")
   // and for sessions with no persisted label (caller falls back to the live
@@ -1422,75 +957,6 @@ WHERE state_changed_at IS NULL`).run();
         AND type IN ('dispatch_queued', 'dispatched', 'dispatch_delivery_attempted')
       LIMIT 1
     `).get({ ticket_id: ticketId, delivery_event_id: deliveryEventId });
-  }
-
-  function hydrateSubscription(row) {
-    return row ? { ...row, classes_filter: parseClasses(row.classes_filter) } : null;
-  }
-
-  function subscribeSession({ session_id, topic, classes = null, cursor_seq = null, expires_at = null, reason = null } = {}) {
-    if (!session_id) throw new Error('subscribe: session_id is required');
-    if (!topic) throw new Error('subscribe: topic is required');
-    const ts = now();
-    const row = {
-      id: crypto.randomUUID(),
-      session_id,
-      topic,
-      classes_filter: serializeClasses(classes),
-      manual: reason == null || reason === 'manual' ? 1 : 0,
-      cursor_seq: cursor_seq == null ? maxEventSeqForTopic(topic) : Math.max(0, Number(cursor_seq) || 0),
-      created_at: ts,
-      expires_at: expires_at ?? null,
-      reason: reason ?? null,
-    };
-    stmts.upsertSubscription.run(row);
-    const existing = db.prepare('SELECT * FROM subscriptions WHERE session_id = ? AND topic = ?').get(session_id, topic);
-    return hydrateSubscription(existing);
-  }
-
-  function activeSubscriptionsBySession() {
-    const out = new Map();
-    for (const row of stmts.listActiveSubscriptions.all()) {
-      const sub = hydrateSubscription(row);
-      const arr = out.get(sub.session_id) ?? [];
-      arr.push(sub);
-      out.set(sub.session_id, arr);
-    }
-    return out;
-  }
-
-  function pendingEventsForSubscription(sub, cap = SUBSCRIPTION_BACKLOG_CAP) {
-    const classes = parseClasses(sub.classes_filter);
-    const placeholders = classes.map((_, i) => `@c${i}`).join(', ');
-    const params = { topic: sub.topic, cursor_seq: Number(sub.cursor_seq) || 0, limit: cap + 1 };
-    classes.forEach((cls, i) => { params[`c${i}`] = cls; });
-    const rows = db.prepare(`
-      SELECT * FROM events
-      WHERE topic = @topic
-        AND id > @cursor_seq
-        AND class IN (${placeholders})
-      ORDER BY id ASC
-      LIMIT @limit
-    `).all(params);
-    const maxRow = db.prepare(`
-      SELECT MAX(id) AS max_seq, COUNT(*) AS count
-      FROM events
-      WHERE topic = @topic
-        AND id > @cursor_seq
-        AND class IN (${placeholders})
-    `).get(params);
-    const count = Number(maxRow?.count ?? rows.length);
-    const maxSeq = Number(maxRow?.max_seq ?? sub.cursor_seq ?? 0);
-    const truncated = count > cap;
-    return {
-      subscription: sub,
-      events: rows.slice(0, cap).map((e) => ({ ...e, data: safeParse(e.data) })),
-      count,
-      truncated,
-      omitted: truncated ? Math.max(0, count - cap) : 0,
-      from_seq: Number(sub.cursor_seq) || 0,
-      to_seq: maxSeq,
-    };
   }
 
   function hasUnackedDismissal(ticketId, deliveryEventId) {
@@ -1880,59 +1346,10 @@ WHERE state_changed_at IS NULL`).run();
 
     ingestBusEvents,
 
-    claimPassiveDelta,
-
-    commitPassiveDelta,
-
-    releasePassiveDelta,
-
-    subscribe({ session_id, topic, classes = null, cursor_seq = null, expires_at = null, reason = null } = {}) {
-      return subscribeSession({ session_id, topic, classes, cursor_seq, expires_at, reason });
-    },
-
-    unsubscribe({ session_id, topic, reason = 'unsubscribe' } = {}) {
-      if (!session_id) throw new Error('unsubscribe: session_id is required');
-      if (!topic) throw new Error('unsubscribe: topic is required');
-      const info = stmts.suspendSubscription.run({ session_id, topic, reason });
-      return { ok: true, removed: info.changes, session_id, topic };
-    },
-
-    suspendSubscriptionsForSession(session_id, reason = 'session_end') {
-      if (!session_id) throw new Error('suspendSubscriptionsForSession: session_id is required');
-      const info = stmts.suspendSubscriptionsForSession.run({ session_id, reason });
-      return { ok: true, suspended: info.changes, session_id };
-    },
-
-    reactivateSubscriptionsForSession(session_id, reason = 'session_active') {
-      if (!session_id) throw new Error('reactivateSubscriptionsForSession: session_id is required');
-      const info = stmts.reactivateSubscriptionsForSession.run({ session_id, reason });
-      return { ok: true, reactivated: info.changes, session_id };
-    },
-
-    purgeSubscriptionsForSession(session_id) {
-      if (!session_id) throw new Error('purgeSubscriptionsForSession: session_id is required');
-      const info = stmts.deleteSubscriptionsForSession.run(session_id);
-      return { ok: true, purged: info.changes, session_id };
-    },
-
-    listSubscriptions({ session_id = null } = {}) {
-      return stmts.listSubscriptions.all({ session_id }).map(hydrateSubscription);
-    },
-
-    activeSubscriptionsBySession,
-
-    pendingEventsForSubscription,
-
-    advanceSubscriptionCursor(id, fromSeq, toSeq) {
-      const info = stmts.advanceSubscriptionCursor.run({ id, from_seq: fromSeq, to_seq: toSeq });
-      return { advanced: info.changes };
-    },
-
     busStats() {
       const rows_per_class = db.prepare('SELECT class, COUNT(*) AS count FROM events GROUP BY class ORDER BY class ASC').all();
       const oldest = db.prepare('SELECT MIN(id) AS oldest_seq, MIN(created_at) AS oldest_created_at FROM events').get();
-      const subscriptions_by_status = db.prepare('SELECT status, COUNT(*) AS count FROM subscriptions GROUP BY status ORDER BY status ASC').all();
-      return { rows_per_class, oldest_seq: oldest?.oldest_seq ?? null, oldest_created_at: oldest?.oldest_created_at ?? null, subscriptions_by_status };
+      return { rows_per_class, oldest_seq: oldest?.oldest_seq ?? null, oldest_created_at: oldest?.oldest_created_at ?? null };
     },
 
     pruneBus({ nowTs = now(), lifecycleDays = 30, activityDays = 7, activityProjectCap = 100000, actor = 'system:bus-prune' } = {}) {
@@ -2706,10 +2123,6 @@ WHERE state_changed_at IS NULL`).run();
     createControlEnvelope({ project_id = null, sender_id, recipient_session_id, kind = 'session_notify', payload = '' } = {}) {
       const allowedKinds = new Set([
         'session_notify',
-        'consult_request',
-        'consult_reply',
-        'consult_status',
-        'subscription_digest',
         'gate_resolution',
         'role_assign',
       ]);
@@ -2786,23 +2199,6 @@ WHERE state_changed_at IS NULL`).run();
         if (fact.changes) recordEvent({ ticket_id: existing.ticket_id, project_id: existing.project_id, type: 'dispatch_acknowledged', actor: target_session_id, data: { envelope_id: envelopeId, kind, summary } });
         return stmts.getEnvelope.get(envelopeId);
       })();
-    },
-
-    replyEnvelope(envelopeId, { target_session_id, kind = 'brief', text = '' } = {}) {
-      const existing = stmts.getEnvelope.get(envelopeId);
-      if (!existing) throw new Error(`replyEnvelope: envelope '${envelopeId}' not found`);
-      if (!target_session_id || existing.recipient_session_id !== target_session_id) throw new Error('replyEnvelope: target session does not match envelope');
-      const ts = now();
-      const child = { id: crypto.randomUUID(), root_id: existing.root_id || existing.id, parent_id: existing.id,
-        ticket_id: existing.ticket_id, project_id: existing.project_id, sender_id: target_session_id,
-        reply_to_session_id: target_session_id, recipient_session_id: existing.reply_to_session_id,
-        sender_session_id: target_session_id, target_session_id: existing.reply_to_session_id,
-        kind: 'reply', payload: JSON.stringify({ text: String(text), kind }), status: 'pending', ack_deadline_at: null, created_at: ts };
-      if (!child.recipient_session_id) throw new Error('replyEnvelope: envelope has no reply route');
-      stmts.insertEnvelope.run(child);
-      stmts.replyEnvelope.run({ id: envelopeId, target_session_id, reply_envelope_id: child.id, ts });
-      recordEvent({ ticket_id: existing.ticket_id, project_id: existing.project_id, type: 'dispatch_replied', actor: target_session_id, data: { envelope_id: envelopeId, reply_envelope_id: child.id, kind, text } });
-      return { envelope: stmts.getEnvelope.get(envelopeId), reply: stmts.getEnvelope.get(child.id) };
     },
 
     cancelQueuedDispatch(queueId, { actor = 'human' } = {}) {

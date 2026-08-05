@@ -17,7 +17,6 @@ import { isChannelDeliveryReady, readChannels } from './channels.js';
 import { applyGateVerdict, createGate } from './projects.js';
 import { listIdeas, createIdea, popIdea, readIdea } from './ideas.js';
 import { initDispatchDrainer } from './dispatch-queue.js';
-import { createSubscriptionReaper } from './subscription-reaper.js';
 import { registerSubstrateRoutes } from './substrate.js';
 import { teamAssists } from './team-assist.js';
 import { golemHome, dashboardJsonPath, journalDirFor, sessionsJsonPath } from '../../lib/golem-home.js';
@@ -148,20 +147,33 @@ function workspaceBlock(ticket) {
   ].join('\n');
 }
 
-function buildDispatchBrief(ticket, note, workspace, messageId = null) {
-  if (ticket?.kind === 'spec') return buildSpecBrief(ticket, note, workspace, messageId);
+function authenticatedReturnBlock(senderSessionId, ticketId) {
+  if (!senderSessionId) return [];
+  return [
+    '',
+    '## Return route',
+    `Authenticated delegating session_id: ${senderSessionId}`,
+    `Return notification: call session_notify({ to: "${senderSessionId}", ticket: "${ticketId}", text: "<outcome, durable report location, and the coordinator's next action>" }).`,
+    'This immutable session id came from the trusted handoff envelope. Do not route by a label/name, rediscover a peer, or choose a different lead.',
+  ];
+}
+
+function buildDispatchBrief(ticket, note, workspace, messageId = null, senderSessionId = null) {
+  if (ticket?.kind === 'spec') return buildSpecBrief(ticket, note, workspace, messageId, senderSessionId);
   const id = ticket.display_id || ticket.id;
-  let brief =
+  let brief = [
     `You've been assigned tracker ticket ${id}: "${ticket.title}" (project ${ticket.project_id}, kind ${ticket.kind}).\n\n` +
     `${note ? note + '\n\n' : ''}` +
     `Load it with the golem tracker tools (ticket_get ${id}) to read the full body, acceptance criteria, and comment thread, then pick it up: move it to in_progress, do the work, comment progress, and move it to review/done when complete. ` +
     `If you have blocking questions, create a question-kind ticket in this project assigned to 'human'.` +
-    (messageId ? `\n\nDispatch message_id: ${messageId}\nAcknowledge this dispatch first with ack({ kind: 'brief', summary: '<one sentence>', envelope_id: '${messageId}' }).` : '');
+    (messageId ? `\n\nDispatch message_id: ${messageId}\nAcknowledge this dispatch first with ack({ kind: 'brief', summary: '<one sentence>', envelope_id: '${messageId}' }).` : ''),
+    ...authenticatedReturnBlock(senderSessionId, id),
+  ].join('\n');
   if (workspace === 'worktree') brief += workspaceBlock(ticket);
   return brief;
 }
 
-function buildSpecBrief(ticket, note, workspace, messageId = null) {
+function buildSpecBrief(ticket, note, workspace, messageId = null, senderSessionId = null) {
   const id = ticket.display_id || ticket.id;
   const comments = (ticket.comments || []).filter((c) => c.dispatch_state === 'undispatched' || c.dispatch_state === 'dispatched');
   const children = ticket.children || [];
@@ -199,32 +211,10 @@ function buildSpecBrief(ticket, note, workspace, messageId = null) {
     `Load it with the golem tracker tools (ticket_get ${id}) to read the full body, comment thread, and links, then pick it up: move it to in_progress, do the work, comment progress, and move it to review/done when complete.`,
     `If you have blocking questions, create a question-kind ticket in this project assigned to 'human'.`,
     messageId ? `Dispatch message_id: ${messageId}\nAcknowledge this dispatch first with ack({ kind: 'brief', summary: '<one sentence>', envelope_id: '${messageId}' }).` : null,
+    ...authenticatedReturnBlock(senderSessionId, id),
   ];
   if (workspace === 'worktree') lines.push(workspaceBlock(ticket));
   return lines.filter((line) => line != null).join('\n');
-}
-
-// GOL-423: a passive batch only rides an already-actionable delivery. Claiming
-// or committing it must never make the dispatch/reply path fail; an unavailable
-// buffer simply leaves the normal brief untouched for this opportunity.
-function appendPassiveDelta(tracker, sessionId, brief) {
-  try {
-    const claim = tracker.claimPassiveDelta(sessionId);
-    if (!claim?.lease_id || !claim?.batch?.body) return { brief, claim: null };
-    return { brief: `${brief}\n\n${claim.batch.body}`, claim };
-  } catch {
-    return { brief, claim: null };
-  }
-}
-
-function settlePassiveDelta(tracker, sessionId, claim, delivered) {
-  if (!claim?.lease_id) return;
-  try {
-    if (delivered) tracker.commitPassiveDelta(sessionId, claim.lease_id);
-    else tracker.releasePassiveDelta(sessionId, claim.lease_id);
-  } catch {
-    // The durable batch remains replayable after an interrupted settlement.
-  }
 }
 
 function statusForHookEvent(type) {
@@ -888,15 +878,6 @@ async function main() {
     return sid && sid.trim() ? sid.trim() : null;
   }
 
-  function requirePassiveCaller(req, reply, sessionId) {
-    const caller = typeof req.headers['x-golem-caller-session'] === 'string'
-      ? req.headers['x-golem-caller-session'].trim()
-      : '';
-    if (caller && caller === sessionId) return true;
-    reply.code(403).send({ error: 'passive delta caller does not match intended session' });
-    return false;
-  }
-
   fastify.post('/api/brief', async (req, reply) => {
     const body = extractBody(req);
     const sessionId = extractSessionId(req);
@@ -912,25 +893,16 @@ async function main() {
     const b = req.body ?? {};
     if (!b.sender_id || !b.session_id) return reply.code(400).send({ error: 'notification sender_id and session_id are required' });
     try {
-      const passive = appendPassiveDelta(tracker, b.session_id, String(b.text || ''));
-      let passiveCommitted = false;
-      try {
-        const result = await deliverControlEnvelope(tracker, {
-          project_id: b.project_id ?? null,
-          sender_id: b.sender_id,
-          recipient_session_id: b.session_id,
-          kind: 'session_notify',
-          content: passive.brief,
-          metadata: { notification_text: String(b.text || '') },
-          legacy: { path: '/brief', body: passive.brief },
-        });
-        // Decide from the delivery opportunity before durable bookkeeping: a
-        // bookkeeping failure must not replay context that already reached it.
-        passiveCommitted = !!result.delivery?.ok;
-        return { ok: !!result.delivery?.ok, envelope_id: result.envelope.id, delivery: result.delivery };
-      } finally {
-        settlePassiveDelta(tracker, b.session_id, passive.claim, passiveCommitted);
-      }
+      const result = await deliverControlEnvelope(tracker, {
+        project_id: b.project_id ?? null,
+        sender_id: b.sender_id,
+        recipient_session_id: b.session_id,
+        kind: 'session_notify',
+        content: String(b.text || ''),
+        metadata: { notification_text: String(b.text || '') },
+        legacy: { path: '/brief', body: String(b.text || '') },
+      });
+      return { ok: !!result.delivery?.ok, envelope_id: result.envelope.id, delivery: result.delivery };
     } catch (err) {
       return reply.code(400).send({ error: String(err?.message ?? err) });
     }
@@ -938,7 +910,7 @@ async function main() {
   fastify.post('/api/messages/control', async (req, reply) => {
     const b = req.body ?? {};
     const legacy = b.legacy && typeof b.legacy === 'object' ? b.legacy : null;
-    const permittedLegacyPaths = new Set(['/brief', '/consult', '/consult/reply']);
+    const permittedLegacyPaths = new Set(['/brief']);
     const gatePath = typeof legacy?.path === 'string'
       && /^\/gates\/[A-Za-z0-9._-]+\/(approve|deny|cancel)$/.test(legacy.path);
     if (!legacy || (typeof legacy.path !== 'string') || (!permittedLegacyPaths.has(legacy.path) && !gatePath)) {
@@ -1375,14 +1347,6 @@ async function main() {
     return assignee && assignee !== 'human' ? assignee : null;
   }
 
-  // GOL-101: comment dispatch used to skip the channel push entirely when the
-  // target held an active `ticket/<display_id>` subscription, on the assumption
-  // that the subscription would carry the feedback. It does not: subscriptions
-  // are passive by design (`events.subscriptionDigestEnabled` defaults false)
-  // and never wake a session, so the short-circuit dropped every dispatch on
-  // the floor while reporting success. The brief push is the only delivery
-  // mechanism — always take it.
-
   function channelFailureDetail(channelResult) {
     return channelResult?.error || `status ${channelResult?.status ?? '?'}`;
   }
@@ -1711,7 +1675,7 @@ async function main() {
       const isIdle = !isPi && !!target && target.alive && target.status === 'idle' && hasChannel;
       if (!isIdle) {
         const envelope = tracker.createDispatchEnvelope(id, { session_id: sessionId, actor: senderId || 'human', sender_id: senderId });
-        const briefString = buildDispatchBrief(existing, note, workspace, envelope.id);
+        const briefString = buildDispatchBrief(existing, note, workspace, envelope.id, envelope.sender_session_id);
         tracker.setEnvelopePayload(envelope.id, { content: briefString, envelope_id: envelope.id, sender_id: envelope.sender_id, reply_to_session_id: envelope.reply_to_session_id, recipient_session_id: envelope.recipient_session_id });
         const queueRow = tracker.queueDispatch(id, { session_id: sessionId, note, workspace, payload: briefString, envelope_id: envelope.id, actor: senderId || 'human' });
         chat.record('system', 'info',
@@ -1737,41 +1701,31 @@ async function main() {
     //    (TKT-0245: extracted to buildDispatchBrief so the drainer produces
     //    byte-identical briefs.)
     const envelope = tracker.createDispatchEnvelope(id, { session_id: sessionId, actor: senderId || 'human', sender_id: senderId });
-    const baseBriefString = buildDispatchBrief(existing, note, workspace, envelope.id);
-    const passive = appendPassiveDelta(tracker, sessionId, baseBriefString);
-    const briefString = passive.brief;
+    const briefString = buildDispatchBrief(existing, note, workspace, envelope.id, envelope.sender_session_id);
     tracker.setEnvelopePayload(envelope.id, { content: briefString, envelope_id: envelope.id, sender_id: envelope.sender_id, reply_to_session_id: envelope.reply_to_session_id, recipient_session_id: envelope.recipient_session_id });
 
     // 3) Best-effort channel push — never fail the request on a push miss.
     let channelResult = null;
-    let passiveCommitted = false;
     try {
-      try {
-        channelResult = await pushBrief(briefString, sessionId, { envelope_id: envelope.id, sender_session_id: envelope.sender_session_id, target_session_id: sessionId });
-      } catch (err) {
-        channelResult = { ok: false, error: String(err?.message ?? err) };
-      }
-      // The push is the delivery opportunity. Set this before chat or tracker
-      // writes so their failures cannot release delivered passive context.
-      passiveCommitted = !!channelResult?.ok;
-      if (channelResult && channelResult.ok) {
-        chat.record('user', 'brief', briefString, { session_id: sessionId, delivery: channelResult.queued ? 'next_turn' : 'push' });
-      } else {
-        const detail = channelResult?.error || `status ${channelResult?.status ?? '?'}`;
-        chat.record('system', 'error', `dispatch of ${existing.display_id || id} to ${sessionId} — channel ${detail} (ticket assigned; session will pick it up on resume)`);
-      }
-      tracker.markDispatchDeliveryAttempted(id, {
-        session_id: sessionId,
-        actor: 'human',
-        error: channelResult && channelResult.ok ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),
-        envelope_id: envelope.id,
-      });
-      tracker.markEnvelopeDelivery(envelope.id, {
-        error: channelResult && channelResult.ok ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),
-      });
-    } finally {
-      settlePassiveDelta(tracker, sessionId, passive.claim, passiveCommitted);
+      channelResult = await pushBrief(briefString, sessionId, { envelope_id: envelope.id, sender_session_id: envelope.sender_session_id, target_session_id: sessionId });
+    } catch (err) {
+      channelResult = { ok: false, error: String(err?.message ?? err) };
     }
+    if (channelResult && channelResult.ok) {
+      chat.record('user', 'brief', briefString, { session_id: sessionId, delivery: channelResult.queued ? 'next_turn' : 'push' });
+    } else {
+      const detail = channelResult?.error || `status ${channelResult?.status ?? '?'}`;
+      chat.record('system', 'error', `dispatch of ${existing.display_id || id} to ${sessionId} — channel ${detail} (ticket assigned; session will pick it up on resume)`);
+    }
+    tracker.markDispatchDeliveryAttempted(id, {
+      session_id: sessionId,
+      actor: senderId || 'human',
+      error: channelResult && channelResult.ok ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),
+      envelope_id: envelope.id,
+    });
+    tracker.markEnvelopeDelivery(envelope.id, {
+      error: channelResult && channelResult.ok ? null : (channelResult?.error || `status ${channelResult?.status ?? '?'}`),
+    });
     if (channelResult && channelResult.ok) {
       tracker.markCommentDispatchesDeliveredForTicket(id, sessionId);
     }
@@ -1805,40 +1759,6 @@ async function main() {
       return reply.code(/not found/.test(msg) ? 404 : 403).send({ error: msg });
     }
   });
-  fastify.post('/api/message-envelopes/:id/reply', async (req, reply) => {
-    try {
-      const trustedCaller = typeof req.headers['x-golem-caller-session'] === 'string' ? req.headers['x-golem-caller-session'] : '';
-      const result = tracker.replyEnvelope(req.params.id, { ...(req.body ?? {}), target_session_id: trustedCaller });
-      const envelope = result.envelope;
-      // Route to the durable sender identity, never to an ambient/requesting
-      // session. Human-originated dispatches deliberately have no channel route.
-      let sender_delivery = null;
-      if (result.reply.recipient_session_id) {
-        const baseBrief = `Reply for dispatch ${envelope.ticket_id}: ${String(req.body?.text || '')}`;
-        const passive = appendPassiveDelta(tracker, result.reply.recipient_session_id, baseBrief);
-        let passiveCommitted = false;
-        try {
-          sender_delivery = await pushBrief(
-            passive.brief,
-            result.reply.recipient_session_id,
-            { envelope_id: result.reply.id, sender_session_id: trustedCaller || null, target_session_id: result.reply.recipient_session_id },
-          );
-          passiveCommitted = !!sender_delivery?.ok;
-          tracker.markEnvelopeDelivery(result.reply.id, { error: sender_delivery.ok ? null : (sender_delivery.error || `status ${sender_delivery.status}`) });
-        } finally {
-          settlePassiveDelta(tracker, result.reply.recipient_session_id, passive.claim, passiveCommitted);
-        }
-      }
-      const ticket = envelope?.ticket_id ? tracker.getTicket(envelope.ticket_id) : null;
-      if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
-      broadcastWS({ type: 'communication-health-updated' });
-      return { ok: true, envelope, reply: result.reply, sender_delivery };
-    } catch (err) {
-      const msg = String(err?.message ?? err);
-      return reply.code(/not found/.test(msg) ? 404 : 403).send({ error: msg });
-    }
-  });
-
   // TKT-0245: GET /api/dispatch-queue — list pending queued dispatches,
   // optionally filtered by ?session_id=. Used by the UI (and the smoke) to
   // discover + cancel pending rows for a session.
@@ -1874,88 +1794,6 @@ async function main() {
       if (/not found|not pending/i.test(msg)) return reply.code(404).send({ error: msg });
       return reply.code(400).send({ error: msg });
     }
-  });
-
-  // GOL-423: local Claude Code hooks and actionable envelope paths share this
-  // lease protocol. A busy lease deliberately returns 409 rather than creating
-  // a second batch; callers fail open and retry on their next real turn.
-  fastify.post('/api/passive-deltas/:sessionId/claim', async (req, reply) => {
-    const sessionId = String(req.params.sessionId || '').trim();
-    if (!requirePassiveCaller(req, reply, sessionId)) return;
-    try {
-      const result = tracker.claimPassiveDelta(sessionId);
-      if (result.busy) return reply.code(409).send({ ok: false, error: 'passive delta is already claimed', retry_at: result.retry_at });
-      return { ok: true, ...result };
-    } catch (err) {
-      return reply.code(400).send({ error: String(err?.message ?? err) });
-    }
-  });
-
-  fastify.post('/api/passive-deltas/:sessionId/commit', async (req, reply) => {
-    const sessionId = String(req.params.sessionId || '').trim();
-    if (!requirePassiveCaller(req, reply, sessionId)) return;
-    try {
-      return { ok: true, ...tracker.commitPassiveDelta(sessionId, req.body?.lease_id) };
-    } catch (err) {
-      return reply.code(/lease/.test(String(err?.message ?? err)) ? 409 : 400).send({ error: String(err?.message ?? err) });
-    }
-  });
-
-  fastify.post('/api/passive-deltas/:sessionId/release', async (req, reply) => {
-    const sessionId = String(req.params.sessionId || '').trim();
-    if (!requirePassiveCaller(req, reply, sessionId)) return;
-    try {
-      return { ok: true, ...tracker.releasePassiveDelta(sessionId, req.body?.lease_id) };
-    } catch (err) {
-      return reply.code(/lease/.test(String(err?.message ?? err)) ? 409 : 400).send({ error: String(err?.message ?? err) });
-    }
-  });
-
-  fastify.post('/api/bus/subscribe', async (req, reply) => {
-    const b = req.body ?? {};
-    try {
-      const sub = tracker.subscribe({
-        session_id: b.session_id,
-        topic: b.topic,
-        classes: b.classes,
-        cursor_seq: b.cursor_seq,
-        expires_at: b.expires_at,
-        reason: b.reason || 'manual',
-      });
-      broadcastWS({ type: 'bus-subscriptions-updated' });
-      return reply.code(201).send(sub);
-    } catch (err) {
-      return reply.code(400).send({ error: String(err?.message ?? err) });
-    }
-  });
-
-  fastify.post('/api/bus/unsubscribe', async (req, reply) => {
-    const b = req.body ?? {};
-    try {
-      const result = tracker.unsubscribe({ session_id: b.session_id, topic: b.topic, reason: b.reason || 'manual' });
-      broadcastWS({ type: 'bus-subscriptions-updated' });
-      return result;
-    } catch (err) {
-      return reply.code(400).send({ error: String(err?.message ?? err) });
-    }
-  });
-
-  fastify.get('/api/bus/subscriptions', async (req) => {
-    const sessionId = typeof req.query?.session_id === 'string' ? req.query.session_id : null;
-    return tracker.listSubscriptions({ session_id: sessionId });
-  });
-
-  // GOL-101: run the subscription reap on demand. `force: true` skips the
-  // grace window, which is how already-stale rows get cleared without waiting
-  // out a full grace period after a restart; `session_id` narrows it to one
-  // owner so a forced reap need not be a fleet-wide action.
-  fastify.post('/api/bus/subscriptions/reap', async (req) => {
-    const sessionId = typeof req.body?.session_id === 'string' && req.body.session_id.trim()
-      ? req.body.session_id.trim()
-      : null;
-    const result = subscriptionReaper.sweep({ force: req.body?.force === true, sessionId });
-    if (result.suspended > 0) broadcastWS({ type: 'bus-subscriptions-updated' });
-    return result;
   });
 
   fastify.get('/api/bus/stats', async () => tracker.busStats());
@@ -2031,6 +1869,15 @@ async function main() {
   // delivery readiness: healthy busy/waiting targets are queueable. `project`
   // omitted → all dispatchable sessions (each annotated with its project_id).
   fastify.get('/api/sessions/dispatchable', async (req) => {
+    // This endpoint is the just-in-time roster authority used immediately
+    // before every new handoff or session notification. Do not make callers
+    // wait for the normal three-second background refresh to discover a peer
+    // that was created after their session started.
+    try {
+      await state.refreshNativeSessions();
+    } catch (err) {
+      console.error('[dispatchable] synchronous session refresh failed:', err);
+    }
     const wanted = req.query?.project != null ? resolveProjectId(req.query.project) : null;
     let channels = [];
     try {
@@ -2437,17 +2284,10 @@ async function main() {
     state,
     chat,
     pushBrief,
-    pushControlEnvelope,
     buildDispatchBrief,
     broadcastWS,
     listChannels,
   });
-
-  // GOL-101: reap subscriptions whose owning session is gone. Same 3s-refreshed
-  // roster the drainer reads; own 5-minute tick with a 60-minute grace. Stopped
-  // in shutdown().
-  const subscriptionReaper = createSubscriptionReaper({ tracker, state, log: fastify.log });
-  subscriptionReaper.start();
 
   // Pin to the canonical dashboard URL http://dashboard.golem.localhost:7420.
   // If 7420 is busy, check whether the occupying process is the previous
@@ -2548,7 +2388,6 @@ async function main() {
     fastify.log.info('shutting down…');
     try {
       dispatchDrainer.close();
-      subscriptionReaper.stop();
       chat.stop();
       await state.close();
       tracker.close();

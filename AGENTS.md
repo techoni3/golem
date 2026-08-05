@@ -66,8 +66,8 @@ See `substrate/README.md` for the channel-consumer launch (`golemc`) and the ful
 Cross-session routing is **opt-in** — see `golem:live-team`. The default is a
 single session owning the whole loop (`golem:standalone`), using in-process
 agents for recon and both review gates. Specs and work items are phase-backed in
-the tracker, and long waits use bus subscriptions (`ticket/<display_id>` or
-`spec/<display_id>/tree`) instead of polling.
+the tracker. Live handoffs use authenticated `session_notify`; the event ledger
+is durable audit history, not a wake-up or subscription path.
 
 When a live team **is** enabled: the dashboard preselects a lead as the
 Assignee/dispatch target and any explicit target overrides it; the team API

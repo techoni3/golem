@@ -386,8 +386,9 @@
 </head>
 <body data-viewport="desktop">
   <header class="hero">
-    <div class="eyebrow">Golem · Settings IA decision lab</div>
+    <div class="eyebrow">Golem · Settings IA decision lab · historical prototype</div>
     <h1>Turn substrate into a <span>managed instruction system.</span></h1>
+    <div class="notice" role="note">This interactive concept predates GOL-132. Its embedded sample data is illustrative, not the current coordination contract. Active handoffs use exact-ID <code>session_notify</code>; the event ledger is audit-only.</div>
     <p class="decision">Choose how Settings should organize canonical authoring, generated harness projections, connection health, and deliberate sync—without hiding where markdown lives or what “Sync” will actually change.</p>
     <div class="contract" aria-label="Comparison invariants">
       <span>canonical source · substrate/</span><span>markdown edit + preview</span><span>global + project scope</span><span>generated targets read-only</span><span>Claude · Codex · OpenCode · Pi</span><span>preview before sync</span>
@@ -473,10 +474,10 @@
       var markdown = {
         agents: "# Golem — root workspace\n\nThis directory is the golem root: the source repo for the plugin, dashboard, tracker, and CLI.\n\n## Work choreography\n\nFeature-sized work defaults through a live `manager` role session when available.\n\n## Parallel work = worktrees\n\nUse a worktree only when a dispatch explicitly names one.",
         managing: "---\nname: managing\ndescription: Intake, routing, verification, reconcile, and closure.\n---\n\n# Managing\n\nOwn the control loop. Ground requests, route work, and require mechanical evidence before closure.\n\n> Managers coordinate implementation; they do not silently become the builder.",
-        tracker: "---\nname: tracker\ndescription: Tracker phases, streams, subscriptions, and dispatch contracts.\n---\n\n# Tracker\n\nThe tracker is the source of truth. Use durable subscriptions for long waits and explicit phase evidence for transitions.",
+        tracker: "---\nname: tracker\ndescription: Tracker phases, streams, active handoffs, and dispatch contracts.\n---\n\n# Tracker\n\nThe tracker is the source of truth. Use durable reports, exact-ID session_notify, and explicit phase evidence for transitions.",
         worker: "# Worker\n\nImplement one bounded ticket, preserve unrelated changes, verify the journey, and return a four-part closing brief.",
         manager: "# Role: manager\n\nMission: Own intake, routing, verification, reconcile, and closure.\n\nLeads with: `golem:managing`, `golem:tracker`, `golem:verify-done`.\n\nBoundaries: never skip dispatchability checks; never advance without evidence.",
-        hooks: "{\n  \"SessionStart\": [\"session-register.sh\", \"tracker-context.sh\"],\n  \"PostToolUse\": [\"journal-route.sh\"],\n  \"Stop\": [\"notify.sh\", \"passive-delta.sh\"]\n}",
+        hooks: "{\n  \"SessionStart\": [\"session-register.sh\", \"tracker-context.sh\"],\n  \"PostToolUse\": [\"journal-route.sh\"],\n  \"Stop\": [\"notify.sh\"]\n}",
         mcp: "{\n  \"mcpServers\": {\n    \"golem\": { \"command\": \"node\", \"args\": [\"mcp/channel/index.js\"] }\n  }\n}"
       };
 

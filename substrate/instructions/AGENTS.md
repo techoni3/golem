@@ -10,7 +10,7 @@ of work is still a question.
 | Inbound | Authority |
 |---------|-----------|
 | `role_assign` | **none** — identity only. `ack` once, then stop and wait. Do not `ticket_list`, hunt work, explore, plan, build, or invent a next step. Work starts only on a user brief or `ticket_dispatch`. |
-| `consult` / `consult_reply` | advisory only — never the asker's repo, tickets, or execution |
+| inbound consultation message | advisory only — never the asker's repo, tickets, or execution |
 | `ticket_dispatch` | act, scoped to that ticket — `question` → answer · `spec` → design · `decision` → recommend |
 | declared autonomous loop, still in force | act through phases **until revoked**; do not pause for trivial approval → `golem:night-shift` |
 | `interrupt` | authority unchanged — fold it in and continue |
@@ -116,8 +116,8 @@ missed*. Run both. A `BLOCKER` finding stops the gate; it is resolved by fixing 
 **only by the human with the reason recorded on the ticket** — never silently, and never by the
 session that produced or routed the work.
 
-Answering a peer consult is a **mode, not a role**: any role may enter it on an inbound `consult`,
-loads `golem:consulting`, and returns advice only.
+Answering a peer consult is a **mode, not a role**: any role may enter it on an inbound
+`CONSULT REQUEST — ADVISORY ONLY` brief, loads `golem:consulting`, and returns advice only.
 
 ## Skill index (situational must-loads)
 
@@ -127,7 +127,7 @@ matching to fire. Role skills are in § Roles; these are the situational ones.
 | Load | When |
 |------|------|
 | `golem:code-survey` | Surveying a codebase to ground a design — feasibility, blast radius, touch points, greenfield vs brownfield. A **builder** loads this during a lead's grounding phase, before any slice exists. Not for web or external research; that is `golem:exploring`. |
-| `golem:tracker` | Any tracker read or write beyond a glance — picking up a dispatched ticket, decomposing into sub-tickets, transitioning phase, raising a blocking question. Load *before* the first mutation, not after a rejection. Not for deciding whether work is ticket-worthy; that is § The Loop step 3. |
+| `golem:tracker` | Any tracker read or write beyond a glance — picking up a dispatched ticket, decomposing into sub-tickets, transitioning phase, raising a blocking question. Load *before* the first mutation, not after a rejection. Tracker events are audit/lifecycle history, not a wake-up or subscription mechanism. Not for deciding whether work is ticket-worthy; that is § The Loop step 3. |
 | `golem:verify-done` | Before moving anything to `built`, `verifying`, `verified`, or `done`, and before believing any "done" / "tests pass" / "PR is open" claim — including your own from earlier in the session. If you are about to type a terminal claim, you needed this already. |
 | `golem:reviewing` | Judging a spec before decomposition, or a diff before close — whether you wear the role or are spawning fresh eyes. Also load it to *interpret* a verdict you were handed. Not for confirming evidence is real; that is `golem:verify-done`. |
 | `golem:git-conventions` | Opening a branch, writing a commit message, opening a PR, or acting on an explicit worktree directive. Also before any history rewrite. Not for plain reads — `git status`, `log`, `diff` need nothing. |
@@ -137,7 +137,7 @@ matching to fire. Role skills are in § Roles; these are the situational ones.
 | `golem:skill-authoring` | Writing or editing a skill, `SKILL.md`, subagent, persona, role card, **or this instructions file** — and before asking an agent to write one. Also load it to decide whether a rule belongs in prose at all rather than a hook or a lint check. |
 | `golem:docs-maintenance` | Repo structure changed — module added, moved, or deleted; entry point, invariant, or data flow changed. Same session as the change, not "later". Also for auditing docs against code. |
 | `golem:journaling` | Appending a project milestone at spec closure or a wave boundary. Hooks already journal every tool call, so this is for milestones only — do not load it to log routine progress. |
-| `golem:consulting` | Answering a peer's inbound `consult` — independent judgment, advisory only, never their tickets or repo. *Asking* for a consult is a live-session action and lives in `golem:live-team`. |
+| `golem:consulting` | Answering an inbound `CONSULT REQUEST — ADVISORY ONLY` brief — independent judgment, advisory only, never the asker's tickets or repo. Use `session_notify` to return to the authenticated sender. |
 | `golem:night-shift` | The human is stepping away and has granted autonomous execution of already-planned work. Covers what that authority does and does not grant. Not a licence to find new work — see the authority table. |
 | `golem:live-team` | **Only** when the human explicitly asks for a live-session hand-off or names a target session. Cross-session delegation is off by default; everything about peers, dispatch, and reconcile is quarantined there. |
 | `golem:compare-design-options` | Evaluating several UI/UX directions — themes, layouts, component behaviour, navigation, density, empty and error states — before committing to one. Builds a standalone decision lab. Not for choosing between technical implementations. |
@@ -175,9 +175,11 @@ reviewer that inherits the context in which the work was produced is the same ey
 process — spawn it fresh, or the gate is decorative.
 
 Cross-session delegation is **off by default**. Do not discover peers or call
-`sessions_dispatchable`, `ticket_dispatch`, `consult_request`, or `session_notify` unless the human
-explicitly asks for a live-session hand-off or names the target session — then load
-`golem:live-team`. An inbound `ticket_dispatch` is always valid work for the receiving session.
+`sessions_dispatchable`, `ticket_dispatch`, or `session_notify` unless the human explicitly asks
+for a live-session hand-off or names the target session — then load `golem:live-team`. An inbound
+`ticket_dispatch` is always valid work for the receiving session. In an authorized live-team flow,
+call `sessions_dispatchable` immediately before every new recipient or fallback decision; route
+notifications only to the exact immutable `session_id` captured from that discovery or handoff.
 
 ## Response Contract
 

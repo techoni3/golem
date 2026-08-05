@@ -15,14 +15,16 @@
 ### `dashboard/server/` — `index.js`, `tracker-db.js`, `phase-machine.js`, `comment-dispatch.js`
 - Agents use HTTP/MCP, never direct DB writes. Phase is truth; `state` derives from it.
 - `planning → planned` needs children **and** waves — a single child still needs `wave: 1`.
-- Dispatch is durable-first, rolled back to `undispatched` on an undelivered push. The reaper
-  suspends subscriptions for sessions off the roster.
+- Dispatch is durable-first, rolled back to `undispatched` on an undelivered push. Active
+  `session_notify` envelopes wake exact session ids; the event ledger is audit-only.
 ### `lib/session-role.js`
 - `BUILTIN_ROLES` is the only place role names are hardcoded. `ROLE_MIGRATIONS` retires a name by
   mapping it forward; the registry self-prunes on next `readRoleRegistry()`.
 ### `substrate/hooks/tracker-context.sh`
-- Builds the SessionStart payload — role card, roster, LSP, recently-closed pointers, recent
-  commits. All derived; fail-open per field; per-field and aggregate caps. Also via `project_context`.
+- Builds the SessionStart payload — role card, LSP, recently-closed pointers, recent commits. All
+  derived; fail-open per field; per-field and aggregate caps. It intentionally carries no live
+  roster; `sessions_dispatchable` is the just-in-time source before a handoff. Also via
+  `project_context`.
 - Its node block sits inside a command substitution: a bare dollar-paren pair or a lone apostrophe
   in a JS comment breaks it, with an EOF error pointing at the last line.
 

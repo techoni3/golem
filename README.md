@@ -13,7 +13,7 @@ connect live sessions to it.
 
 - Manager, planner, builder, and explorer roles, plus focused subagents where
   the harness supports them.
-- Tickets, dependencies, phases, comments, gates, and event subscriptions.
+- Tickets, dependencies, phases, comments, gates, and an auditable event ledger.
 - Addressed work delivery with honest per-harness delivery semantics.
 - Cross-session consultation and optional ntfy notifications.
 - Central local journals and registries with no required per-project footprint.
@@ -229,7 +229,7 @@ a tamper warning.
 
 Mutable state normally lives in `~/.golem/`:
 
-- `tracker.db` — tickets, comments, phases, events, and subscriptions.
+- `tracker.db` — tickets, comments, phases, events, and active message envelopes.
 - `projects.json` and `sessions.json` — discovered projects and session roster.
 - `journals/<project_id>/hook.jsonl` — lifecycle and tool-event history.
 - `renders/` and `substrate.lock` — generated harness output and drift metadata.

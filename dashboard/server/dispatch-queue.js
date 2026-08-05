@@ -41,15 +41,10 @@ export function initDispatchDrainer({
   state,
   chat,
   pushBrief,
-  pushControlEnvelope,
   buildDispatchBrief,
   broadcastWS,
   listChannels,
 }) {
-  // Older isolated drainer journeys provide only pushBrief. Production passes
-  // the typed control adapter; the fallback preserves their legacy generic
-  // subscription behavior without altering CC/OC delivery.
-  const deliverControl = pushControlEnvelope ?? (({ content }, sessionId) => pushBrief(content, sessionId));
   // session_id → ts(ms) of the most recent successful delivery. Used by the
   // cooldown check so we never deliver twice to a session within 60s.
   const lastDeliveredAt = new Map();
@@ -145,30 +140,6 @@ export function initDispatchDrainer({
     return changed;
   }
 
-  function eventLine(ev) {
-    const label = ev.topic || ev.ticket_id || ev.project_id || 'event';
-    const actor = ev.actor_label || ev.actor || ev.actor_kind || 'unknown';
-    return `- #${ev.id} ${label} ${ev.type} by ${actor} (${ev.created_at})`;
-  }
-
-  function digestBrief(sessionId, digests) {
-    const fromSeq = Math.min(...digests.map((d) => d.from_seq + 1));
-    const toSeq = Math.max(...digests.map((d) => d.to_seq));
-    const lines = [
-      `Event subscription digest (${fromSeq}-${toSeq})`,
-      '',
-      `Subscriber: ${sessionId}`,
-      '',
-    ];
-    for (const d of digests) {
-      lines.push(`## ${d.subscription.topic}`);
-      if (d.truncated) lines.push(`Backlog truncated: ${d.omitted} event(s) elided. Re-read the ticket/spec for full state.`);
-      for (const ev of d.events) lines.push(eventLine(ev));
-      lines.push('');
-    }
-    return lines.join('\n').trim();
-  }
-
   async function tick() {
     if (stopped) return;
     let pending;
@@ -178,7 +149,6 @@ export function initDispatchDrainer({
         const step = (name, fn) => { if (!settled[name]) { fn(); settled[name] = true; ack.value.settled = settled; checkpointPiPickupAck(ack.file, ack.value); } };
         if (meta.queue_id) step('queue', () => tracker.markQueueDelivered(meta.queue_id, { envelope_id: meta.envelope_id || null }));
         if (meta.envelope_id) step('envelope', () => tracker.markEnvelopeDelivery(meta.envelope_id, { error: null }));
-        if (meta.passive_lease_id) step('passive', () => tracker.commitPassiveDelta(meta.session_id, meta.passive_lease_id));
         if (meta.ticket_id) step('comments', () => tracker.markCommentDispatchesDeliveredForTicket(meta.ticket_id, meta.session_id));
         completePiPickupAck(ack);
       } catch (err) { console.error('[dispatch-drainer] Pi pickup settlement failed:', err); }
@@ -334,55 +304,38 @@ export function initDispatchDrainer({
           try { await pushBrief(`Dispatch revoked for ${assigned.display_id || assigned.id}: ${assigned.title || ''}\n\nReason: queued dispatch delivered to another session. Stand down unless you receive a new dispatch.`, assigned.revoked_session_id); } catch { /* best-effort */ }
         }
         const envelope = row.envelope_id ? tracker.getEnvelope(row.envelope_id) : null;
-        let briefString = buildDispatchBrief(ticket, row.note, row.workspace || undefined, row.envelope_id || null);
-        try {
-          const payload = envelope?.payload ? JSON.parse(envelope.payload) : null;
-          if (typeof payload?.content === 'string') briefString = payload.content;
-        } catch { /* legacy rows retain reconstructed brief behavior */ }
-        let passive = null;
-        if (row.envelope_id) {
+        // Rebuild delegated briefs from the durable envelope identity. Older
+        // queue rows may contain a pre-GOL-132 payload without the authenticated
+        // return block; the immutable sender id must still be rendered before
+        // that row is delivered. Human-originated rows may retain their stored
+        // payload because they have no peer return route to reconstruct.
+        let briefString = buildDispatchBrief(ticket, row.note, row.workspace || undefined, row.envelope_id || null, envelope?.sender_session_id || null);
+        if (!envelope?.sender_session_id) {
           try {
-            const claim = tracker.claimPassiveDelta(sessionId);
-            if (claim?.lease_id && claim?.batch?.body) {
-              passive = claim;
-              briefString = `${briefString}\n\n${claim.batch.body}`;
-            }
-          } catch { /* passive delivery must not hold a queued dispatch */ }
+            const payload = envelope?.payload ? JSON.parse(envelope.payload) : null;
+            if (typeof payload?.content === 'string') briefString = payload.content;
+          } catch { /* legacy rows retain reconstructed brief behavior */ }
         }
-
         let pushResult;
         try {
           pushResult = isPi
-            ? enqueuePiBrief(sessionId, briefString, { queue_id: row.id, envelope_id: row.envelope_id || null, ticket_id: ticket.id, session_id: sessionId, passive_lease_id: passive?.lease_id || null }, { messageId: row.id })
-            : await pushBrief(briefString, sessionId, { envelope_id: row.envelope_id || undefined, sender_session_id: null, target_session_id: sessionId });
+            ? enqueuePiBrief(sessionId, briefString, { queue_id: row.id, envelope_id: row.envelope_id || null, ticket_id: ticket.id, session_id: sessionId }, { messageId: row.id })
+            : await pushBrief(briefString, sessionId, { envelope_id: row.envelope_id || undefined, sender_session_id: envelope?.sender_session_id || null, target_session_id: sessionId });
         } catch (err) {
           pushResult = { ok: false, error: String(err?.message ?? err) };
         }
 
-        // Set the outcome from the delivery opportunity before queue/envelope
-        // writes: their failure must not replay context that already landed.
-        const passiveCommitted = !!pushResult?.ok;
-        try {
-          if (pushResult.queued) {
-            assigned = tracker.setDispatched(ticket.id, { session_id: sessionId, actor: 'golem-drainer' });
-            if (assigned.revoked_session_id) {
-              try { await pushBrief(`Dispatch revoked for ${assigned.display_id || assigned.id}: ${assigned.title || ''}\n\nReason: queued dispatch delivered to another session. Stand down unless you receive a new dispatch.`, assigned.revoked_session_id); } catch { /* best-effort */ }
-            }
-            tracker.markQueueNextTurn(row.id, { ownerToken: publishingOwner });
+        if (pushResult.queued) {
+          assigned = tracker.setDispatched(ticket.id, { session_id: sessionId, actor: 'golem-drainer' });
+          if (assigned.revoked_session_id) {
+            try { await pushBrief(`Dispatch revoked for ${assigned.display_id || assigned.id}: ${assigned.title || ''}\n\nReason: queued dispatch delivered to another session. Stand down unless you receive a new dispatch.`, assigned.revoked_session_id); } catch { /* best-effort */ }
           }
-          else if (isPi) tracker.releaseQueuePublishing(row.id, { ownerToken: publishingOwner });
-          else {
-            tracker.markQueueDelivered(row.id, { error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}`, envelope_id: row.envelope_id || null });
-            if (row.envelope_id) tracker.markEnvelopeDelivery(row.envelope_id, { error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}` });
-          }
-        } finally {
-          if (passive?.lease_id) {
-            try {
-              if (passiveCommitted && !pushResult.queued) tracker.commitPassiveDelta(sessionId, passive.lease_id);
-              else if (pushResult.queued) { /* pickup ack settles this lease */ }
-              else tracker.releasePassiveDelta(sessionId, passive.lease_id);
-            } catch { /* a failed settlement leaves the batch replayable */ }
-          }
+          tracker.markQueueNextTurn(row.id, { ownerToken: publishingOwner });
+        } else if (isPi) {
+          tracker.releaseQueuePublishing(row.id, { ownerToken: publishingOwner });
+        } else {
+          tracker.markQueueDelivered(row.id, { error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}`, envelope_id: row.envelope_id || null });
+          if (row.envelope_id) tracker.markEnvelopeDelivery(row.envelope_id, { error: pushResult.ok ? null : pushResult.error || `status ${pushResult.status}` });
         }
         if (pushResult && pushResult.ok && !pushResult.queued) {
           tracker.markCommentDispatchesDeliveredForTicket(ticket.id, sessionId);
@@ -413,71 +366,6 @@ export function initDispatchDrainer({
         if (isPi) piPublishing.delete(row.id);
       }
     }
-    let digestChanged = false;
-    try {
-      const subsBySession = tracker.activeSubscriptionsBySession();
-      const subscriptionDigestEnabled = loadConfig()?.events?.subscriptionDigestEnabled === true;
-      for (const [sessionId, subs] of subsBySession) {
-        if (!subscriptionDigestEnabled) {
-          // GOL-424: preserve event history but quietly advance each durable
-          // cursor through eligible classes. Re-enabling legacy digests later
-          // therefore cannot replay the disabled-era backlog into a model turn.
-          for (const sub of subs) {
-            const pending = tracker.pendingEventsForSubscription(sub);
-            if (pending.to_seq > pending.from_seq) {
-              tracker.advanceSubscriptionCursor(sub.id, pending.from_seq, pending.to_seq);
-              digestChanged = true;
-            }
-          }
-          continue;
-        }
-        const s = byId.get(sessionId);
-        if (!s || !s.alive || !channelIds.has(sessionId)) continue;
-        const last = lastDeliveredAt.get(sessionId);
-        if (last != null && now - last < COOLDOWN_MS) continue;
-        if (s.status !== 'idle') continue;
-        const digests = subs
-          .map((sub) => tracker.pendingEventsForSubscription(sub))
-          .filter((d) => d.to_seq > d.from_seq && (d.events.length > 0 || d.truncated));
-        if (!digests.length) continue;
-        const brief = digestBrief(sessionId, digests);
-        const envelope = tracker.createControlEnvelope({
-          sender_id: 'golem-drainer',
-          recipient_session_id: sessionId,
-          kind: 'subscription_digest',
-          payload: {
-            content: brief,
-            topics: digests.map((digest) => digest.subscription.topic),
-            from_seq: Math.min(...digests.map((digest) => digest.from_seq + 1)),
-            to_seq: Math.max(...digests.map((digest) => digest.to_seq)),
-          },
-        });
-        let pushResult;
-        try {
-          pushResult = await deliverControl({
-            envelope,
-            content: brief,
-            legacy: { path: '/brief', body: brief },
-          }, sessionId);
-        } catch (err) {
-          pushResult = { ok: false, error: String(err?.message ?? err) };
-        }
-        tracker.markEnvelopeDelivery(envelope.id, {
-          error: pushResult?.ok ? null : (pushResult?.error || `status ${pushResult?.status ?? '?'}`),
-        });
-        if (!pushResult?.ok) {
-          const detail = pushResult?.error || `status ${pushResult?.status ?? '?'}`;
-          chat.record('system', 'error', `subscription digest to ${sessionId} failed — channel ${detail}`, { session_id: sessionId });
-          continue;
-        }
-        chat.record('user', 'brief', brief, { session_id: sessionId });
-        for (const d of digests) tracker.advanceSubscriptionCursor(d.subscription.id, d.from_seq, d.to_seq);
-        lastDeliveredAt.set(sessionId, Date.now());
-        digestChanged = true;
-      }
-    } catch (err) {
-      console.error('[dispatch-drainer] subscription digest failed:', err);
-    }
     // TKT-0286: one signal per tick if any queue row transitioned (deliver,
     // expire, or a drainer-internal cancel) — queue-aware surfaces refetch.
     if (queueChanged) {
@@ -486,7 +374,6 @@ export function initDispatchDrainer({
       // drawer listens for this signal and refetches once; it never polls.
       broadcastWS({ type: 'communication-health-updated' });
     }
-    if (digestChanged) broadcastWS({ type: 'bus-subscriptions-updated' });
   }
 
   timer = setInterval(() => {
