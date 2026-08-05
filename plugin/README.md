@@ -30,14 +30,11 @@ sub-agents, and the golem channel MCP.
 - **Notification** → pushes the message to your ntfy topic so you get a phone
   ping on needs-input / idle. No-op when no topic is configured.
 - **Agents** → `worker`, `reviewer`, `researcher` (all `model: opus`).
-- **Channel MCP** (`golem`) → `ack` / `respond` tools + an SSE `/events` stream
-  the dashboard subscribes to, **plus the tracker tools** and the
-  **session-to-session consult tools** (see below).
-- **Consult tools** (on the same `golem` MCP) → `consult_request`, `consult_reply`,
-  `consult_status`. One live session asks ANOTHER for a fresh pair of eyes on a
-  hard problem (a second opinion, not delegation) over the channel transport —
-  fully async, the asker never blocks. Answering lives in `golem:consulting`;
-  asking is a live-session action in `golem:live-team`. See the section below.
+- **Channel MCP** (`golem`) → `ack` / `respond`, tracker tools, and one active
+  `session_notify` primitive for delegated returns and advisory consultation. The
+  `/events` SSE stream is dashboard chat telemetry, not a coordination bus.
+  `respond` is user-facing chat only; it is not a correlated delegated-return
+  route.
 - **Tracker tools** (on the same `golem` MCP) → live sessions read/write the
   cross-project ticket tracker — the source of truth for work, **replacing
   PLAN.md**. These are thin HTTP clients of the dashboard's REST API (the
@@ -46,7 +43,7 @@ sub-agents, and the golem channel MCP.
   `ticket_get`, `ticket_create`, `ticket_update`, `ticket_comment`,
   `ticket_dispatch`, `stream_create`, `stream_list`, `sessions_dispatchable`.
   Plus `project_context`, which is not a tracker tool — it re-renders the session's
-  ambient context (role card, roster, recently-closed pointers, recent commits) by
+  ambient context (role card, recently-closed pointers, recent commits) by
   shelling out to the same `tracker-context.sh` the SessionStart hook runs.
   Identity is injected — `ticket_list mine:true` finds your work, and `project`
   defaults to your current project. See the `golem:tracker` skill.
@@ -124,47 +121,22 @@ and the launch flag remain host-owned, and an HTTP 202 confirms only that the
 target channel transport accepted the notification. OpenCode uses its separate
 `promptAsync` bridge and is unaffected by these Claude authentication rules.
 
-## Session-to-session consult
+## Active session messaging
 
-A live session can ask **another** live session for a *fresh pair of eyes* on a
-hard problem — a second opinion, not delegation, and not a subagent (the peer
-keeps its own context, often on a different backend: claude or an ollama model
-like glm-5.2). It rides the same channel transport as dispatch:
+Cross-session coordination is deliberately simple and harness-agnostic. In an authorized live-team
+flow, call `sessions_dispatchable` immediately before choosing a new recipient; never rely on the
+boot-time roster. Send to the exact immutable `session_id`, never a label or `/rename` name.
 
-1. The asker calls **`consult_request({ to, question, context })`** — `to` is the
-   peer's `/rename` name (resolved via `claude agents --json` ∩ live channels) or
-   a `session_id`. The tool first requires a delivery-ready target, POSTs to the
-   peer's channel **`/consult`** route, and returns a `consult_id` after that
-   transport accepts it. This is not confirmation of a model turn. **The asker
-   never blocks.**
-2. The consult arrives at the peer as `<channel kind="consult" consult_id=…
-   from_session=…>`. Its `golem:consulting` skill investigates independently
-   (code, web), forms a proposal, and calls **`consult_reply({ to_session,
-   consult_id, text })`**.
-3. The reply POSTs to the asker's channel **`/consult/reply`** route and pushes in
-   as `<channel kind="consult_reply" consult_id=…>` — like a subagent result
-   landing. The asker (`golem:live-team`) weighs it as advice and keeps the
-   final say. `consult_status` nudges a pending consult without blocking.
+For delegated work, the receiver writes the durable report/comment first and then sends a concise
+`session_notify` containing the outcome, report location, and next action. The authenticated sender
+context in every dispatch brief gives the receiver a rename-safe return route. Human-originated
+dispatches have no peer return target.
 
-Both routes are gated by `X-Sender: consult` (in the default allow-list).
-Requirements:
-
-- **v4.3.0+ on both ends** — the `/consult` routes and `consult_*` tools ship in
-  this version. A running session needs `claude plugin update golem@golem-workspace`
-  then `/reload-plugins` to pick them up; new sessions get them automatically.
-- **Both ends must be channel _consumers_.** A plain `claude` session can *send* a
-  consult (it has the tools) but will **not receive** the pushed `consult` request
-  or `consult_reply` — Claude Code silently drops channel notifications unless the
-  session was launched as a consumer (`claude --dangerously-load-development-channels
-  plugin:golem@golem-workspace`, i.e. the `golemc` alias). So the consultant must be a
-  consumer to get the request, **and the asker must be a consumer to get the reply.**
-- **Claude Code consumers must use supported Anthropic authentication.** Known
-  Bedrock, Vertex, Foundry, and custom `ANTHROPIC_BASE_URL` sessions are marked
-  non-deliverable with remediation instead of returning a false consult success.
-  OpenCode peers remain consultable through their prompt bridge.
-
-Consult traffic also surfaces in the dashboard chat (a short audit marker on each
-session's lane).
+Consultation uses the same primitive. Send `CONSULT REQUEST — ADVISORY ONLY` with a unique reference,
+question, and context. The provider answers with `CONSULT REPLY — ADVISORY ONLY` (or
+`CONSULT STATUS — ADVISORY ONLY`) over `session_notify`, echoing the reference. Consultation is
+advisory only; it does not create a ticket or edit the asker\'s work. Large reports belong in the
+tracker, with the notification acting as the wake-up and pointer.
 
 ## Project identity
 
@@ -181,7 +153,7 @@ resolved by walking up from the session cwd to the nearest `.git` or `CLAUDE.md`
 | `XDG_CONFIG_HOME` | base for the `golem/` config/registry dir | `~/.config` |
 | `GOLEM_CHANNEL_PORT` | channel HTTP port (`0` = random free port) | `7421` |
 | `GOLEM_CEO_SESSION_ID` | explicit override for the id the channel registers under | unset → derived **logical** id (see below) |
-| `GOLEM_CHANNEL_ALLOWED_SENDERS` | comma list of accepted `X-Sender` values | `dashboard,cli,curl,consult` |
+| `GOLEM_CHANNEL_ALLOWED_SENDERS` | comma list of accepted `X-Sender` values | `dashboard,cli,curl` |
 | `GOLEM_CLI` | hook override for the `golem` CLI path used by sync-on-register tests | `command -v golem` |
 
 `CLAUDE_PLUGIN_ROOT` is provided by Claude Code and resolves hook/MCP paths.
@@ -204,7 +176,7 @@ plugin/
   skills/reviewing/SKILL.md    # golem:reviewing — spec + code review gates, binding verdict
   skills/consulting/SKILL.md   # golem:consulting — answer a peer's consult, advisory only
   skills/live-team/SKILL.md    # golem:live-team — opt-in cross-session dispatch and consults
-  mcp/channel/index.js         # golem channel MCP — ack/respond + tracker + consult tools, /consult routes
+  mcp/channel/index.js         # golem channel MCP — ack/respond + tracker + active session_notify
   mcp/channel/tracker-client.js# HTTP client of the dashboard tracker REST API
   mcp/channel/node_modules/    # bundled deps (@modelcontextprotocol/sdk)
   .mcp.json                    # wires the channel MCP via ${CLAUDE_PLUGIN_ROOT}

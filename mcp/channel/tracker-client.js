@@ -364,20 +364,3 @@ export function acknowledgeEnvelope(id, body) {
   if (!id) throw new Error('acknowledgeEnvelope: id is required');
   return request('POST', `/api/message-envelopes/${encodeURIComponent(id)}/ack`, { body, caller_session_id: body?.target_session_id });
 }
-
-export function replyEnvelope(id, body) {
-  if (!id) throw new Error('replyEnvelope: id is required');
-  return request('POST', `/api/message-envelopes/${encodeURIComponent(id)}/reply`, { body, caller_session_id: body?.target_session_id });
-}
-
-export function subscribeBus({ session_id, topic, classes } = {}) {
-  return request('POST', '/api/bus/subscribe', { body: { session_id, topic, classes } });
-}
-
-export function unsubscribeBus({ session_id, topic } = {}) {
-  return request('POST', '/api/bus/unsubscribe', { body: { session_id, topic } });
-}
-
-export function listBusSubscriptions(session_id) {
-  return request('GET', '/api/bus/subscriptions', { params: session_id ? { session_id } : {} });
-}

@@ -289,7 +289,6 @@ try {
   const priorGolemHome = process.env.GOLEM_HOME;
   process.env.GOLEM_HOME = path.join(temp, 'home');
   fs.mkdirSync(process.env.GOLEM_HOME, { recursive: true });
-  fs.writeFileSync(path.join(process.env.GOLEM_HOME, 'config.json'), JSON.stringify({ events: { subscriptionDigestEnabled: true } }));
   const tracker = openTrackerDb(path.join(temp, 'tracker.db'));
   try {
     const { readEndpointLeases, releaseEndpointLeases, renewEndpointLease, upsertSessionFact } = await import(pathToFileURL(path.resolve('lib/session-facts.js')).href + `?typed=${Date.now()}`);
@@ -807,90 +806,6 @@ try {
     assert.equal(tracker.raw().prepare('SELECT status FROM dispatch_queue WHERE id = ?').get(recoveryQueued.id).status, 'delivered', 'recovery-required work leaves the shared queue instead of replaying');
     assert.equal(tracker.getEnvelope(recoveryQueued.envelope_id).delivery_state, 'recovery_required');
 
-    const digestSession = 'typed-subscription';
-    const digestTopic = 'test/typed-subscription';
-    const subscription = tracker.subscribe({ session_id: digestSession, topic: digestTopic, cursor_seq: 0 });
-    const digestEvent = tracker.recordEvent({ topic: digestTopic, type: 'typed_subscription_event', actor: 'test' });
-    const digestDrainer = initDispatchDrainer({
-      tracker,
-      state: { nativeSessions: () => [{ session_id: digestSession, harness: 'pi', alive: true, status: 'idle' }] },
-      chat: { record: () => {} },
-      pushBrief: async () => { throw new Error('typed digest uses the durable control adapter'); },
-      pushControlEnvelope: async ({ envelope, metadata }) => ({
-        ok: false, status: 503, typed_worker: true, typed_attempt_id: metadata.attempt_id,
-        body: JSON.stringify({ accepted: true, envelope_id: envelope.id, attempt_id: metadata.attempt_id, accepted_attempt_id: metadata.attempt_id, delivery_state: 'recovery_required' }),
-      }),
-      buildDispatchBrief: (ticket) => ticket.title,
-      broadcastWS: () => {},
-      listChannels: async () => [{ session_id: digestSession, kind: 'typed-worker', delivery_ready: true }],
-    });
-    await digestDrainer.tick();
-    assert.equal(tracker.listSubscriptions({ session_id: digestSession })[0].cursor_seq, digestEvent.id, 'a correlated accepted non-2xx digest advances its durable cursor instead of replaying');
-    assert.equal(tracker.getEnvelope(tracker.raw().prepare("SELECT id FROM message_envelopes WHERE kind = 'subscription_digest' ORDER BY created_at DESC LIMIT 1").get().id).delivery_state, 'recovery_required');
-
-    // A lost digest response is the same ambiguous typed boundary as a
-    // notification/control/reply. The production drainer retains its original
-    // envelope and cursor range, then duplicate-retries it once without a
-    // second native start or a newly minted digest envelope.
-    const lostDigestSession = 'typed-subscription-lost-response';
-    const lostDigestTopic = 'test/typed-subscription-lost-response';
-    const lostDigestSubscription = tracker.subscribe({ session_id: lostDigestSession, topic: lostDigestTopic, cursor_seq: 0 });
-    const lostDigestEvent = tracker.recordEvent({ topic: lostDigestTopic, type: 'typed_subscription_lost_response', actor: 'test' });
-    const lostDigestInbox = normalizeTypedWorkerInbox();
-    let lostDigestStarts = 0;
-    let lostDigestRequests = 0;
-    let loseDigestResponse = true;
-    const lostDigestDrainer = initDispatchDrainer({
-      tracker,
-      state: { nativeSessions: () => [{ session_id: lostDigestSession, harness: 'pi', alive: true, status: 'idle' }] },
-      chat: { record: () => {} },
-      pushBrief: async () => { throw new Error('typed digest uses control delivery'); },
-      pushControlEnvelope: async ({ envelope: digestEnvelope, content, metadata }) => {
-        lostDigestRequests += 1;
-        const typed = {
-          protocol_version: TYPED_WORKER_PROTOCOL_VERSION,
-          content,
-          ...metadata,
-          target_session_id: lostDigestSession,
-        };
-        const claim = claimTypedDelivery(lostDigestInbox, typed);
-        if (!claim.duplicate) {
-          lostDigestStarts += 1;
-          acceptTypedDelivery(lostDigestInbox, digestEnvelope.id, { turnId: 'lost-digest-native-turn' });
-          settleTypedDelivery(lostDigestInbox, digestEnvelope.id, { turnId: 'lost-digest-native-turn' });
-        }
-        if (loseDigestResponse) {
-          loseDigestResponse = false;
-          return { ok: false, status: 0, typed_worker: true, typed_attempt_id: metadata.attempt_id, error: 'response lost after native acceptance' };
-        }
-        return {
-          ok: true,
-          status: 200,
-          typed_worker: true,
-          body: JSON.stringify(typedDeliveryResult(getTypedDelivery(lostDigestInbox, digestEnvelope.id), {
-            duplicate: true,
-            attemptId: metadata.attempt_id,
-          })),
-        };
-      },
-      buildDispatchBrief: (ticket) => ticket.title,
-      broadcastWS: () => {},
-      listChannels: async () => [{ session_id: lostDigestSession, kind: 'typed-worker', delivery_ready: true }],
-    });
-    await lostDigestDrainer.tick();
-    const lostDigestRetry = tracker.raw().prepare(`SELECT r.* FROM envelope_delivery_retries r
-      JOIN message_envelopes e ON e.id = r.envelope_id
-      WHERE e.target_session_id = ? AND e.kind = 'subscription_digest' ORDER BY r.rowid DESC LIMIT 1`).get(lostDigestSession);
-    assert.equal(lostDigestRetry?.status, 'pending', 'lost digest response retains the original shared envelope retry');
-    assert.equal(tracker.listSubscriptions({ session_id: lostDigestSession })[0].cursor_seq, 0, 'lost response does not advance the cursor before correlated retry reconciliation');
-    assert.equal(lostDigestStarts, 1, 'the initial lost digest response starts one native turn');
-    await lostDigestDrainer.tick();
-    assert.equal(tracker.raw().prepare('SELECT status FROM envelope_delivery_retries WHERE envelope_id = ?').get(lostDigestRetry.envelope_id).status, 'delivered', 'duplicate digest retry finalizes its owned retry row');
-    assert.equal(tracker.listSubscriptions({ session_id: lostDigestSession })[0].cursor_seq, lostDigestEvent.id, 'duplicate digest retry advances the original cursor range exactly once');
-    assert.equal(lostDigestRequests, 2, 'lost digest response is retried once with the original envelope');
-    assert.equal(lostDigestStarts, 1, 'lost digest retry does not create a second native start');
-    lostDigestDrainer.close();
-
     // Retry draining shares the queue's one-opportunity/cooldown rule. Two
     // already-pending controls for one idle worker must not both become native
     // turns merely because the first settles quickly in the same poll.
@@ -905,6 +820,10 @@ try {
     });
     tracker.enqueueEnvelopeRetry(retryFifoOne.id, { session_id: retryFifoSession, content: 'retry fifo one', require_typed: true });
     tracker.enqueueEnvelopeRetry(retryFifoTwo.id, { session_id: retryFifoSession, content: 'retry fifo two', require_typed: true });
+    tracker.raw().prepare('UPDATE envelope_delivery_retries SET created_at = ? WHERE envelope_id = ?')
+      .run('2026-01-01T00:00:00.000Z', retryFifoOne.id);
+    tracker.raw().prepare('UPDATE envelope_delivery_retries SET created_at = ? WHERE envelope_id = ?')
+      .run('2026-01-01T00:00:00.001Z', retryFifoTwo.id);
     let retryFifoClock = 10_000;
     const retryFifoPublishes = [];
     const retryFifoDrainer = initDispatchDrainer({
@@ -937,9 +856,9 @@ try {
     assert.deepEqual(retryFifoPublishes, [retryFifoOne.id, retryFifoTwo.id], 'the next FIFO retry publishes after the shared cooldown');
     retryFifoDrainer.close();
 
-    // Queue rows and retry rows are one per-session delivery stream. A newer
-    // control retry must not overtake an older queued ticket merely because
-    // retries are stored in a separate table.
+    // Queue rows and retry rows are one per-session delivery stream. When
+    // timestamps collide at SQLite's millisecond precision, their immutable
+    // ids provide the stable total-order tie-break across both tables.
     const crossSourceSession = 'typed-cross-source-fifo';
     const crossSourceTicket = tracker.createTicket({ project_id: 'typed-test-000000', title: 'older queued ticket', created_by: 'test' });
     const olderQueue = tracker.queueDispatch(crossSourceTicket.id, {
@@ -955,7 +874,11 @@ try {
     tracker.raw().prepare('UPDATE dispatch_queue SET created_at = ? WHERE id = ?')
       .run('2026-01-01T00:00:00.000Z', olderQueue.id);
     tracker.raw().prepare('UPDATE envelope_delivery_retries SET created_at = ? WHERE envelope_id = ?')
-      .run('2026-01-01T00:00:00.001Z', newerRetryEnvelope.id);
+      .run('2026-01-01T00:00:00.000Z', newerRetryEnvelope.id);
+    const queueWinsTie = olderQueue.id.localeCompare(newerRetryEnvelope.id) < 0;
+    const tieOrder = queueWinsTie
+      ? [olderQueue.envelope_id, newerRetryEnvelope.id]
+      : [newerRetryEnvelope.id, olderQueue.envelope_id];
     let crossSourceClock = 20_000;
     const crossSourcePublishes = [];
     const terminalResult = (id, metadata) => ({
@@ -983,12 +906,62 @@ try {
       nowMs: () => crossSourceClock,
     });
     await crossSourceDrainer.tick();
-    assert.deepEqual(crossSourcePublishes, [olderQueue.envelope_id], 'the older queue wins the first cross-source native opportunity');
-    assert.equal(tracker.getEnvelopeRetry(newerRetryEnvelope.id).status, 'pending', 'the newer retry remains pending behind the older queue');
+    assert.deepEqual(crossSourcePublishes, tieOrder.slice(0, 1), 'equal-timestamp cross-source work uses the immutable-id total-order tie-break');
+    if (queueWinsTie) assert.equal(tracker.getEnvelopeRetry(newerRetryEnvelope.id).status, 'pending', 'the retry remains pending behind the tie-winning queue row');
+    else assert.equal(tracker.raw().prepare('SELECT status FROM dispatch_queue WHERE id = ?').get(olderQueue.id).status, 'pending', 'the queue remains pending behind the tie-winning retry');
     crossSourceClock += 60_001;
     await crossSourceDrainer.tick();
-    assert.deepEqual(crossSourcePublishes, [olderQueue.envelope_id, newerRetryEnvelope.id], 'the newer retry publishes only after the older queue and cooldown');
+    assert.deepEqual(crossSourcePublishes, tieOrder, 'the second equal-timestamp source publishes only after the total-order head and cooldown');
     crossSourceDrainer.close();
+
+    // A retry can discover only at publication time that the endpoint already
+    // settled that envelope. That duplicate response is bookkeeping, not a
+    // native opportunity: the next queued ticket must still run in this tick.
+    const settlementOnlySession = 'typed-settlement-only-retry';
+    const settlementOnlyEnvelope = tracker.createControlEnvelope({
+      project_id: 'typed-test-000000', sender_id: 'test', recipient_session_id: settlementOnlySession,
+      kind: 'session_notify', payload: { content: 'settle old retry' },
+    });
+    tracker.enqueueEnvelopeRetry(settlementOnlyEnvelope.id, {
+      session_id: settlementOnlySession, content: 'settle old retry', require_typed: true,
+    });
+    const afterSettlementTicket = tracker.createTicket({ project_id: 'typed-test-000000', title: 'native work after settlement', created_by: 'test' });
+    const afterSettlementQueue = tracker.queueDispatch(afterSettlementTicket.id, {
+      session_id: settlementOnlySession, payload: 'native work after settlement', actor: 'test',
+    });
+    tracker.raw().prepare('UPDATE envelope_delivery_retries SET created_at = ? WHERE envelope_id = ?')
+      .run('2026-01-01T00:00:00.000Z', settlementOnlyEnvelope.id);
+    tracker.raw().prepare('UPDATE dispatch_queue SET created_at = ? WHERE id = ?')
+      .run('2026-01-01T00:00:00.001Z', afterSettlementQueue.id);
+    const settlementOnlyPublishes = [];
+    const settlementOnlyDrainer = initDispatchDrainer({
+      tracker,
+      state: { nativeSessions: () => [{ session_id: settlementOnlySession, harness: 'pi', alive: true, status: 'idle' }] },
+      chat: { record: () => {} },
+      pushControlEnvelope: async ({ envelope: controlEnvelope, metadata }) => {
+        settlementOnlyPublishes.push(`settle:${controlEnvelope.id}`);
+        return {
+          ok: true, status: 200, typed_worker: true, typed_attempt_id: metadata.attempt_id,
+          body: JSON.stringify({
+            accepted: true, duplicate: true, envelope_id: controlEnvelope.id,
+            attempt_id: metadata.attempt_id, accepted_attempt_id: 'original-attempt', delivery_state: 'settled',
+          }),
+        };
+      },
+      pushBrief: async (_content, _sessionId, metadata) => {
+        settlementOnlyPublishes.push(`native:${metadata.envelope_id}`);
+        return terminalResult(metadata.envelope_id, metadata);
+      },
+      buildDispatchBrief: (queuedTicket) => queuedTicket.title,
+      broadcastWS: () => {},
+      listChannels: async () => [{ session_id: settlementOnlySession, kind: 'typed-worker', delivery_ready: true }],
+    });
+    await settlementOnlyDrainer.tick();
+    assert.deepEqual(settlementOnlyPublishes, [
+      `settle:${settlementOnlyEnvelope.id}`,
+      `native:${afterSettlementQueue.envelope_id}`,
+    ], 'duplicate terminal settlement leaves the same tick native opportunity available to the next queue row');
+    settlementOnlyDrainer.close();
 
     const settledSession = 'typed-fast-settle';
     const settledTicket = tracker.createTicket({ project_id: 'typed-test-000000', title: 'typed fast settle', created_by: 'test' });

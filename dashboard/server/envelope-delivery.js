@@ -18,39 +18,15 @@ function storedSettlement(retry) {
   try { return JSON.parse(retry?.settlement_json || 'null'); } catch { return null; }
 }
 
-// A passive batch may be held by the synchronous route which rendered it, or
-// by a restarted drainer after that route died. Commit the exact stored batch
-// when possible; a different active lease is a safe hold, never permission to
-// settle another delivery's context.
-function settlePassive(tracker, passive) {
-  if (!passive?.session_id || !passive?.batch_id) return true;
-  if (passive.lease_id) {
-    try {
-      const result = tracker.commitPassiveDelta(passive.session_id, passive.lease_id);
-      if (result?.committed || result?.missing) return true;
-    } catch { /* reclaim below after an interrupted owner */ }
-  }
-  const claim = tracker.claimPassiveDelta(passive.session_id);
-  if (claim?.busy) return false;
-  if (!claim?.batch) return true;
-  if (claim.batch.id !== passive.batch_id) {
-    if (claim.lease_id) tracker.releasePassiveDelta(passive.session_id, claim.lease_id);
-    return true; // the stored batch was already committed; this is newer work.
-  }
-  tracker.commitPassiveDelta(passive.session_id, claim.lease_id);
-  return true;
-}
-
 // Settlement is deliberately completed while the retry remains owned and
-// publishing. Each operation is idempotent (exact passive batch, pending-only
-// comment state, CAS subscription cursor, guarded queue/root update), so a
-// process death between operations leaves the same original envelope available
+// publishing. Each operation is idempotent (exact pending-only comment state
+// and guarded queue/root update), so a process death between operations leaves
+// the same original envelope available
 // for restart settlement rather than minting another native turn.
 export function settleDurableEnvelope({ tracker, envelope, retry, retryOwnerToken } = {}) {
   if (!tracker || !envelope?.id || !retryOwnerToken) throw new Error('settleDurableEnvelope requires tracker, envelope, and retry owner');
   const settlement = storedSettlement(retry);
   try {
-    if (!settlePassive(tracker, settlement?.passive)) return false;
     const comments = settlement?.comment_dispatch;
     const commentDispatchIds = Array.isArray(comments?.dispatch_ids)
       ? comments.dispatch_ids.filter((id) => typeof id === 'string' && id)
@@ -59,9 +35,6 @@ export function settleDurableEnvelope({ tracker, envelope, retry, retryOwnerToke
       // Exact immutable ids only. An older retry must never sweep a newer
       // comment batch merely because both address the same ticket/session.
       tracker.markCommentDispatchesDelivered(commentDispatchIds);
-    }
-    for (const cursor of Array.isArray(settlement?.subscription_cursors) ? settlement.subscription_cursors : []) {
-      if (cursor?.id != null) tracker.advanceSubscriptionCursor(cursor.id, cursor.from_seq, cursor.to_seq);
     }
     const queue = settlement?.queue;
     if (queue?.id) {
@@ -164,7 +137,7 @@ export async function publishDurableEnvelope({
   }
 
   // Native acceptance is not completion. Keep the original retry and every
-  // stored settlement owner replayable, but do not apply queue/passive/comment
+  // stored settlement owner replayable, but do not apply queue/comment
   // settlement until the adapter reports a correlated terminal lifecycle.
   // A terminal response can still arrive synchronously for a duplicate whose
   // native turn completed before the original HTTP response was observed.

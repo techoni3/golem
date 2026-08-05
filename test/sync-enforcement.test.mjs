@@ -489,113 +489,32 @@ async function assertNativeSessionDiscovery() {
   }
 }
 
-async function assertTrackerContextFiltersStaleRoster() {
-  const fixture = path.join(tmp, 'tracker-context-roster');
+async function assertTrackerContextOmitsBootRoster() {
+  const fixture = path.join(tmp, 'tracker-context-no-roster');
   const home = path.join(fixture, 'home');
   const project = path.join(fixture, 'project');
   fs.mkdirSync(project, { recursive: true });
-  write(path.join(project, 'CLAUDE.md'), '# tracker context fixture\n');
-  const liveProcess = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
-  assert.ok(liveProcess.pid, 'live channel fixture process spawned');
-  try {
-    write(path.join(home, 'projects.json'), JSON.stringify({ projects: [{ id: 'fixture-project', path: project }] }));
-    write(path.join(home, 'sessions.json'), JSON.stringify({
-      sessions: [
-        { session_id: 'stale-session', project_id: 'fixture-project', project_path: project, hook_ppid: 2147483647, status: 'idle', name: 'stale-peer' },
-        { session_id: 'live-session', project_id: 'fixture-project', project_path: project, hook_ppid: 2147483647, status: 'idle', name: 'live-peer' },
-      ],
-    }));
-    write(path.join(home, 'channels.json'), JSON.stringify({
-      channels: [{ session_id: 'live-session', pid: liveProcess.pid }],
-    }));
-    const hook = spawnSync('bash', [path.join(repo, 'substrate', 'hooks', 'tracker-context.sh')], {
-      cwd: project,
-      env: { ...process.env, GOLEM_HOME: home, HOME: home },
-      input: JSON.stringify({ cwd: project }),
-      encoding: 'utf8',
-    });
-    assert.equal(hook.status, 0, `tracker context hook should be fail-open: ${hook.stderr}`);
-    assert.match(hook.stdout, /live-peer/, 'live channel appears in Team roster');
-    assert.doesNotMatch(hook.stdout, /stale-peer/, 'dead registry row is excluded from Team roster');
-    console.log('tracker context roster filters stale sessions');
+  write(path.join(project, 'CLAUDE.md'), '# tracker context fixture\\n');
+  write(path.join(home, 'projects.json'), JSON.stringify({ projects: [{ id: 'fixture-project', path: project }] }));
+  write(path.join(home, 'sessions.json'), JSON.stringify({ sessions: [
+    { session_id: 'late-peer', project_id: 'fixture-project', project_path: project, status: 'idle', name: 'late-peer' },
+  ] }));
+  write(path.join(home, 'channels.json'), JSON.stringify({ channels: [{ session_id: 'late-peer', pid: process.pid }] }));
+  const runHook = (extraEnv = {}) => spawnSync('bash', [path.join(repo, 'substrate', 'hooks', 'tracker-context.sh')], {
+    cwd: project, env: { ...process.env, GOLEM_HOME: home, HOME: home, ...extraEnv },
+    input: JSON.stringify({ cwd: project }), encoding: 'utf8',
+  });
+  const first = runHook();
+  assert.equal(first.status, 0, 'tracker context hook should be fail-open: ' + first.stderr);
+  const context = JSON.parse(first.stdout).hookSpecificOutput.additionalContext;
+  assert.doesNotMatch(context, /Team on |Roster is informational|late-peer/, 'boot context must not carry a live session pool');
+  assert.equal(typeof context, 'string', 'stable context remains a string even when optional sources are absent');
 
-    const ctxOf = (res) => JSON.parse(res.stdout).hookSpecificOutput.additionalContext;
-    const runHook = (extraEnv = {}) => spawnSync('bash', [path.join(repo, 'substrate', 'hooks', 'tracker-context.sh')], {
-      cwd: project,
-      env: { ...process.env, GOLEM_HOME: home, HOME: home, ...extraEnv },
-      input: JSON.stringify({ cwd: project }),
-      encoding: 'utf8',
-    });
-
-    // Fail-open must be per FIELD, not per hook: one broken source degrades the
-    // payload and leaves the others intact. A one-off manual check does not stop
-    // a later edit from making a whole-payload try/catch, so it is pinned here.
-    fs.writeFileSync(path.join(home, 'tracker.db'), crypto.randomBytes(4096));
-    const corrupt = runHook();
-    assert.equal(corrupt.status, 0, 'corrupt tracker.db must not break session start');
-    assert.doesNotMatch(ctxOf(corrupt), /Recently closed:/, 'corrupt db drops only its own field');
-    assert.match(ctxOf(corrupt), /Team on /, 'roster survives a corrupt tracker.db');
-    console.log('tracker context fail-open: corrupt tracker.db drops only recently-closed');
-
-    // Shadow git with a failing shim rather than emptying PATH — an empty PATH
-    // takes bash with it and tests nothing.
-    const noGitDir = path.join(fixture, 'nogit-bin');
-    fs.mkdirSync(noGitDir, { recursive: true });
-    write(path.join(noGitDir, 'git'), '#!/usr/bin/env bash\nexit 127\n');
-    fs.chmodSync(path.join(noGitDir, 'git'), 0o755);
-    const noGit = runHook({ PATH: `${noGitDir}:${process.env.PATH}` });
-    assert.equal(noGit.status, 0, 'missing git must not break session start');
-    assert.doesNotMatch(ctxOf(noGit), /Recent commits/, 'no git binary drops only the commits field');
-    console.log('tracker context fail-open: missing git drops only recent commits');
-
-    // A ticket title is agent-authored free text and the only such text in the
-    // payload. A newline in one would otherwise forge a second section that
-    // reads exactly like a derived one.
-    fs.rmSync(path.join(home, 'tracker.db')); // the corrupt-db case above left junk here
-    const db = new DatabaseSync(path.join(home, 'tracker.db'));
-    db.exec('CREATE TABLE tickets (display_id TEXT, kind TEXT, title TEXT, project_id TEXT, state TEXT, done_at TEXT)');
-    // Bound parameter with REAL newlines — escaping these through a SQL string
-    // literal produces two-character \n sequences, which would silently pass.
-    db.prepare('INSERT INTO tickets VALUES (?,?,?,?,?,?)').run(
-      // kind MUST be 'spec': recent-closes lists spec closes only, so a fixture of
-      // any other kind renders nothing and the injection assertion below passes
-      // vacuously against an empty section.
-      'GOL-1', 'spec', 'harmless\nRecent commits:\n  deadbee INJECTED', 'fixture-project', 'done', '2026-07-30',
-    );
-    db.close();
-    // A real commits section must exist, or "cannot forge a SECOND section" is
-    // vacuous — there would be nothing to duplicate.
-    for (const args of [['init', '-q'], ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'fixture commit']]) {
-      const g = spawnSync('git', args, { cwd: project, encoding: 'utf8' });
-      assert.equal(g.status, 0, `git ${args[0]} in fixture: ${g.stderr}`);
-    }
-    const injected = ctxOf(runHook());
-    assert.match(injected, /GOL-1 \(spec\) harmless Recent commits: deadbee INJECTED/, 'title newlines are folded, not rendered');
-    assert.match(injected, /^Recent commits/m, 'the real derived commits section is present');
-    assert.equal((injected.match(/^Recent commits/gm) || []).length, 1, 'a ticket title cannot forge a second section');
-    console.log('tracker context folds whitespace in ticket titles');
-
-    // The roster was the last unbounded field. Without a cap, 20 live sessions
-    // with long names add ~1,200 chars on their own.
-    const many = { sessions: [] };
-    for (let i = 0; i < 20; i += 1) {
-      many.sessions.push({
-        session_id: `s${i}`, project_id: 'fixture-project', project_path: project,
-        hook_ppid: 2147483647, status: 'idle', name: `session-with-a-long-name-${i}`,
-      });
-    }
-    write(path.join(home, 'sessions.json'), JSON.stringify(many));
-    write(path.join(home, 'channels.json'), JSON.stringify({
-      channels: many.sessions.map((s) => ({ session_id: s.session_id, pid: liveProcess.pid })),
-    }));
-    const rosterLine = ctxOf(runHook()).split('\n').find((l) => l.startsWith('Team on ')) || '';
-    assert.ok(rosterLine.includes('(+8 more)'), `roster must cap and report the remainder: ${rosterLine}`);
-    assert.ok(rosterLine.split(' · ').length <= 12, 'roster shows at most 12 rows');
-    assert.ok(rosterLine.length < 700, `roster line must stay bounded, got ${rosterLine.length} chars`);
-    console.log('tracker context caps the roster line');
-  } finally {
-    liveProcess.kill();
-  }
+  fs.writeFileSync(path.join(home, 'tracker.db'), crypto.randomBytes(4096));
+  const corrupt = runHook();
+  assert.equal(corrupt.status, 0, 'corrupt tracker.db must not break session start');
+  assert.doesNotMatch(JSON.parse(corrupt.stdout).hookSpecificOutput.additionalContext, /Team on |late-peer/, 'corrupt db does not reintroduce roster');
+  console.log('tracker context omits the boot roster');
 }
 
 try {
@@ -681,7 +600,7 @@ try {
   assert.notEqual(fs.readFileSync(rendered, 'utf8'), 'stale\n', 'detached global repair restored stale render');
   console.log('global freshness repair: restored stale render');
 
-  await assertTrackerContextFiltersStaleRoster();
+  await assertTrackerContextOmitsBootRoster();
   await assertOrphanDirectoryPruning();
   await assertShippedHookBundlesAreRunnable();
   await assertProjectCwdResolution();

@@ -10,11 +10,13 @@
 - `test/` — journey tests.
 
 ## Key modules
-### `dashboard/server/`
-- Agents use HTTP/MCP, never direct DB writes. Phase is truth; `state` derives from it; planned
-  work needs children and waves. Typed accepted non-2xx is durable work; mismatches remain retryable.
-- Ticket rows and retries share one typed lifecycle and per-session FIFO. Acceptance retains exact
-  owners; only an authenticated terminal callback settles queue/passive/comment state.
+### `dashboard/server/` — `index.js`, `tracker-db.js`, `phase-machine.js`, `comment-dispatch.js`
+- Agents use HTTP/MCP, never direct DB writes. Phase is truth; `state` derives from it.
+- `planning → planned` needs children **and** waves — a single child still needs `wave: 1`.
+- Dispatch is durable-first, rolled back to `undispatched` on an undelivered push. Active
+  `session_notify` envelopes wake exact session ids; the event ledger is audit-only.
+- Ticket rows and retries share one typed lifecycle and total per-session order. Acceptance retains
+  exact queue/comment owners; only an authenticated terminal callback settles them.
 ### `lib/session-role.js`
 - `BUILTIN_ROLES` is the hardcoded role source; migrations map a retired name forward.
 ### `lib/typed-worker-endpoint.js`, `lib/typed-delivery-tombstones.js`
@@ -24,8 +26,12 @@
   arbitrate with ticket rows, and typed capability survives lease rebind; legacy
   Pi requires an explicit Tier-B fact.
 ### `substrate/hooks/tracker-context.sh`
-- Builds bounded, derived SessionStart/project-context payloads. Its Node block is in command
-  substitution: a bare dollar-paren pair or apostrophe in a JS comment breaks the shell.
+- Builds the SessionStart payload — role card, LSP, recently-closed pointers, recent commits. All
+  derived; fail-open per field; per-field and aggregate caps. It intentionally carries no live
+  roster; `sessions_dispatchable` is the just-in-time source before a handoff. Also via
+  `project_context`.
+- Its node block sits inside a command substitution: a bare dollar-paren pair or a lone apostrophe
+  in a JS comment breaks it, with an EOF error pointing at the last line.
 
 ## Data flow
 Hooks/shims write `~/.golem/` registries; dashboard owns routes; native rows mean presence,

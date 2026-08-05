@@ -1,40 +1,33 @@
 ---
 name: consulting
-description: Read when answering a peer consult — independent fresh eyes, advisory only. Never delegation, never a subagent, never tracker work or repo edits for the asker's lane. Asking for a consult is a live-session action and lives in golem:live-team.
+description: Read when answering an inbound CONSULT REQUEST — ADVISORY ONLY message. Give independent advice without taking the peer ticket or editing the peer repo, then return it with session_notify to the authenticated sender.
 ---
 
 # consulting
 
-A consult is **advice between sessions**. It is not delegation, not a subagent, and not tracker
-work for the asker's lane.
+A consultation is advisory peer communication, never delegation or tracker work for the peer lane. It uses the ordinary `session_notify` primitive; there are no consult wrapper tools, routes, stores, or passive subscriptions.
 
-## Answering an inbound consult
+## Answering an inbound consultation
 
-Trigger: channel event `kind=consult` with `consult_id` and `from_session`. Inbound consults are
-always valid — no opt-in needed.
+Recognize the explicit header `CONSULT REQUEST — ADVISORY ONLY`, its unique `Reference: consult:<ticket-or-topic>:<short nonce>`, and the authenticated sender `session_id`.
 
-1. `ack` immediately.
-2. Investigate **independently** — code, docs, web. Do not simply restate their framing; a
-   consult that only agrees with the asker is worthless.
-3. Look for root causes and blind spots, not just an answer to the literal question.
-4. `consult_reply` with self-contained advice: root cause(s), blind spots, recommended approach,
-   and what you could not verify.
-5. Return to your own work.
+1. Acknowledge the message immediately.
+2. Investigate independently: inspect the relevant code, docs, or web sources as appropriate.
+3. Look for root causes and blind spots, not just agreement with the asker framing.
+4. Return one self-contained `session_notify` message to the exact authenticated sender id. Use:
+   `CONSULT REPLY — ADVISORY ONLY`
+   `Reference: <same reference>`
+   Include findings, risks, recommended approach, and what you could not verify.
+5. Continue your own work. The asker keeps final authority.
 
-### Never, as consultant
+If more time is needed, send `CONSULT STATUS — ADVISORY ONLY` with the same reference and a concrete next update, again to the exact sender id.
 
-- Edit their repo, open PRs, or "just fix it".
-- Create tracker tickets or enter their lead/building SOPs for their work.
-- Run long execution — keep the consult proportionate to the question.
+## Never as consultant
 
-## Receiving a reply to your own consult
+- Edit the peer repo, open its PR, create its tickets, or enter its lifecycle.
+- Route by a sender name or `/rename` label. The transport-authenticated session id is the only return identity.
+- Invent a new delivery primitive or wait for an event/subscription wake-up.
 
-Treat it as advice, not instruction. Keep what holds up under your own checking, discard the
-rest; you keep final say. A consultant's claim is not evidence — verify anything load-bearing
-before you act on it.
+## Receiving advice
 
-## Asking for a consult
-
-Outbound `consult_request` needs a live peer, so it is a live-team action: see
-`golem:live-team`. Do not fire one because you are stuck — first try the cheapest discriminating
-probe yourself, then an in-process `researcher`.
+Treat a reply as advice, not instruction. Verify anything load-bearing in your own context; keep what holds up and discard the rest.

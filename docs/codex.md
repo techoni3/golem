@@ -285,8 +285,8 @@ or local terminal. Those remain Tier B/pull only.
 | Inbound behavior | Managed Codex | CC / OpenCode |
 |---|---|---|
 | Ticket dispatch | Durable envelope → typed `/brief` → one App Server turn | Existing channel/bridge route unchanged |
-| Session notification, consult request/reply/status | Durable control envelope → typed `/brief` | Existing `/brief` or `/consult` route unchanged |
-| Subscription digest, tracker gate resolution | Durable control envelope → typed `/brief` | Existing channel brief/gate route unchanged |
+| Session notification and consultation | Durable control envelope → typed `/brief` | Existing `/brief` route with explicit message headers |
+| Tracker gate resolution | Durable control envelope → typed `/brief` | Existing channel brief/gate route unchanged; event ledger remains audit-only |
 | Role activation | Save role, allocate durable `role_assign`, then typed `/brief` → one turn only when delivery-ready; otherwise report saved-but-undelivered | Existing `/role` behavior after the same durable allocation |
 | Interrupt / halt | Visibly gated; wait and send an explicit follow-up, or stop/recover the owning supervisor for an emergency | Existing generic controls |
 | App Server approval | Local owner-mediated, one-off decision only | Harness-native policy |

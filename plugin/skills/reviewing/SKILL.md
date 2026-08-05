@@ -86,3 +86,9 @@ tagged `BLOCKER` / `MAJOR` / `MINOR` / `NIT` with `file:line` and a one-line fix
 A `BLOCKER` stops the gate. It is resolved by fixing it, or overridden **only by the human with
 the reason recorded on the ticket** — never silently, and never by the session that routed the
 work.
+
+## Return the verdict actively
+
+After posting the review report, notify the exact authenticated delegating `session_id` from the
+dispatch brief with `session_notify`. Include the verdict and report location. Do not route by a
+name/label or wait for an event subscription; review delivery is an active handoff.

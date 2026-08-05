@@ -342,10 +342,10 @@ async function main() {
     JSON.stringify(uninitializedChannel));
   const uninitializedConsult = await fetch(`http://${uninitializedChannel.host}:${uninitializedChannel.port}/consult`, {
     method: 'POST',
-    headers: { 'X-Sender': 'consult', 'Content-Type': 'application/json' },
+    headers: { 'X-Sender': 'dashboard', 'Content-Type': 'application/json' },
     body: JSON.stringify({ consult_id: 'cns-preinit', question: 'must not be accepted' }),
   });
-  check('pre-initialization CC endpoint refuses channel delivery', uninitializedConsult.status === 503, await uninitializedConsult.text());
+  check('dedicated consult route is retired', uninitializedConsult.status === 404, await uninitializedConsult.text());
   writeClaudeSession({ sessionId: uninitializedCcId, pid: uninitializedCcChild.pid, name: 'preinit-cc' });
   fs.writeFileSync(path.join(tmpGolemHome, 'sessions.json'), JSON.stringify({ sessions: [{
     session_id: uninitializedCcId,
@@ -500,6 +500,23 @@ async function main() {
   });
   check('addressed sibling brief reaches bridge', addressedBrief.status === 202 && bridgePayloads.at(-1)?.body?.session_id === siblingB, JSON.stringify(bridgePayloads));
 
+  const labelNotify = await callToolFrom(identityMcpClient, 'session_notify', {
+    to: 'duplicate-human-name', text: 'label routing must fail', __golem_session_id: siblingA, __golem_call_id: 'label-notify',
+  });
+  check('session_notify rejects label/name routing', labelNotify.result.isError && /exact session_id|Labels\/names/.test(labelNotify.text), labelNotify.text);
+
+  const exactNotify = await callToolFrom(identityMcpClient, 'session_notify', {
+    to: siblingB, text: 'durable report is ready', ticket: 'GOL-132', __golem_session_id: siblingA, __golem_call_id: 'exact-notify',
+  });
+  await sleep(50);
+  const notifyBody = bridgePayloads.at(-1)?.body || {};
+  check('session_notify delivers authenticated sender context',
+    !exactNotify.result.isError
+      && notifyBody.session_id === siblingB
+      && /Authenticated sender session_id: ses_identity_sibling_a/.test(notifyBody.content || '')
+      && /Return route: session_notify/.test(notifyBody.content || ''),
+    `${exactNotify.text} bridge=${JSON.stringify(notifyBody)}`);
+
   const identityTicket = await callToolFrom(identityMcpClient, 'ticket_create', {
     project: PROJECT_ID,
     title: 'Per-call identity journey',
@@ -528,23 +545,6 @@ async function main() {
   check('sibling writes retain their individual authors', siblingAuthors.includes(siblingA) && siblingAuthors.includes(siblingB), JSON.stringify(siblingTicket.json?.comments));
   check('injected metadata is stripped before ticket handlers', !JSON.stringify(siblingTicket.json).includes('__golem_'), siblingTicket.text);
 
-  const siblingSubA = await callToolFrom(identityMcpClient, 'subscribe', {
-    topic: 'ticket/SIBLING-A', __golem_session_id: siblingA, __golem_call_id: 'sub-a', __golem_probe: 'must-be-stripped',
-  });
-  const siblingSubB = await callToolFrom(identityMcpClient, 'subscribe', {
-    topic: 'ticket/SIBLING-B', __golem_session_id: siblingB, __golem_call_id: 'sub-b', __golem_probe: 'must-be-stripped',
-  });
-  check('sibling A subscription uses its injected caller identity', !siblingSubA.result.isError && siblingSubA.json?.session_id === siblingA, siblingSubA.text);
-  check('sibling B subscription uses its injected caller identity', !siblingSubB.result.isError && siblingSubB.json?.session_id === siblingB, siblingSubB.text);
-  const siblingSubsA = await callToolFrom(identityMcpClient, 'subscriptions_list', { __golem_session_id: siblingA, __golem_call_id: 'list-a' });
-  const siblingSubsB = await callToolFrom(identityMcpClient, 'subscriptions_list', { __golem_session_id: siblingB, __golem_call_id: 'list-b' });
-  check('sibling subscription lists stay isolated', Array.isArray(siblingSubsA.json) && Array.isArray(siblingSubsB.json) && siblingSubsA.json.some((sub) => sub.topic === 'ticket/SIBLING-A') && !siblingSubsA.json.some((sub) => sub.topic === 'ticket/SIBLING-B') && siblingSubsB.json.some((sub) => sub.topic === 'ticket/SIBLING-B') && !siblingSubsB.json.some((sub) => sub.topic === 'ticket/SIBLING-A'), `${siblingSubsA.text}\n${siblingSubsB.text}`);
-  check('subscription injected metadata is stripped before tracker handlers', !JSON.stringify([siblingSubA.json, siblingSubB.json, siblingSubsA.json, siblingSubsB.json]).includes('__golem_'), `${siblingSubA.text}\n${siblingSubB.text}`);
-  const siblingUnsubA = await callToolFrom(identityMcpClient, 'unsubscribe', { topic: 'ticket/SIBLING-A', __golem_session_id: siblingA, __golem_call_id: 'unsub-a' });
-  const afterUnsubB = await callToolFrom(identityMcpClient, 'subscriptions_list', { __golem_session_id: siblingB, __golem_call_id: 'list-b-after' });
-  check('sibling unsubscribe affects only its injected caller subscription', !siblingUnsubA.result.isError && afterUnsubB.json?.some((sub) => sub.topic === 'ticket/SIBLING-B'), `${siblingUnsubA.text}\n${afterUnsubB.text}`);
-  const ambiguousSub = await callToolFrom(identityMcpClient, 'subscribe', { topic: 'ticket/AMBIGUOUS' });
-  check('ambiguous sibling subscription fails closed', ambiguousSub.result.isError && /no trusted caller session id/.test(ambiguousSub.text), ambiguousSub.text);
 
   const ambiguousWrite = await callToolFrom(identityMcpClient, 'ticket_comment', { id: identityTicket.json?.id, body: 'must not write' });
   check('ambiguous sibling write is refused', ambiguousWrite.result.isError && /2 sibling sessions.*refusing to write/.test(ambiguousWrite.text), ambiguousWrite.text);
@@ -713,20 +713,6 @@ async function main() {
     supportedByHumanProjectName.some((row) => row.session_id === ccFallbackId && row.project_id === uniqueProjectId && row.reachable === true),
     JSON.stringify(supportedByHumanProjectName));
 
-  const supportedConsult = await callTool('consult_request', {
-    to: ccFallbackId,
-    question: 'Does the supported Claude channel receive this consult?',
-    context: 'GOL-483 positive channel-eligibility journey.',
-  });
-  await sleep(50);
-  const supportedConsultNotification = ccFallbackNotifications.find((notification) => (
-    notification.params?.meta?.kind === 'consult'
-      && notification.params?.meta?.consult_id === supportedConsult.json?.consult_id
-  ));
-  check('supported CC consult is accepted and emits concrete channel bytes',
-    !supportedConsult.result.isError && !!supportedConsultNotification,
-    `${supportedConsult.text} notifications=${JSON.stringify(ccFallbackNotifications)}`);
-
   const unsupportedCcId = 'cc-custom-provider';
   const unsupportedCcNotifications = [];
   unsupportedCcMcpClient = new Client({ name: 'golem-unsupported-cc-journey', version: '1.0.0' });
@@ -793,29 +779,12 @@ async function main() {
       && !readinessFilteredDispatchables.some((row) => row.session_id === unsupportedCcId),
     JSON.stringify(readinessFilteredDispatchables));
 
-  const unsupportedConsult = await callTool('consult_request', {
-    to: unsupportedCcId,
-    question: 'This must fail before HTTP acceptance.',
-  });
-  check('consult_request rejects unsupported CC with actionable Anthropic-auth guidance',
-    unsupportedConsult.result.isError === true
-      && /Anthropic authentication.*claude\.ai.*Console API key/i.test(unsupportedConsult.text)
-      && /ANTHROPIC_BASE_URL/.test(unsupportedConsult.text),
-    unsupportedConsult.text);
-  check('unsupported consult emits no channel notification', unsupportedCcNotifications.length === 0, JSON.stringify(unsupportedCcNotifications));
-
-  const unsupportedDirect = await fetch(`http://${unsupportedChannel.host}:${unsupportedChannel.port}/consult`, {
-    method: 'POST',
-    headers: { 'X-Sender': 'consult', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ consult_id: 'cns-unsupported', question: 'must not be accepted' }),
-  });
-  const unsupportedDirectText = await unsupportedDirect.text();
-  check('unsupported CC endpoint refuses direct legacy delivery before 202',
-    unsupportedDirect.status === 503 && /Anthropic authentication/i.test(unsupportedDirectText),
-    `${unsupportedDirect.status} ${unsupportedDirectText}`);
 
 
   const tools = await mcpClient.listTools();
+  check('MCP omits retired subscription and consult wrapper tools', !tools.tools.some((tool) => ['subscribe', 'unsubscribe', 'subscriptions_list', 'consult_request', 'consult_reply', 'consult_status'].includes(tool.name)), tools.tools.map((tool) => tool.name).join(', '));
+  const respondTool = tools.tools.find((tool) => tool.name === 'respond');
+  check('respond is user-facing only; no correlated envelope reply input', !!respondTool && !respondTool.inputSchema?.properties?.envelope_id && /not a correlated peer-handoff reply/.test(respondTool.description || ''), JSON.stringify(respondTool));
   const transitionTool = tools.tools.find((tool) => tool.name === 'ticket_transition');
   check('MCP lists ticket_transition', !!transitionTool, tools.tools.map((tool) => tool.name).join(', '));
   check('ticket_transition description teaches the phase ladder', /queued.*building.*built.*verifying.*verified.*done/s.test(transitionTool?.description || ''), transitionTool?.description);
@@ -908,6 +877,11 @@ async function main() {
   check('full walk reaches built', !walkedBuilt.result.isError && walkedBuilt.json?.phase === 'built', walkedBuilt.text);
   const dispatched = await callTool('ticket_dispatch', { id: walk.id, session_id: SESSION_ID, note: 'verification routing' });
   check('full walk records manager dispatch artifact', !dispatched.result.isError, dispatched.text);
+  const dispatchBody = channelEvents.filter((event) => event.params?.meta?.kind === 'brief').at(-1)?.params?.content || '';
+  check('ticket dispatch carries authenticated return route',
+    dispatchBody.includes(`Authenticated delegating session_id: ${SESSION_ID}`)
+      && dispatchBody.includes('Return notification: call session_notify'),
+    dispatchBody);
   const walkedVerifying = await callTool('ticket_transition', { id: walk.id, phase: 'verifying' });
   check('full walk reaches verifying', !walkedVerifying.result.isError && walkedVerifying.json?.phase === 'verifying', walkedVerifying.text);
   await callTool('ticket_comment', { id: walk.id, body: 'Verification PASS: journey test completed.' });

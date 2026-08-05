@@ -13,6 +13,10 @@ You own the entire loop. No live peers, no cross-session hand-offs, no waiting f
 does not exist. What you do **not** get to drop is the independence that separate roles used to
 provide — you buy that back with in-process agents.
 
+In a live-team-shaped brief that reaches this session, treat an active `session_notify` as the
+wake-up: read the authenticated sender context, fetch any durable report, and recontextualize the
+human before asking a question. Never rely on a stale boot roster or passive event subscription.
+
 ## The one rule that makes this work
 
 **Changing hats is not the same as being independent.** You can act as lead and then as

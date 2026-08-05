@@ -120,7 +120,9 @@ Wave N+1 does not start until every open wave N child is terminal. Default route
 `worker` per slice, one writer per checkout. Parallel builders need one directed worktree each —
 that is a live-team pattern (`golem:live-team`), never something you set up on your own initiative.
 
-Subscribe to `spec/<display_id>/tree` when waiting. Quiet next-turn interest, never polling.
+Do not subscribe or wait on the event ledger. When a child, explorer, or reviewer reports, read the
+durable ticket comment/report and recontextualize the human before asking a question or requesting a
+decision. Active peer notifications use `session_notify` and the authenticated exact sender id.
 
 ## Built loop
 

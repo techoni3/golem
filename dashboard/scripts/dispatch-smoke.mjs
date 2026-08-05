@@ -160,9 +160,8 @@ async function run() {
   check('envelope ack accepts stored target without changing root delivery status', correctAck.status === 200 && !!correctAck.body?.envelope?.acknowledged_at && correctAck.body?.envelope?.status === 'pending', JSON.stringify(correctAck.body));
   const retryAck = await jsend('POST', `/api/message-envelopes/${queued.body?.envelope_id}/ack`, {}, { 'x-golem-caller-session': 'offline-queued-session' });
   check('same target ack is idempotent', retryAck.status === 200 && retryAck.body?.envelope?.acknowledged_at === correctAck.body?.envelope?.acknowledged_at, JSON.stringify(retryAck.body));
-  const reply = await jsend('POST', `/api/message-envelopes/${queued.body?.envelope_id}/reply`, { text: 'completed' }, { 'x-golem-caller-session': 'offline-queued-session' });
-  const rootAfterReply = sql2.prepare('SELECT * FROM message_envelopes WHERE id = ?').get(queued.body?.envelope_id);
-  check('reply creates routed child without completing root', reply.status === 200 && reply.body?.reply?.parent_id === queued.body?.envelope_id && reply.body?.reply?.recipient_session_id === 'sender-session' && rootAfterReply?.completed_at == null && rootAfterReply?.reply_envelope_id === reply.body?.reply?.id, JSON.stringify({ rootAfterReply, reply: reply.body }));
+  const correlatedReply = await jsend('POST', `/api/message-envelopes/${queued.body?.envelope_id}/reply`, { text: 'completed' }, { 'x-golem-caller-session': 'offline-queued-session' });
+  check('correlated envelope reply route is retired; delegated returns use session_notify', correlatedReply.status === 404, JSON.stringify(correlatedReply.body));
   const notification = await jsend('POST', '/api/messages/notify', { session_id: 'notify-recipient', sender_id: 'notify-sender', text: 'durable notification', project_id: PID });
   check('session notify reports failed delivery truthfully', notification.status === 200 && notification.body?.ok === false, JSON.stringify(notification.body));
   const notificationEnvelope = sql2.prepare('SELECT * FROM message_envelopes WHERE id = ?').get(notification.body?.envelope_id);

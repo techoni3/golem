@@ -36,7 +36,6 @@ process.env.GOLEM_HOME = state;
 process.env.GOLEM_TRACKER_DB = dashboardDb;
 process.env.XDG_CONFIG_HOME = path.join(temp, 'xdg');
 fs.mkdirSync(state, { recursive: true });
-fs.writeFileSync(path.join(state, 'config.json'), JSON.stringify({ events: { subscriptionDigestEnabled: true } }));
 
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
@@ -306,8 +305,8 @@ try {
 
   const control = await assertOriginalRetry('control', () => postJson(dashboard.baseUrl, '/api/messages/control', {
     project_id: 'typed-immediate-000000', sender_id: 'typed-control-source', session_id: canonicalId,
-    kind: 'consult_request', content: 'lost response control', metadata: { consult_id: 'lost-control' },
-    legacy: { path: '/consult', body: { consult_id: 'lost-control', question: 'controlled' } },
+    kind: 'session_notify', content: 'lost response control', metadata: { notification_text: 'lost response control' },
+    legacy: { path: '/brief', body: 'lost response control' },
   }), ({ json }) => json?.envelope_id);
   assert.equal(control.result.response.status, 200, control.result.text);
   assert.equal(control.result.json?.queued, true, control.result.text);
@@ -342,26 +341,8 @@ try {
   assert.equal(commentAfterRetry.comments.find((entry) => entry.id === createdComment.json.id)?.dispatch_state, 'dispatched', 'comment stays visibly dispatched until the worker addresses it');
   assert.deepEqual(commentDispatchDebug.map((row) => row.status), ['delivered'], 'comment retry settles its original dispatch after correlated acceptance');
 
-  await restartDashboardForIndependentRetry();
-
-  // Seed a durable reply route, then drop the reply's typed response. It must
-  // retry the child reply envelope, not create another reply lineage.
-  const replySource = await postJson(dashboard.baseUrl, '/api/messages/control', {
-    project_id: 'typed-immediate-000000', sender_id: canonicalId, session_id: canonicalId,
-    kind: 'consult_request', content: 'reply source', metadata: { consult_id: 'reply-source' },
-    legacy: { path: '/consult', body: { consult_id: 'reply-source', question: 'controlled' } },
-  });
-  assert.equal(replySource.response.status, 200, replySource.text);
-  const reply = await assertOriginalRetry('reply', () => postJson(
-    dashboard.baseUrl,
-    `/api/message-envelopes/${encodeURIComponent(replySource.json.envelope_id)}/reply`,
-    { kind: 'brief', text: 'lost response reply' },
-    { 'x-golem-caller-session': canonicalId },
-  ), ({ json }) => json?.reply?.id);
-  assert.equal(reply.result.response.status, 200, reply.result.text);
-
   // An accepted 503 is a completed typed opportunity, not a failed HTTP
-  // notification: it reports success and settles passive context through the
+  // notification: it reports success and settles its exact durable owners through the
   // same accepted-delivery predicate.
   nextResponseStatus = 503;
   const accepted503 = await postJson(dashboard.baseUrl, '/api/messages/notify', {
@@ -373,8 +354,8 @@ try {
   nextResponseStatus = 503;
   const accepted503Control = await postJson(dashboard.baseUrl, '/api/messages/control', {
     project_id: 'typed-immediate-000000', sender_id: 'typed-control-503', session_id: canonicalId,
-    kind: 'consult_request', content: 'accepted 503 control', metadata: { consult_id: 'accepted-503-control' },
-    legacy: { path: '/consult', body: { consult_id: 'accepted-503-control', question: 'controlled' } },
+    kind: 'session_notify', content: 'accepted 503 control', metadata: { notification_text: 'accepted 503 control' },
+    legacy: { path: '/brief', body: 'accepted 503 control' },
   });
   assert.equal(accepted503Control.response.status, 200, accepted503Control.text);
   assert.equal(accepted503Control.json?.ok, true, accepted503Control.text);
@@ -591,7 +572,7 @@ try {
   })();
   await waitForRetry(newerEnvelopeId, `newer exact comment retry (${dashboard.stderr()})`);
 
-  console.log('typed immediate retry production journey passed: ticket/notification/control/comment/reply lost response -> original shared envelope retry -> one native start; accepted-503, typed lease-gap, immediate+queued-ticket crash-after-accept settlement recovery, and exact older-comment CAS');
+  console.log('typed immediate retry production journey passed: ticket/notification/control/comment lost response -> original shared envelope retry -> one native start; accepted-503, typed lease-gap, immediate+queued-ticket crash-after-accept settlement recovery, and exact older-comment CAS');
 } finally {
   await stopProcess(dashboard?.child);
   await closeTypedWorkerEndpoint(endpoint?.server);
