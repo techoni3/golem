@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -59,7 +59,25 @@ try {
   assert.equal(JSON.parse(readFileSync(path.join(codexRoot, 'plugins', 'golem', 'capabilities.json'))).push_delivery, false);
   assert.deepEqual(JSON.parse(readFileSync(path.join(codexRoot, 'plugins', 'golem', 'capabilities.json'))).delivery, ['pull']);
   assert.ok(readFileSync(path.join(codexRoot, 'plugins', 'golem', 'lib', 'session-facts.js'), 'utf8').includes('withRegistryLock'));
-  assert.equal(JSON.parse(readFileSync(path.join(env.GOLEM_HOME, 'renders', 'pi', 'capabilities.json'))).tier, 'B');
+  const piRoot = path.join(env.GOLEM_HOME, 'renders', 'pi');
+  assert.equal(JSON.parse(readFileSync(path.join(piRoot, 'capabilities.json'))).tier, 'B');
+  const fakeBin = path.join(temp, 'bin');
+  const piCapture = path.join(temp, 'installed-pi.json');
+  mkdirSync(fakeBin, { recursive: true });
+  writeFileSync(path.join(fakeBin, 'pi'), `#!${process.execPath}
+const fs = require('node:fs');
+if (process.argv.length === 3 && process.argv[2] === '--version') { console.log('0.80.10'); process.exit(0); }
+fs.writeFileSync(process.env.GOLEM_PI_RELEASE_CAPTURE, JSON.stringify({ args: process.argv.slice(2), profile: process.env.PI_CODING_AGENT_DIR, sessions: process.env.PI_CODING_AGENT_SESSION_DIR }));
+`, { mode: 0o700 });
+  env.PATH = `${fakeBin}:${env.PATH}`;
+  env.GOLEM_PI_RELEASE_CAPTURE = piCapture;
+  run(process.execPath, [cli, 'pi', '--provider', 'ollama', '--model', 'deepseek-v4-flash:0731-cloud', '--', '--print'], installDir);
+  const launchedPi = JSON.parse(readFileSync(piCapture, 'utf8'));
+  assert.equal(launchedPi.args[1], '--extension');
+  assert.equal(realpathSync(launchedPi.args[2]), realpathSync(path.join(piRoot, 'golem.ts')));
+  assert.equal(launchedPi.profile, path.join(env.GOLEM_HOME, 'pi-agent'));
+  assert.equal(launchedPi.sessions, path.join(env.GOLEM_HOME, 'pi-sessions'));
+  assert.equal(existsSync(path.join(home, '.pi')), false, 'installed managed Pi launch does not mutate the normal profile');
   console.log(`release smoke passed: ${tarballName}`);
   console.log(`installed root: ${packageRoot}`);
   console.log(`rendered channel SDK: ${sdk}`);

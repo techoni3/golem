@@ -12,11 +12,13 @@
 //                Run one managed, headless Codex App Server lifecycle process.
 //   codex        Open one managed interactive Codex TUI.
 //   claude / cc  Open Claude Code as a Golem channel consumer, optionally via Ollama.
+//   pi           Open native Pi with Golem's isolated profile and rendered extension.
 //   doctor       Sanity-check the environment.
 //   status       Dashboard health + canonical URL.
 //   help         Show this message.
 
 import { spawn, spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync, renameSync, rmdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -574,6 +576,158 @@ async function cmdClaude(args) {
 
   err('golem claude: Claude Code exited without a status or signal');
   process.exitCode = 1;
+}
+
+const SUPPORTED_PI_VERSION = '0.80.10';
+const MIN_PI_NODE = Object.freeze({ major: 22, minor: 19 });
+
+function piLauncherHelp() {
+  log(`Usage: golem pi [--provider <id> --model <id>] [--resume <session-id>] [-- <pi args...>]
+
+Open the native Pi TUI with Golem's canonical rendered extension. Golem uses a
+managed Pi profile and session store under GOLEM_HOME; it never writes the
+normal ~/.pi profile. The supported baseline is Pi ${SUPPORTED_PI_VERSION} on
+Node.js >=${MIN_PI_NODE.major}.${MIN_PI_NODE.minor}.
+
+Wrapper options:
+  --provider <id>       Explicit Pi provider. Supply together with --model.
+  --model <id>          Explicit provider-local model id. Supply with --provider.
+  --resume <session-id> Resume a native Pi session id through --session.
+
+Arguments after -- are passed to Pi unchanged except wrapper-owned provider,
+model, session, profile, and extension-discovery flags. Additional explicit
+extensions are allowed; the shipped Golem extension is always loaded first.
+
+  golem pi --provider ollama --model deepseek-v4-flash:0731-cloud
+  golem pi --resume <pi-session-id> -- --thinking high`);
+}
+
+function piNodeSupported(version = process.versions.node) {
+  const [major, minor] = String(version).split('.').map(Number);
+  return major > MIN_PI_NODE.major || (major === MIN_PI_NODE.major && minor >= MIN_PI_NODE.minor);
+}
+
+function isReservedPiArgument(arg) {
+  return arg === '--provider' || arg.startsWith('--provider=')
+    || arg === '--model' || arg.startsWith('--model=')
+    || arg === '--resume' || arg === '-r'
+    || arg === '--session' || arg.startsWith('--session=')
+    || arg === '--session-id' || arg.startsWith('--session-id=')
+    || arg === '--session-dir' || arg.startsWith('--session-dir=')
+    || arg === '--no-extensions' || arg === '-ne';
+}
+
+async function cmdPi(args) {
+  if (args.length === 1 && (args[0] === '--help' || args[0] === '-h')) {
+    piLauncherHelp();
+    return;
+  }
+  if (!piNodeSupported()) {
+    fatal(1, `golem pi requires Node.js >=${MIN_PI_NODE.major}.${MIN_PI_NODE.minor}; running ${process.versions.node}`);
+  }
+
+  let provider = null;
+  let model = null;
+  let resume = null;
+  let separatorSeen = false;
+  const passthrough = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (!separatorSeen && arg === '--') { separatorSeen = true; continue; }
+    if (!separatorSeen && ['--provider', '--model', '--resume'].includes(arg)) {
+      const value = args[++index];
+      if (!value || value.startsWith('-')) fatal(2, `golem pi requires a value for ${arg}`);
+      if (arg === '--provider') provider = value;
+      else if (arg === '--model') model = value;
+      else resume = value;
+      continue;
+    }
+    if (!separatorSeen && arg.startsWith('--provider=')) provider = arg.slice('--provider='.length);
+    else if (!separatorSeen && arg.startsWith('--model=')) model = arg.slice('--model='.length);
+    else if (!separatorSeen && arg.startsWith('--resume=')) resume = arg.slice('--resume='.length);
+    else {
+      if (isReservedPiArgument(arg)) fatal(2, `golem pi owns ${arg.split('=')[0]}; use the wrapper option before --`);
+      passthrough.push(arg);
+    }
+  }
+  if ((provider == null) !== (model == null)) fatal(2, 'golem pi requires --provider and --model together');
+  if (provider != null && !provider.trim()) fatal(2, 'golem pi requires a non-empty --provider');
+  if (model != null && !model.trim()) fatal(2, 'golem pi requires a non-empty --model');
+  if (resume != null && !resume.trim()) fatal(2, 'golem pi requires a non-empty --resume');
+
+  const managedProfile = join(golemHome(), 'pi-agent');
+  const managedSessions = join(golemHome(), 'pi-sessions');
+  mkdirSync(managedProfile, { recursive: true });
+  mkdirSync(managedSessions, { recursive: true });
+  const childEnv = {
+    ...process.env,
+    PI_CODING_AGENT_DIR: managedProfile,
+    PI_CODING_AGENT_SESSION_DIR: managedSessions,
+  };
+  const versionProbe = spawnSync('pi', ['--version'], { env: childEnv, encoding: 'utf8' });
+  if (versionProbe.error?.code === 'ENOENT') fatal(1, "golem pi could not find the 'pi' executable on PATH; install @earendil-works/pi-coding-agent@0.80.10");
+  if (versionProbe.status !== 0) fatal(1, `golem pi could not inspect Pi: ${(versionProbe.stderr || versionProbe.error?.message || 'unknown error').trim()}`);
+  const piVersion = versionProbe.stdout.trim();
+  if (piVersion !== SUPPORTED_PI_VERSION) {
+    fatal(1, `golem pi supports Pi ${SUPPORTED_PI_VERSION}; found ${piVersion || '(no version)'}. Install the pinned baseline before launching.`);
+  }
+
+  await cmdSync(['--target', 'pi']);
+  const extension = join(renderDirFor('pi'), 'golem.ts');
+  if (!existsSync(extension)) fatal(1, `golem pi render is missing ${extension}; run golem sync --target pi`);
+
+  const dashboard = await probeDashboard();
+  if (!dashboard.ok) err(`golem pi: dashboard unavailable (${dashboard.error}); starting in degraded mode and tracker tools will fail until it returns`);
+
+  Object.assign(childEnv, {
+    GOLEM_PI_REQUESTED_PROVIDER: provider?.trim() || '',
+    GOLEM_PI_REQUESTED_MODEL: model?.trim() || '',
+    GOLEM_PI_LAUNCH_NONCE: randomUUID(),
+    GOLEM_PI_VERSION: piVersion,
+    GOLEM_PI_EXTENSION_VERSION: readPackageVersion(),
+  });
+  const launchArgs = [
+    '--no-extensions', '--extension', extension,
+    ...(provider ? ['--provider', provider.trim(), '--model', model.trim()] : []),
+    ...(resume ? ['--session', resume.trim()] : []),
+    ...passthrough,
+  ];
+  const child = spawn('pi', launchArgs, { cwd: process.cwd(), env: childEnv, stdio: 'inherit' });
+  const onSigint = () => { /* native Pi owns terminal Ctrl-C turn semantics */ };
+  const forward = (signal) => { if (child.exitCode === null && child.signalCode === null) child.kill(signal); };
+  const onSigterm = () => forward('SIGTERM');
+  const onSighup = () => forward('SIGHUP');
+  process.on('SIGINT', onSigint);
+  process.once('SIGTERM', onSigterm);
+  process.once('SIGHUP', onSighup);
+  let exitSignal = null;
+  try {
+    const outcome = await new Promise((resolveOutcome) => {
+      let settled = false;
+      const finish = (value) => { if (!settled) { settled = true; resolveOutcome(value); } };
+      child.once('error', (error) => finish({ error }));
+      child.once('exit', (code, signal) => finish({ code, signal }));
+    });
+    if (outcome.error) {
+      err(`golem pi could not start Pi: ${outcome.error.message}`);
+      process.exitCode = 1;
+      return;
+    }
+    if (Number.isInteger(outcome.code)) {
+      if (outcome.code) process.exitCode = outcome.code;
+      return;
+    }
+    exitSignal = outcome.signal;
+  } finally {
+    process.off('SIGINT', onSigint);
+    process.off('SIGTERM', onSigterm);
+    process.off('SIGHUP', onSighup);
+  }
+  if (exitSignal) process.kill(process.pid, exitSignal);
+  else {
+    err('golem pi: Pi exited without a status or signal');
+    process.exitCode = 1;
+  }
 }
 
 function readSessionsRegistry() {
@@ -1785,6 +1939,9 @@ Run:
   claude|cc [--backend native|ollama] [--model <id>] [-- <claude args...>]
                        Open Claude Code with Golem's development channel loaded;
                        optionally launch through Ollama with an explicit model.
+  pi [--provider <id> --model <id>] [--resume <session-id>] [-- <pi args...>]
+                       Open native Pi with the canonical Golem extension and a
+                       Golem-owned isolated Pi profile/session store.
   role <role|clear> [--session <id-or-name>]
                          Set or clear a session role (${SESSION_ROLES.join(', ')}).
   sessions dedup [--apply]
@@ -1874,6 +2031,9 @@ async function main() {
     case 'claude':
     case 'cc':
       await cmdClaude(rest);
+      break;
+    case 'pi':
+      await cmdPi(rest);
       break;
     case 'role':
       await cmdRole(rest);

@@ -530,20 +530,27 @@ async function main() {
     }]
   });
 }\n`);
-  const nativeId = crypto.randomUUID();
   const nativeEnv = { ...env };
   delete nativeEnv.PI_OFFLINE;
-  const native = spawn('pi', [
-    '--mode', 'rpc', '--no-approve', '--session-id', nativeId,
-    '--session-dir', env.PI_CODING_AGENT_SESSION_DIR,
-    '--provider', 'golem-test', '--model', 'test-model',
-    '-e', providerExtension, '-e', path.join(render, 'golem.ts'),
+  const native = spawn(process.execPath, [path.join(repo, 'cli/golem.js'),
+    'pi', '--provider', 'golem-test', '--model', 'test-model', '--',
+    '--mode', 'rpc', '--no-approve', '-e', providerExtension,
   ], { cwd: repo, env: nativeEnv, stdio: ['pipe', 'pipe', 'pipe'] });
   let nativeErr = '';
   let nativeOut = '';
+  let nativeId = null;
   native.stderr.on('data', (chunk) => { nativeErr += chunk; });
   native.stdout.on('data', (chunk) => { nativeOut += chunk; });
   try {
+    const nativeFact = await waitFor(() => readJson(path.join(env.GOLEM_HOME, 'session-facts.json'))?.facts?.find((row) => (
+      row.harness === 'pi' && row.provider === 'golem-test' && row.observations?.launch_nonce
+    )), `managed Pi did not record resolved/requested model facts: ${nativeErr}`, 20_000);
+    nativeId = nativeFact.canonical_id;
+    assert.equal(nativeFact.model, 'test-model');
+    assert.equal(nativeFact.observations.requested_provider, 'golem-test');
+    assert.equal(nativeFact.observations.requested_model, 'test-model');
+    assert.equal(nativeFact.observations.pi_version, '0.80.10');
+    assert.equal(nativeFact.observations.extension_version, JSON.parse(fs.readFileSync(path.join(repo, 'package.json'), 'utf8')).version);
     const nativeLease = await waitFor(() => readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json'))?.leases?.find((row) => row.canonical_id === nativeId), `native Pi did not register typed lease: ${nativeErr}`, 20_000);
     const nativeStart = await postLease(nativeLease, typedEnvelope(nativeId, 'native-first', 'hold this real Pi turn open', 'brief', 'native-attempt-a'));
     const nativeStartBody = await nativeStart.json();
