@@ -84,7 +84,15 @@ try {
   mkdirSync(fakeBin, { recursive: true });
   writeFileSync(path.join(fakeBin, 'pi'), `#!${process.execPath}
 const fs = require('node:fs');
+const path = require('node:path');
 if (process.argv.length === 3 && process.argv[2] === '--version') { console.log(process.env.GOLEM_FAKE_PI_VERSION || '0.80.10'); process.exit(0); }
+if (process.argv[2] === 'install') {
+  const root = path.join(process.env.PI_CODING_AGENT_DIR, 'npm', 'node_modules', '@ifi', 'pi-provider-ollama');
+  fs.mkdirSync(root, { recursive: true });
+  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: '@ifi/pi-provider-ollama', version: '0.5.1' }));
+  fs.writeFileSync(path.join(root, 'index.ts'), 'export default function () {}\\n');
+  process.exit(0);
+}
 fs.writeFileSync(process.env.GOLEM_PI_RELEASE_CAPTURE, JSON.stringify({ args: process.argv.slice(2), profile: process.env.PI_CODING_AGENT_DIR, sessions: process.env.PI_CODING_AGENT_SESSION_DIR, managed_models: JSON.parse(fs.readFileSync(require('node:path').join(process.env.PI_CODING_AGENT_DIR, 'models.json'), 'utf8')) }));
 `, { mode: 0o700 });
   env.PATH = `${fakeBin}:${env.PATH}`;
@@ -93,10 +101,11 @@ fs.writeFileSync(process.env.GOLEM_PI_RELEASE_CAPTURE, JSON.stringify({ args: pr
   const launchedPi = JSON.parse(readFileSync(piCapture, 'utf8'));
   assert.equal(launchedPi.args[1], '--extension');
   assert.equal(realpathSync(launchedPi.args[2]), realpathSync(path.join(piRoot, 'golem.ts')));
+  assert.equal(launchedPi.args[3], '--extension');
+  assert.equal(realpathSync(launchedPi.args[4]), realpathSync(path.join(env.GOLEM_HOME, 'pi-agent', 'npm', 'node_modules', '@ifi', 'pi-provider-ollama', 'index.ts')));
   assert.equal(launchedPi.profile, path.join(env.GOLEM_HOME, 'pi-agent'));
   assert.equal(launchedPi.sessions, path.join(env.GOLEM_HOME, 'pi-sessions'));
-  assert.deepEqual(Object.keys(launchedPi.managed_models.providers), ['ollama']);
-  assert.deepEqual(launchedPi.managed_models.providers.ollama.models, [{ id: 'deepseek-v4-flash:0731-cloud', input: ['text'] }]);
+  assert.deepEqual(launchedPi.managed_models, { providers: {} }, 'installed artifact delegates Ollama catalogs to the pinned provider extension');
   assert.equal(readFileSync(path.join(sourcePiProfile, 'models.json'), 'utf8'), sourceModels, 'installed managed Pi launch does not mutate source provider config');
   const unsupported = runResult(process.execPath, [cli, 'pi'], installDir, { GOLEM_FAKE_PI_VERSION: '0.80.9' });
   assert.equal(unsupported.status, 1, unsupported.stderr);

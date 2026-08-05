@@ -49,6 +49,7 @@ function createHarness(extension, sessionId, { reason = 'startup', previousSessi
   let shutdown = false;
   let name = 'pi-native-test';
   let nextPrompt = null;
+  const models = new Map();
   const pi = {
     on(event, handler) {
       const list = handlers.get(event) || [];
@@ -57,6 +58,7 @@ function createHarness(extension, sessionId, { reason = 'startup', previousSessi
     },
     registerTool(tool) { tools.set(tool.name, tool); },
     sendUserMessage(text) { sent.push(text); },
+    setModel(model) { ctx.model = model; return true; },
   };
   extension(pi);
   const ctx = {
@@ -72,6 +74,9 @@ function createHarness(extension, sessionId, { reason = 'startup', previousSessi
       getSessionFile: () => path.join(temp, `${sessionId}.jsonl`),
       getSessionName: () => name,
       getLeafId: () => `leaf-${sent.length}`,
+    },
+    modelRegistry: {
+      find: (provider, model) => models.get(`${provider}/${model}`) ?? null,
     },
   };
   const emit = async (event, payload = {}) => {
@@ -99,6 +104,7 @@ function createHarness(extension, sessionId, { reason = 'startup', previousSessi
     setIdle(value) { idle = value; },
     setPending(value) { pending = value; },
     setName(value) { name = value; },
+    addModel(model) { models.set(`${model.provider}/${model.id}`, model); },
     get aborted() { return aborted; },
     get shutdown() { return shutdown; },
     start: () => emit('session_start', { reason, previousSessionFile }),
@@ -167,6 +173,16 @@ async function main() {
   let lease = readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json')).leases.find((row) => row.canonical_id === sessionId);
   assert.equal(lease.kind, 'typed-worker');
   assert.equal(lease.delivery_ready, true);
+
+  process.env.GOLEM_PI_REQUESTED_PROVIDER = 'ollama';
+  process.env.GOLEM_PI_REQUESTED_MODEL = 'local-startup-model';
+  const localSelection = createHarness(extension, 'pi-local-selection');
+  localSelection.addModel({ provider: 'ollama', id: 'local-startup-model' });
+  await localSelection.start();
+  assert.deepEqual(localSelection.ctx.model, { provider: 'ollama', id: 'local-startup-model' }, 'managed Pi activates the requested local model after extension discovery');
+  await localSelection.emit('session_shutdown', {});
+  delete process.env.GOLEM_PI_REQUESTED_PROVIDER;
+  delete process.env.GOLEM_PI_REQUESTED_MODEL;
 
   const legacyRoot = path.join(env.GOLEM_HOME, 'pi-inbox', sessionId);
   fs.mkdirSync(path.join(legacyRoot, 'pending'), { recursive: true });

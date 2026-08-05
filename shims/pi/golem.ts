@@ -12,6 +12,27 @@ import { readRoleCard, sessionsJsonPath, setSessionRole, validateSessionRole } f
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PI_ROLES = new Set(['builder', 'explorer', 'reviewer']);
+const LOCAL_OLLAMA_PROVIDER = 'ollama';
+const LOCAL_MODEL_DISCOVERY_TIMEOUT_MS = 15_000;
+
+function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+async function selectRequestedLocalModel(pi, ctx) {
+  const provider = process.env.GOLEM_PI_REQUESTED_PROVIDER?.trim();
+  const modelId = process.env.GOLEM_PI_REQUESTED_MODEL?.trim();
+  if (provider !== LOCAL_OLLAMA_PROVIDER || !modelId) return;
+
+  const deadline = Date.now() + LOCAL_MODEL_DISCOVERY_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const model = ctx.modelRegistry.find(provider, modelId);
+    if (model) {
+      if (!pi.setModel(model)) throw new Error(`Ollama model "${modelId}" is available but Pi could not activate it`);
+      return;
+    }
+    await wait(50);
+  }
+  throw new Error(`Ollama model "${modelId}" was not discovered within ${LOCAL_MODEL_DISCOVERY_TIMEOUT_MS / 1000}s; run ollama list and /ollama:refresh-models`);
+}
 
 function sessionRole(sessionId) {
   try {
@@ -97,7 +118,10 @@ export default function golem(pi) {
   const home = golemHome();
   let canonicalId;
   let pendingPickup = [];
-  pi.on('session_start', (_event, ctx) => { canonicalId = ctx.sessionManager.getSessionId(); });
+  pi.on('session_start', async (_event, ctx) => {
+    canonicalId = ctx.sessionManager.getSessionId();
+    await selectRequestedLocalModel(pi, ctx);
+  });
   pi.on('input', (event, ctx) => {
     if (event.source === 'extension') return;
     const id = canonicalId || ctx.sessionManager.getSessionId();

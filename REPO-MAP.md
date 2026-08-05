@@ -1,12 +1,13 @@
 # REPO-MAP.md
-> Last verified: 2026-08-05 @ GOL-130 working tree — maintained via golem:docs-maintenance.
+> Last verified: 2026-08-05 @ GOL-134 working tree — maintained via golem:docs-maintenance.
 ## Directory structure
 - `substrate/` — plugin source; `plugin/` is its generated CC render, never hand-edited. Roles
   have one source: `instructions/AGENTS.md`; cards and skills point to it.
 - `.claude/skills/` — repo-only doctrine for instructions, roles, and skills.
 - `cli/` `lib/` — entry point; runtime, role, compiler, managed-harness helpers. `golem pi`
-  version-gates Pi 0.80.10, syncs the render, launches with a Golem-owned isolated profile, and
-  bridges only the explicitly requested custom provider/model definition into that profile.
+  version-gates Pi 0.80.10, syncs the render, launches with a Golem-owned isolated profile,
+  pins the Pi Ollama local/cloud provider there, and selectively bridges other requested custom
+  provider/model definitions.
 - `dashboard/server/` — Fastify API and tracker owner. `dashboard/web/` → `dashboard/dist/`.
 - `mcp/channel/` — channel server. `shims/{opencode,codex}/` — harness events onto hooks.
 - `test/` — journey tests.

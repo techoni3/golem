@@ -44,6 +44,10 @@ const __dirname = dirname(__filename);
 const GOLEM_ROOT = resolve(__dirname, '..');
 const DASHBOARD_DIR = resolve(GOLEM_ROOT, 'dashboard');
 const DEFAULT_DASHBOARD_PORT = 7420;
+const PI_OLLAMA_PROVIDER_PACKAGE = '@ifi/pi-provider-ollama';
+const PI_OLLAMA_PROVIDER_VERSION = '0.5.1';
+const PI_OLLAMA_PROVIDER_SPEC = `npm:${PI_OLLAMA_PROVIDER_PACKAGE}@${PI_OLLAMA_PROVIDER_VERSION}`;
+const PI_OLLAMA_PROVIDER_IDS = new Set(['ollama', 'ollama-cloud']);
 
 function dashboardUrl() {
   if (process.env.GOLEM_DASHBOARD_URL) return process.env.GOLEM_DASHBOARD_URL.replace(/\/$/, '');
@@ -586,10 +590,12 @@ function piLauncherHelp() {
 Open the native Pi TUI with Golem's canonical rendered extension. Golem uses a
 managed Pi profile and session store under GOLEM_HOME; it never writes the
 normal ~/.pi profile. The supported baseline is Pi ${SUPPORTED_PI_VERSION} on
-Node.js >=${MIN_PI_NODE.major}.${MIN_PI_NODE.minor}.
+Node.js >=${MIN_PI_NODE.major}.${MIN_PI_NODE.minor}. The first launch installs
+${PI_OLLAMA_PROVIDER_SPEC} into the managed profile; later launches reuse it.
 
 Wrapper options:
-  --provider <id>       Explicit Pi provider. Supply together with --model.
+  --provider <id>       Explicit Pi provider. Use ollama for local daemon models
+                        or ollama-cloud for direct cloud. Supply with --model.
   --model <id>          Explicit provider-local model id. Supply with --provider.
   --resume <session-id> Resume a native Pi session id through --session.
 
@@ -597,7 +603,8 @@ Arguments after -- are passed to Pi unchanged except wrapper-owned provider,
 model, session, profile, and extension-discovery flags. Additional explicit
 extensions are allowed; the shipped Golem extension is always loaded first.
 
-  golem pi --provider ollama --model deepseek-v4-flash:0731-cloud
+  golem pi --provider ollama --model laguna-xs-2.1:q4_K_M
+  golem pi --provider ollama-cloud --model deepseek-v4-flash
   golem pi --resume <pi-session-id> -- --thinking high`);
 }
 
@@ -609,6 +616,46 @@ function isReservedPiArgument(arg) {
     || arg === '--session-id' || arg.startsWith('--session-id=')
     || arg === '--session-dir' || arg.startsWith('--session-dir=')
     || arg === '--no-extensions' || arg === '-ne';
+}
+
+function managedPiOllamaExtensionPath(managedProfile) {
+  return join(managedProfile, 'npm', 'node_modules', '@ifi', 'pi-provider-ollama', 'index.ts');
+}
+
+function managedPiOllamaPackageVersion(managedProfile) {
+  const packageFile = join(managedProfile, 'npm', 'node_modules', '@ifi', 'pi-provider-ollama', 'package.json');
+  if (!existsSync(packageFile)) return null;
+  try {
+    return JSON.parse(readFileSync(packageFile, 'utf8')).version ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function ensureManagedPiOllamaProvider(managedProfile, childEnv) {
+  const extension = managedPiOllamaExtensionPath(managedProfile);
+  if (managedPiOllamaPackageVersion(managedProfile) === PI_OLLAMA_PROVIDER_VERSION && existsSync(extension)) {
+    return extension;
+  }
+
+  err(`golem pi: installing ${PI_OLLAMA_PROVIDER_SPEC} into the managed Pi profile`);
+  const installed = spawnSync('pi', ['install', PI_OLLAMA_PROVIDER_SPEC], {
+    cwd: process.cwd(),
+    env: childEnv,
+    encoding: 'utf8',
+  });
+  if (installed.error?.code === 'ENOENT') {
+    fatal(1, "golem pi could not find the 'pi' executable while installing the Ollama provider");
+  }
+  if (installed.status !== 0) {
+    const detail = (installed.stderr || installed.stdout || installed.error?.message || 'unknown error').trim();
+    fatal(1, `golem pi could not install ${PI_OLLAMA_PROVIDER_SPEC}: ${detail}`);
+  }
+  const installedVersion = managedPiOllamaPackageVersion(managedProfile);
+  if (installedVersion !== PI_OLLAMA_PROVIDER_VERSION || !existsSync(extension)) {
+    fatal(1, `golem pi installed ${PI_OLLAMA_PROVIDER_SPEC}, but its extension was not found in ${managedProfile}`);
+  }
+  return extension;
 }
 
 async function cmdPi(args) {
@@ -658,6 +705,7 @@ async function cmdPi(args) {
     ...process.env,
     PI_CODING_AGENT_DIR: managedProfile,
     PI_CODING_AGENT_SESSION_DIR: managedSessions,
+    PI_OLLAMA_CLOUD_CACHE_PATH: join(managedProfile, 'cache', 'ollama-cloud-models.json'),
   };
   const versionProbe = spawnSync('pi', ['--version'], { env: childEnv, encoding: 'utf8' });
   if (versionProbe.error?.code === 'ENOENT') fatal(1, "golem pi could not find the 'pi' executable on PATH; install @earendil-works/pi-coding-agent@0.80.10");
@@ -667,6 +715,8 @@ async function cmdPi(args) {
     fatal(1, `golem pi supports Pi ${SUPPORTED_PI_VERSION}; found ${piVersion || '(no version)'}. Install the pinned baseline before launching.`);
   }
 
+  const ollamaExtension = ensureManagedPiOllamaProvider(managedProfile, childEnv);
+
   // Pi custom providers live in the profile's models.json. The managed
   // profile is intentionally isolated, so bridge only the explicitly
   // requested provider/model instead of exposing or copying the whole user
@@ -674,7 +724,7 @@ async function cmdPi(args) {
   const managedModelsFile = join(managedProfile, 'models.json');
   let managedModels = { providers: {} };
   const sourceModelsFile = join(sourceProfile, 'models.json');
-  if (provider && existsSync(sourceModelsFile) && resolve(sourceModelsFile) !== resolve(managedModelsFile)) {
+  if (provider && !PI_OLLAMA_PROVIDER_IDS.has(provider.trim()) && existsSync(sourceModelsFile) && resolve(sourceModelsFile) !== resolve(managedModelsFile)) {
     const errors = [];
     const parsed = parseJsonc(readFileSync(sourceModelsFile, 'utf8'), errors, { allowTrailingComma: true, disallowComments: false });
     if (errors.length || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -713,7 +763,8 @@ async function cmdPi(args) {
   });
   const launchArgs = [
     '--no-extensions', '--extension', extension,
-    ...(provider ? ['--provider', provider.trim(), '--model', model.trim()] : []),
+    '--extension', ollamaExtension,
+    ...(provider && provider.trim() !== 'ollama' ? ['--provider', provider.trim(), '--model', model.trim()] : []),
     ...(resume ? ['--session', resume.trim()] : []),
     ...passthrough,
   ];
