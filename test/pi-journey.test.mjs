@@ -376,6 +376,15 @@ async function main() {
   await durableRestart.start();
   await waitFor(() => durableRestart.sent.length === 1, 'restart did not replay durable deferred input');
   assert.equal(durableRestart.sent[0], 'survive worker restart');
+  // A generic extension-triggered turn has no input event and cannot dequeue
+  // or cause duplicate reinjection of the replayed durable item.
+  durableRestart.setIdle(false);
+  await durableRestart.emit('agent_start', {});
+  durableRestart.setIdle(true);
+  await durableRestart.emit('agent_settled', {});
+  await sleep(25);
+  assert.equal(durableRestart.sent.length, 1, 'uncorrelated settle does not reinject deferred input');
+  assert.equal(readJson(path.join(env.GOLEM_HOME, 'pi-workers', durableInputId, 'delivery.json')).deferred_inputs.length, 1, 'uncorrelated start cannot dequeue deferred input');
   await durableRestart.emit('input', { source: 'extension', text: 'survive worker restart' });
   durableRestart.setIdle(false);
   await durableRestart.emit('agent_start', {});
