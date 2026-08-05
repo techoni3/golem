@@ -276,22 +276,29 @@ async function main() {
   assert.equal(postCrashRestart.sent.length, 0);
   await postCrashRestart.emit('session_shutdown', { reason: 'quit' });
 
-  // Pi's generic agent_start is not evidence for a typed turn unless the
-  // exact extension input was observed first. An unrelated RPC turn releases
-  // the claim so the dashboard can safely retry it.
+  // Pi's generic agent_start has no turn identity. Unrelated input is handled
+  // and deferred while typed preflight owns the slot, then replayed after the
+  // typed turn settles instead of creating an ambiguous concurrent start.
   const displacedId = 'pi-displaced-typed-input';
   const displaced = createHarness(extension, displacedId);
   await displaced.start();
   const displacedLease = readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json')).leases.find((row) => row.canonical_id === displacedId);
   const displacedStart = postLease(displacedLease, typedEnvelope(displacedId, 'displaced', 'typed input awaiting correlation'));
   await waitFor(() => displaced.sent.length === 1, 'displaced typed input was not injected');
-  await displaced.emit('input', { source: 'rpc', text: 'unrelated native turn' });
+  const displacedInput = await displaced.emit('input', { source: 'rpc', text: 'unrelated native turn' });
+  assert.equal(displacedInput.action, 'handled');
+  assert.equal(readJson(path.join(env.GOLEM_HOME, 'pi-workers', displacedId, 'delivery.json')).inbox.deliveries.find((row) => row.envelope_id === 'displaced').lifecycle_state, 'claimed');
+  await displaced.emit('input', { source: 'extension', text: 'typed input awaiting correlation' });
   displaced.setIdle(false);
   await displaced.emit('agent_start', {});
   const displacedResponse = await displacedStart;
-  const displacedBody = await displacedResponse.json();
-  assert.equal(displacedBody.delivery_state, 'recovery_required');
-  assert.equal(readJson(path.join(env.GOLEM_HOME, 'pi-workers', displacedId, 'delivery.json')).inbox.deliveries.find((row) => row.envelope_id === 'displaced').lifecycle_state, 'recovery_required');
+  assert.equal((await displacedResponse.json()).delivery_state, 'accepted');
+  displaced.setIdle(true);
+  await displaced.emit('agent_settled', {});
+  await waitFor(() => displaced.sent.length === 2, 'deferred unrelated input was not replayed after typed settlement');
+  await displaced.emit('input', { source: 'extension', text: 'unrelated native turn' });
+  displaced.setIdle(false);
+  await displaced.emit('agent_start', {});
   displaced.setIdle(true);
   await displaced.emit('agent_settled', {});
   await displaced.emit('session_shutdown', { reason: 'quit' });
@@ -311,30 +318,22 @@ async function main() {
   await waitFor(() => preInput.aborted, 'pre-input control did not request abort');
   assert.equal(readJson(path.join(env.GOLEM_HOME, 'pi-workers', preInputId, 'delivery.json')).inbox.deliveries.find((row) => row.envelope_id === 'pre-input').lifecycle_state, 'claimed');
 
-  // An unrelated input may win the first agent_start. Its settlement must not
-  // falsely complete the control while the original typed preflight remains.
-  await preInput.emit('input', { source: 'rpc', text: 'unrelated turn wins first start' });
-  preInput.setIdle(false);
-  await preInput.emit('agent_start', {});
-  const preInputStartBody = await (await preInputStart).json();
-  assert.equal(preInputStartBody.delivery_state, 'recovery_required');
-  // The exact typed input can emerge while the unrelated turn is still
-  // active, then pause before its own agent_start. Unrelated settlement still
-  // must not consume the typed control waiter.
-  await preInput.emit('input', { source: 'extension', text: 'delayed by earlier input extension' });
-  preInput.setIdle(true);
-  await preInput.emit('agent_settled', {});
+  // Multiple unrelated inputs are fenced at the input hook; Pi never emits an
+  // ambiguous start for either while the typed native preflight owns the slot.
+  assert.equal((await preInput.emit('input', { source: 'rpc', text: 'first unrelated turn' })).action, 'handled');
+  assert.equal((await preInput.emit('input', { source: 'interactive', text: 'second unrelated turn' })).action, 'handled');
   await sleep(25);
-  assert.equal(preInputControlDone, false, 'unrelated settlement cannot complete typed control');
-
+  assert.equal(preInputControlDone, false, 'deferred unrelated inputs cannot complete typed control');
+  await preInput.emit('input', { source: 'extension', text: 'delayed by earlier input extension' });
   preInput.setIdle(false);
   await preInput.emit('agent_start', {});
+  assert.equal((await (await preInputStart).json()).delivery_state, 'accepted');
   preInput.setIdle(true);
   await preInput.emit('agent_settled', {});
   assert.equal((await (await preInputInterrupt).json()).accepted, true);
   const preInputRetry = await postLease(preInputLease, typedEnvelope(preInputId, 'pre-input', 'delayed by earlier input extension', 'brief', 'pre-input-retry'));
   assert.equal((await preInputRetry.json()).duplicate, true);
-  assert.equal(preInput.sent.length, 1, 'post-send/pre-input control never permits a second native injection');
+  assert.equal(preInput.sent.filter((text) => text === 'delayed by earlier input extension').length, 1, 'post-send/pre-input control never permits a second typed injection');
   await preInput.emit('session_shutdown', { reason: 'quit' });
 
   // Once Pi has emitted the exact extension input, interrupt cannot release
