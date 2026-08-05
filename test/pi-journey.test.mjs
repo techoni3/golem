@@ -289,11 +289,36 @@ async function main() {
   displaced.setIdle(false);
   await displaced.emit('agent_start', {});
   const displacedResponse = await displacedStart;
-  assert.equal(displacedResponse.status, 409);
-  assert.equal(readJson(path.join(env.GOLEM_HOME, 'pi-workers', displacedId, 'delivery.json')).inbox.deliveries.some((row) => row.envelope_id === 'displaced'), false);
+  const displacedBody = await displacedResponse.json();
+  assert.equal(displacedBody.delivery_state, 'recovery_required');
+  assert.equal(readJson(path.join(env.GOLEM_HOME, 'pi-workers', displacedId, 'delivery.json')).inbox.deliveries.find((row) => row.envelope_id === 'displaced').lifecycle_state, 'recovery_required');
   displaced.setIdle(true);
   await displaced.emit('agent_settled', {});
   await displaced.emit('session_shutdown', { reason: 'quit' });
+
+  // An earlier async Pi input extension can delay Golem's own input observer
+  // after fire-and-forget sendUserMessage. Control in that window must retain
+  // the claim until the native start/settlement boundary, never permit replay.
+  const preInputId = 'pi-post-send-pre-input-control';
+  const preInput = createHarness(extension, preInputId);
+  await preInput.start();
+  const preInputLease = readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json')).leases.find((row) => row.canonical_id === preInputId);
+  const preInputStart = postLease(preInputLease, typedEnvelope(preInputId, 'pre-input', 'delayed by earlier input extension'));
+  await waitFor(() => preInput.sent.length === 1, 'pre-input typed injection did not begin');
+  const preInputInterrupt = postLease(preInputLease, typedEnvelope(preInputId, 'pre-input-interrupt', 'stop delayed preflight', 'interrupt'));
+  await waitFor(() => preInput.aborted, 'pre-input control did not request abort');
+  assert.equal(readJson(path.join(env.GOLEM_HOME, 'pi-workers', preInputId, 'delivery.json')).inbox.deliveries.find((row) => row.envelope_id === 'pre-input').lifecycle_state, 'claimed');
+  await preInput.emit('input', { source: 'extension', text: 'delayed by earlier input extension' });
+  preInput.setIdle(false);
+  await preInput.emit('agent_start', {});
+  assert.equal((await (await preInputStart).json()).accepted, true);
+  preInput.setIdle(true);
+  await preInput.emit('agent_settled', {});
+  assert.equal((await (await preInputInterrupt).json()).accepted, true);
+  const preInputRetry = await postLease(preInputLease, typedEnvelope(preInputId, 'pre-input', 'delayed by earlier input extension', 'brief', 'pre-input-retry'));
+  assert.equal((await preInputRetry.json()).duplicate, true);
+  assert.equal(preInput.sent.length, 1, 'post-send/pre-input control never permits a second native injection');
+  await preInput.emit('session_shutdown', { reason: 'quit' });
 
   // Once Pi has emitted the exact extension input, interrupt cannot release
   // the claim: Pi 0.80.10 may still continue its idle auth/compaction preflight.
