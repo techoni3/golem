@@ -305,13 +305,27 @@ async function main() {
   const preInputLease = readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json')).leases.find((row) => row.canonical_id === preInputId);
   const preInputStart = postLease(preInputLease, typedEnvelope(preInputId, 'pre-input', 'delayed by earlier input extension'));
   await waitFor(() => preInput.sent.length === 1, 'pre-input typed injection did not begin');
-  const preInputInterrupt = postLease(preInputLease, typedEnvelope(preInputId, 'pre-input-interrupt', 'stop delayed preflight', 'interrupt'));
+  let preInputControlDone = false;
+  const preInputInterrupt = postLease(preInputLease, typedEnvelope(preInputId, 'pre-input-interrupt', 'stop delayed preflight', 'interrupt'))
+    .then((response) => { preInputControlDone = true; return response; });
   await waitFor(() => preInput.aborted, 'pre-input control did not request abort');
   assert.equal(readJson(path.join(env.GOLEM_HOME, 'pi-workers', preInputId, 'delivery.json')).inbox.deliveries.find((row) => row.envelope_id === 'pre-input').lifecycle_state, 'claimed');
+
+  // An unrelated input may win the first agent_start. Its settlement must not
+  // falsely complete the control while the original typed preflight remains.
+  await preInput.emit('input', { source: 'rpc', text: 'unrelated turn wins first start' });
+  preInput.setIdle(false);
+  await preInput.emit('agent_start', {});
+  const preInputStartBody = await (await preInputStart).json();
+  assert.equal(preInputStartBody.delivery_state, 'recovery_required');
+  preInput.setIdle(true);
+  await preInput.emit('agent_settled', {});
+  await sleep(25);
+  assert.equal(preInputControlDone, false, 'unrelated settlement cannot complete typed control');
+
   await preInput.emit('input', { source: 'extension', text: 'delayed by earlier input extension' });
   preInput.setIdle(false);
   await preInput.emit('agent_start', {});
-  assert.equal((await (await preInputStart).json()).accepted, true);
   preInput.setIdle(true);
   await preInput.emit('agent_settled', {});
   assert.equal((await (await preInputInterrupt).json()).accepted, true);
