@@ -135,6 +135,17 @@ try {
   const prompt = await worker.emit('before_agent_start', { prompt: 'review next', systemPrompt: 'Pi base prompt' });
   assert.match(prompt.systemPrompt, /Role: reviewer/, 'dashboard role change applies at the next safe boundary');
 
+  for (const unsupported of ['lead', 'standalone']) {
+    const rejected = await fetch(`${baseUrl}/api/sessions/pi-tools-worker/role`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role: unsupported }),
+    });
+    const rejectedBody = await rejected.json();
+    assert.equal(rejected.status, 400, JSON.stringify(rejectedBody));
+    assert.match(rejectedBody.error, /Pi first-class worker role must be builder, explorer, reviewer, or clear/);
+  }
+  const afterRejectedRole = await worker.emit('before_agent_start', { prompt: 'review remains', systemPrompt: 'Pi base prompt' });
+  assert.match(afterRejectedRole.systemPrompt, /Role: reviewer/, 'rejected orchestration role cannot replace Pi worker authority');
+
   console.log('Pi native tool journey passed: shared tracker identity, read/comment/transition, L4, response, and safe-boundary role refresh');
 } finally {
   if (ticket) {

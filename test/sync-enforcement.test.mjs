@@ -179,6 +179,26 @@ async function assertPiWorkerSurfacesAreExplicit() {
   console.log('Pi worker surfaces are explicit and missing required resources fail loudly');
 }
 
+async function assertPiRolePersistenceBoundary() {
+  const { setSessionRole } = await import('../lib/session-role.js');
+  const priorHome = process.env.GOLEM_HOME;
+  const home = path.join(tmp, 'pi-role-boundary');
+  process.env.GOLEM_HOME = home;
+  try {
+    fs.mkdirSync(home, { recursive: true });
+    write(path.join(home, 'session-facts.json'), JSON.stringify({ version: 1, facts: [{
+      canonical_id: 'pi-role-test', harness: 'pi', project_path: repo, observed_at: new Date().toISOString(),
+    }] }));
+    assert.throws(() => setSessionRole('pi-role-test', 'lead', { by: 'human:dashboard' }), /Pi first-class worker role/);
+    assert.throws(() => setSessionRole('pi-role-test', 'standalone', { by: 'human:cli' }), /Pi first-class worker role/);
+    assert.equal(setSessionRole('pi-role-test', 'builder', { by: 'human:dashboard' }).role, 'builder');
+  } finally {
+    if (priorHome == null) delete process.env.GOLEM_HOME;
+    else process.env.GOLEM_HOME = priorHome;
+  }
+  console.log('Pi role persistence rejects lead/standalone before canonical truth changes');
+}
+
 async function assertProjectCwdResolution() {
   // The three cases below were all reachable without a live server and all
   // shipped unguarded: removing the $HOME stop, re-adding AGENTS.md to the
@@ -628,6 +648,7 @@ try {
   await assertOrphanDirectoryPruning();
   await assertShippedHookBundlesAreRunnable();
   await assertPiWorkerSurfacesAreExplicit();
+  await assertPiRolePersistenceBoundary();
   await assertProjectCwdResolution();
   await assertPayloadBudgetAndRefusal();
   assertNativeSessionDeduplication();
