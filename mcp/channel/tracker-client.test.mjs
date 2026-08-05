@@ -21,6 +21,9 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { z } from 'zod';
 import { projectIdFor } from '../../lib/project-id.js';
+import { createGolemClient, GolemClientError } from '../../lib/golem-client.js';
+import { GOLEM_TOOL_CONTRACTS, RETIRED_GOLEM_TOOL_CONTRACTS } from '../../lib/golem-tool-contracts.js';
+import { createGolemToolRuntime } from '../../lib/golem-tool-runtime.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const DASHBOARD_SERVER = path.resolve(__dirname, '../../dashboard/server/index.js');
@@ -218,6 +221,51 @@ async function main() {
     `got ${client.dashboardBaseUrl()} want ${doc.url}`);
   check('currentSessionId() reflects GOLEM_CEO_SESSION_ID', client.currentSessionId() === SESSION_ID,
     client.currentSessionId());
+
+  // The same contracts and trusted-identity runtime are consumable without MCP.
+  // This is the native-adapter seam Pi will call through registerTool().
+  const sharedClient = createGolemClient({ baseUrl: doc.url, callerSessionId: SESSION_ID });
+  const nativeRuntime = createGolemToolRuntime({
+    client: sharedClient,
+    callerSessionId: SESSION_ID,
+    projectId: PROJECT_ID,
+  });
+  const registered = [];
+  nativeRuntime.register((definition) => registered.push(definition), {
+    names: ['ticket_get', 'ticket_create', 'ticket_transition'],
+  });
+  check('native runtime registers wrappers from shared contracts',
+    registered.length === 3 && registered.every((entry) => typeof entry.execute === 'function'),
+    registered.map((entry) => entry.name).join(','));
+  check('shared contract source explicitly records retired subscription surface',
+    GOLEM_TOOL_CONTRACTS.every((entry) => !entry.name.includes('subscribe')) && !!RETIRED_GOLEM_TOOL_CONTRACTS.subscriptions);
+
+  const nativeCreated = await nativeRuntime.invoke('ticket_create', {
+    title: 'native contract identity journey',
+    created_by: 'spoofed-model-session',
+    actor: 'spoofed-model-session',
+    author: 'spoofed-model-session',
+    project_id: SECOND_PROJECT_ID,
+  });
+  check('native runtime ignores model project_id in favor of trusted project context', nativeCreated.project_id === PROJECT_ID, nativeCreated.project_id);
+  check('native runtime injects trusted creator identity', nativeCreated.created_by === SESSION_ID, nativeCreated.created_by);
+  check('native runtime refuses model identity impersonation by construction',
+    !JSON.stringify(nativeCreated).includes('spoofed-model-session'));
+
+  let deterministicError;
+  try { await sharedClient.getTicket('GOL-999999999'); } catch (err) { deterministicError = err; }
+  check('shared client exposes structured non-retryable 4xx errors',
+    deterministicError instanceof GolemClientError && deterministicError.status === 404 && deterministicError.retryable === false,
+    JSON.stringify(deterministicError));
+  const offlineClient = createGolemClient({
+    baseUrl: 'http://127.0.0.1:1',
+    fetchImpl: async () => { throw new Error('synthetic transport outage'); },
+  });
+  let retryableError;
+  try { await offlineClient.listTickets(); } catch (err) { retryableError = err; }
+  check('shared client exposes structured retryable transport errors',
+    retryableError instanceof GolemClientError && retryableError.code === 'GOLEM_TRANSPORT_ERROR' && retryableError.retryable === true,
+    JSON.stringify(retryableError));
 
   // 3) createTicket → getTicket round-trip.
   const created = await client.createTicket({
@@ -782,6 +830,9 @@ async function main() {
 
 
   const tools = await mcpClient.listTools();
+  check('MCP advertises the canonical shared contract source without schema drift',
+    JSON.stringify(tools.tools) === JSON.stringify(GOLEM_TOOL_CONTRACTS),
+    `mcp=${tools.tools.length} shared=${GOLEM_TOOL_CONTRACTS.length}`);
   check('MCP omits retired subscription and consult wrapper tools', !tools.tools.some((tool) => ['subscribe', 'unsubscribe', 'subscriptions_list', 'consult_request', 'consult_reply', 'consult_status'].includes(tool.name)), tools.tools.map((tool) => tool.name).join(', '));
   const respondTool = tools.tools.find((tool) => tool.name === 'respond');
   check('respond is user-facing only; no correlated envelope reply input', !!respondTool && !respondTool.inputSchema?.properties?.envelope_id && /not a correlated peer-handoff reply/.test(respondTool.description || ''), JSON.stringify(respondTool));

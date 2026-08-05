@@ -19,6 +19,12 @@
   exact queue/comment owners; only an authenticated terminal callback settles them.
 ### `lib/session-role.js`
 - `BUILTIN_ROLES` is the hardcoded role source; migrations map a retired name forward.
+### `lib/golem-client.js`, `lib/golem-tool-contracts.js`, `lib/golem-tool-runtime.js`
+- Harness-neutral native-tool seam: one immutable schema source, one structured-error REST client,
+  and trusted adapter-context execution/registration. MCP advertises these contracts directly;
+  CC and Codex renders package all three. Pi consumption is implemented by its adapter slice.
+- Passive subscription wrappers are explicitly retired; active notification and tracker-backed
+  dispatch are the current shared coordination surface.
 ### `lib/typed-worker-endpoint.js`, `lib/typed-delivery-tombstones.js`
 - Shared protocol validates authenticated, versioned envelopes; rich supervisor history is never the
   replay ledger. Terminal tracker retirement prunes lifecycle detail only after a non-evicting

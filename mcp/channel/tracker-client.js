@@ -15,6 +15,9 @@ import os from 'node:os';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { managedCodexBinding, resolveCallerSessionId } from './identity.js';
+import { createGolemClient, GolemClientError } from '../../lib/golem-client.js';
+
+export { GolemClientError };
 
 // --- golem-home resolution (TKT-0573, ADR-4) --------------------------------
 // This is a hand-maintained MIRROR of lib/golem-home.js's golemHome(). This
@@ -158,44 +161,20 @@ export function currentProjectId(sessionId) {
 
 // --- HTTP plumbing ---------------------------------------------------------
 
-function buildUrl(pathname, params) {
-  const u = new URL(pathname, dashboardBaseUrl());
-  if (params && typeof params === 'object') {
-    for (const [k, v] of Object.entries(params)) {
-      if (v == null) continue;
-      u.searchParams.set(k, String(v));
-    }
-  }
-  return u.toString();
-}
-
 function requireProjectScope(value, operation) {
   if (typeof value !== 'string' || !value.trim()) {
-    throw new Error(
+    throw new GolemClientError(
       `${operation}: project_id is required at the MCP-to-REST boundary; ` +
         'pass project:"<contract-id>" or ensure the session is registered to a project',
+      { code: 'GOLEM_INVALID_ARGUMENT', retryable: false },
     );
   }
   return value.trim();
 }
 
-function serializeBody(method, pathname, body, requiredFields = []) {
-  for (const field of requiredFields) {
-    if (typeof body?.[field] !== 'string' || !body[field].trim()) {
-      throw new Error(
-        `tracker transport invariant failed: ${method} ${pathname} requires nonblank ${field}`,
-      );
-    }
-  }
-  return JSON.stringify(body);
-}
-
 /**
- * Core fetch wrapper. On a non-2xx response, throws an Error carrying the
- * server's parsed `{error}` (when present) plus the HTTP status; on 2xx returns
- * the parsed JSON body (or null for an empty body). Uses the global fetch
- * (Node 18+/20+). X-Sender is set for parity with the channel server's gating —
- * the /api/* routes do NOT check it, but it is harmless.
+ * Compatibility request wrapper. Transport and structured error semantics live
+ * in the harness-neutral client; dashboard discovery remains process-local.
  */
 async function request(method, pathname, {
   params,
@@ -204,47 +183,13 @@ async function request(method, pathname, {
   verbatimError = false,
   caller_session_id = null,
 } = {}) {
-  const url = buildUrl(pathname, params);
-  const init = {
-    method,
-    headers: { 'X-Sender': 'cli' },
-  };
-  if (caller_session_id) init.headers['X-Golem-Caller-Session'] = caller_session_id;
-  if (body !== undefined) {
-    init.headers['Content-Type'] = 'application/json';
-    init.body = serializeBody(method, pathname, body, requiredBodyFields);
-  }
-
-  let res;
-  try {
-    res = await fetch(url, init);
-  } catch (err) {
-    throw new Error(
-      `tracker request failed: ${method} ${url} — ${err?.message ?? err}. ` +
-        `Is the golem dashboard running? (dashboardBaseUrl=${dashboardBaseUrl()})`,
-    );
-  }
-
-  const text = await res.text();
-  let parsed = null;
-  if (text) {
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      parsed = text;
-    }
-  }
-
-  if (!res.ok) {
-    const serverErr =
-      parsed && typeof parsed === 'object' && parsed.error != null
-        ? parsed.error
-        : typeof parsed === 'string' && parsed
-          ? parsed
-          : res.statusText;
-    throw new Error(verbatimError ? String(serverErr) : `tracker ${method} ${pathname} → ${res.status} ${serverErr}`);
-  }
-  return parsed;
+  return createGolemClient({ baseUrl: dashboardBaseUrl() }).request(method, pathname, {
+    params,
+    body,
+    requiredBodyFields,
+    verbatimError,
+    caller_session_id,
+  });
 }
 
 // --- API wrappers (one per dashboard tracker route) ------------------------
@@ -258,7 +203,7 @@ export function listTickets(params = {}) {
 
 /** GET /api/tickets/:id */
 export function getTicket(id) {
-  if (!id) throw new Error('getTicket: id is required');
+  if (!id) throw new GolemClientError('getTicket: id is required', { code: 'GOLEM_INVALID_ARGUMENT' });
   return request('GET', `/api/tickets/${encodeURIComponent(id)}`);
 }
 
@@ -276,13 +221,13 @@ export function createTicket(body = {}) {
 
 /** PATCH /api/tickets/:id {…patch, actor?} */
 export function updateTicket(id, patch) {
-  if (!id) throw new Error('updateTicket: id is required');
+  if (!id) throw new GolemClientError('updateTicket: id is required', { code: 'GOLEM_INVALID_ARGUMENT' });
   return request('PATCH', `/api/tickets/${encodeURIComponent(id)}`, { body: patch });
 }
 
 /** POST /api/tickets/:id/transition {phase,reason?,skip_reason?,actor} */
 export function transitionTicket(id, input) {
-  if (!id) throw new Error('transitionTicket: id is required');
+  if (!id) throw new GolemClientError('transitionTicket: id is required', { code: 'GOLEM_INVALID_ARGUMENT' });
   return request('POST', `/api/tickets/${encodeURIComponent(id)}/transition`, {
     body: input,
     verbatimError: true,
@@ -291,27 +236,27 @@ export function transitionTicket(id, input) {
 
 /** POST /api/tickets/:id/comments {author,body,quote?,prefix?,suffix?,section?,section_id?,tag?,status?,parent_id?} */
 export function addComment(id, input = {}) {
-  if (!id) throw new Error('addComment: id is required');
+  if (!id) throw new GolemClientError('addComment: id is required', { code: 'GOLEM_INVALID_ARGUMENT' });
   return request('POST', `/api/tickets/${encodeURIComponent(id)}/comments`, { body: input });
 }
 
 /** PATCH /api/tickets/:id/comments/:cid {body?,tag?,status?} */
 export function updateComment(id, commentId, patch) {
-  if (!id) throw new Error('updateComment: id is required');
-  if (!commentId) throw new Error('updateComment: commentId is required');
+  if (!id) throw new GolemClientError('updateComment: id is required', { code: 'GOLEM_INVALID_ARGUMENT' });
+  if (!commentId) throw new GolemClientError('updateComment: commentId is required', { code: 'GOLEM_INVALID_ARGUMENT' });
   return request('PATCH', `/api/tickets/${encodeURIComponent(id)}/comments/${encodeURIComponent(commentId)}`, { body: patch });
 }
 
 /** POST /api/tickets/:id/comments/:cid/reply {author,body} */
 export function replyComment(id, commentId, body) {
-  if (!id) throw new Error('replyComment: id is required');
-  if (!commentId) throw new Error('replyComment: commentId is required');
+  if (!id) throw new GolemClientError('replyComment: id is required', { code: 'GOLEM_INVALID_ARGUMENT' });
+  if (!commentId) throw new GolemClientError('replyComment: commentId is required', { code: 'GOLEM_INVALID_ARGUMENT' });
   return request('POST', `/api/tickets/${encodeURIComponent(id)}/comments/${encodeURIComponent(commentId)}/reply`, { body });
 }
 
 /** POST /api/tickets/:id/dispatch {session_id,note?,mode?} — when_idle:true maps to mode 'when_idle'. */
 export function dispatchTicket(id, { session_id, note, when_idle, workspace, sender_id } = {}) {
-  if (!id) throw new Error('dispatchTicket: id is required');
+  if (!id) throw new GolemClientError('dispatchTicket: id is required', { code: 'GOLEM_INVALID_ARGUMENT' });
   return request('POST', `/api/tickets/${encodeURIComponent(id)}/dispatch`, {
     body: { session_id, note, mode: when_idle ? 'when_idle' : 'now', workspace: workspace || undefined, sender_id: sender_id || undefined },
   });
@@ -342,7 +287,7 @@ export function listDispatchable(project) {
  * channel could not be reached).
  */
 export function postBrief(sessionId, text) {
-  if (!sessionId) throw new Error('postBrief: sessionId is required');
+  if (!sessionId) throw new GolemClientError('postBrief: sessionId is required', { code: 'GOLEM_INVALID_ARGUMENT' });
   return request('POST', '/api/brief', { body: { session_id: sessionId, text } });
 }
 
@@ -361,6 +306,6 @@ export function deliverControlMessage({ session_id, sender_id, project_id, kind,
 
 /** Correlated channel lifecycle updates. The dashboard validates target identity. */
 export function acknowledgeEnvelope(id, body) {
-  if (!id) throw new Error('acknowledgeEnvelope: id is required');
+  if (!id) throw new GolemClientError('acknowledgeEnvelope: id is required', { code: 'GOLEM_INVALID_ARGUMENT' });
   return request('POST', `/api/message-envelopes/${encodeURIComponent(id)}/ack`, { body, caller_session_id: body?.target_session_id });
 }
