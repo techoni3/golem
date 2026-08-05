@@ -44,6 +44,8 @@ import {
 import { channelsJsonPath, golemHome, sessionsJsonPath } from '../../lib/golem-home.js';
 import { readCodexSupervisors } from '../../lib/codex-supervisor.js';
 import { isSessionFactTerminal, readSessionFacts } from '../../lib/session-facts.js';
+import { piCompatibility } from '../../lib/pi-compatibility.js';
+import { isTypedWorkerChannel } from './channels.js';
 
 const HOME = os.homedir();
 const SESSIONS_DIR = path.join(HOME, '.claude', 'sessions');
@@ -545,13 +547,13 @@ export async function readNativeSessions(registeredIdLookup, verifiedChannels = 
     const factTerminal = isSessionFactTerminal(s._fact);
     const rowEnded = !!s.ended_at || factTerminal;
     const verifiedEndpoint = verifiedBySession.get(s.session_id);
-    const managedCodexHealthy = harness === 'codex' && verifiedEndpoint?.kind === 'codex-supervisor';
+    const typedWorkerHealthy = isTypedWorkerChannel(verifiedEndpoint);
     // An authenticated healthy endpoint is sufficient liveness evidence on its
     // own (mirrors managed Codex): with heartbeat fact re-stamps gone (GOL-109)
     // an idle opencode session's fact legitimately ages past the recency
     // window while its bridge stays live. The fallback arm only applies to
     // rows without a fact, so it needs no fact-freshness gate.
-    const alive = managedCodexHealthy
+    const alive = typedWorkerHealthy
       ? !rowEnded
       : harness === 'opencode'
       ? !!(!factTerminal && !s.ended_at && (verifiedEndpoint || (!s._fact && liveChannelSessionIds.has(s.session_id) && (bridge
@@ -589,6 +591,14 @@ export async function readNativeSessions(registeredIdLookup, verifiedChannels = 
       }
     }
 
+    const fact = s._fact ?? null;
+    const piVersion = fact?.observations?.pi_version ?? null;
+    const compatibility = harness === 'pi' ? piCompatibility(piVersion) : null;
+    const projectedStatus = harness === 'pi' && verifiedEndpoint?.delivery_ready === true
+      ? 'idle'
+      : harness === 'pi' && ['active'].includes(String(s.status || '').toLowerCase())
+        ? 'busy'
+        : s.status;
     out.push({
       session_id: s.session_id,
       pid: bridgePid || s.pid,
@@ -598,12 +608,23 @@ export async function readNativeSessions(registeredIdLookup, verifiedChannels = 
       project_root,
       registered,
       name: s.name,
-      status: s.status,
+      status: projectedStatus,
       waiting_for: s.waiting_for ?? null,
       started_at: s.started_at,
       updated_at: s.updated_at,
       harness,
       model: s.model ?? null,
+      provider: fact?.provider ?? null,
+      continuation_key: fact?.continuation_key ?? null,
+      session_file: fact?.locator?.session_file ?? null,
+      delivery_mode: fact?.delivery?.mode ?? null,
+      delivery_push: fact?.delivery?.push ?? null,
+      trust: fact?.trust ?? null,
+      compatibility,
+      pi_version: piVersion,
+      extension_version: fact?.observations?.extension_version ?? null,
+      adapter_state: fact?.observations?.adapter_state ?? null,
+      delivery_state: fact?.observations?.delivery_state ?? null,
       role: s.role ?? null,
       role_updated_at: s.role_updated_at ?? null,
       role_updated_by: s.role_updated_by ?? null,

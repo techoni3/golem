@@ -1,6 +1,6 @@
 {
   "name": "@laveesingh/golem",
-  "version": "5.6.13",
+  "version": "5.6.14",
   "description": "Golem — substrate compiler, dashboard/tracker, and CLI for the agentic harness.",
   "license": "MIT",
   "repository": {
@@ -52,7 +52,8 @@
     "dashboard:build": "vite build --config dashboard/vite.config.js",
     "dashboard:dev": "vite --config dashboard/vite.config.js",
     "dashboard:serve": "npm run dashboard:build && node dashboard/server/index.js",
-    "test:dashboard:browser": "node dashboard/scripts/gol-461-browser.mjs && node dashboard/scripts/gol-495-browser.mjs && node dashboard/scripts/nested-composer-overlay.browser.mjs",
+    "test:dashboard:browser": "node dashboard/scripts/gol-461-browser.mjs && node dashboard/scripts/gol-495-browser.mjs && node dashboard/scripts/nested-composer-overlay.browser.mjs && node dashboard/scripts/gol-129-pi-browser.mjs",
+    "test:pi:dashboard": "node test/typed-immediate-retry.test.mjs && npm run dashboard:build && node dashboard/scripts/gol-129-pi-browser.mjs",
     "check:dashboard": "dashboard/scripts/check.sh"
   },
   "dependencies": {

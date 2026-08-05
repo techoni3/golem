@@ -197,11 +197,11 @@ try {
     if (method === 'turn/start' && params.clientUserMessageId) roleTurns.push(params);
     return request(method, params, ...rest);
   };
-  const role = await post(dashboard.base, `/api/sessions/${encodeURIComponent(sessionId)}/role`, { role: 'manager' });
+  const role = await post(dashboard.base, `/api/sessions/${encodeURIComponent(sessionId)}/role`, { role: 'lead' });
   supervisor.rpc.request = request;
   assert.equal(role.response.status, 200, role.text);
   assert.equal(role.json.saved, true);
-  assert.equal(role.json.session.role, 'manager');
+  assert.equal(role.json.session.role, 'lead');
   assert.equal(role.json.session.harness, 'codex', 'managed role persistence is enriched from canonical facts');
   assert.equal(role.json.session.name, threadName);
   assert.equal(role.json.session.project_path, repo);
@@ -210,13 +210,13 @@ try {
   assert.equal(roleTurns.length, 1, 'idle role assignment starts exactly one typed App Server turn');
   assert.equal(roleTurns[0].clientUserMessageId, role.json.activation.envelope_id);
   assert.match(roleTurns[0].input?.[0]?.text || '', /ROLE ASSIGNMENT ONLY/);
-  assert.match(roleTurns[0].input?.[0]?.text || '', /Your session role is now: manager/);
+  assert.match(roleTurns[0].input?.[0]?.text || '', /Your session role is now: lead/);
   assert.match(roleTurns[0].input?.[0]?.text || '', /Role card \(identity context for later/);
   await awaitControl(supervisor, role.json.activation.envelope_id, 'role assignment');
   assert.equal(readCodexSupervisor(sessionId).inbox.deliveries.length, beforeRoleDeliveries + 1, 'one durable envelope maps to one role turn');
   const renderedRole = await waitFor(async () => {
     const snapshot = await (await fetch(`${dashboard.base}/api/snapshot`)).json();
-    return snapshot.native_sessions?.find((row) => row.session_id === sessionId && row.role === 'manager') || null;
+    return snapshot.native_sessions?.find((row) => row.session_id === sessionId && row.role === 'lead') || null;
   }, 'managed Codex rendered role after dashboard reconciliation');
   assert.equal(renderedRole.harness, 'codex');
   assert.equal(renderedRole.name, threadName);
@@ -285,13 +285,13 @@ try {
     session_id: 'opencode-role-legacy', pid: process.pid, host: '127.0.0.1', port: legacyRoleChannel.port,
     harness: 'opencode', project_id: first.project_id, project_path: repo, cwd: repo, name: 'oc:role-legacy',
   }] }));
-  const legacyRole = await post(dashboard.base, '/api/sessions/opencode-role-legacy/role', { role: 'manager' });
+  const legacyRole = await post(dashboard.base, '/api/sessions/opencode-role-legacy/role', { role: 'lead' });
   assert.equal(legacyRole.response.status, 200, legacyRole.text);
   assert.equal(legacyRole.json.activation.ok, true, legacyRole.text);
   assert.equal(legacyRoleChannel.requests.length, 1);
   assert.equal(legacyRoleChannel.requests[0].path, '/role');
-  assert.match(legacyRoleChannel.requests[0].body, /Your session role is now: manager/);
-  const liveRolePush = await post(dashboard.base, '/api/roles/manager/push', {});
+  assert.match(legacyRoleChannel.requests[0].body, /Your session role is now: lead/);
+  const liveRolePush = await post(dashboard.base, '/api/roles/lead/push', {});
   assert.equal(liveRolePush.response.status, 200, liveRolePush.text);
   assert.ok(liveRolePush.json.results.some((row) => row.session_id === 'opencode-role-legacy' && row.ok), liveRolePush.text);
   assert.equal(legacyRoleChannel.requests.at(-1).path, '/role', 'role push-to-live preserves the OpenCode legacy route');

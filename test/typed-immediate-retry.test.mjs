@@ -192,17 +192,19 @@ try {
     host: endpoint.host,
     port: endpoint.port,
     kind: 'typed-worker',
-    harness: 'codex',
+    harness: 'pi',
   });
   upsertSessionFact({
     canonical_id: canonicalId,
     continuation_key: `typed-immediate:${canonicalId}`,
-    harness: 'codex',
+    harness: 'pi',
     locator: { raw_session_id: canonicalId },
     project_path: repo,
     status: 'idle',
     capabilities: { typed_worker: true, typed_worker_protocol: TYPED_WORKER_PROTOCOL_VERSION },
     delivery: { mode: 'typed-worker', push: true },
+    provider: 'ollama', model: 'deepseek-v4-flash:0731-cloud', trust: 'host-full-trust',
+    observations: { pi_version: '0.80.10', extension_version: '5.6.14' },
   });
 
   dashboard = await startDashboard(await unusedPort());
@@ -246,6 +248,7 @@ try {
   assert.equal(first.delivery.mode, 'shared_queue');
   assert.equal(nativeStarts, 1, 'the lost response happened after exactly one native start');
   assert.equal(endpointRequests, 1);
+  assert.equal(fs.existsSync(path.join(state, 'pi-inbox', canonicalId)), false, 'the production Pi route never creates a second filesystem inbox');
 
   const immediateQueue = new Database(dashboardDb, { readonly: true });
   try {

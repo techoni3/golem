@@ -7,11 +7,13 @@ import gemmaIcon from '@lobehub/icons-static-svg/icons/gemma-color.svg?url';
 import minimaxIcon from '@lobehub/icons-static-svg/icons/minimax-color.svg?url';
 import openAiIcon from '@lobehub/icons-static-svg/icons/openai.svg?url';
 import openCodeIcon from '@lobehub/icons-static-svg/icons/opencode.svg?url';
+import ollamaIcon from '@lobehub/icons-static-svg/icons/ollama.svg?url';
 import tencentIcon from '@lobehub/icons-static-svg/icons/tencent-color.svg?url';
 import zaiIcon from '@lobehub/icons-static-svg/icons/zai.svg?url';
 
 (function () {
   const providers = [
+    { id: 'ollama', label: 'Ollama', pattern: /^(?:ollama)$/i, iconSrc: ollamaIcon },
     { id: 'openai', label: 'OpenAI', pattern: /^(gpt|o[0-9])/i, iconSrc: openAiIcon },
     { id: 'anthropic', label: 'Anthropic', pattern: /^claude/i, iconSrc: anthropicIcon },
     { id: 'minimax', label: 'MiniMax', pattern: /^minimax/i, iconSrc: minimaxIcon },
@@ -28,7 +30,15 @@ import zaiIcon from '@lobehub/icons-static-svg/icons/zai.svg?url';
     claudecode: { id: 'claudecode', label: 'Claude Code', iconSrc: claudeCodeIcon },
     opencode: { id: 'opencode', label: 'OpenCode', iconSrc: openCodeIcon },
     codex: { id: 'codex', label: 'Codex', iconSrc: codexIcon },
+    pi: { id: 'pi', label: 'Pi', iconSrc: null },
   };
+
+  function providerForId(provider) {
+    const id = typeof provider === 'string' ? provider.trim() : '';
+    if (!id) return null;
+    return providers.find((entry) => entry.id.toLowerCase() === id.toLowerCase())
+      || { id: id.toLowerCase().replace(/[^a-z0-9_-]/g, '-') || 'fallback', label: id, iconSrc: null };
+  }
 
   function providerForModel(model) {
     const id = typeof model === 'string' ? model.trim() : '';
@@ -40,5 +50,5 @@ import zaiIcon from '@lobehub/icons-static-svg/icons/zai.svg?url';
     return harnesses[harness] || null;
   }
 
-  window.ModelProviders = { providers, fallback, providerForModel, harnesses, harnessForId };
+  window.ModelProviders = { providers, fallback, providerForId, providerForModel, harnesses, harnessForId };
 })();

@@ -209,6 +209,7 @@ function sessionStatusKind(s) {
   if (s.status === 'idle') return 'idle';
   if (['error', 'failed', 'system error'].includes(s.status)) return 'error';
   if (['initializing', 'starting'].includes(s.status)) return 'initializing';
+  if (s.status === 'stopping') return 'stopping';
   if (s.status === 'offline') return 'unavailable';
   return 'unknown';
 }
@@ -225,9 +226,11 @@ function HarnessIcon({ harness }) {
   );
 }
 
-function ModelPill({ model }) {
+function ModelPill({ model, provider: providerId }) {
   const modelLabel = typeof model === 'string' && model.trim() ? model.trim() : 'model unavailable';
-  const provider = window.ModelProviders?.providerForModel?.(model) || window.ModelProviders?.fallback || { id: 'fallback', label: 'Unknown' };
+  const provider = window.ModelProviders?.providerForId?.(providerId)
+    || window.ModelProviders?.providerForModel?.(model)
+    || window.ModelProviders?.fallback || { id: 'fallback', label: 'Unknown' };
   const providerLabel = provider.id === 'fallback' ? 'Unknown provider' : provider.label;
   return (
     <span className="agent-model-pill" title={`${providerLabel}: ${modelLabel}`}>
@@ -248,6 +251,7 @@ function stateLabel(statusKind) {
     idle: 'Idle',
     error: 'Error',
     initializing: 'Initializing',
+    stopping: 'Stopping',
     unavailable: 'Unavailable',
     unknown: 'Unknown state',
     dead: 'Offline',
@@ -358,12 +362,22 @@ function AgentCard({ session, name, queueCount = 0, setRoute, showControls = fal
               aria-label={project ? `Open ${project.name} agents` : 'Unregistered project; project navigation is unavailable'}
             ><ProjectGlyph project={fallbackProject} size={compact ? 28 : 32}/></button>
             <div className="native-session-name agent-card-name" title={title}>{title}</div>
-            <ModelPill model={s.model}/>
+            <ModelPill model={s.model} provider={s.provider}/>
             <div className="agent-card-time mono" title={`${lifetime}; ${freshness}`} aria-label={`${lifetime}, ${freshness}`}>
               <Icon.Clock size={13}/>
               <span>{lifetime}</span><span aria-hidden="true">/</span><span>{freshness}</span>
             </div>
           </div>
+
+          {s.harness === 'pi' && (
+            <div className="agent-card-pi-truth mono" aria-label="Pi worker truth">
+              <span title={`delivery ${s.delivery_mode || 'unknown'}`}>{s.delivery_ready === true ? 'ready' : `not ready${s.delivery_reason ? ` · ${s.delivery_reason}` : ''}`}</span>
+              {s.delivery_state && <span>turn {s.delivery_state}</span>}
+              <span title={`continuation ${s.continuation_key || 'unknown'}`}>continuation {s.continuation_key ? s.continuation_key.slice(0, 8) : 'unknown'}</span>
+              <span>{s.compatibility?.status || 'unverified'} · Pi {s.pi_version || '?'}</span>
+              <span>{s.trust || 'trust unknown'}</span>
+            </div>
+          )}
 
           <div className="agent-card-operations">
             <div className="agent-card-field agent-card-role-field">

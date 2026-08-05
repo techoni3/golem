@@ -50,6 +50,8 @@ const channelServer = http.createServer((req, res) => {
     res.end(JSON.stringify({
       canonical_id: requestUrl.searchParams.get('session_id'),
       owner_token: requestUrl.searchParams.get('owner_token'),
+      protocol_version: 1,
+      kind: 'codex-supervisor',
       delivery_ready: false,
     }));
     return;

@@ -36,6 +36,7 @@ import * as codexAdapter from '../lib/compiler/adapters/codex.js';
 import * as piAdapter from '../lib/compiler/adapters/pi.js';
 import { isHarnessEnabled, loadConfig, saveConfig } from '../lib/golem-config.js';
 import { CodexSupervisor, readCodexSupervisor } from '../lib/codex-supervisor.js';
+import { MIN_PI_NODE, SUPPORTED_PI_VERSION, piNodeSupported } from '../lib/pi-compatibility.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -578,9 +579,6 @@ async function cmdClaude(args) {
   process.exitCode = 1;
 }
 
-const SUPPORTED_PI_VERSION = '0.80.10';
-const MIN_PI_NODE = Object.freeze({ major: 22, minor: 19 });
-
 function piLauncherHelp() {
   log(`Usage: golem pi [--provider <id> --model <id>] [--resume <session-id>] [-- <pi args...>]
 
@@ -600,11 +598,6 @@ extensions are allowed; the shipped Golem extension is always loaded first.
 
   golem pi --provider ollama --model deepseek-v4-flash:0731-cloud
   golem pi --resume <pi-session-id> -- --thinking high`);
-}
-
-function piNodeSupported(version = process.versions.node) {
-  const [major, minor] = String(version).split('.').map(Number);
-  return major > MIN_PI_NODE.major || (major === MIN_PI_NODE.major && minor >= MIN_PI_NODE.minor);
 }
 
 function isReservedPiArgument(arg) {

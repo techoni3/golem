@@ -29,9 +29,9 @@
 import { loadConfig } from '../../lib/golem-config.js';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import { checkpointPiPickupAck, claimPiPickupAcks, completePiPickupAck, enqueuePiBrief } from '../../lib/pi-inbox.js';
+import { checkpointPiPickupAck, claimPiPickupAcks, completePiPickupAck } from '../../lib/pi-inbox.js';
 import { isChannelDeliveryReady, isTypedWorkerChannel } from './channels.js';
-import { hasTypedWorkerCapability, readEndpointLeases, readSessionFacts } from '../../lib/session-facts.js';
+import { hasTypedWorkerCapability, readSessionFacts } from '../../lib/session-facts.js';
 import { isLegacyReplayFence } from './typed-delivery.js';
 import { acceptedDelivery, publishDurableEnvelope, settleDurableEnvelope } from './envelope-delivery.js';
 
@@ -56,8 +56,6 @@ export function initDispatchDrainer({
   buildDispatchBrief,
   broadcastWS,
   listChannels,
-  listEndpointLeases = () => readEndpointLeases({ includeExpired: true }),
-  listSessionFacts = () => readSessionFacts(),
   nowMs = () => Date.now(),
 }) {
   const deliverControl = pushControlEnvelope ?? (({ content }, sessionId) => pushBrief(content, sessionId));
@@ -382,8 +380,6 @@ export function initDispatchDrainer({
     // (safe), not burn.
     let channelIds = new Set();
     let channelsBySession = new Map();
-    let typedCapableSessionIds = new Set();
-    let legacyPiSessionIds = new Set();
     try {
       // A managed Codex supervisor can keep a healthy loopback lease while it
       // is busy/recovering. Treat delivery_ready:false exactly like an absent
@@ -393,22 +389,6 @@ export function initDispatchDrainer({
       channelIds = new Set(readyChannels.map((channel) => channel.session_id));
       channelsBySession = new Map(readyChannels.map((channel) => [channel.session_id, channel]));
     } catch { /* transient → everyone waits a tick */ }
-    try {
-      typedCapableSessionIds = new Set((await listEndpointLeases())
-        .filter(isTypedWorkerChannel)
-        .map((lease) => lease.canonical_id || lease.session_id)
-        .filter(Boolean));
-    } catch { /* a registry read failure never falls back to the Pi spool */ }
-    try {
-      for (const fact of await listSessionFacts()) {
-        if (!fact?.canonical_id) continue;
-        // Capability is sticky across terminal fact -> restart -> pre-lease
-        // ticks. A lease is reachability; it must not decide whether a typed
-        // worker is silently demoted to Pi's compatibility spool.
-        if (hasTypedWorkerCapability(fact)) typedCapableSessionIds.add(fact.canonical_id);
-        else if (hasExplicitLegacyPiDelivery(fact)) legacyPiSessionIds.add(fact.canonical_id);
-      }
-    } catch { /* a fact read failure never invents a legacy Pi fallback */ }
     const byId = new Map();
     for (const s of sessions) if (s.session_id) byId.set(s.session_id, s);
     const retryDrain = await drainEnvelopeRetries({ byId, channelsBySession, pendingQueue: pending });
@@ -428,13 +408,7 @@ export function initDispatchDrainer({
     for (const [sessionId, rows] of bySession) {
       if (retryDrain.queueBlockedByRetry.has(sessionId)) continue;
       const s = byId.get(sessionId);
-      const isPi = s?.harness === 'pi';
       const isTypedWorker = isTypedWorkerChannel(channelsBySession.get(sessionId));
-      const isTypedCapable = isTypedWorker || typedCapableSessionIds.has(sessionId);
-      // Pi stays on the migration-only next-turn spool only until it has
-      // registered the shared typed endpoint. A first-class Pi lease follows
-      // the same generic channel path as any other typed worker.
-      const usesLegacyPiSpool = isPi && !isTypedCapable && legacyPiSessionIds.has(sessionId);
 
       const waveGate = (row) => {
         try {
@@ -449,7 +423,7 @@ export function initDispatchDrainer({
 
       // Session unknown, dead, OR unreachable (channel MCP down — TKT-0369):
       // hold rows pending (60m expiry), never burn one on a push that can't land.
-      if (!s || !s.alive || (!usesLegacyPiSpool && !channelIds.has(sessionId))) {
+      if (!s || !s.alive || !channelIds.has(sessionId)) {
         const oldest = rows.find((row) => !isWaveHeld(row));
         if (!oldest) continue; // all rows are wave-held; do not expire them as offline.
         const createdMs = Date.parse(oldest.created_at);
@@ -501,7 +475,7 @@ export function initDispatchDrainer({
         }
       }
       if (!row) continue;
-      const requiresPublishingLease = usesLegacyPiSpool || isTypedWorker;
+      const requiresPublishingLease = isTypedWorker;
       try {
         const ticket = tracker.getTicket(row.ticket_id);
         if (!ticket) {
@@ -567,7 +541,7 @@ export function initDispatchDrainer({
         // below, but the ticket is already dispatched to this same session.
         // Repeating setDispatched would cancel that very queue row before the
         // duplicate-safe retry reaches the endpoint.
-        if (!usesLegacyPiSpool && ticket.dispatched_to !== sessionId) {
+        if (ticket.dispatched_to !== sessionId) {
           assigned = tracker.setDispatched(ticket.id, { session_id: sessionId, actor: 'golem-drainer' });
         }
         if (assigned.revoked_session_id) {
@@ -594,9 +568,7 @@ export function initDispatchDrainer({
         // Freeze the exact comment rows alongside this queued envelope before
         // transport. A later batch for the same ticket/session must remain
         // pending when this older retry settles after a lost response.
-        const commentDispatches = !usesLegacyPiSpool
-          ? (tracker.listPendingCommentDispatchesForTicket?.(ticket.id, sessionId) ?? [])
-          : [];
+        const commentDispatches = tracker.listPendingCommentDispatchesForTicket?.(ticket.id, sessionId) ?? [];
         const commentDispatchIds = commentDispatches.map((dispatch) => dispatch.id);
         let pushResult;
         let typedPublication = null;
@@ -627,11 +599,7 @@ export function initDispatchDrainer({
               publish: ({ content, metadata }) => pushBrief(content, sessionId, metadata),
             });
             pushResult = typedPublication.delivery;
-          } else {
-            pushResult = usesLegacyPiSpool
-              ? enqueuePiBrief(sessionId, briefString, { queue_id: row.id, envelope_id: row.envelope_id || null, ticket_id: ticket.id, session_id: sessionId }, { messageId: row.id })
-              : await pushBrief(briefString, sessionId, { envelope_id: row.envelope_id || undefined, sender_session_id: envelope?.sender_session_id || null, target_session_id: sessionId });
-          }
+          } else pushResult = await pushBrief(briefString, sessionId, { envelope_id: row.envelope_id || undefined, sender_session_id: envelope?.sender_session_id || null, target_session_id: sessionId });
         } catch (err) {
           pushResult = { ok: false, error: String(err?.message ?? err) };
         }

@@ -96,6 +96,37 @@ assert.equal(ocRow?.updated_at, freshRegistryAt, 'registry recency wins when the
 const ocRow2 = recencyRows.find((row) => row.session_id === 'oc-recency2');
 assert.equal(ocRow2?.updated_at, freshFactAt, 'fact recency wins when the registry is older');
 
+// GOL-129: a verified typed-worker lease is endpoint liveness, not activity.
+// It keeps a quiet Pi visible without forging a newer observed_at, while the
+// fact remains the authority for provider/model/continuation/trust metadata.
+upsertSessionFact({
+  canonical_id: 'pi-stale-live', continuation_key: 'pi-continuation', harness: 'pi',
+  locator: { raw_session_id: 'pi-stale-live', session_file: '/tmp/pi-session.jsonl' },
+  project_path: process.cwd(), name: 'Pi stale live', status: 'active',
+  provider: 'ollama', model: 'deepseek-v4-flash:0731-cloud',
+  delivery: { mode: 'typed-worker', push: true, ready: false },
+  capabilities: { typed_worker: true }, trust: 'host-full-trust',
+  observations: { adapter_state: 'active', delivery_state: 'accepted', pi_version: '0.80.10', extension_version: '5.6.14' },
+  observed_at: new Date(staleFactAt).toISOString(),
+});
+const piBusy = (await readNativeSessions(() => true, [{
+  session_id: 'pi-stale-live', endpoint_health: 'healthy', kind: 'typed-worker', delivery_ready: false,
+}])).find((row) => row.session_id === 'pi-stale-live');
+assert.equal(piBusy?.alive, true, 'healthy typed Pi lease keeps a quiet worker visible past fact recency');
+assert.equal(piBusy?.updated_at, staleFactAt, 'lease liveness does not forge Pi activity recency');
+assert.equal(piBusy?.status, 'busy', 'Pi active fact projects the canonical busy state');
+assert.equal(piBusy?.provider, 'ollama');
+assert.equal(piBusy?.model, 'deepseek-v4-flash:0731-cloud');
+assert.equal(piBusy?.continuation_key, 'pi-continuation');
+assert.equal(piBusy?.delivery_mode, 'typed-worker');
+assert.equal(piBusy?.delivery_state, 'accepted');
+assert.equal(piBusy?.trust, 'host-full-trust');
+assert.deepEqual(piBusy?.compatibility, { status: 'supported', pi_version: '0.80.10', supported_pi_version: '0.80.10', node_requirement: '>=22.19' });
+const piIdle = (await readNativeSessions(() => true, [{
+  session_id: 'pi-stale-live', endpoint_health: 'healthy', kind: 'typed-worker', delivery_ready: true,
+}])).find((row) => row.session_id === 'pi-stale-live');
+assert.equal(piIdle?.status, 'idle', 'live typed readiness outranks a stale active observation');
+
 // GOL-109 merge overlay: the CLI row's updated_at is fabricated (= startedAt;
 // `claude agents --json` emits no updatedAt), so overlaying it must never
 // regress the golem registry's hook-driven recency — the shape that occurs in

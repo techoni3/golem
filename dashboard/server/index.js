@@ -912,13 +912,18 @@ async function main() {
   fastify.post('/api/brief', async (req, reply) => {
     const body = extractBody(req);
     const sessionId = extractSessionId(req);
-    chat.record('user', 'brief', bodyToText(body), sessionId ? { session_id: sessionId } : {});
-    const result = await pushBrief(body, sessionId);
-    if (!result.ok) {
-      noteForwardFailure('brief', result);
-      return reply.code(502).send(result);
-    }
-    return result;
+    const content = bodyToText(body);
+    chat.record('user', 'brief', content, sessionId ? { session_id: sessionId } : {});
+    if (!sessionId) return reply.code(400).send({ error: 'session_id is required' });
+    const result = await deliverControlEnvelope(tracker, {
+      sender_id: 'human:dashboard', recipient_session_id: sessionId,
+      kind: 'brief', content, legacy: { path: '/brief', body },
+    });
+    const ok = result.delivered || result.retry_queued;
+    if (!ok) noteForwardFailure('brief', result.delivery);
+    return reply.code(ok ? 200 : (result.delivery?.status || 502)).send({
+      ok, queued: result.retry_queued, envelope_id: result.envelope.id, delivery: result.delivery,
+    });
   });
   fastify.post('/api/messages/notify', async (req, reply) => {
     const b = req.body ?? {};
@@ -987,24 +992,44 @@ async function main() {
   fastify.post('/api/interrupt', async (req, reply) => {
     const body = extractBody(req);
     const sessionId = extractSessionId(req);
-    chat.record('user', 'interrupt', bodyToText(body), sessionId ? { session_id: sessionId } : {});
-    const result = await pushInterrupt(body, sessionId);
-    if (!result.ok) {
-      noteForwardFailure('interrupt', result);
-      return reply.code(result.status || 502).send(result);
+    const content = bodyToText(body);
+    chat.record('user', 'interrupt', content, sessionId ? { session_id: sessionId } : {});
+    if (!sessionId) return reply.code(400).send({ error: 'session_id is required' });
+    const managedCodex = (await listChannels()).some((channel) => channel.session_id === sessionId && channel.kind === 'codex-supervisor');
+    if (managedCodex) {
+      const gated = await pushInterrupt(body, sessionId);
+      return reply.code(gated.status || (gated.ok ? 200 : 502)).send(gated);
     }
-    return result;
+    const result = await deliverControlEnvelope(tracker, {
+      sender_id: 'human:dashboard', recipient_session_id: sessionId,
+      kind: 'interrupt', content, legacy: { path: '/interrupt', body },
+    });
+    const ok = result.delivered || result.retry_queued;
+    if (!ok) noteForwardFailure('interrupt', result.delivery);
+    return reply.code(ok ? 200 : (result.delivery?.status || 502)).send({
+      ok, queued: result.retry_queued, envelope_id: result.envelope.id, delivery: result.delivery,
+    });
   });
   fastify.post('/api/halt', async (req, reply) => {
     const body = extractBody(req);
     const sessionId = extractSessionId(req);
-    chat.record('system', 'halt', bodyToText(body) || 'halt requested', sessionId ? { session_id: sessionId } : {});
-    const result = await pushHalt(body, sessionId);
-    if (!result.ok) {
-      noteForwardFailure('halt', result);
-      return reply.code(result.status || 502).send(result);
+    const content = bodyToText(body) || 'halt requested';
+    chat.record('system', 'halt', content, sessionId ? { session_id: sessionId } : {});
+    if (!sessionId) return reply.code(400).send({ error: 'session_id is required' });
+    const managedCodex = (await listChannels()).some((channel) => channel.session_id === sessionId && channel.kind === 'codex-supervisor');
+    if (managedCodex) {
+      const gated = await pushHalt(body, sessionId);
+      return reply.code(gated.status || (gated.ok ? 200 : 502)).send(gated);
     }
-    return result;
+    const result = await deliverControlEnvelope(tracker, {
+      sender_id: 'human:dashboard', recipient_session_id: sessionId,
+      kind: 'halt', content, legacy: { path: '/halt', body },
+    });
+    const ok = result.delivered || result.retry_queued;
+    if (!ok) noteForwardFailure('halt', result.delivery);
+    return reply.code(ok ? 200 : (result.delivery?.status || 502)).send({
+      ok, queued: result.retry_queued, envelope_id: result.envelope.id, delivery: result.delivery,
+    });
   });
   // v4: brief / interrupt / halt are delivered over per-session channels.
   // Gate verdicts (v3 docs/agent-notes/gates/ flow) were removed in TKT-0009.
@@ -1718,11 +1743,9 @@ async function main() {
     const existing = ticketRef;
     if (!sessionId) return reply.code(400).send({ error: 'session_id is required' });
     const nativeTarget = state.nativeSessions().find((s) => s.session_id === sessionId);
-    const isPi = nativeTarget?.harness === 'pi';
-
     // 'when_idle': queue for delivery on idle unless the target is already idle
     // (in which case fall through to the immediate 'now' path — no queue row).
-    if (mode === 'when_idle' || isPi) {
+    if (mode === 'when_idle') {
       const target = nativeTarget;
       // TKT-0369: only fall through to the immediate path when the target is
       // idle AND actually reachable — an idle session with a dead channel MCP
@@ -1730,7 +1753,7 @@ async function main() {
       // on an immediate push that cannot succeed.
       let hasChannel = false;
       try { hasChannel = (await listChannels()).some((c) => c.session_id === sessionId && isChannelDeliveryReady(c)); } catch { /* treat as unreachable */ }
-      const isIdle = !isPi && !!target && target.alive && target.status === 'idle' && hasChannel;
+      const isIdle = !!target && target.alive && target.status === 'idle' && hasChannel;
       if (!isIdle) {
         const envelope = tracker.createDispatchEnvelope(id, { session_id: sessionId, actor: senderId || 'human', sender_id: senderId });
         const briefString = buildDispatchBrief(existing, note, workspace, envelope.id, envelope.sender_session_id);

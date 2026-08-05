@@ -32,6 +32,7 @@ export const SESSION_ROLES = new Proxy([], {
   getOwnPropertyDescriptor(_target, prop) { return Object.getOwnPropertyDescriptor(roleNames(), prop); },
 });
 export const SESSION_ROLE_UPDATED_BY = Object.freeze(['human:dashboard', 'human:cli', 'self:mcp']);
+const PI_WORKER_ROLES = new Set(['builder', 'explorer', 'reviewer']);
 
 let roleRegistryCache = null;
 
@@ -489,6 +490,10 @@ export function setSessionRole(sessionId, role, { by } = {}) {
   return withFileLock(`${file}.lock`, () => {
     const reg = readRegistry(file);
     const target = roleTargetForSession(reg, sessionId);
+    const harness = target.row?.harness || target.fact?.harness || target.lease?.harness || target.channel?.harness || null;
+    if (harness === 'pi' && nextRole != null && !PI_WORKER_ROLES.has(nextRole)) {
+      throw new Error(`Pi first-class worker role must be builder, explorer, reviewer, or clear (got ${nextRole})`);
+    }
     const base = target.row || {};
     const updated = {
       ...base,

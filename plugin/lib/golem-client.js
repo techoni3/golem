@@ -4,6 +4,8 @@
 // deliberately does not inspect process environment, session registries, or
 // model-supplied arguments.
 
+import fs from 'node:fs';
+
 export class GolemClientError extends Error {
   constructor(message, {
     code = 'GOLEM_REQUEST_FAILED',
@@ -33,6 +35,17 @@ export class GolemClientError extends Error {
       pathname: this.pathname,
     };
   }
+}
+
+export function resolveGolemDashboardBaseUrl({ dashboardFile } = {}) {
+  const fallback = 'http://dashboard.golem.localhost:7420';
+  if (!dashboardFile) return fallback;
+  try {
+    const value = JSON.parse(fs.readFileSync(dashboardFile, 'utf8'));
+    if (typeof value?.url === 'string' && value.url.trim()) return value.url.replace(/\/+$/, '');
+    if (value?.host && value?.port) return `http://${value.host}:${value.port}`;
+  } catch {}
+  return fallback;
 }
 
 function requireNonblank(value, label) {
@@ -158,6 +171,7 @@ export function createGolemClient({
     listDispatchable: (project) => request('GET', '/api/sessions/dispatchable', { params: project ? { project } : {} }),
     postBrief: (sessionId, text) => request('POST', '/api/brief', { body: { session_id: requireNonblank(sessionId, 'postBrief: sessionId'), text } }),
     notifySession: (body) => request('POST', '/api/messages/notify', { body }),
+    respond: (body) => request('POST', '/api/messages/respond', { body }),
     deliverControlMessage: (body) => request('POST', '/api/messages/control', { body }),
     acknowledgeEnvelope: (id, body) => request('POST', `/api/message-envelopes/${encodeURIComponent(requireNonblank(id, 'acknowledgeEnvelope: id'))}/ack`, { body, caller_session_id: body?.target_session_id }),
   });

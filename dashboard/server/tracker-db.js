@@ -2246,6 +2246,10 @@ WHERE state_changed_at IS NULL`).run();
     // generic, unaudited message bus.
     createControlEnvelope({ project_id = null, sender_id, recipient_session_id, kind = 'session_notify', payload = '' } = {}) {
       const allowedKinds = new Set([
+        'brief',
+        'consult',
+        'interrupt',
+        'halt',
         'session_notify',
         'gate_resolution',
         'role_assign',
