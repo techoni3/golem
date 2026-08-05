@@ -135,6 +135,7 @@ async function main() {
   const executable = path.join(render, 'golem.mjs');
   fs.copyFileSync(path.join(render, 'golem.ts'), executable);
   const extension = (await import(`${pathToFileURL(executable).href}?t=${Date.now()}`)).default;
+  const { PiNativeAdapter } = await import(`${pathToFileURL(path.join(render, 'lib', 'pi-native-adapter.js')).href}?t=${Date.now()}`);
   const sessionId = 'pi-native-session';
   const harness = createHarness(extension, sessionId);
   await harness.start();
@@ -359,6 +360,84 @@ async function main() {
   assert.equal((await preflightRetry.json()).duplicate, true);
   assert.equal(preflight.sent.length, 1, 'preflight retry never injects a second Pi prompt');
   await preflight.emit('session_shutdown', { reason: 'quit' });
+
+  // Handled local input remains durable until its own agent_start. A crash
+  // releases the unaccepted typed claim, but restart replays the local turn.
+  const durableInputId = 'pi-durable-deferred-input';
+  const durableInput = createHarness(extension, durableInputId);
+  await durableInput.start();
+  const durableInputLease = readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json')).leases.find((row) => row.canonical_id === durableInputId);
+  const durableTyped = postLease(durableInputLease, typedEnvelope(durableInputId, 'durable-owner', 'typed owner before crash'));
+  await waitFor(() => durableInput.sent.length === 1, 'durable typed injection did not begin');
+  assert.equal((await durableInput.emit('input', { source: 'rpc', text: 'survive worker restart' })).action, 'handled');
+  await durableInput.emit('session_shutdown', { reason: 'crash' });
+  assert.equal((await durableTyped).status, 503);
+  const durableRestart = createHarness(extension, durableInputId, { reason: 'resume' });
+  await durableRestart.start();
+  await waitFor(() => durableRestart.sent.length === 1, 'restart did not replay durable deferred input');
+  assert.equal(durableRestart.sent[0], 'survive worker restart');
+  await durableRestart.emit('input', { source: 'extension', text: 'survive worker restart' });
+  durableRestart.setIdle(false);
+  await durableRestart.emit('agent_start', {});
+  assert.equal(readJson(path.join(env.GOLEM_HOME, 'pi-workers', durableInputId, 'delivery.json')).deferred_inputs.length, 0, 'deferred input dequeues only at its own agent_start');
+  durableRestart.setIdle(true);
+  await durableRestart.emit('agent_settled', {});
+  await durableRestart.emit('session_shutdown', { reason: 'quit' });
+
+  // Halt does not discard input already acknowledged as handled. It stops
+  // after typed settlement, and the next session drains the durable FIFO.
+  const haltDurableId = 'pi-halt-durable-input';
+  const haltDurable = createHarness(extension, haltDurableId);
+  await haltDurable.start();
+  const haltDurableLease = readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json')).leases.find((row) => row.canonical_id === haltDurableId);
+  const haltOwned = postLease(haltDurableLease, typedEnvelope(haltDurableId, 'halt-owner', 'typed owner before halt'));
+  await waitFor(() => haltDurable.sent.length === 1, 'halt-owned typed injection did not begin');
+  assert.equal((await haltDurable.emit('input', { source: 'interactive', text: 'survive explicit halt' })).action, 'handled');
+  const haltControl = postLease(haltDurableLease, typedEnvelope(haltDurableId, 'durable-halt', 'halt with deferred input', 'halt'));
+  await waitFor(() => haltDurable.aborted, 'halt did not request preflight abort');
+  await haltDurable.emit('input', { source: 'extension', text: 'typed owner before halt' });
+  haltDurable.setIdle(false);
+  await haltDurable.emit('agent_start', {});
+  assert.equal((await (await haltOwned).json()).accepted, true);
+  haltDurable.setIdle(true);
+  await haltDurable.emit('agent_settled', {});
+  assert.equal((await (await haltControl).json()).accepted, true);
+  await waitFor(() => haltDurable.shutdown, 'halt did not request shutdown');
+  await haltDurable.emit('session_shutdown', { reason: 'halt' });
+  const haltRestart = createHarness(extension, haltDurableId, { reason: 'resume' });
+  await haltRestart.start();
+  await waitFor(() => haltRestart.sent.length === 1, 'halt restart did not replay durable input');
+  assert.equal(haltRestart.sent[0], 'survive explicit halt');
+  await haltRestart.emit('input', { source: 'extension', text: 'survive explicit halt' });
+  haltRestart.setIdle(false);
+  await haltRestart.emit('agent_start', {});
+  haltRestart.setIdle(true);
+  await haltRestart.emit('agent_settled', {});
+  await haltRestart.emit('session_shutdown', { reason: 'quit' });
+
+  // Timeout is outcome-unknown but retains native lineage. A late start is
+  // still observed, and timed-out interrupt intent is re-applied there.
+  const timeoutId = 'pi-late-native-start';
+  const timeoutHarness = createHarness((pi) => new PiNativeAdapter(pi, {
+    home: env.GOLEM_HOME, acceptTimeoutMs: 250, controlTimeoutMs: 50,
+  }).bind(), timeoutId);
+  await timeoutHarness.start();
+  const timeoutLease = readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json')).leases.find((row) => row.canonical_id === timeoutId);
+  const timeoutTyped = postLease(timeoutLease, typedEnvelope(timeoutId, 'late-start', 'late native prompt'));
+  await waitFor(() => timeoutHarness.sent.length === 1, 'late-start typed injection did not begin');
+  const timeoutControl = await postLease(timeoutLease, typedEnvelope(timeoutId, 'late-interrupt', 'interrupt before late start', 'interrupt'));
+  assert.equal(timeoutControl.status, 503);
+  assert.equal((await (await timeoutTyped).json()).delivery_state, 'recovery_required');
+  await timeoutHarness.emit('input', { source: 'extension', text: 'late native prompt' });
+  timeoutHarness.setIdle(false);
+  await timeoutHarness.emit('agent_start', {});
+  assert.equal(timeoutHarness.aborted, true, 'timed-out interrupt is re-applied to late native start');
+  timeoutHarness.setIdle(true);
+  await timeoutHarness.emit('agent_settled', {});
+  const timeoutRetry = await postLease(timeoutLease, typedEnvelope(timeoutId, 'late-start', 'late native prompt', 'brief', 'late-retry'));
+  assert.equal((await timeoutRetry.json()).duplicate, true);
+  assert.equal(timeoutHarness.sent.length, 1);
+  await timeoutHarness.emit('session_shutdown', { reason: 'quit' });
 
   const journal = fs.readFileSync(path.join(env.GOLEM_HOME, 'journals', projectIdFor(repo), 'hook.jsonl'), 'utf8');
   assert.match(journal, /"event":"agent_start"/);
