@@ -4,7 +4,8 @@
 > registers the shared authenticated typed-worker endpoint. The next-turn spool described below is
 > retained only as a migration reader for already-published records; it is no longer the intended
 > delivery path for a typed-capable Pi session. GOL-127 subsequently added shared native tools and
-> worker resources. Product tier remains B until managed launch, dashboard cutover, and release proof land.
+> worker resources. GOL-130 subsequently completed managed launch, dashboard cutover, mixed-harness,
+> and installed-package release proof and promoted Pi to a Tier-A first-class worker.
 
 Tested 2026-07-13 in an isolated `HOME`, `GOLEM_HOME`, and `XDG_CONFIG_HOME`.
 
@@ -23,7 +24,7 @@ Tested 2026-07-13 in an isolated `HOME`, `GOLEM_HOME`, and `XDG_CONFIG_HOME`.
   `ctx.sendUserMessage()` are in-process APIs. No documented external endpoint
   was found for addressing an already-running idle TUI. Because Pi was absent,
   native load/event/idle-delivery execution was not possible in this host.
-- Result: **Tier B**. The portable extension claims a durable, session-addressed
+- Historical Wave-0 result: **Tier B**. The portable extension claimed a durable, session-addressed
   JSONL inbox on the next real input and transforms that input with the queued
   text. It explicitly advertises `push_delivery: false`.
 

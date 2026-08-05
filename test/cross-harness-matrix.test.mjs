@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { createServer } from 'node:http';
 import os from 'node:os';
@@ -217,6 +217,86 @@ async function acknowledgeAndAct(client, ticket, envelopeId, target) {
   assert.equal(envelope.facts.filter((fact) => fact.kind === 'acknowledged').length, 1, 'exactly one recipient acknowledgement fact');
 }
 
+function createPiHarness(extension, sessionId) {
+  const handlers = new Map();
+  const tools = new Map();
+  const sent = [];
+  let leaf = 0;
+  let harness;
+  const pi = {
+    on(event, handler) {
+      const list = handlers.get(event) || [];
+      list.push(handler);
+      handlers.set(event, list);
+    },
+    registerTool(tool) { tools.set(tool.name, tool); },
+    sendUserMessage(content) {
+      sent.push(content);
+      queueMicrotask(async () => {
+        await harness.emit('input', { source: 'extension', text: content });
+        await harness.emit('agent_start', { prompt: content });
+      });
+    },
+  };
+  extension(pi);
+  const ctx = {
+    cwd: project,
+    mode: 'tui',
+    model: { provider: 'ollama', id: 'deepseek-v4-flash:0731-cloud' },
+    isIdle: () => true,
+    hasPendingMessages: () => false,
+    abort() {},
+    shutdown() {},
+    sessionManager: {
+      getSessionId: () => sessionId,
+      getSessionFile: () => path.join(temp, `${sessionId}.jsonl`),
+      getSessionName: () => 'GOL-130 Pi matrix worker',
+      getLeafId: () => `pi-leaf-${leaf}`,
+    },
+  };
+  harness = {
+    sent,
+    tools,
+    async emit(event, payload = {}) {
+      let result;
+      if (event === 'agent_start') {
+        for (const handler of handlers.get('before_agent_start') || []) {
+          const changed = await handler({ prompt: payload.prompt || '', systemPrompt: 'Pi base prompt' }, ctx);
+          if (changed !== undefined) result = changed;
+        }
+        leaf += 1;
+      }
+      for (const handler of handlers.get(event) || []) {
+        const changed = await handler(payload, ctx);
+        if (changed !== undefined) result = changed;
+      }
+      return result;
+    },
+    start: () => harness.emit('session_start', { reason: 'startup' }),
+    settle: () => harness.emit('agent_settled', {}),
+    shutdown: () => harness.emit('session_shutdown', { reason: 'shutdown' }),
+  };
+  return harness;
+}
+
+async function invokePi(harness, name, args) {
+  const result = await harness.tools.get(name).execute(`pi-${name}`, args, undefined, undefined, {
+    cwd: project,
+    sessionManager: { getSessionId: () => 'pi-matrix-worker' },
+  });
+  assert.equal(result.details?.ok, true, result.content?.[0]?.text || `${name} failed`);
+  return result.details.result;
+}
+
+async function acknowledgeAndActPi(harness, ticket, envelopeId, target) {
+  await invokePi(harness, 'ack', { kind: 'brief', envelope_id: envelopeId, summary: 'Pi matrix delivery understood' });
+  await invokePi(harness, 'ticket_comment', { id: ticket.id, body: `GOL-130 target action by ${target}`, tag: 'note' });
+  const hydrated = await (await fetch(`${dashboard.base}/api/tickets/${encodeURIComponent(ticket.id)}`)).json();
+  assert.equal(hydrated.comments.filter((comment) => comment.author === target).length, 1,
+    `subsequent Pi tracker action is attributed to ${target}`);
+  await harness.settle();
+}
+
 async function waitForCodexCompletion(supervisor, envelopeId, label) {
   return waitFor(() => {
     const record = readCodexSupervisor(supervisor.canonicalId);
@@ -302,6 +382,7 @@ let codexTargetMcp;
 let ccSource;
 let ccTarget;
 let ocTarget;
+let piTarget;
 let projectId;
 
 try {
@@ -317,6 +398,18 @@ try {
   fs.writeFileSync(path.join(hooks, 'journal-route.sh'), '#!/usr/bin/env bash\nexit 0\n');
 
   dashboard = await startDashboard();
+  process.env.GOLEM_DASHBOARD_URL = dashboard.base;
+  process.env.GOLEM_PI_VERSION = '0.80.10';
+  process.env.GOLEM_PI_EXTENSION_VERSION = '5.6.15';
+  execFileSync(process.execPath, [path.join(repo, 'cli', 'golem.js'), 'sync', '--target', 'pi'], {
+    cwd: repo, env: { ...process.env, GOLEM_HOME: home, XDG_CONFIG_HOME: xdg }, stdio: 'pipe',
+  });
+  const renderedPi = path.join(home, 'renders', 'pi');
+  const executablePi = path.join(renderedPi, 'golem.mjs');
+  fs.copyFileSync(path.join(renderedPi, 'golem.ts'), executablePi);
+  const piExtension = (await import(`${pathToFileURL(executablePi).href}?gol130=${Date.now()}`)).default;
+  piTarget = createPiHarness(piExtension, 'pi-matrix-worker');
+  await piTarget.start();
   const first = new CodexSupervisor({ canonicalId: 'codex-matrix-source', cwd: project });
   codexSource = first;
   const second = new CodexSupervisor({ canonicalId: 'codex-matrix-target', cwd: project });
@@ -341,6 +434,39 @@ try {
     channel.session_id === 'cc-matrix-source' || channel.session_id === 'cc-matrix-target'
   )).length === 2, 'generic CC channel registrations');
 
+  await waitFor(async () => (await (await fetch(`${dashboard.base}/api/native-sessions`)).json())
+    .some((row) => row.session_id === 'pi-matrix-worker' && row.delivery_ready), 'Pi typed-worker registration');
+
+  // Codex ↔ Pi through the real Pi extension endpoint and its registered
+  // ticket_dispatch tool. This proves both directions retain canonical actor
+  // identity rather than treating Pi as a dashboard-only target.
+  const codexToPi = await createTicket('matrix Codex to Pi');
+  const codexToPiDispatch = await dispatchFrom(codexSourceMcp.client, codexToPi, 'pi-matrix-worker');
+  assert.equal(codexToPiDispatch.delivered, true, JSON.stringify(codexToPiDispatch));
+  await assertEnvelope(codexToPiDispatch.envelope_id, { sender: codexSource.canonicalId, target: 'pi-matrix-worker' });
+  await acknowledgeAndActPi(piTarget, codexToPi, codexToPiDispatch.envelope_id, 'pi-matrix-worker');
+
+  const piToCodex = await createTicket('matrix Pi to Codex');
+  const piToCodexDispatch = await invokePi(piTarget, 'ticket_dispatch', { id: piToCodex.id, session_id: codexTarget.canonicalId, note: CONTROLLED_NOTE });
+  assert.equal(piToCodexDispatch.delivered, true, JSON.stringify(piToCodexDispatch));
+  await assertEnvelope(piToCodexDispatch.envelope_id, { sender: 'pi-matrix-worker', target: codexTarget.canonicalId });
+  await acknowledgeAndAct(codexTargetMcp.client, piToCodex, piToCodexDispatch.envelope_id, codexTarget.canonicalId);
+  await waitForCodexCompletion(codexTarget, piToCodexDispatch.envelope_id, 'Pi to Codex turn completion');
+
+  const ccToPi = await createTicket('matrix Claude Code to Pi');
+  const ccToPiDispatch = await dispatchFrom(ccSource.client, ccToPi, 'pi-matrix-worker');
+  assert.equal(ccToPiDispatch.delivered, true, JSON.stringify(ccToPiDispatch));
+  await assertEnvelope(ccToPiDispatch.envelope_id, { sender: 'cc-matrix-source', target: 'pi-matrix-worker' });
+  await acknowledgeAndActPi(piTarget, ccToPi, ccToPiDispatch.envelope_id, 'pi-matrix-worker');
+
+  const piToCc = await createTicket('matrix Pi to Claude Code');
+  const piToCcDispatch = await invokePi(piTarget, 'ticket_dispatch', { id: piToCc.id, session_id: 'cc-matrix-target', note: CONTROLLED_NOTE });
+  assert.equal(piToCcDispatch.delivered, true, JSON.stringify(piToCcDispatch));
+  await assertEnvelope(piToCcDispatch.envelope_id, { sender: 'pi-matrix-worker', target: 'cc-matrix-target' });
+  await waitFor(() => ccTarget.notifications.some((message) => message.method === 'notifications/claude/channel'
+    && JSON.stringify(message).includes(piToCcDispatch.envelope_id)), 'Pi to CC channel delivery');
+  await acknowledgeAndAct(ccTarget.client, piToCc, piToCcDispatch.envelope_id, 'cc-matrix-target');
+
   // Tracker → Codex, with a real supervisor turn and target-owned ack/action.
   const trackerToCodex = await createTicket('matrix tracker to Codex');
   const trackerDispatch = await dispatchFromHuman(trackerToCodex, codexTarget.canonicalId);
@@ -363,8 +489,9 @@ try {
   const codexToCcDispatch = await dispatchFrom(codexSourceMcp.client, codexToCc, 'cc-matrix-target');
   assert.equal(codexToCcDispatch.delivered, true, JSON.stringify(codexToCcDispatch));
   await assertEnvelope(codexToCcDispatch.envelope_id, { sender: codexSource.canonicalId, target: 'cc-matrix-target' });
-  await waitFor(() => ccTarget.notifications.filter((message) => message.method === 'notifications/claude/channel').length === 1,
-    'one CC channel delivery');
+  await waitFor(() => ccTarget.notifications.filter((message) => message.method === 'notifications/claude/channel'
+    && JSON.stringify(message).includes(codexToCcDispatch.envelope_id)).length === 1,
+    'one CC channel delivery for the Codex envelope');
   await acknowledgeAndAct(ccTarget.client, codexToCc, codexToCcDispatch.envelope_id, 'cc-matrix-target');
 
   // Existing generic CC → managed Codex.
@@ -418,6 +545,20 @@ try {
   await waitFor(() => promptCalls.length === 1, 'one OpenCode promptAsync delivery');
   assert.match(promptCalls[0].body.parts[0].text, /<channel source="golem" kind="brief"/, 'OpenCode receives the generic channel brief exactly once');
   await acknowledgeAndAct(ocTarget.client, codexToOc, ocDispatch.envelope_id, ocSession);
+
+  const ocToPi = await createTicket('matrix OpenCode to Pi');
+  const ocToPiDispatch = await dispatchFrom(ocTarget.client, ocToPi, 'pi-matrix-worker');
+  assert.equal(ocToPiDispatch.delivered, true, JSON.stringify(ocToPiDispatch));
+  await assertEnvelope(ocToPiDispatch.envelope_id, { sender: ocSession, target: 'pi-matrix-worker' });
+  await acknowledgeAndActPi(piTarget, ocToPi, ocToPiDispatch.envelope_id, 'pi-matrix-worker');
+
+  const piToOc = await createTicket('matrix Pi to OpenCode');
+  const piToOcDispatch = await invokePi(piTarget, 'ticket_dispatch', { id: piToOc.id, session_id: ocSession, note: CONTROLLED_NOTE });
+  assert.equal(piToOcDispatch.delivered, true, JSON.stringify(piToOcDispatch));
+  await assertEnvelope(piToOcDispatch.envelope_id, { sender: 'pi-matrix-worker', target: ocSession });
+  await waitFor(() => promptCalls.some((request) => JSON.stringify(request).includes(piToOcDispatch.envelope_id)),
+    'Pi to OpenCode promptAsync delivery');
+  await acknowledgeAndAct(ocTarget.client, piToOc, piToOcDispatch.envelope_id, ocSession);
 
   // OpenCode bridge → managed Codex.
   const ocToCodex = await createTicket('matrix OpenCode to Codex');
@@ -520,8 +661,9 @@ try {
   assert.equal(spoof.isError, true, 'model-supplied actor cannot impersonate another harness');
   assert.match(text(spoof), /conflicts with the supervisor binding/i);
 
-  console.log('GOL-475 cross-harness matrix passed: Tracker/Codex/CC/OpenCode dispatch, durable identity+ack+target action, delivery-ready queue holds, retry, restart, and spoof rejection');
+  console.log('GOL-130 cross-harness matrix passed: bidirectional Pi/Codex/CC/OpenCode dispatch, durable identity+ack+target action, delivery-ready queue holds, retry, restart, and spoof rejection');
 } finally {
+  await piTarget?.shutdown().catch(() => {});
   await ocTarget?.client?.close().catch(() => {});
   await ccSource?.client?.close().catch(() => {});
   await ccTarget?.client?.close().catch(() => {});

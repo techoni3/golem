@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-08-05 @ b1a0ed2 — maintained via golem:docs-maintenance.
+> Last verified: 2026-08-05 @ GOL-130 working tree — maintained via golem:docs-maintenance.
 ## Directory structure
 - `substrate/` — plugin source; `plugin/` is its generated CC render, never hand-edited. Roles
   have one source: `instructions/AGENTS.md`; cards and skills point to it.
@@ -33,7 +33,7 @@
 - The Pi render also registers shared tools, injects Golem-owned authority plus the current
   builder/explorer/reviewer card at safe turn boundaries, exposes progressive skills, and executes
   the shipped bounded L4 hook. The managed launcher and dashboard use one pinned compatibility
-  contract; only installed-artifact release proof and Tier-A promotion remain.
+  contract. Its Tier-A worker capability is verified by the installed-artifact release matrix.
 ### `lib/typed-worker-endpoint.js`, `lib/typed-delivery-tombstones.js`
 - Shared protocol validates authenticated, versioned envelopes; rich supervisor history is never the
   replay ledger. Terminal tracker retirement prunes lifecycle detail only after a non-evicting

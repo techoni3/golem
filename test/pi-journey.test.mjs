@@ -137,7 +137,7 @@ async function main() {
   execFileSync(process.execPath, [path.join(repo, 'cli/golem.js'), 'sync', '--target', 'pi'], { cwd: repo, env });
   const render = path.join(env.GOLEM_HOME, 'renders', 'pi');
   const caps = readJson(path.join(render, 'capabilities.json'));
-  assert.equal(caps.tier, 'B', 'delivery alone does not prematurely promote Pi');
+  assert.equal(caps.tier, 'A', 'the shipped render advertises the proven first-class worker tier');
   assert.equal(caps.push_delivery, true);
   assert.deepEqual(caps.delivery, ['typed-worker', 'next_turn_migration']);
   assert.equal(fs.existsSync(path.join(env.HOME, '.pi')), false, 'sync does not mutate Pi profile');
