@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-08-05 @ 02164fd — maintained via golem:docs-maintenance.
+> Last verified: 2026-08-05 @ b1a0ed2 — maintained via golem:docs-maintenance.
 ## Directory structure
 - `substrate/` — plugin source; `plugin/` is its generated CC render, never hand-edited. Roles
   have one source: `instructions/AGENTS.md`; cards and skills point to it.
@@ -26,13 +26,14 @@
   CC, Codex, and Pi package the same contracts. Pi translates only its native execute/result shape.
 - Passive subscription wrappers are explicitly retired; active notification and tracker-backed
   dispatch are the current shared coordination surface.
-### `lib/pi-native-adapter.js`, `shims/pi/golem.ts`
+### `lib/pi-native-adapter.js`, `lib/pi-compatibility.js`, `shims/pi/golem.ts`
 - Pi 0.80.10 binds the shared typed-worker endpoint to native `sendUserMessage`, with a synchronous
   starting reservation, correlated agent acceptance/settlement, control abort/halt, durable replay,
   endpoint leases, canonical facts, and central journaling. The old Pi inbox is migration-read-only.
 - The Pi render also registers shared tools, injects Golem-owned authority plus the current
   builder/explorer/reviewer card at safe turn boundaries, exposes progressive skills, and executes
-  the shipped bounded L4 hook. Managed launch, dashboard cutover, and Tier-A promotion remain.
+  the shipped bounded L4 hook. The managed launcher and dashboard use one pinned compatibility
+  contract; only installed-artifact release proof and Tier-A promotion remain.
 ### `lib/typed-worker-endpoint.js`, `lib/typed-delivery-tombstones.js`
 - Shared protocol validates authenticated, versioned envelopes; rich supervisor history is never the
   replay ledger. Terminal tracker retirement prunes lifecycle detail only after a non-evicting
@@ -51,7 +52,8 @@
 
 ## Data flow
 Hooks/shims write `~/.golem/` registries; dashboard owns routes; native rows mean presence,
-dispatchable rows mean readiness.
+dispatchable rows mean readiness. Typed-worker leases keep quiet Pi/Codex workers live without
+forging activity timestamps, and dashboard controls enter the same durable envelope router.
 
 ## Gotchas
 - Profile-owned root instructions render as marked blocks; text outside is human-owned. Pi keeps
