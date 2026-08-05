@@ -295,6 +295,30 @@ async function main() {
   await displaced.emit('agent_settled', {});
   await displaced.emit('session_shutdown', { reason: 'quit' });
 
+  // Once Pi has emitted the exact extension input, interrupt cannot release
+  // the claim: Pi 0.80.10 may still continue its idle auth/compaction preflight.
+  // Hold the claim, re-abort at agent_start, and make retries duplicates.
+  const preflightId = 'pi-correlated-preflight-control';
+  const preflight = createHarness(extension, preflightId);
+  await preflight.start();
+  const preflightLease = readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json')).leases.find((row) => row.canonical_id === preflightId);
+  const preflightStart = postLease(preflightLease, typedEnvelope(preflightId, 'preflight', 'correlated preflight turn'));
+  await waitFor(() => preflight.sent.length === 1, 'preflight typed input was not injected');
+  await preflight.emit('input', { source: 'extension', text: 'correlated preflight turn' });
+  const preflightInterrupt = postLease(preflightLease, typedEnvelope(preflightId, 'preflight-interrupt', 'stop preflight', 'interrupt'));
+  await waitFor(() => preflight.aborted, 'preflight control did not request abort');
+  assert.equal(readJson(path.join(env.GOLEM_HOME, 'pi-workers', preflightId, 'delivery.json')).inbox.deliveries.find((row) => row.envelope_id === 'preflight').lifecycle_state, 'claimed');
+  preflight.setIdle(false);
+  await preflight.emit('agent_start', {});
+  assert.equal((await (await preflightStart).json()).accepted, true);
+  preflight.setIdle(true);
+  await preflight.emit('agent_settled', {});
+  assert.equal((await (await preflightInterrupt).json()).accepted, true);
+  const preflightRetry = await postLease(preflightLease, typedEnvelope(preflightId, 'preflight', 'correlated preflight turn', 'brief', 'preflight-retry'));
+  assert.equal((await preflightRetry.json()).duplicate, true);
+  assert.equal(preflight.sent.length, 1, 'preflight retry never injects a second Pi prompt');
+  await preflight.emit('session_shutdown', { reason: 'quit' });
+
   const journal = fs.readFileSync(path.join(env.GOLEM_HOME, 'journals', projectIdFor(repo), 'hook.jsonl'), 'utf8');
   assert.match(journal, /"event":"agent_start"/);
   assert.doesNotMatch(journal, /owner_token|api.key|authorization/i, 'journal contains no endpoint/auth secrets');
