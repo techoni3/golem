@@ -155,6 +155,30 @@ async function assertShippedHookBundlesAreRunnable() {
   console.log('shipped hook bundles run standalone; codex injects L4 and fails open');
 }
 
+async function assertPiWorkerSurfacesAreExplicit() {
+  const pi = await import('../lib/compiler/adapters/pi.js');
+  const plan = pi.buildPlan({ substrateRoot: path.join(repo, 'substrate'), repoRoot: repo, packageVersion: '0.0.0' });
+  const keys = new Set(plan.map((entry) => entry.key));
+  for (const required of [
+    'runtime:golem-client.js', 'runtime:golem-tool-contracts.js', 'runtime:golem-tool-runtime.js',
+    'instructions:AGENTS.md', 'role:builder', 'role:explorer', 'role:reviewer',
+    'skill:tracker/SKILL.md', 'skill:building/SKILL.md', 'skill:reviewing/SKILL.md',
+    'hook:tracker-context.sh', 'hook:_golem-home.sh',
+  ]) assert.ok(keys.has(required), `Pi render must explicitly declare ${required}`);
+  assert.equal(keys.has('role:lead'), false, 'Pi worker render must not silently enable lead scope');
+  assert.equal(keys.has('role:standalone'), false, 'Pi worker render must not silently enable standalone scope');
+
+  const broken = path.join(tmp, 'pi-missing-surface');
+  fs.cpSync(path.join(repo, 'substrate'), broken, { recursive: true });
+  fs.rmSync(path.join(broken, 'roles', 'reviewer.md'));
+  assert.throws(
+    () => pi.buildPlan({ substrateRoot: broken, repoRoot: repo, packageVersion: '0.0.0' }),
+    /reviewer\.md/,
+    'missing required Pi role surface must fail plan construction rather than disappear',
+  );
+  console.log('Pi worker surfaces are explicit and missing required resources fail loudly');
+}
+
 async function assertProjectCwdResolution() {
   // The three cases below were all reachable without a live server and all
   // shipped unguarded: removing the $HOME stop, re-adding AGENTS.md to the
@@ -603,6 +627,7 @@ try {
   await assertTrackerContextOmitsBootRoster();
   await assertOrphanDirectoryPruning();
   await assertShippedHookBundlesAreRunnable();
+  await assertPiWorkerSurfacesAreExplicit();
   await assertProjectCwdResolution();
   await assertPayloadBudgetAndRefusal();
   assertNativeSessionDeduplication();

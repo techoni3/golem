@@ -29,7 +29,7 @@ fail-open, so a dashboard outage does not block a coding session.
 | **Codex** | **Tier A — recommended** | `golem codex` opens the normal interactive Codex TUI through Golem's private App Server bridge. It provides durable typed delivery into the canonical thread when idle, native resume, lifecycle facts, and Codex-owned sandbox and approvals. This is Golem's most complete managed integration. |
 | Claude Code | Tier A | `golem claude` opens native Claude Code with the rendered plugin's addressed-push channel. Plain `claude` sessions can pull work but do not receive channel pushes. |
 | OpenCode | Tier A | Rendered agents, skills, instructions, MCP configuration, and addressed delivery through the live OpenCode shim bridge. |
-| Pi | Tier B | Portable extension with lifecycle facts and durable next-input pickup; no live-idle push. |
+| Pi | Tier B | Native live delivery plus shared Golem tools and worker resources; managed launch/dashboard release proof still pending. |
 | Gemini CLI | Unsupported | No adapter or release contract is shipped. |
 
 A separately launched bare `codex` process remains a compatibility path with
@@ -159,8 +159,9 @@ golem sync --target pi
 pi -e ~/.golem/renders/pi/golem.ts
 ```
 
-Pi claims queued work on the next real user input and acknowledges it when
-agent processing begins.
+Pi registers a typed live endpoint, shared tracker/project tools, Golem-owned
+authority and builder/explorer/reviewer role context, progressive skills, and
+bounded project context. The legacy next-input spool is migration-read-only.
 
 If `GOLEM_HOME` is set, replace `~/.golem` in these examples with that path.
 

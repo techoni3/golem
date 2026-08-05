@@ -41,6 +41,7 @@ function readJson(file, fallback = null) {
 
 function createHarness(extension, sessionId, { reason = 'startup', previousSessionFile } = {}) {
   const handlers = new Map();
+  const tools = new Map();
   const sent = [];
   let idle = true;
   let pending = false;
@@ -54,6 +55,7 @@ function createHarness(extension, sessionId, { reason = 'startup', previousSessi
       list.push(handler);
       handlers.set(event, list);
     },
+    registerTool(tool) { tools.set(tool.name, tool); },
     sendUserMessage(text) { sent.push(text); },
   };
   extension(pi);
@@ -75,8 +77,12 @@ function createHarness(extension, sessionId, { reason = 'startup', previousSessi
   const emit = async (event, payload = {}) => {
     let result;
     if (event === 'agent_start' && !payload.skipBefore) {
-      const beforePayload = { prompt: payload.prompt ?? nextPrompt ?? '' };
-      for (const handler of handlers.get('before_agent_start') || []) await handler(beforePayload, ctx);
+      const beforePayload = { prompt: payload.prompt ?? nextPrompt ?? '', systemPrompt: payload.systemPrompt ?? 'Pi base prompt' };
+      for (const handler of handlers.get('before_agent_start') || []) {
+        const changed = await handler(beforePayload, ctx);
+        if (changed?.systemPrompt) beforePayload.systemPrompt = changed.systemPrompt;
+        if (changed !== undefined) result = changed;
+      }
       nextPrompt = null;
     }
     for (const handler of handlers.get(event) || []) {
@@ -89,7 +95,7 @@ function createHarness(extension, sessionId, { reason = 'startup', previousSessi
     return result;
   };
   return {
-    pi, ctx, sent, emit,
+    pi, ctx, sent, tools, emit,
     setIdle(value) { idle = value; },
     setPending(value) { pending = value; },
     setName(value) { name = value; },
@@ -148,6 +154,16 @@ async function main() {
   const sessionId = 'pi-native-session';
   const harness = createHarness(extension, sessionId);
   await harness.start();
+  assert.equal(harness.tools.has('ticket_get'), true, 'shipped Pi extension registers shared tracker tools');
+  assert.equal(harness.tools.has('project_context'), true, 'shipped Pi extension registers project context');
+  const discovered = await harness.emit('resources_discover', { cwd: repo, reason: 'startup' });
+  assert.deepEqual(discovered.skillPaths.map((value) => fs.realpathSync(value)), [fs.realpathSync(path.join(render, 'skills'))]);
+  const roleResult = await harness.tools.get('session_role').execute('tool-role', { role: 'builder' }, undefined, undefined, harness.ctx);
+  assert.equal(roleResult.details.ok, true, roleResult.content[0].text);
+  const prompt = await harness.emit('before_agent_start', { prompt: 'inspect role context', systemPrompt: 'Pi base prompt' });
+  assert.match(prompt.systemPrompt, /Authority, Then Size/, 'Golem authority rules are injected without a Pi profile file');
+  assert.match(prompt.systemPrompt, /Role: builder/, 'role truth is read at the safe turn boundary');
+  assert.match(prompt.systemPrompt, /Recent commits:/, 'bounded shipped L4 context is injected');
   let lease = readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json')).leases.find((row) => row.canonical_id === sessionId);
   assert.equal(lease.kind, 'typed-worker');
   assert.equal(lease.delivery_ready, true);

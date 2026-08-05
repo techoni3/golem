@@ -22,15 +22,16 @@
 ### `lib/golem-client.js`, `lib/golem-tool-contracts.js`, `lib/golem-tool-runtime.js`
 - Harness-neutral native-tool seam: one immutable schema source, one structured-error REST client,
   and trusted adapter-context execution/registration. MCP advertises these contracts directly;
-  CC and Codex renders package all three. Pi consumption is reserved for GOL-127's adapter slice.
+  CC, Codex, and Pi package the same contracts. Pi translates only its native execute/result shape.
 - Passive subscription wrappers are explicitly retired; active notification and tracker-backed
   dispatch are the current shared coordination surface.
 ### `lib/pi-native-adapter.js`, `shims/pi/golem.ts`
 - Pi 0.80.10 binds the shared typed-worker endpoint to native `sendUserMessage`, with a synchronous
   starting reservation, correlated agent acceptance/settlement, control abort/halt, durable replay,
   endpoint leases, canonical facts, and central journaling. The old Pi inbox is migration-read-only.
-- This is delivery/lifecycle only. Pi tools, rules/roles/skills/context, managed launch, dashboard
-  cutover, and Tier-A promotion remain owned by later GOL-122 slices.
+- The Pi render also registers shared tools, injects Golem-owned authority plus the current
+  builder/explorer/reviewer card at safe turn boundaries, exposes progressive skills, and executes
+  the shipped bounded L4 hook. Managed launch, dashboard cutover, and Tier-A promotion remain.
 ### `lib/typed-worker-endpoint.js`, `lib/typed-delivery-tombstones.js`
 - Shared protocol validates authenticated, versioned envelopes; rich supervisor history is never the
   replay ledger. Terminal tracker retirement prunes lifecycle detail only after a non-evicting
@@ -52,9 +53,11 @@ Hooks/shims write `~/.golem/` registries; dashboard owns routes; native rows mea
 dispatchable rows mean readiness.
 
 ## Gotchas
-- Root instructions render as marked blocks; text outside is human-owned. `pi` has none.
+- Profile-owned root instructions render as marked blocks; text outside is human-owned. Pi keeps
+  instructions inside its Golem render and injects them per turn without profile writes.
 - Claude runs cached render bytes: sync + version bump + `/reload-plugins`; render is not install.
-- Role cards render for cc, codex, opencode (not pi); agents only for cc and opencode — codex
+- Role cards render for cc, codex, opencode, and Pi; Pi deliberately ships only
+  builder/explorer/reviewer. Agents render only for cc and opencode — codex
   ships none despite `capabilities.json` claiming `subagents: true`.
 - opencode is bound to this checkout; its `plugin[]` names the shim by absolute path.
 - Bare Codex is pull-only; `golem codex` is private; raw role/interrupt/halt stay gated.
