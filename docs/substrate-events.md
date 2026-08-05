@@ -71,8 +71,13 @@ readiness, bounds envelope bytes, and rejects a stale owner or duplicate
 envelope. Dashboard records `claimed → accepted → settled|interrupted|
 recovery_required` separately from the legacy transport status. Only
 pre-acceptance failure returns work to the shared queue; accepted work is never
-automatically replayed. Codex remains one adapter: it claims before `turn/start`
-and records a correlated accepted mapping only after the native start result.
+automatically replayed. Acceptance retains the original retry plus exact queue,
+passive, comment, and cursor owners. The adapter durably records its terminal
+fact, then uses the shared authenticated lifecycle callback; only that terminal
+report applies settlement. Ticket rows and retries are arbitrated as one
+per-session FIFO, while settlement-only terminal retries consume no native turn.
+Codex remains one adapter: it claims before `turn/start` and records a correlated
+accepted mapping only after the native start result.
 An ambiguous start outcome is recovery-required and releases neither the
 canonical mapping nor a second delivery attempt. Once the pinned App Server
 handshake, MCP status check, typed endpoint, and idle thread are all valid, the

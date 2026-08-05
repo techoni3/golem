@@ -130,6 +130,15 @@ recovery-pending and is not replayed automatically. A completed mapping survives
 a restart; an in-progress mapping remains non-dispatchable until a later
 recovery policy resolves it.
 
+The synchronous `202` records native acceptance only. It leaves the original
+retry and its exact queue/passive/comment settlement owners durable. On
+`turn/completed` or accepted-process loss, the supervisor first persists
+`settled`, `interrupted`, or `recovery_required`, then reports that terminal fact
+to the dashboard through the shared owner-authenticated lifecycle callback. The
+dashboard verifies the live lease and immutable first-accept attempt before it
+settles those owners. A failed callback is retried from the adapter's durable
+terminal record; it never creates another native turn.
+
 `delivery_ready:true` therefore means all of the following are true at once:
 the pinned App Server is live, the required MCP is active with the canonical
 binding, the typed endpoint lease is current, and the thread is idle with no
@@ -163,8 +172,9 @@ node test/codex-delivery.test.mjs
 
 The journey interrupts its own temporary App Server turn immediately after the
 durable mapping is observed (or accepts the controlled prompt's immediate
-completion), so it never performs the tracker ticket's requested work in the
-source checkout.
+completion), then separately kills an accepted App Server process and proves
+authenticated `recovery_required` settlement plus restart replay refusal. It
+never performs the tracker ticket's requested work in the source checkout.
 
 ## GOL-477 private managed Codex TUI
 

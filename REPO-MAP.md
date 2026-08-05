@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-08-04 @ 510e80d — maintained via golem:docs-maintenance.
+> Last verified: 2026-08-05 @ 5276e81 — maintained via golem:docs-maintenance.
 ## Directory structure
 - `substrate/` — plugin source; `plugin/` is its generated CC render, never hand-edited. Roles
   have one source: `instructions/AGENTS.md`; cards and skills point to it.
@@ -13,15 +13,15 @@
 ### `dashboard/server/`
 - Agents use HTTP/MCP, never direct DB writes. Phase is truth; `state` derives from it; planned
   work needs children and waves. Typed accepted non-2xx is durable work; mismatches remain retryable.
-- Ticket rows and `envelope_delivery_retries` share one typed lifecycle: a lost response retries the
-  original envelope only; stale publishing rows reconcile persisted claim/accept/terminal truth first.
+- Ticket rows and retries share one typed lifecycle and per-session FIFO. Acceptance retains exact
+  owners; only an authenticated terminal callback settles queue/passive/comment state.
 ### `lib/session-role.js`
 - `BUILTIN_ROLES` is the hardcoded role source; migrations map a retired name forward.
 ### `lib/typed-worker-endpoint.js`, `lib/typed-delivery-tombstones.js`
 - Shared protocol validates authenticated, versioned envelopes; rich supervisor history is never the
   replay ledger. Terminal tracker retirement prunes lifecycle detail only after a non-evicting
-  compact rejection is durable; wire expiry is renewable. Original retries reserve before
-  transport, respect per-session FIFO/cooldown, and typed capability survives lease rebind; legacy
+  compact rejection is durable; wire expiry is renewable. Retries reserve before transport,
+  arbitrate with ticket rows, and typed capability survives lease rebind; legacy
   Pi requires an explicit Tier-B fact.
 ### `substrate/hooks/tracker-context.sh`
 - Builds bounded, derived SessionStart/project-context payloads. Its Node block is in command
