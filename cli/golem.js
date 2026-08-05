@@ -19,11 +19,12 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync, renameSync, rmdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync, renameSync, rmdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, resolve, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse as parseJsonc, printParseErrorCode } from 'jsonc-parser';
 import { golemHome, legacyConfigDir, migratedHomeDir, trackerDbPath, renderDirFor, projectsJsonPath, sessionsJsonPath } from '../lib/golem-home.js';
 import { projectIdFor } from '../lib/project-id.js';
 import { SESSION_ROLES, pushRoleBriefDirect, setSessionRole } from '../lib/session-role.js';
@@ -648,6 +649,7 @@ async function cmdPi(args) {
   if (model != null && !model.trim()) fatal(2, 'golem pi requires a non-empty --model');
   if (resume != null && !resume.trim()) fatal(2, 'golem pi requires a non-empty --resume');
 
+  const sourceProfile = process.env.PI_CODING_AGENT_DIR || join(homedir(), '.pi', 'agent');
   const managedProfile = join(golemHome(), 'pi-agent');
   const managedSessions = join(golemHome(), 'pi-sessions');
   mkdirSync(managedProfile, { recursive: true });
@@ -664,6 +666,36 @@ async function cmdPi(args) {
   if (piVersion !== SUPPORTED_PI_VERSION) {
     fatal(1, `golem pi supports Pi ${SUPPORTED_PI_VERSION}; found ${piVersion || '(no version)'}. Install the pinned baseline before launching.`);
   }
+
+  // Pi custom providers live in the profile's models.json. The managed
+  // profile is intentionally isolated, so bridge only the explicitly
+  // requested provider/model instead of exposing or copying the whole user
+  // profile. Built-in providers have no source definition and need no bridge.
+  const managedModelsFile = join(managedProfile, 'models.json');
+  let managedModels = { providers: {} };
+  const sourceModelsFile = join(sourceProfile, 'models.json');
+  if (provider && existsSync(sourceModelsFile) && resolve(sourceModelsFile) !== resolve(managedModelsFile)) {
+    const errors = [];
+    const parsed = parseJsonc(readFileSync(sourceModelsFile, 'utf8'), errors, { allowTrailingComma: true, disallowComments: false });
+    if (errors.length || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      const detail = errors.length ? printParseErrorCode(errors[0].error) : 'invalid root value';
+      fatal(1, `golem pi could not parse source provider config ${sourceModelsFile}: ${detail}`);
+    }
+    const sourceProvider = parsed.providers?.[provider.trim()];
+    if (sourceProvider != null) {
+      if (typeof sourceProvider !== 'object' || Array.isArray(sourceProvider)) {
+        fatal(1, `golem pi source provider "${provider.trim()}" is not an object in ${sourceModelsFile}`);
+      }
+      const definitions = Array.isArray(sourceProvider.models) ? sourceProvider.models : [];
+      const selected = definitions.find((entry) => entry && typeof entry === 'object' && entry.id === model.trim());
+      if (!selected) {
+        fatal(2, `golem pi source provider "${provider.trim()}" does not define model "${model.trim()}" in ${sourceModelsFile}`);
+      }
+      managedModels = { providers: { [provider.trim()]: { ...sourceProvider, models: [selected] } } };
+    }
+  }
+  writeFileSync(managedModelsFile, `${JSON.stringify(managedModels, null, 2)}\n`, { mode: 0o600 });
+  chmodSync(managedModelsFile, 0o600);
 
   await cmdSync(['--target', 'pi']);
   const extension = join(renderDirFor('pi'), 'golem.ts');

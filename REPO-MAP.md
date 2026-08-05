@@ -5,7 +5,8 @@
   have one source: `instructions/AGENTS.md`; cards and skills point to it.
 - `.claude/skills/` — repo-only doctrine for instructions, roles, and skills.
 - `cli/` `lib/` — entry point; runtime, role, compiler, managed-harness helpers. `golem pi`
-  version-gates Pi 0.80.10, syncs the render, and launches with a Golem-owned isolated profile.
+  version-gates Pi 0.80.10, syncs the render, launches with a Golem-owned isolated profile, and
+  bridges only the explicitly requested custom provider/model definition into that profile.
 - `dashboard/server/` — Fastify API and tracker owner. `dashboard/web/` → `dashboard/dist/`.
 - `mcp/channel/` — channel server. `shims/{opencode,codex}/` — harness events onto hooks.
 - `test/` — journey tests.

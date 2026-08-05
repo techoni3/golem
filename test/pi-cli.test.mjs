@@ -13,13 +13,22 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'golem-pi-cli-'));
 const bin = path.join(temp, 'bin');
 const project = path.join(temp, 'project');
 const state = path.join(temp, 'state');
-const normalProfile = path.join(temp, 'home', '.pi');
+const normalProfile = path.join(temp, 'home', '.pi', 'agent');
 const capture = path.join(temp, 'pi-launch.json');
 const signalCapture = path.join(temp, 'pi-signal.txt');
+const sourceModels = path.join(normalProfile, 'models.json');
 fs.mkdirSync(bin, { recursive: true });
 fs.mkdirSync(project, { recursive: true });
 fs.mkdirSync(normalProfile, { recursive: true });
 fs.writeFileSync(path.join(normalProfile, 'sentinel'), 'human profile\n');
+const sourceModelsText = `${JSON.stringify({ providers: {
+  ollama: {
+    baseUrl: 'http://127.0.0.1:11434/v1', api: 'openai-completions', apiKey: 'ollama',
+    models: [{ id: 'deepseek-v4-flash:0731-cloud', input: ['text'] }, { id: 'unrelated-model' }],
+  },
+  unrelated: { baseUrl: 'http://127.0.0.1:9999/v1', api: 'openai-completions', apiKey: 'secret-reference', models: [{ id: 'must-not-copy' }] },
+} }, null, 2)}\n`;
+fs.writeFileSync(sourceModels, sourceModelsText, { mode: 0o600 });
 
 const fakePi = path.join(bin, 'pi');
 fs.writeFileSync(fakePi, `#!${process.execPath}
@@ -37,6 +46,7 @@ fs.writeFileSync(process.env.GOLEM_PI_CAPTURE, JSON.stringify({
   launch_nonce: process.env.GOLEM_PI_LAUNCH_NONCE,
   pi_version: process.env.GOLEM_PI_VERSION,
   extension_version: process.env.GOLEM_PI_EXTENSION_VERSION,
+  managed_models: JSON.parse(fs.readFileSync(require('node:path').join(process.env.PI_CODING_AGENT_DIR, 'models.json'), 'utf8')),
 }, null, 2));
 if (process.env.GOLEM_FAKE_PI_WAIT === '1') {
   for (const signal of ['SIGTERM', 'SIGHUP']) process.once(signal, () => {
@@ -120,7 +130,26 @@ try {
   assert.equal(record.pi_version, '0.80.10');
   assert.match(record.extension_version, /^5\./);
   assert.match(record.launch_nonce, /^[0-9a-f-]{36}$/);
-  assert.deepEqual(fs.readdirSync(normalProfile), ['sentinel'], 'managed launch never mutates the normal Pi profile');
+  assert.deepEqual(Object.keys(record.managed_models.providers), ['ollama']);
+  assert.equal(record.managed_models.providers.ollama.apiKey, 'ollama');
+  assert.deepEqual(record.managed_models.providers.ollama.models, [{ id: 'deepseek-v4-flash:0731-cloud', input: ['text'] }]);
+  assert.deepEqual(fs.readdirSync(normalProfile), ['models.json', 'sentinel'], 'managed launch never mutates the normal Pi profile');
+  assert.equal(fs.readFileSync(sourceModels, 'utf8'), sourceModelsText, 'managed launch leaves source provider config byte-for-byte untouched');
+  assert.equal(fs.statSync(path.join(state, 'pi-agent', 'models.json')).mode & 0o777, 0o600, 'managed provider bridge is private');
+
+  const builtIn = run(['pi', '--provider', 'anthropic', '--model', 'claude-test']);
+  assert.equal(builtIn.status, 0, builtIn.stderr);
+  assert.deepEqual(JSON.parse(fs.readFileSync(capture, 'utf8')).managed_models, { providers: {} }, 'providers absent from source config fall through to Pi built-ins');
+
+  const missingCustomModel = run(['pi', '--provider', 'ollama', '--model', 'missing-model']);
+  assert.equal(missingCustomModel.status, 2, missingCustomModel.stderr);
+  assert.match(missingCustomModel.stderr, /source provider "ollama" does not define model "missing-model"/);
+
+  fs.writeFileSync(sourceModels, '{ invalid jsonc');
+  const malformedModels = run(['pi', '--provider', 'ollama', '--model', 'deepseek-v4-flash:0731-cloud']);
+  assert.equal(malformedModels.status, 1, malformedModels.stderr);
+  assert.match(malformedModels.stderr, /could not parse source provider config/);
+  fs.writeFileSync(sourceModels, sourceModelsText, { mode: 0o600 });
 
   for (const args of [
     ['pi', '--provider', 'ollama'],
