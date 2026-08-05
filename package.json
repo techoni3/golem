@@ -39,7 +39,7 @@
     "SECURITY.md"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=22.19"
   },
   "scripts": {
     "check": "node --check cli/golem.js && npm run audit:skills && node cli/golem.js sync --check --all",

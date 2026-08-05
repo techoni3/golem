@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -125,6 +126,8 @@ async function main() {
   assert.equal(caps.push_delivery, true);
   assert.deepEqual(caps.delivery, ['typed-worker', 'next_turn_migration']);
   assert.equal(fs.existsSync(path.join(env.HOME, '.pi')), false, 'sync does not mutate Pi profile');
+  assert.equal(execFileSync('pi', ['--version'], { env, encoding: 'utf8' }).trim(), '0.80.10', 'native proof is pinned to the surveyed Pi version');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(repo, 'package.json'), 'utf8')).engines.node, '>=22.19', 'root runtime supports stable node:sqlite');
   for (const required of ['pi-native-adapter.js', 'typed-worker-endpoint.js', 'typed-delivery-tombstones.js', 'project-id.js']) {
     assert.ok(fs.existsSync(path.join(render, 'lib', required)), `Pi render ships ${required}`);
   }
@@ -147,6 +150,15 @@ async function main() {
   harness.setIdle(false);
   await harness.emit('agent_start', {});
   assert.ok(fs.existsSync(path.join(legacyRoot, 'acks', 'legacy.json')), 'migration pickup acknowledges only at observable agent_start');
+  harness.setIdle(true);
+  await harness.emit('agent_settled', {});
+
+  // Any native input reserves the pre-agent gap before Pi reports itself busy.
+  await harness.emit('input', { source: 'interactive', text: 'local turn' });
+  const localBusy = await postLease(lease, typedEnvelope(sessionId, 'local-race', 'must not overtake local input'));
+  assert.equal(localBusy.status, 409);
+  harness.setIdle(false);
+  await harness.emit('agent_start', {});
   harness.setIdle(true);
   await harness.emit('agent_settled', {});
 
@@ -184,7 +196,12 @@ async function main() {
 
   // Busy interrupt is accepted through the control path, aborts Pi, and makes
   // the accepted work terminal rather than replaying it.
-  const interrupt = await postLease(lease, typedEnvelope(sessionId, 'interrupt-control', 'stop', 'interrupt'));
+  const interruptPromise = postLease(lease, typedEnvelope(sessionId, 'interrupt-control', 'stop', 'interrupt'));
+  await waitFor(() => harness.aborted, 'Pi abort was not requested');
+  assert.equal(readJson(path.join(env.GOLEM_HOME, 'pi-workers', sessionId, 'delivery.json')).inbox.deliveries.find((row) => row.envelope_id === 'second').lifecycle_state, 'accepted', 'control does not report terminal before Pi settles');
+  harness.setIdle(true);
+  await harness.emit('agent_settled', {});
+  const interrupt = await interruptPromise;
   assert.equal((await interrupt.json()).accepted, true);
   assert.equal(harness.aborted, true);
   const delivery = readJson(path.join(env.GOLEM_HOME, 'pi-workers', sessionId, 'delivery.json')).inbox.deliveries.find((row) => row.envelope_id === 'second');
@@ -192,7 +209,7 @@ async function main() {
 
   const halt = await postLease(lease, typedEnvelope(sessionId, 'halt-control', 'halt', 'halt'));
   assert.equal((await halt.json()).accepted, true);
-  assert.equal(harness.shutdown, true);
+  await waitFor(() => harness.shutdown, 'halt did not shut down after its response boundary');
   await harness.emit('session_shutdown', { reason: 'reload' });
   assert.equal(readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json')).leases.some((row) => row.owner_token === lease.owner_token), false);
 
@@ -227,6 +244,7 @@ async function main() {
   preCrashLease = readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json')).leases.find((row) => row.canonical_id === preCrashId);
   const preRetry = postLease(preCrashLease, typedEnvelope(preCrashId, 'precrash', 'retry after preaccept crash', 'brief', 'pre-attempt-b'));
   await waitFor(() => preCrashRestart.sent.length === 1, 'pre-crash retry did not inject');
+  await preCrashRestart.emit('input', { source: 'extension', text: 'retry after preaccept crash' });
   preCrashRestart.setIdle(false);
   await preCrashRestart.emit('agent_start', {});
   assert.equal((await (await preRetry).json()).accepted_attempt_id, 'pre-attempt-b');
@@ -242,6 +260,7 @@ async function main() {
   let postCrashLease = readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json')).leases.find((row) => row.canonical_id === postCrashId);
   const postStart = postLease(postCrashLease, typedEnvelope(postCrashId, 'postcrash', 'must not replay after acceptance', 'brief', 'post-attempt-a'));
   await waitFor(() => postCrash.sent.length === 1, 'post-crash injection did not start');
+  await postCrash.emit('input', { source: 'extension', text: 'must not replay after acceptance' });
   postCrash.setIdle(false);
   await postCrash.emit('agent_start', {});
   assert.equal((await (await postStart).json()).accepted, true);
@@ -257,30 +276,119 @@ async function main() {
   assert.equal(postCrashRestart.sent.length, 0);
   await postCrashRestart.emit('session_shutdown', { reason: 'quit' });
 
+  // Pi's generic agent_start is not evidence for a typed turn unless the
+  // exact extension input was observed first. An unrelated RPC turn releases
+  // the claim so the dashboard can safely retry it.
+  const displacedId = 'pi-displaced-typed-input';
+  const displaced = createHarness(extension, displacedId);
+  await displaced.start();
+  const displacedLease = readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json')).leases.find((row) => row.canonical_id === displacedId);
+  const displacedStart = postLease(displacedLease, typedEnvelope(displacedId, 'displaced', 'typed input awaiting correlation'));
+  await waitFor(() => displaced.sent.length === 1, 'displaced typed input was not injected');
+  await displaced.emit('input', { source: 'rpc', text: 'unrelated native turn' });
+  displaced.setIdle(false);
+  await displaced.emit('agent_start', {});
+  const displacedResponse = await displacedStart;
+  assert.equal(displacedResponse.status, 409);
+  assert.equal(readJson(path.join(env.GOLEM_HOME, 'pi-workers', displacedId, 'delivery.json')).inbox.deliveries.some((row) => row.envelope_id === 'displaced'), false);
+  displaced.setIdle(true);
+  await displaced.emit('agent_settled', {});
+  await displaced.emit('session_shutdown', { reason: 'quit' });
+
   const journal = fs.readFileSync(path.join(env.GOLEM_HOME, 'journals', projectIdFor(repo), 'hook.jsonl'), 'utf8');
   assert.match(journal, /"event":"agent_start"/);
   assert.doesNotMatch(journal, /owner_token|api.key|authorization/i, 'journal contains no endpoint/auth secrets');
 
-  // Native Pi binary proof: load the shipped extension in isolated RPC mode,
-  // observe its real session_start lease/fact, then terminate and observe lease
-  // cleanup. No provider call or user profile is needed.
-  const nativeId = crypto.randomUUID();
-  const native = spawn('pi', [
-    '--mode', 'rpc', '--offline', '--no-approve', '--session-id', nativeId,
-    '--session-dir', env.PI_CODING_AGENT_SESSION_DIR, '-e', path.join(render, 'golem.ts'),
-  ], { cwd: repo, env, stdio: ['pipe', 'pipe', 'pipe'] });
-  let nativeErr = '';
-  native.stderr.on('data', (chunk) => { nativeErr += chunk; });
-  await waitFor(() => readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json'))?.leases?.find((row) => row.canonical_id === nativeId), `native Pi did not register typed lease: ${nativeErr}`, 20_000);
-  native.kill('SIGTERM');
-  await new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error(`native Pi did not exit: ${nativeErr}`)), 10_000);
-    native.once('exit', () => { clearTimeout(timeout); resolve(); });
+  // Native Pi binary proof: a local OpenAI-compatible provider holds the real
+  // Pi turn open while typed delivery proves correlated acceptance, FIFO, and
+  // abort settlement through Pi's actual extension events.
+  let providerRequests = 0;
+  const providerServer = http.createServer((request, response) => {
+    providerRequests += 1;
+    request.resume();
+    response.writeHead(200, {
+      'content-type': 'text/event-stream',
+      'cache-control': 'no-cache',
+      connection: 'keep-alive',
+    });
+    response.write(`data: ${JSON.stringify({
+      id: 'pi-native-proof', object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000), model: 'test-model',
+      choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }],
+    })}\n\n`);
+    const timer = setTimeout(() => {
+      response.write(`data: ${JSON.stringify({
+        id: 'pi-native-proof', object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000), model: 'test-model',
+        choices: [{ index: 0, delta: { content: 'done' }, finish_reason: 'stop' }],
+      })}\n\n`);
+      response.end('data: [DONE]\n\n');
+    }, 30_000);
+    timer.unref?.();
+    response.on('close', () => clearTimeout(timer));
   });
+  await new Promise((resolve, reject) => {
+    providerServer.once('error', reject);
+    providerServer.listen(0, '127.0.0.1', resolve);
+  });
+  const providerAddress = providerServer.address();
+  assert.ok(providerAddress && typeof providerAddress !== 'string');
+  const providerExtension = path.join(temp, 'pi-test-provider.ts');
+  fs.writeFileSync(providerExtension, `export default function (pi) {
+  pi.registerProvider('golem-test', {
+    baseUrl: 'http://127.0.0.1:${providerAddress.port}/v1',
+    apiKey: 'test-key',
+    api: 'openai-completions',
+    models: [{
+      id: 'test-model', name: 'Golem native proof', reasoning: false,
+      input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 16000, maxTokens: 256
+    }]
+  });
+}\n`);
+  const nativeId = crypto.randomUUID();
+  const nativeEnv = { ...env };
+  delete nativeEnv.PI_OFFLINE;
+  const native = spawn('pi', [
+    '--mode', 'rpc', '--no-approve', '--session-id', nativeId,
+    '--session-dir', env.PI_CODING_AGENT_SESSION_DIR,
+    '--provider', 'golem-test', '--model', 'test-model',
+    '-e', providerExtension, '-e', path.join(render, 'golem.ts'),
+  ], { cwd: repo, env: nativeEnv, stdio: ['pipe', 'pipe', 'pipe'] });
+  let nativeErr = '';
+  let nativeOut = '';
+  native.stderr.on('data', (chunk) => { nativeErr += chunk; });
+  native.stdout.on('data', (chunk) => { nativeOut += chunk; });
+  try {
+    const nativeLease = await waitFor(() => readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json'))?.leases?.find((row) => row.canonical_id === nativeId), `native Pi did not register typed lease: ${nativeErr}`, 20_000);
+    const nativeStart = await postLease(nativeLease, typedEnvelope(nativeId, 'native-first', 'hold this real Pi turn open', 'brief', 'native-attempt-a'));
+    const nativeStartBody = await nativeStart.json();
+    assert.equal(nativeStartBody.accepted, true, `native Pi rejected typed delivery: ${JSON.stringify(nativeStartBody)} ${nativeErr}`);
+    assert.equal(nativeStartBody.delivery_state, 'accepted');
+    await waitFor(() => providerRequests === 1, `native Pi did not call the isolated provider: ${nativeErr}`);
+
+    const nativeBusy = await postLease(nativeLease, typedEnvelope(nativeId, 'native-second', 'must remain FIFO'));
+    assert.equal(nativeBusy.status, 409, 'real Pi process rejects a second turn while native work is active');
+    const nativeInterrupt = await postLease(nativeLease, typedEnvelope(nativeId, 'native-interrupt', 'abort real Pi', 'interrupt'));
+    assert.equal((await nativeInterrupt.json()).accepted, true, `native interrupt did not observe settlement: ${nativeErr}`);
+    const nativeRecord = readJson(path.join(env.GOLEM_HOME, 'pi-workers', nativeId, 'delivery.json'));
+    assert.equal(nativeRecord.inbox.deliveries.find((row) => row.envelope_id === 'native-first').lifecycle_state, 'interrupted');
+    const nativeJournal = fs.readFileSync(path.join(env.GOLEM_HOME, 'journals', projectIdFor(repo), 'hook.jsonl'), 'utf8');
+    assert.match(nativeJournal, new RegExp(`"event":"agent_start","session_id":"${nativeId}"`));
+    assert.match(nativeJournal, new RegExp(`"event":"agent_settled","session_id":"${nativeId}"`));
+  } finally {
+    native.kill('SIGTERM');
+    await new Promise((resolve) => {
+      if (native.exitCode !== null) return resolve();
+      const timeout = setTimeout(() => { native.kill('SIGKILL'); resolve(); }, 10_000);
+      native.once('exit', () => { clearTimeout(timeout); resolve(); });
+    });
+    providerServer.closeAllConnections?.();
+    await new Promise((resolve) => providerServer.close(resolve));
+  }
+  assert.doesNotMatch(nativeOut, /"success":false/, `native Pi RPC reported failure: ${nativeOut}`);
   await waitFor(() => !readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json'))?.leases?.some((row) => row.canonical_id === nativeId), 'native Pi did not release endpoint lease');
   assert.equal(fs.existsSync(path.join(env.HOME, '.pi')), false, 'native isolated Pi did not write the normal profile');
 
-  console.log('Pi native typed-worker journey passed: FIFO reservation, correlated acceptance, settlement, controls, pre/post-acceptance crash recovery, reload/fork identity, facts/journal, and real Pi lease lifecycle');
+  console.log('Pi native typed-worker journey passed: FIFO reservation, correlated acceptance, settlement, controls, pre/post-acceptance crash recovery, reload/fork identity, facts/journal, and real Pi typed delivery');
 }
 
 try {
