@@ -318,12 +318,15 @@ async function main() {
   await preInput.emit('agent_start', {});
   const preInputStartBody = await (await preInputStart).json();
   assert.equal(preInputStartBody.delivery_state, 'recovery_required');
+  // The exact typed input can emerge while the unrelated turn is still
+  // active, then pause before its own agent_start. Unrelated settlement still
+  // must not consume the typed control waiter.
+  await preInput.emit('input', { source: 'extension', text: 'delayed by earlier input extension' });
   preInput.setIdle(true);
   await preInput.emit('agent_settled', {});
   await sleep(25);
   assert.equal(preInputControlDone, false, 'unrelated settlement cannot complete typed control');
 
-  await preInput.emit('input', { source: 'extension', text: 'delayed by earlier input extension' });
   preInput.setIdle(false);
   await preInput.emit('agent_start', {});
   preInput.setIdle(true);
