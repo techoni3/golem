@@ -47,6 +47,7 @@ function createHarness(extension, sessionId, { reason = 'startup', previousSessi
   let aborted = false;
   let shutdown = false;
   let name = 'pi-native-test';
+  let nextPrompt = null;
   const pi = {
     on(event, handler) {
       const list = handlers.get(event) || [];
@@ -73,9 +74,17 @@ function createHarness(extension, sessionId, { reason = 'startup', previousSessi
   };
   const emit = async (event, payload = {}) => {
     let result;
+    if (event === 'agent_start' && !payload.skipBefore) {
+      const beforePayload = { prompt: payload.prompt ?? nextPrompt ?? '' };
+      for (const handler of handlers.get('before_agent_start') || []) await handler(beforePayload, ctx);
+      nextPrompt = null;
+    }
     for (const handler of handlers.get(event) || []) {
       const next = await handler(payload, ctx);
       if (next !== undefined) result = next;
+    }
+    if (event === 'input' && result?.action !== 'handled') {
+      nextPrompt = result?.action === 'transform' ? result.text : payload.text;
     }
     return result;
   };
@@ -386,6 +395,14 @@ async function main() {
   assert.equal(durableRestart.sent.length, 1, 'uncorrelated settle does not reinject deferred input');
   assert.equal(readJson(path.join(env.GOLEM_HOME, 'pi-workers', durableInputId, 'delivery.json')).deferred_inputs.length, 1, 'uncorrelated start cannot dequeue deferred input');
   await durableRestart.emit('input', { source: 'extension', text: 'survive worker restart' });
+  // Even after exact input is observed, a generic prompt-bearing start cannot
+  // consume it; before_agent_start is the correlation boundary.
+  await durableRestart.emit('before_agent_start', { prompt: 'generic extension turn' });
+  durableRestart.setIdle(false);
+  await durableRestart.emit('agent_start', { skipBefore: true });
+  durableRestart.setIdle(true);
+  await durableRestart.emit('agent_settled', {});
+  assert.equal(readJson(path.join(env.GOLEM_HOME, 'pi-workers', durableInputId, 'delivery.json')).deferred_inputs.length, 1, 'post-input unrelated start cannot dequeue deferred input');
   durableRestart.setIdle(false);
   await durableRestart.emit('agent_start', {});
   assert.equal(readJson(path.join(env.GOLEM_HOME, 'pi-workers', durableInputId, 'delivery.json')).deferred_inputs.length, 0, 'deferred input dequeues only at its own agent_start');
