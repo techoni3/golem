@@ -25,12 +25,20 @@
   CC and Codex renders package all three. Pi consumption is reserved for GOL-127's adapter slice.
 - Passive subscription wrappers are explicitly retired; active notification and tracker-backed
   dispatch are the current shared coordination surface.
+### `lib/pi-native-adapter.js`, `shims/pi/golem.ts`
+- Pi 0.80.10 binds the shared typed-worker endpoint to native `sendUserMessage`, with a synchronous
+  starting reservation, correlated agent acceptance/settlement, control abort/halt, durable replay,
+  endpoint leases, canonical facts, and central journaling. The old Pi inbox is migration-read-only.
+- This is delivery/lifecycle only. Pi tools, rules/roles/skills/context, managed launch, dashboard
+  cutover, and Tier-A promotion remain owned by later GOL-122 slices.
 ### `lib/typed-worker-endpoint.js`, `lib/typed-delivery-tombstones.js`
 - Shared protocol validates authenticated, versioned envelopes; rich supervisor history is never the
   replay ledger. Terminal tracker retirement prunes lifecycle detail only after a non-evicting
   compact rejection is durable; wire expiry is renewable. Retries reserve before transport,
   arbitrate with ticket rows, and typed capability survives lease rebind; legacy
   Pi requires an explicit Tier-B fact.
+- Replay tombstones use Node 22's built-in SQLite so isolated native-adapter renders do not depend on
+  an architecture-specific addon.
 ### `substrate/hooks/tracker-context.sh`
 - Builds the SessionStart payload — role card, LSP, recently-closed pointers, recent commits. All
   derived; fail-open per field; per-field and aggregate caps. It intentionally carries no live

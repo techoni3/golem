@@ -1,5 +1,11 @@
 # Pi native adapter spike
 
+> Historical Wave-0 evidence. As of GOL-126, Pi 0.80.10 is installed and the shipped extension
+> registers the shared authenticated typed-worker endpoint. The next-turn spool described below is
+> retained only as a migration reader for already-published records; it is no longer the intended
+> delivery path for a typed-capable Pi session. Product tier remains B until tools/resources,
+> managed launch, dashboard cutover, and release proof land.
+
 Tested 2026-07-13 in an isolated `HOME`, `GOLEM_HOME`, and `XDG_CONFIG_HOME`.
 
 - Pi executable: not installed (`command -v pi` and `pi --version` failed).

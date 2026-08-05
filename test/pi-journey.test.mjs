@@ -1,43 +1,290 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
-import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'; import { fileURLToPath } from 'node:url';
-import { enqueuePiBrief } from '../lib/pi-inbox.js'; import { initDispatchDrainer } from '../dashboard/server/dispatch-queue.js';
-const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'golem-pi-'));
-const env = { ...process.env, HOME: path.join(temp, 'home'), GOLEM_HOME: path.join(temp, 'state'), XDG_CONFIG_HOME: path.join(temp, 'xdg') };
-try {
+import { execFileSync, spawn } from 'node:child_process';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { projectIdFor } from '../lib/project-id.js';
+
+const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'golem-pi-native-'));
+const env = {
+  ...process.env,
+  HOME: path.join(temp, 'home'),
+  GOLEM_HOME: path.join(temp, 'state'),
+  XDG_CONFIG_HOME: path.join(temp, 'xdg'),
+  PI_CODING_AGENT_DIR: path.join(temp, 'pi-profile'),
+  PI_CODING_AGENT_SESSION_DIR: path.join(temp, 'pi-sessions'),
+  PI_OFFLINE: '1',
+};
+fs.mkdirSync(env.GOLEM_HOME, { recursive: true });
+fs.writeFileSync(path.join(env.GOLEM_HOME, 'dashboard.json'), JSON.stringify({ url: 'http://127.0.0.1:1' }));
+process.env.GOLEM_HOME = env.GOLEM_HOME;
+process.env.XDG_CONFIG_HOME = env.XDG_CONFIG_HOME;
+
+function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+async function waitFor(predicate, message, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const value = await predicate();
+    if (value) return value;
+    await sleep(25);
+  }
+  throw new Error(message);
+}
+
+function readJson(file, fallback = null) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
+}
+
+function createHarness(extension, sessionId, { reason = 'startup', previousSessionFile } = {}) {
+  const handlers = new Map();
+  const sent = [];
+  let idle = true;
+  let pending = false;
+  let aborted = false;
+  let shutdown = false;
+  let name = 'pi-native-test';
+  const pi = {
+    on(event, handler) {
+      const list = handlers.get(event) || [];
+      list.push(handler);
+      handlers.set(event, list);
+    },
+    sendUserMessage(text) { sent.push(text); },
+  };
+  extension(pi);
+  const ctx = {
+    cwd: repo,
+    mode: 'tui',
+    model: { provider: 'ollama', id: 'deepseek-v4-flash:0731-cloud' },
+    isIdle: () => idle,
+    hasPendingMessages: () => pending,
+    abort: () => { aborted = true; idle = true; },
+    shutdown: () => { shutdown = true; },
+    sessionManager: {
+      getSessionId: () => sessionId,
+      getSessionFile: () => path.join(temp, `${sessionId}.jsonl`),
+      getSessionName: () => name,
+      getLeafId: () => `leaf-${sent.length}`,
+    },
+  };
+  const emit = async (event, payload = {}) => {
+    let result;
+    for (const handler of handlers.get(event) || []) {
+      const next = await handler(payload, ctx);
+      if (next !== undefined) result = next;
+    }
+    return result;
+  };
+  return {
+    pi, ctx, sent, emit,
+    setIdle(value) { idle = value; },
+    setPending(value) { pending = value; },
+    setName(value) { name = value; },
+    get aborted() { return aborted; },
+    get shutdown() { return shutdown; },
+    start: () => emit('session_start', { reason, previousSessionFile }),
+  };
+}
+
+function typedEnvelope(sessionId, id, content, kind = 'brief', attempt = `attempt-${id}`) {
+  const now = Date.now();
+  return {
+    protocol_version: 1,
+    envelope_id: id,
+    target_session_id: sessionId,
+    sender_session_id: 'sender-test',
+    kind,
+    content,
+    attempt_id: attempt,
+    created_at: new Date(now).toISOString(),
+    expires_at: new Date(now + 60_000).toISOString(),
+  };
+}
+
+async function postLease(lease, envelope) {
+  return fetch(`http://${lease.host}:${lease.port}/brief`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-sender': 'dashboard',
+      'x-golem-target-session': lease.canonical_id,
+      'x-golem-endpoint-owner': lease.owner_token,
+    },
+    body: JSON.stringify(envelope),
+  });
+}
+
+async function main() {
   execFileSync(process.execPath, [path.join(repo, 'cli/golem.js'), 'sync', '--target', 'pi'], { cwd: repo, env });
-  assert.equal(fs.existsSync(path.join(env.HOME, '.pi')), false); const root = path.join(env.GOLEM_HOME, 'renders', 'pi');
-  const caps = JSON.parse(fs.readFileSync(path.join(root, 'capabilities.json'))); assert.equal(caps.tier, 'B'); assert.equal(caps.push_delivery, false); assert.equal(caps.node, '>=22.19');
-  assert.ok(!fs.readFileSync(path.join(root, 'golem.ts'), 'utf8').includes(repo), 'extension is portable');
-  const executable = path.join(root, 'golem.mjs'); fs.copyFileSync(path.join(root, 'golem.ts'), executable);
-  const handlers = {}; const extension = (await import(`file://${executable}`)).default; process.env.GOLEM_HOME = env.GOLEM_HOME; extension({ on: (name, handler) => { handlers[name] = handler; } });
-  let name = 'spike'; const ctx = { cwd: repo, isIdle: () => true, sessionManager: { getSessionId: () => 'pi-session-uuid', getSessionFile: () => '/tmp/pi-session.jsonl', getSessionName: () => name } };
-  handlers.session_start({ reason: 'resume' }, ctx); name = 'renamed'; handlers.session_info_changed({ name }, ctx); handlers.tool_call({ toolName: 'bash', toolCallId: 'tool-1' }, ctx);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(env.GOLEM_HOME, 'session-facts.json'))).facts[0].observations.tool_name, 'bash'); handlers.agent_settled({}, ctx);
-  const fact = JSON.parse(fs.readFileSync(path.join(env.GOLEM_HOME, 'session-facts.json'))).facts[0]; assert.equal(fact.canonical_id, 'pi-session-uuid'); assert.equal(fact.name, 'renamed'); assert.equal(fact.status, 'idle');
-  const inboxDir = path.join(env.GOLEM_HOME, 'pi-inbox', 'pi-session-uuid');
-  // Production drainer accepts a Pi dispatch durably as queued/next-turn even
-  // though the target has no push channel.
-  let queueStatus = 'pending', envelopeDelivered = false, commentsDelivered = false, failCommentsOnce = true, failPublishOnce = true; const ticket = { id: 'GOL-460', title: 'Pi', project_id: 'test' };
-  // Tier-B Pi has no typed endpoint, but its production drainer fixture still
-  // implements the shared retry interface. Any accidental typed retry here is
-  // a test failure rather than a swallowed missing-method warning.
-  const tracker = { listPendingDispatches: () => ['pending','publishing'].includes(queueStatus) ? [{ id: 'q1', status: queueStatus, ticket_id: ticket.id, session_id: 'pi-session-uuid', envelope_id: 'e1', created_at: new Date().toISOString() }] : [], claimQueuePublishing: () => { if (queueStatus !== 'pending') return false; queueStatus = 'publishing'; return true; }, releaseQueuePublishing: () => { if (queueStatus === 'publishing') queueStatus = 'pending'; return true; }, unackedDispatchesForWindow: () => [], claimDueEscalation: () => null, claimDueAckPing: () => null, waveGateForTicket: () => ({ blocked: false }), getTicket: () => ticket, getEnvelope: () => null, listPendingEnvelopeRetries: () => [], claimEnvelopeRetry: () => false, releaseEnvelopeRetry: () => false, markEnvelopeRetryDelivered: () => false, enqueueEnvelopeRetry: () => { throw new Error('Tier-B Pi fixture must not enqueue typed retries'); }, setDispatched: () => { if (failPublishOnce) { failPublishOnce = false; throw new Error('transient publish'); } ticket.dispatched_at = new Date().toISOString(); return ticket; }, markQueueNextTurn: () => { queueStatus = 'next_turn'; }, markQueueDelivered: () => { queueStatus = 'delivered'; }, markEnvelopeDelivery: () => { envelopeDelivered = true; }, markCommentDispatchesDeliveredForTicket: () => { if (failCommentsOnce) { failCommentsOnce = false; throw new Error('partial settlement'); } commentsDelivered = true; } };
-  const drainerErrors = []; const originalConsoleError = console.error; console.error = (...args) => drainerErrors.push(args.map(String).join(' '));
-  const drainer = initDispatchDrainer({ tracker, state: { nativeSessions: () => [{ session_id: 'pi-session-uuid', harness: 'pi', alive: true, status: 'idle' }] }, chat: { record: () => {} }, pushBrief: async () => { throw new Error('Pi must not push'); }, buildDispatchBrief: () => 'production queued brief', broadcastWS: () => {}, listChannels: async () => [] });
-  await drainer.tick(); assert.equal(queueStatus, 'pending', 'transient failure releases DB and memory claim'); assert.equal(ticket.dispatched_at, undefined, 'failed generation does not self-stale');
-  await Promise.all([drainer.tick(), drainer.tick()]); assert.equal(queueStatus, 'next_turn'); assert.equal(envelopeDelivered, false); assert.equal(commentsDelivered, false); assert.equal(fs.readdirSync(path.join(inboxDir, 'pending')).filter((x) => x === 'q1.json').length, 1);
-  assert.equal(enqueuePiBrief('pi-session-uuid', 'replay', {}, { home: env.GOLEM_HOME, file: path.join(env.GOLEM_HOME, 'session-facts.json'), messageId: 'q1' }).replay, true);
-  // Every acknowledged enqueue owns a distinct linked file; a second producer
-  // cannot write an inode that the consumer has renamed/unlinked.
-  const concurrent = enqueuePiBrief('pi-session-uuid', 'concurrent', {}, { home: env.GOLEM_HOME, file: path.join(env.GOLEM_HOME, 'session-facts.json'), messageId: 'q2' }); assert.equal(concurrent.queued, true); assert.equal(fs.readdirSync(path.join(inboxDir, 'pending')).length, 2);
-  fs.mkdirSync(path.join(inboxDir, 'processing'), { recursive: true }); fs.renameSync(path.join(inboxDir, 'pending', 'q2.json'), path.join(inboxDir, 'processing', 'q2.json'));
-  assert.match(handlers.input({ text: 'next turn' }, ctx).text, /production queued brief/); assert.equal(fs.readdirSync(path.join(inboxDir, 'processing')).length, 2, 'crash before agent_start remains retryable'); assert.equal(fs.existsSync(path.join(inboxDir, 'acks')), false);
-  handlers.agent_start({}, ctx); assert.equal(fs.readdirSync(path.join(inboxDir, 'acks')).length, 2);
-  fs.writeFileSync(path.join(inboxDir, 'acks', 'malformed.json'), '{');
-  await drainer.tick(); assert.equal(commentsDelivered, false); assert.ok(fs.existsSync(path.join(inboxDir, 'acks', '.claims'))); assert.ok(fs.existsSync(path.join(inboxDir, 'acks', 'malformed')));
-  await drainer.tick(); drainer.close(); assert.equal(queueStatus, 'delivered'); assert.equal(envelopeDelivered, true); assert.equal(commentsDelivered, true);
-  console.error = originalConsoleError; assert.equal(drainerErrors.length, 2, `unexpected drainer errors: ${drainerErrors.join('\n')}`); assert.match(drainerErrors[0], /delivery for q1 failed: Error: transient publish/); assert.match(drainerErrors[1], /Pi pickup settlement failed: Error: partial settlement/);
-  const native = spawnSync('pi', ['--version'], { env, encoding: 'utf8' });
-  console.log(`pi native ${native.status === 0 ? `present: ${native.stdout.trim()}` : 'absent'}; node ${process.version}; delivery Tier B (no live idle endpoint proven)`);
-} finally { fs.rmSync(temp, { recursive: true, force: true }); }
+  const render = path.join(env.GOLEM_HOME, 'renders', 'pi');
+  const caps = readJson(path.join(render, 'capabilities.json'));
+  assert.equal(caps.tier, 'B', 'delivery alone does not prematurely promote Pi');
+  assert.equal(caps.push_delivery, true);
+  assert.deepEqual(caps.delivery, ['typed-worker', 'next_turn_migration']);
+  assert.equal(fs.existsSync(path.join(env.HOME, '.pi')), false, 'sync does not mutate Pi profile');
+  for (const required of ['pi-native-adapter.js', 'typed-worker-endpoint.js', 'typed-delivery-tombstones.js', 'project-id.js']) {
+    assert.ok(fs.existsSync(path.join(render, 'lib', required)), `Pi render ships ${required}`);
+  }
+
+  const executable = path.join(render, 'golem.mjs');
+  fs.copyFileSync(path.join(render, 'golem.ts'), executable);
+  const extension = (await import(`${pathToFileURL(executable).href}?t=${Date.now()}`)).default;
+  const sessionId = 'pi-native-session';
+  const harness = createHarness(extension, sessionId);
+  await harness.start();
+  let lease = readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json')).leases.find((row) => row.canonical_id === sessionId);
+  assert.equal(lease.kind, 'typed-worker');
+  assert.equal(lease.delivery_ready, true);
+
+  const legacyRoot = path.join(env.GOLEM_HOME, 'pi-inbox', sessionId);
+  fs.mkdirSync(path.join(legacyRoot, 'pending'), { recursive: true });
+  fs.writeFileSync(path.join(legacyRoot, 'pending', 'legacy.json'), JSON.stringify({ text: 'legacy already-published work' }));
+  const migrated = await harness.emit('input', { source: 'interactive', text: 'human turn' });
+  assert.match(migrated.text, /legacy already-published work/);
+  harness.setIdle(false);
+  await harness.emit('agent_start', {});
+  assert.ok(fs.existsSync(path.join(legacyRoot, 'acks', 'legacy.json')), 'migration pickup acknowledges only at observable agent_start');
+  harness.setIdle(true);
+  await harness.emit('agent_settled', {});
+
+  // The first publish reserves synchronously. A second pre-agent publish cannot
+  // overtake it even though the mocked Pi context still reports idle.
+  const firstPromise = postLease(lease, typedEnvelope(sessionId, 'first', 'first native turn'));
+  await waitFor(() => harness.sent.length === 1, 'first native sendUserMessage was not invoked');
+  const secondBusy = await postLease(lease, typedEnvelope(sessionId, 'second', 'must wait'));
+  assert.equal(secondBusy.status, 409);
+  assert.equal(harness.sent.length, 1);
+  await harness.emit('input', { source: 'extension', text: 'first native turn' });
+  harness.setIdle(false);
+  await harness.emit('agent_start', {});
+  const firstResponse = await firstPromise;
+  const firstBody = await firstResponse.json();
+  assert.equal(firstBody.accepted, true);
+  assert.equal(firstBody.delivery_state, 'accepted');
+  assert.equal(firstBody.accepted_attempt_id, 'attempt-first');
+  const activeBusy = await postLease(lease, typedEnvelope(sessionId, 'second', 'must still wait', 'brief', 'attempt-second-a'));
+  assert.equal(activeBusy.status, 409);
+  harness.setIdle(true);
+  await harness.emit('agent_settled', {});
+
+  // Terminal duplicate returns the immutable first disposition and never calls
+  // Pi twice. Then the queued second logical envelope can start.
+  const duplicate = await postLease(lease, typedEnvelope(sessionId, 'first', 'first native turn', 'brief', 'attempt-first-retry'));
+  assert.equal((await duplicate.json()).duplicate, true);
+  assert.equal(harness.sent.length, 1);
+  const secondPromise = postLease(lease, typedEnvelope(sessionId, 'second', 'second native turn', 'brief', 'attempt-second-b'));
+  await waitFor(() => harness.sent.length === 2, 'second native sendUserMessage was not invoked');
+  await harness.emit('input', { source: 'extension', text: 'second native turn' });
+  harness.setIdle(false);
+  await harness.emit('agent_start', {});
+  assert.equal((await (await secondPromise).json()).accepted, true);
+
+  // Busy interrupt is accepted through the control path, aborts Pi, and makes
+  // the accepted work terminal rather than replaying it.
+  const interrupt = await postLease(lease, typedEnvelope(sessionId, 'interrupt-control', 'stop', 'interrupt'));
+  assert.equal((await interrupt.json()).accepted, true);
+  assert.equal(harness.aborted, true);
+  const delivery = readJson(path.join(env.GOLEM_HOME, 'pi-workers', sessionId, 'delivery.json')).inbox.deliveries.find((row) => row.envelope_id === 'second');
+  assert.equal(delivery.lifecycle_state, 'interrupted');
+
+  const halt = await postLease(lease, typedEnvelope(sessionId, 'halt-control', 'halt', 'halt'));
+  assert.equal((await halt.json()).accepted, true);
+  assert.equal(harness.shutdown, true);
+  await harness.emit('session_shutdown', { reason: 'reload' });
+  assert.equal(readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json')).leases.some((row) => row.owner_token === lease.owner_token), false);
+
+  // Reload keeps canonical identity but receives a new endpoint lease. Fork is
+  // a distinct canonical worker with previous-session lineage in its fact.
+  const resumed = createHarness(extension, sessionId, { reason: 'reload' });
+  await resumed.start();
+  lease = readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json')).leases.find((row) => row.canonical_id === sessionId);
+  assert.ok(lease && lease.owner_token);
+  const forked = createHarness(extension, 'pi-native-fork', { reason: 'fork', previousSessionFile: path.join(temp, `${sessionId}.jsonl`) });
+  await forked.start();
+  const facts = readJson(path.join(env.GOLEM_HOME, 'session-facts.json')).facts;
+  assert.equal(facts.filter((fact) => fact.canonical_id === sessionId).length, 1);
+  assert.equal(facts.find((fact) => fact.canonical_id === sessionId).provider, 'ollama');
+  assert.equal(facts.find((fact) => fact.canonical_id === sessionId).model, 'deepseek-v4-flash:0731-cloud');
+  assert.equal(facts.find((fact) => fact.canonical_id === sessionId).trust, 'host-full-trust');
+  assert.equal(facts.find((fact) => fact.canonical_id === 'pi-native-fork').observations.previous_session_file, path.join(temp, `${sessionId}.jsonl`));
+  await resumed.emit('session_shutdown', { reason: 'quit' });
+  await forked.emit('session_shutdown', { reason: 'quit' });
+
+  // Crash before correlated agent_start releases the exact claim for replay.
+  const preCrashId = 'pi-preaccept-crash';
+  const preCrash = createHarness(extension, preCrashId);
+  await preCrash.start();
+  let preCrashLease = readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json')).leases.find((row) => row.canonical_id === preCrashId);
+  const preCrashResponse = postLease(preCrashLease, typedEnvelope(preCrashId, 'precrash', 'retry after preaccept crash', 'brief', 'pre-attempt-a'));
+  await waitFor(() => preCrash.sent.length === 1, 'pre-crash injection did not start');
+  await preCrash.emit('session_shutdown', { reason: 'quit' });
+  assert.equal((await preCrashResponse).status, 503);
+  const preCrashRestart = createHarness(extension, preCrashId, { reason: 'resume' });
+  await preCrashRestart.start();
+  preCrashLease = readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json')).leases.find((row) => row.canonical_id === preCrashId);
+  const preRetry = postLease(preCrashLease, typedEnvelope(preCrashId, 'precrash', 'retry after preaccept crash', 'brief', 'pre-attempt-b'));
+  await waitFor(() => preCrashRestart.sent.length === 1, 'pre-crash retry did not inject');
+  preCrashRestart.setIdle(false);
+  await preCrashRestart.emit('agent_start', {});
+  assert.equal((await (await preRetry).json()).accepted_attempt_id, 'pre-attempt-b');
+  preCrashRestart.setIdle(true);
+  await preCrashRestart.emit('agent_settled', {});
+  await preCrashRestart.emit('session_shutdown', { reason: 'quit' });
+
+  // Crash after acceptance freezes the first attempt as recovery-required. A
+  // retry gets that original disposition and never injects a second Pi turn.
+  const postCrashId = 'pi-postaccept-crash';
+  const postCrash = createHarness(extension, postCrashId);
+  await postCrash.start();
+  let postCrashLease = readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json')).leases.find((row) => row.canonical_id === postCrashId);
+  const postStart = postLease(postCrashLease, typedEnvelope(postCrashId, 'postcrash', 'must not replay after acceptance', 'brief', 'post-attempt-a'));
+  await waitFor(() => postCrash.sent.length === 1, 'post-crash injection did not start');
+  postCrash.setIdle(false);
+  await postCrash.emit('agent_start', {});
+  assert.equal((await (await postStart).json()).accepted, true);
+  await postCrash.emit('session_shutdown', { reason: 'quit' });
+  const postCrashRestart = createHarness(extension, postCrashId, { reason: 'resume' });
+  await postCrashRestart.start();
+  postCrashLease = readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json')).leases.find((row) => row.canonical_id === postCrashId);
+  assert.equal(postCrashLease.delivery_ready, false);
+  const postRetry = await postLease(postCrashLease, typedEnvelope(postCrashId, 'postcrash', 'must not replay after acceptance', 'brief', 'post-attempt-b'));
+  const postRetryBody = await postRetry.json();
+  assert.equal(postRetryBody.delivery_state, 'recovery_required');
+  assert.equal(postRetryBody.accepted_attempt_id, 'post-attempt-a');
+  assert.equal(postCrashRestart.sent.length, 0);
+  await postCrashRestart.emit('session_shutdown', { reason: 'quit' });
+
+  const journal = fs.readFileSync(path.join(env.GOLEM_HOME, 'journals', projectIdFor(repo), 'hook.jsonl'), 'utf8');
+  assert.match(journal, /"event":"agent_start"/);
+  assert.doesNotMatch(journal, /owner_token|api.key|authorization/i, 'journal contains no endpoint/auth secrets');
+
+  // Native Pi binary proof: load the shipped extension in isolated RPC mode,
+  // observe its real session_start lease/fact, then terminate and observe lease
+  // cleanup. No provider call or user profile is needed.
+  const nativeId = crypto.randomUUID();
+  const native = spawn('pi', [
+    '--mode', 'rpc', '--offline', '--no-approve', '--session-id', nativeId,
+    '--session-dir', env.PI_CODING_AGENT_SESSION_DIR, '-e', path.join(render, 'golem.ts'),
+  ], { cwd: repo, env, stdio: ['pipe', 'pipe', 'pipe'] });
+  let nativeErr = '';
+  native.stderr.on('data', (chunk) => { nativeErr += chunk; });
+  await waitFor(() => readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json'))?.leases?.find((row) => row.canonical_id === nativeId), `native Pi did not register typed lease: ${nativeErr}`, 20_000);
+  native.kill('SIGTERM');
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`native Pi did not exit: ${nativeErr}`)), 10_000);
+    native.once('exit', () => { clearTimeout(timeout); resolve(); });
+  });
+  await waitFor(() => !readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json'))?.leases?.some((row) => row.canonical_id === nativeId), 'native Pi did not release endpoint lease');
+  assert.equal(fs.existsSync(path.join(env.HOME, '.pi')), false, 'native isolated Pi did not write the normal profile');
+
+  console.log('Pi native typed-worker journey passed: FIFO reservation, correlated acceptance, settlement, controls, pre/post-acceptance crash recovery, reload/fork identity, facts/journal, and real Pi lease lifecycle');
+}
+
+try {
+  await main();
+} finally {
+  fs.rmSync(temp, { recursive: true, force: true });
+}
