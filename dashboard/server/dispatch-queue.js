@@ -184,8 +184,8 @@ export function initDispatchDrainer({
       return leftTime - rightTime;
     }
     if (Number.isFinite(leftTime) !== Number.isFinite(rightTime)) return Number.isFinite(leftTime) ? -1 : 1;
-    const leftId = String(left?.envelope_id || left?.id || '');
-    const rightId = String(right?.envelope_id || right?.id || '');
+    const leftId = String(left?.id || left?.envelope_id || '');
+    const rightId = String(right?.id || right?.envelope_id || '');
     return leftId.localeCompare(rightId);
   }
 
