@@ -266,6 +266,20 @@ async function main() {
   check('shared client exposes structured retryable transport errors',
     retryableError instanceof GolemClientError && retryableError.code === 'GOLEM_TRANSPORT_ERROR' && retryableError.retryable === true,
     JSON.stringify(retryableError));
+  let invalidBaseError;
+  try { createGolemClient({ baseUrl: 'not a valid URL' }); } catch (err) { invalidBaseError = err; }
+  check('shared client structures malformed base URL errors as non-retryable',
+    invalidBaseError instanceof GolemClientError && invalidBaseError.code === 'GOLEM_INVALID_ARGUMENT' && invalidBaseError.retryable === false,
+    JSON.stringify(invalidBaseError));
+  const brokenBodyClient = createGolemClient({
+    baseUrl: doc.url,
+    fetchImpl: async () => ({ status: 200, text: async () => { throw new Error('synthetic body read failure'); } }),
+  });
+  let bodyReadError;
+  try { await brokenBodyClient.listTickets(); } catch (err) { bodyReadError = err; }
+  check('shared client structures response-body transport errors as retryable',
+    bodyReadError instanceof GolemClientError && bodyReadError.code === 'GOLEM_TRANSPORT_ERROR' && bodyReadError.retryable === true,
+    JSON.stringify(bodyReadError));
 
   // 3) createTicket → getTicket round-trip.
   const created = await client.createTicket({

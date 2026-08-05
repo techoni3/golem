@@ -22,7 +22,7 @@
 ### `lib/golem-client.js`, `lib/golem-tool-contracts.js`, `lib/golem-tool-runtime.js`
 - Harness-neutral native-tool seam: one immutable schema source, one structured-error REST client,
   and trusted adapter-context execution/registration. MCP advertises these contracts directly;
-  CC and Codex renders package all three. Pi consumption is implemented by its adapter slice.
+  CC and Codex renders package all three. Pi consumption is reserved for GOL-127's adapter slice.
 - Passive subscription wrappers are explicitly retired; active notification and tracker-backed
   dispatch are the current shared coordination surface.
 ### `lib/typed-worker-endpoint.js`, `lib/typed-delivery-tombstones.js`
