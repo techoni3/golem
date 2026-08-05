@@ -22,8 +22,10 @@ import { registerSubstrateRoutes } from './substrate.js';
 import { teamAssists } from './team-assist.js';
 import { golemHome, dashboardJsonPath, journalDirFor, sessionsJsonPath } from '../../lib/golem-home.js';
 import { createRole, deleteRole, getRole, listRoleCards, roleChangeBrief, roleMission, setSessionRole, updateRoleMeta, writeRoleCard } from '../../lib/session-role.js';
-import { acceptedDelivery, publishDurableEnvelope } from './envelope-delivery.js';
-import { hasTypedWorkerCapability, readSessionFacts } from '../../lib/session-facts.js';
+import { acceptedDelivery, publishDurableEnvelope, settleDurableEnvelope } from './envelope-delivery.js';
+import { recordTypedEnvelopeOutcome } from './typed-delivery.js';
+import { sameEndpointSecret } from '../../lib/typed-worker-endpoint.js';
+import { hasTypedWorkerCapability, readEndpointLeases, readSessionFacts } from '../../lib/session-facts.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const WEB_SOURCE_ROOT = path.resolve(__dirname, '..', 'web');
@@ -1916,6 +1918,75 @@ async function main() {
     } catch (err) {
       const msg = String(err?.message ?? err);
       return reply.code(/not found/.test(msg) ? 404 : 403).send({ error: msg });
+    }
+  });
+  // Typed adapters report native terminal lifecycle separately from the
+  // synchronous acceptance response. Authenticate against the session's live
+  // endpoint lease, then bind the report to the immutable first-accept attempt
+  // before applying any stored queue/passive/comment settlement.
+  fastify.post('/api/message-envelopes/:id/lifecycle', async (req, reply) => {
+    try {
+      const envelope = tracker.getEnvelope(req.params.id);
+      if (!envelope) return reply.code(404).send({ error: 'message envelope not found' });
+      const targetSession = String(req.headers['x-golem-target-session'] || '');
+      const ownerToken = String(req.headers['x-golem-endpoint-owner'] || '');
+      const lease = readEndpointLeases({ includeExpired: false }).find((candidate) => (
+        candidate.canonical_id === targetSession
+        && sameEndpointSecret(candidate.owner_token, ownerToken)
+      ));
+      if (!lease || targetSession !== envelope.target_session_id) {
+        return reply.code(403).send({ error: 'typed lifecycle authentication failed' });
+      }
+      const state = req.body?.state;
+      const attemptId = req.body?.attempt_id;
+      const acceptedAttemptId = req.body?.accepted_attempt_id;
+      if (!['settled', 'interrupted', 'recovery_required'].includes(state)
+        || typeof attemptId !== 'string' || !attemptId
+        || typeof acceptedAttemptId !== 'string' || !acceptedAttemptId
+        || acceptedAttemptId !== envelope.accepted_attempt_id) {
+        return reply.code(409).send({ error: 'typed lifecycle report does not match the accepted envelope lineage' });
+      }
+      const lifecycleBody = {
+        ok: state === 'settled',
+        accepted: true,
+        envelope_id: envelope.id,
+        attempt_id: attemptId,
+        accepted_attempt_id: acceptedAttemptId,
+        delivery_state: state,
+        error: req.body?.error ?? null,
+      };
+      const delivery = {
+        ok: lifecycleBody.ok,
+        status: 200,
+        typed_worker: true,
+        body: JSON.stringify(lifecycleBody),
+      };
+      const outcome = recordTypedEnvelopeOutcome(tracker, envelope.id, attemptId, delivery);
+      if (!outcome || outcome.delivery_state !== state) {
+        return reply.code(409).send({ error: 'typed lifecycle report was not correlated' });
+      }
+      let settled = false;
+      const retry = tracker.getEnvelopeRetry(envelope.id);
+      if (retry) {
+        const settlementOwner = crypto.randomUUID();
+        if (tracker.claimEnvelopeRetry(envelope.id, { ownerToken: settlementOwner })) {
+          settled = settleDurableEnvelope({
+            tracker,
+            envelope: tracker.getEnvelope(envelope.id),
+            retry: tracker.getEnvelopeRetry(envelope.id),
+            retryOwnerToken: settlementOwner,
+          });
+        }
+      } else {
+        settled = true;
+      }
+      const ticket = envelope.ticket_id ? tracker.getTicket(envelope.ticket_id) : null;
+      if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
+      broadcastWS({ type: 'dispatch-queue-updated' });
+      broadcastWS({ type: 'communication-health-updated' });
+      return { ok: true, lifecycle: outcome.delivery_state, settled };
+    } catch (err) {
+      return reply.code(409).send({ error: String(err?.message ?? err) });
     }
   });
   fastify.post('/api/message-envelopes/:id/reply', async (req, reply) => {

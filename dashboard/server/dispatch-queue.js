@@ -204,7 +204,7 @@ export function initDispatchDrainer({
     try { return JSON.parse(value); } catch { return fallback; }
   }
 
-  async function drainEnvelopeRetries({ byId, channelsBySession }) {
+  async function drainEnvelopeRetries({ byId, channelsBySession, pendingQueue }) {
     let changed = false;
     // This is a required shared-tracker capability. Do not downgrade a missing
     // dependency to a noisy successful tick: callers/tests must see the error
@@ -213,6 +213,13 @@ export function initDispatchDrainer({
     // Retries are delivery work too: preserve FIFO and never stack multiple
     // native opportunities onto one session in the same tick.
     const blockedRetrySessions = new Set();
+    const queueBlockedByRetry = new Set();
+    const queueRowsBySession = new Map();
+    for (const row of pendingQueue) {
+      const rows = queueRowsBySession.get(row.session_id) ?? [];
+      rows.push(row);
+      queueRowsBySession.set(row.session_id, rows);
+    }
     for (const retry of retries) {
       if (blockedRetrySessions.has(retry.session_id)) continue;
       let envelope = tracker.getEnvelope(retry.envelope_id);
@@ -226,7 +233,7 @@ export function initDispatchDrainer({
       // A recorded acceptance is authoritative even when the process/lease is
       // presently absent. Finalize retry settlement without waiting to route a
       // second transport attempt through a restarted worker.
-      if (['accepted', 'settled', 'interrupted', 'recovery_required'].includes(persistedState)) {
+      if (['settled', 'interrupted', 'recovery_required'].includes(persistedState)) {
         if (!tracker.claimEnvelopeRetry(retry.envelope_id, { ownerToken: publishingOwner })) {
           blockedRetrySessions.add(retry.session_id);
           continue;
@@ -238,6 +245,27 @@ export function initDispatchDrainer({
         }
         continue;
       }
+      // Acceptance owns a native turn but is not settlement. It blocks later
+      // work for this session until the authenticated adapter callback records
+      // a terminal state; it never replays or retires the stored owners.
+      if (persistedState === 'accepted') {
+        blockedRetrySessions.add(retry.session_id);
+        queueBlockedByRetry.add(retry.session_id);
+        continue;
+      }
+      // Pick one native opportunity across both durable sources. A retry row
+      // for a queued ticket represents that same queue row, so exclude its own
+      // envelope when comparing age. Any genuinely older queued item wins.
+      const olderQueue = (queueRowsBySession.get(retry.session_id) ?? []).find((row) => (
+        row.envelope_id !== retry.envelope_id
+        && Date.parse(row.created_at || '') <= Date.parse(retry.created_at || '')
+        && (() => {
+          try { return tracker.waveGateForTicket(row.ticket_id)?.blocked !== true; }
+          catch { return true; }
+        })()
+      ));
+      if (olderQueue) continue;
+      queueBlockedByRetry.add(retry.session_id);
       const session = byId.get(retry.session_id);
       const channel = channelsBySession.get(retry.session_id);
       if (!session?.alive || session.status !== 'idle') {
@@ -301,7 +329,7 @@ export function initDispatchDrainer({
         });
       }
     }
-    return changed;
+    return { changed, queueBlockedByRetry };
   }
 
   async function tick() {
@@ -392,7 +420,8 @@ export function initDispatchDrainer({
     } catch { /* a fact read failure never invents a legacy Pi fallback */ }
     const byId = new Map();
     for (const s of sessions) if (s.session_id) byId.set(s.session_id, s);
-    if (await drainEnvelopeRetries({ byId, channelsBySession })) queueChanged = true;
+    const retryDrain = await drainEnvelopeRetries({ byId, channelsBySession, pendingQueue: pending });
+    if (retryDrain.changed) queueChanged = true;
 
     // Group pending rows by session_id. listPendingDispatches returns FIFO by
     // created_at globally, so within each session the rows are also FIFO.
@@ -406,6 +435,7 @@ export function initDispatchDrainer({
     const now = nowMs();
     // TKT-0286: broadcast dispatch-queue-updated once if any row transitioned this tick.
     for (const [sessionId, rows] of bySession) {
+      if (retryDrain.queueBlockedByRetry.has(sessionId)) continue;
       const s = byId.get(sessionId);
       const isPi = s?.harness === 'pi';
       const isTypedWorker = isTypedWorkerChannel(channelsBySession.get(sessionId));
@@ -533,6 +563,7 @@ export function initDispatchDrainer({
             if (refreshed) broadcastWS({ type: 'ticket-updated', ticket: refreshed });
             continue;
           }
+          if (reconciliation.action === 'accepted') continue;
           if (reconciliation.action === 'not_owned') continue;
           envelope = reconciliation.envelope;
         }
@@ -696,7 +727,7 @@ export function initDispatchDrainer({
           chat.record('system', 'info', `wave hold released for ${ticket.id}; dispatch delivered to ${sessionId}`, { session_id: sessionId, ticket_id: ticket.id });
         }
         queueChanged = true;
-        lastDeliveredAt.set(sessionId, Date.now());
+        lastDeliveredAt.set(sessionId, nowMs());
       } catch (err) {
         if (requiresPublishingLease) { try { tracker.releaseQueuePublishing(row.id, { ownerToken: publishingOwner }); } catch {} }
         console.error(`[dispatch-drainer] delivery for ${row.id} failed:`, err);
@@ -784,7 +815,7 @@ export function initDispatchDrainer({
         if (!isTypedWorkerChannel(channelsBySession.get(sessionId))) {
           for (const d of digests) tracker.advanceSubscriptionCursor(d.subscription.id, d.from_seq, d.to_seq);
         }
-        lastDeliveredAt.set(sessionId, Date.now());
+        lastDeliveredAt.set(sessionId, nowMs());
         digestChanged = true;
       }
     } catch (err) {

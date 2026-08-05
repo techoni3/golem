@@ -23,6 +23,7 @@ process.env.GOLEM_TRACKER_DB = dashboardDb;
 
 const { CodexSupervisor, readCodexSupervisor } = await import('../lib/codex-supervisor.js');
 const { readChannels } = await import('../dashboard/server/channels.js');
+const { openTrackerDb } = await import('../dashboard/server/tracker-db.js');
 
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
@@ -215,6 +216,21 @@ try {
   }, 'controlled App Server turn terminal record', 30_000);
   assert.equal(afterTurn.record.health.delivery_ready, afterTurn.delivery.state === 'completed');
   assert.equal(interruptWasNeeded || afterTurn.delivery.state === 'completed', true, 'turn is either safely interrupted or completes the side-effect-free prompt');
+  const terminalTracker = await waitFor(() => {
+    const tracker = openTrackerDb(dashboardDb);
+    try {
+      const envelope = tracker.getEnvelope(dispatched.envelope_id);
+      const retry = tracker.getEnvelopeRetry(dispatched.envelope_id);
+      const queue = tracker.raw().prepare('SELECT * FROM dispatch_queue WHERE envelope_id = ?').get(dispatched.envelope_id);
+      return ['settled', 'interrupted'].includes(envelope?.delivery_state)
+        && retry?.status === 'delivered' && queue?.status === 'delivered'
+        ? { envelope, retry, queue }
+        : null;
+    } finally {
+      tracker.close();
+    }
+  }, 'adapter terminal callback settlement', 15_000);
+  assert.equal(terminalTracker.envelope.delivery_state, afterTurn.delivery.lifecycle_state, 'tracker terminal lifecycle matches the native adapter result');
 
   const payload = {
     envelope_id: dispatched.envelope_id,
@@ -265,6 +281,76 @@ try {
     'restart retry does not create a replacement turn',
   );
 
+  // A real App Server process death after its 202 acceptance is a terminal
+  // recovery-required outcome, not delivery completion and never an automatic
+  // second native turn. The supervisor reports it through the authenticated
+  // lifecycle route before retiring its endpoint lease.
+  const crashTicketResponse = await fetch(`${dashboard.baseUrl}/api/tickets`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      project_id: first.project_id,
+      kind: 'work-item',
+      title: 'GOL-474 accepted process crash journey',
+      body: 'Crash after native acceptance must become recovery-required.',
+      created_by: 'human',
+    }),
+  });
+  assert.equal(crashTicketResponse.status, 201);
+  const crashTicket = await crashTicketResponse.json();
+  const crashDispatchResponse = await fetch(`${dashboard.baseUrl}/api/tickets/${encodeURIComponent(crashTicket.id)}/dispatch`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      session_id: canonicalId,
+      sender_id: 'human',
+      note: 'CONTROLLED CRASH JOURNEY: reply exactly CRASH_JOURNEY_DONE and do not call tools.',
+    }),
+  });
+  assert.equal(crashDispatchResponse.status, 200);
+  const crashDispatch = await crashDispatchResponse.json();
+  assert.equal(crashDispatch.delivered, true, JSON.stringify(crashDispatch));
+  const crashStarted = await waitFor(() => {
+    const record = readCodexSupervisor(canonicalId);
+    const delivery = record?.inbox?.deliveries?.find((row) => row.envelope_id === crashDispatch.envelope_id);
+    return delivery?.state === 'started' && delivery.turn_id ? { record, delivery } : null;
+  }, 'accepted crash delivery start', 15_000);
+  const dead = new Promise((resolve) => resumed.once('dead', resolve));
+  assert.equal(resumed.rpc.child.kill('SIGKILL'), true, 'test terminates the real accepted App Server process');
+  await dead;
+  const crashTracker = await waitFor(() => {
+    const tracker = openTrackerDb(dashboardDb);
+    try {
+      const envelope = tracker.getEnvelope(crashDispatch.envelope_id);
+      const retry = tracker.getEnvelopeRetry(crashDispatch.envelope_id);
+      const queue = tracker.raw().prepare('SELECT * FROM dispatch_queue WHERE envelope_id = ?').get(crashDispatch.envelope_id);
+      return envelope?.delivery_state === 'recovery_required'
+        && retry?.status === 'delivered' && queue?.status === 'delivered'
+        ? { envelope, retry, queue }
+        : null;
+    } finally {
+      tracker.close();
+    }
+  }, 'accepted process crash tracker recovery settlement', 15_000);
+  assert.equal(crashTracker.envelope.accepted_attempt_id, crashStarted.delivery.accepted_attempt_id, 'crash callback preserves immutable first acceptance');
+  resumed = new CodexSupervisor({ canonicalId, cwd: repo });
+  const recoveredRecord = await resumed.start();
+  const crashRetryAttempt = `${crashStarted.delivery.attempt_id}-post-crash-retry`;
+  const crashDuplicate = await typedRetry(recoveredRecord, {
+    envelope_id: crashDispatch.envelope_id,
+    content: dispatchBrief(crashTicket, 'CONTROLLED CRASH JOURNEY: reply exactly CRASH_JOURNEY_DONE and do not call tools.', crashDispatch.envelope_id),
+    sender_session_id: 'human',
+    target_session_id: canonicalId,
+    kind: crashStarted.delivery.kind,
+    created_at: crashStarted.delivery.created_at,
+    expires_at: crashStarted.delivery.expires_at,
+    attempt_id: crashRetryAttempt,
+  });
+  assert.equal(crashDuplicate.response.status, 200, JSON.stringify(crashDuplicate.body));
+  assert.equal(crashDuplicate.body.delivery_state, 'recovery_required');
+  assert.equal(crashDuplicate.body.accepted_attempt_id, crashStarted.delivery.accepted_attempt_id);
+  assert.equal(resumed.rpc.notifications.filter((message) => message.method === 'turn/completed').length, 0, 'post-crash duplicate creates no replacement turn');
+
   // This is the same process-level binding supplied to the real App Server MCP
   // child. A raw model argument cannot impersonate another session, while the
   // supervisor-owned identity remains the creator for a valid direct call.
@@ -301,7 +387,7 @@ try {
   assert.notEqual(bound.isError, true, toolText(bound));
   assert.equal(JSON.parse(toolText(bound)).created_by, canonicalId, 'bound MCP attributes writes to the supervisor-owned actor');
 
-  console.log('GOL-474 Codex delivery journey passed: dashboard envelope -> actual App Server turn/start, typed duplicate/restart idempotency, and bound actor spoof rejection');
+  console.log('GOL-474 Codex delivery journey passed: dashboard envelope -> actual App Server turn/start, authenticated terminal/crash settlement, typed duplicate/restart idempotency, and bound actor spoof rejection');
 } finally {
   await mcpClient?.close().catch(() => {});
   await resumed?.stop({ deleteThread: true }).catch(() => {});

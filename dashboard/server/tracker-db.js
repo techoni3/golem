@@ -3180,7 +3180,7 @@ WHERE state_changed_at IS NULL`).run();
         const envelope = row.envelope_id ? stmts.getEnvelope.get(row.envelope_id) : null;
         if (!envelope) return { action: 'retry', queue: row, envelope: null };
         const state = envelope.delivery_state || 'pending';
-        if (['accepted', 'settled', 'interrupted', 'recovery_required'].includes(state)) {
+        if (['settled', 'interrupted', 'recovery_required'].includes(state)) {
           const finalized = stmts.markQueueDeliveredRow.run({
             delivered_at: ts, last_error: null, resolved_at: ts, id: queueId, owner: ownerToken,
           });
@@ -3194,6 +3194,9 @@ WHERE state_changed_at IS NULL`).run();
             });
           }
           return { action: 'finalized', queue: stmts.getQueueRow.get(queueId), envelope };
+        }
+        if (state === 'accepted') {
+          return { action: 'accepted', queue: row, envelope };
         }
         if (state === 'claimed') {
           // No correlated acceptance exists, so this is exactly the one

@@ -16,6 +16,12 @@ export function recordTypedEnvelopeOutcome(tracker, envelopeId, attemptId, deliv
   if (!outcome?.accepted) return null;
   const error = delivery?.ok ? null : (outcome.error || delivery?.error || null);
   const current = tracker.getEnvelope(envelopeId)?.delivery_state || 'pending';
+  // A terminal adapter callback can beat the original HTTP acceptance
+  // response. Tracker terminal truth wins; the stale response still counts as
+  // accepted but must not attempt an illegal terminal -> accepted regression.
+  if (TERMINAL_DELIVERY_STATES.has(current) && outcome.delivery_state === 'accepted') {
+    return { ...outcome, delivery_state: current };
+  }
   // Direct routes can receive a fast terminal answer before observing their
   // claim. Materialize the required prefix; never allow claimed -> terminal.
   if (['pending', 'published'].includes(current)) {

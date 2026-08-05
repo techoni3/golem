@@ -5,6 +5,8 @@ import crypto from 'node:crypto';
 import { typedEnvelopeMetadata } from '../../lib/typed-worker-endpoint.js';
 import { recordTypedEnvelopeOutcome } from './typed-delivery.js';
 
+const TERMINAL_TYPED_DELIVERY_STATES = new Set(['settled', 'interrupted', 'recovery_required']);
+
 // A typed 2xx is not itself proof of acceptance: only the correlated endpoint
 // result is. Legacy channel routes retain their established HTTP success rule.
 export function acceptedDelivery(delivery) {
@@ -161,13 +163,19 @@ export async function publishDurableEnvelope({
     });
   }
 
-  // A typed acceptance retains its owned retry until every associated durable
-  // settlement has applied. A typed non-acceptance releases only the exact
-  // pre-transport reservation for a same-envelope retry.
+  // Native acceptance is not completion. Keep the original retry and every
+  // stored settlement owner replayable, but do not apply queue/passive/comment
+  // settlement until the adapter reports a correlated terminal lifecycle.
+  // A terminal response can still arrive synchronously for a duplicate whose
+  // native turn completed before the original HTTP response was observed.
   let settled = !usesRetry;
   if (usesRetry && retryOwned) {
-    if (delivered) {
+    const typedTerminal = typedTarget && TERMINAL_TYPED_DELIVERY_STATES.has(typedOutcome?.delivery_state);
+    if (delivered && (!typedTarget || typedTerminal)) {
       settled = settleDurableEnvelope({ tracker, envelope, retry, retryOwnerToken });
+    } else if (delivered && typedTarget) {
+      settled = false;
+      tracker.releaseEnvelopeRetry(envelope.id, { ownerToken: retryOwnerToken, error: null });
     } else if (!delivered) {
       if (typedTarget && metadata?.attempt_id) {
         tracker.recordTypedEnvelopeLifecycle(envelope.id, {

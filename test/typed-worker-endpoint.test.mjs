@@ -348,8 +348,8 @@ try {
     // A restart can reclaim an expired publishing lease after the endpoint
     // state persisted but before the old dashboard finalized its queue row.
     // Reconciliation happens under the new owner: claimed is replayable;
-    // accepted and terminal evidence finalize the owned row without a second
-    // transport attempt or an illegal accepted -> claimed transition.
+    // accepted evidence remains durably owned but unfinished, and only terminal
+    // evidence finalizes the queue without a second transport attempt.
     const restartCases = [
       { name: 'claimed', state: 'claimed', shouldPush: true },
       { name: 'accepted', state: 'accepted', shouldPush: false },
@@ -365,6 +365,12 @@ try {
       const queued = tracker.queueDispatch(restartTicket.id, { session_id: sessionId, payload: `recover ${item.name}`, actor: 'test' });
       const queuedEnvelope = tracker.getEnvelope(queued.envelope_id);
       tracker.claimQueuePublishing(queued.id, { ownerToken: `dead-${item.name}` });
+      tracker.enqueueEnvelopeRetry(queuedEnvelope.id, {
+        session_id: sessionId,
+        content: `recover ${item.name}`,
+        settlement: { queue: { id: queued.id, owner_token: `dead-${item.name}` } },
+        require_typed: true,
+      });
       tracker.recordTypedEnvelopeLifecycle(queuedEnvelope.id, { state: 'claimed', attempt_id: `dead-${item.name}` });
       if (item.state === 'accepted') tracker.recordTypedEnvelopeLifecycle(queuedEnvelope.id, { state: 'accepted', attempt_id: `dead-${item.name}` });
       if (['settled', 'interrupted', 'recovery_required'].includes(item.state)) {
@@ -397,7 +403,9 @@ try {
     await restartDrainer.tick();
     assert.equal(restartNativePublishes, 1, 'only the pre-acceptance stale claim is republished after restart');
     for (const queued of restartQueueRows) {
-      assert.equal(tracker.raw().prepare('SELECT status FROM dispatch_queue WHERE id = ?').get(queued.id).status, 'delivered', `stale ${restartSessions.get(queued.session_id).state} publishing row finalizes exactly once`);
+      const state = restartSessions.get(queued.session_id).state;
+      const expected = ['settled', 'interrupted', 'recovery_required'].includes(state) ? 'delivered' : 'publishing';
+      assert.equal(tracker.raw().prepare('SELECT status FROM dispatch_queue WHERE id = ?').get(queued.id).status, expected, `stale ${state} publishing row preserves the acceptance/terminal boundary`);
     }
     assert.equal(tracker.getEnvelope(restartQueueRows[1].envelope_id).delivery_state, 'accepted', 'accepted restart evidence is retained rather than overwritten by a new claim');
     assert.equal(tracker.getEnvelope(restartQueueRows[2].envelope_id).delivery_state, 'settled', 'terminal restart evidence is retained rather than released to pending');
@@ -594,7 +602,7 @@ try {
     });
     await drainer.tick();
     assert.equal(pushes, 1, 'shared drainer publishes only the FIFO head for a typed worker');
-    assert.equal(tracker.raw().prepare('SELECT status FROM dispatch_queue WHERE id = ?').get(queuedOne.id).status, 'delivered');
+    assert.equal(tracker.raw().prepare('SELECT status FROM dispatch_queue WHERE id = ?').get(queuedOne.id).status, 'publishing', 'acceptance retains queue ownership until terminal lifecycle');
     assert.equal(tracker.getEnvelope(queuedOne.envelope_id).delivery_state, 'accepted');
     assert.equal(fs.existsSync(path.join(process.env.GOLEM_HOME, 'pi-inbox', canonicalId)), false, 'a typed Pi lease creates no second pi-inbox publication');
     assert.equal(tracker.raw().prepare('SELECT status FROM dispatch_queue WHERE id = ?').get(queuedTwo.id).status, 'pending');
@@ -701,7 +709,7 @@ try {
       // the replacement in the next queue pass and starts exactly one turn.
       await createUpgradeDrainer().tick();
       assert.equal(nativeUpgradeStarts, 1, 'tracker-authoritative reissue delivers exactly one post-fence native turn');
-      assert.equal(tracker.raw().prepare('SELECT status FROM dispatch_queue WHERE id = ?').get(upgradeQueued.id).status, 'delivered');
+      assert.equal(tracker.raw().prepare('SELECT status FROM dispatch_queue WHERE id = ?').get(upgradeQueued.id).status, 'publishing', 'post-fence acceptance remains owned until terminal lifecycle');
       assert.equal(tracker.getEnvelope(replacement.id).delivery_state, 'accepted');
       settleTypedDelivery(upgradeInbox, replacement.id);
     } finally {
@@ -855,10 +863,15 @@ try {
           loseDigestResponse = false;
           return { ok: false, status: 0, typed_worker: true, typed_attempt_id: metadata.attempt_id, error: 'response lost after native acceptance' };
         }
-        return typedDeliveryResult(getTypedDelivery(lostDigestInbox, digestEnvelope.id), {
-          duplicate: true,
-          attemptId: metadata.attempt_id,
-        });
+        return {
+          ok: true,
+          status: 200,
+          typed_worker: true,
+          body: JSON.stringify(typedDeliveryResult(getTypedDelivery(lostDigestInbox, digestEnvelope.id), {
+            duplicate: true,
+            attemptId: metadata.attempt_id,
+          })),
+        };
       },
       buildDispatchBrief: (ticket) => ticket.title,
       broadcastWS: () => {},
@@ -923,6 +936,59 @@ try {
     await retryFifoDrainer.tick();
     assert.deepEqual(retryFifoPublishes, [retryFifoOne.id, retryFifoTwo.id], 'the next FIFO retry publishes after the shared cooldown');
     retryFifoDrainer.close();
+
+    // Queue rows and retry rows are one per-session delivery stream. A newer
+    // control retry must not overtake an older queued ticket merely because
+    // retries are stored in a separate table.
+    const crossSourceSession = 'typed-cross-source-fifo';
+    const crossSourceTicket = tracker.createTicket({ project_id: 'typed-test-000000', title: 'older queued ticket', created_by: 'test' });
+    const olderQueue = tracker.queueDispatch(crossSourceTicket.id, {
+      session_id: crossSourceSession, payload: 'older queued ticket', actor: 'test',
+    });
+    const newerRetryEnvelope = tracker.createControlEnvelope({
+      project_id: 'typed-test-000000', sender_id: 'test', recipient_session_id: crossSourceSession,
+      kind: 'session_notify', payload: { content: 'newer retry' },
+    });
+    tracker.enqueueEnvelopeRetry(newerRetryEnvelope.id, {
+      session_id: crossSourceSession, content: 'newer retry', require_typed: true,
+    });
+    tracker.raw().prepare('UPDATE dispatch_queue SET created_at = ? WHERE id = ?')
+      .run('2026-01-01T00:00:00.000Z', olderQueue.id);
+    tracker.raw().prepare('UPDATE envelope_delivery_retries SET created_at = ? WHERE envelope_id = ?')
+      .run('2026-01-01T00:00:00.001Z', newerRetryEnvelope.id);
+    let crossSourceClock = 20_000;
+    const crossSourcePublishes = [];
+    const terminalResult = (id, metadata) => ({
+      ok: true, status: 200, typed_worker: true, typed_attempt_id: metadata.attempt_id,
+      body: JSON.stringify({
+        accepted: true, envelope_id: id, attempt_id: metadata.attempt_id,
+        accepted_attempt_id: metadata.attempt_id, delivery_state: 'settled',
+      }),
+    });
+    const crossSourceDrainer = initDispatchDrainer({
+      tracker,
+      state: { nativeSessions: () => [{ session_id: crossSourceSession, harness: 'pi', alive: true, status: 'idle' }] },
+      chat: { record: () => {} },
+      pushBrief: async (_content, _sessionId, metadata) => {
+        crossSourcePublishes.push(olderQueue.envelope_id);
+        return terminalResult(olderQueue.envelope_id, metadata);
+      },
+      pushControlEnvelope: async ({ envelope: controlEnvelope, metadata }) => {
+        crossSourcePublishes.push(controlEnvelope.id);
+        return terminalResult(controlEnvelope.id, metadata);
+      },
+      buildDispatchBrief: (queuedTicket) => queuedTicket.title,
+      broadcastWS: () => {},
+      listChannels: async () => [{ session_id: crossSourceSession, kind: 'typed-worker', delivery_ready: true }],
+      nowMs: () => crossSourceClock,
+    });
+    await crossSourceDrainer.tick();
+    assert.deepEqual(crossSourcePublishes, [olderQueue.envelope_id], 'the older queue wins the first cross-source native opportunity');
+    assert.equal(tracker.getEnvelopeRetry(newerRetryEnvelope.id).status, 'pending', 'the newer retry remains pending behind the older queue');
+    crossSourceClock += 60_001;
+    await crossSourceDrainer.tick();
+    assert.deepEqual(crossSourcePublishes, [olderQueue.envelope_id, newerRetryEnvelope.id], 'the newer retry publishes only after the older queue and cooldown');
+    crossSourceDrainer.close();
 
     const settledSession = 'typed-fast-settle';
     const settledTicket = tracker.createTicket({ project_id: 'typed-test-000000', title: 'typed fast settle', created_by: 'test' });
@@ -1041,7 +1107,7 @@ try {
         reminderPublishes.push(metadata.envelope_id);
         return { ok: true, status: 202, typed_worker: true, body: JSON.stringify({
           accepted: true, envelope_id: metadata.envelope_id, attempt_id: metadata.attempt_id,
-          accepted_attempt_id: metadata.attempt_id, delivery_state: 'accepted',
+          accepted_attempt_id: metadata.attempt_id, delivery_state: 'settled',
         }) };
       },
       buildDispatchBrief: (ticket) => ticket.title,
@@ -1053,13 +1119,13 @@ try {
     });
     await reminderDrainer.tick();
     const pingedRoot = tracker.getEnvelope(reminderRoot.id);
-    assert.ok(pingedRoot.ping_envelope_id, 'typed accepted ping links to its root only after durable child settlement');
-    assert.equal(tracker.getEnvelopeRetry(pingedRoot.ping_envelope_id)?.status, 'delivered', 'accepted ping resolves its original retry idempotently');
+    assert.ok(pingedRoot.ping_envelope_id, 'typed settled ping links to its root only after durable child settlement');
+    assert.equal(tracker.getEnvelopeRetry(pingedRoot.ping_envelope_id)?.status, 'delivered', 'settled ping resolves its original retry idempotently');
     tracker.raw().prepare("UPDATE message_envelopes SET escalate_after = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(reminderRoot.id);
     await reminderDrainer.tick();
     const escalatedRoot = tracker.getEnvelope(reminderRoot.id);
-    assert.ok(escalatedRoot.escalation_envelope_id, 'typed accepted escalation links to root only after durable child settlement');
-    assert.equal(tracker.getEnvelopeRetry(escalatedRoot.escalation_envelope_id)?.status, 'delivered', 'accepted escalation resolves its original retry idempotently');
+    assert.ok(escalatedRoot.escalation_envelope_id, 'typed settled escalation links to root only after durable child settlement');
+    assert.equal(tracker.getEnvelopeRetry(escalatedRoot.escalation_envelope_id)?.status, 'delivered', 'settled escalation resolves its original retry idempotently');
     assert.equal(reminderPublishes.length, 2, 'one ping and one escalation receive one native opportunity each');
     reminderDrainer.close();
 
