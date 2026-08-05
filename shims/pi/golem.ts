@@ -26,7 +26,7 @@ async function selectRequestedLocalModel(pi, ctx) {
   while (Date.now() < deadline) {
     const model = ctx.modelRegistry.find(provider, modelId);
     if (model) {
-      if (!pi.setModel(model)) throw new Error(`Ollama model "${modelId}" is available but Pi could not activate it`);
+      if (!await pi.setModel(model)) throw new Error(`Ollama model "${modelId}" is available but Pi could not activate it`);
       return;
     }
     await wait(50);

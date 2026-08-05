@@ -58,7 +58,7 @@ function createHarness(extension, sessionId, { reason = 'startup', previousSessi
     },
     registerTool(tool) { tools.set(tool.name, tool); },
     sendUserMessage(text) { sent.push(text); },
-    setModel(model) { ctx.model = model; return true; },
+    async setModel(model) { await sleep(5); ctx.model = model; return true; },
   };
   extension(pi);
   const ctx = {
