@@ -15,8 +15,6 @@ const env = {
   HOME: path.join(temp, 'home'),
   GOLEM_HOME: path.join(temp, 'state'),
   XDG_CONFIG_HOME: path.join(temp, 'xdg'),
-  PI_CODING_AGENT_DIR: path.join(temp, 'pi-profile'),
-  PI_CODING_AGENT_SESSION_DIR: path.join(temp, 'pi-sessions'),
   PI_OFFLINE: '1',
 };
 fs.mkdirSync(env.GOLEM_HOME, { recursive: true });
@@ -196,28 +194,22 @@ async function main() {
   assert.equal((await readNativeSessions(() => true, [{ ...heartbeatLease, session_id: heartbeatId, endpoint_health: 'healthy' }])).find((row) => row.session_id === heartbeatId)?.alive, true, 'renewed typed lease keeps a quiet Pi worker live');
   await heartbeatHarness.emit('session_shutdown', { reason: 'quit' });
 
-  process.env.GOLEM_PI_REQUESTED_PROVIDER = 'ollama';
-  process.env.GOLEM_PI_REQUESTED_MODEL = 'local-startup-model';
-  const localSelection = createHarness(extension, 'pi-local-selection');
-  localSelection.setName('pi-local-selection');
-  localSelection.addModel({ provider: 'ollama', id: 'local-startup-model' });
-  await localSelection.start();
-  assert.deepEqual(localSelection.ctx.model, { provider: 'ollama', id: 'local-startup-model' }, 'managed Pi activates the requested local model after extension discovery');
-  await localSelection.emit('session_shutdown', {});
-  let localSelectionFact = readJson(path.join(env.GOLEM_HOME, 'session-facts.json')).facts.find((row) => row.canonical_id === 'pi-local-selection');
-  assert.equal(localSelectionFact.status, 'stopped', 'Pi process shutdown records terminal status');
-  assert.ok(localSelectionFact.ended_at, 'Pi process shutdown records terminal time');
-  assert.equal((await readNativeSessions(() => true, [])).some((row) => row.session_id === 'pi-local-selection'), false, 'terminal Pi worker is removed instead of projected as channel-offline');
-  delete process.env.GOLEM_PI_REQUESTED_PROVIDER;
-  delete process.env.GOLEM_PI_REQUESTED_MODEL;
-  const resumedLocalSelection = createHarness(extension, 'pi-local-selection', { reason: 'reload' });
-  resumedLocalSelection.setName('pi-local-selection');
-  await resumedLocalSelection.start();
-  localSelectionFact = readJson(path.join(env.GOLEM_HOME, 'session-facts.json')).facts.find((row) => row.canonical_id === 'pi-local-selection');
-  assert.equal(localSelectionFact.status, 'idle', 'same-ID Pi reload clears terminal status');
-  assert.equal(localSelectionFact.ended_at, null, 'same-ID Pi reload clears terminal time');
-  assert.ok(readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json')).leases.some((row) => row.canonical_id === 'pi-local-selection'), 'same-ID Pi reload registers a fresh lease');
-  await resumedLocalSelection.emit('session_shutdown', { reason: 'quit' });
+  const reload = createHarness(extension, 'pi-session-reload');
+  reload.setName('pi-session-reload');
+  await reload.start();
+  await reload.emit('session_shutdown', {});
+  let reloadFact = readJson(path.join(env.GOLEM_HOME, 'session-facts.json')).facts.find((row) => row.canonical_id === 'pi-session-reload');
+  assert.equal(reloadFact.status, 'stopped', 'Pi process shutdown records terminal status');
+  assert.ok(reloadFact.ended_at, 'Pi process shutdown records terminal time');
+  assert.equal((await readNativeSessions(() => true, [])).some((row) => row.session_id === 'pi-session-reload'), false, 'terminal Pi worker is removed instead of projected as channel-offline');
+  const resumedReload = createHarness(extension, 'pi-session-reload', { reason: 'reload' });
+  resumedReload.setName('pi-session-reload');
+  await resumedReload.start();
+  reloadFact = readJson(path.join(env.GOLEM_HOME, 'session-facts.json')).facts.find((row) => row.canonical_id === 'pi-session-reload');
+  assert.equal(reloadFact.status, 'idle', 'same-ID Pi reload clears terminal status');
+  assert.equal(reloadFact.ended_at, null, 'same-ID Pi reload clears terminal time');
+  assert.ok(readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json')).leases.some((row) => row.canonical_id === 'pi-session-reload'), 'same-ID Pi reload registers a fresh lease');
+  await resumedReload.emit('session_shutdown', { reason: 'quit' });
 
   const legacyRoot = path.join(env.GOLEM_HOME, 'pi-inbox', sessionId);
   fs.mkdirSync(path.join(legacyRoot, 'pending'), { recursive: true });
@@ -595,11 +587,10 @@ async function main() {
   try {
     const nativeFact = await waitFor(() => readJson(path.join(env.GOLEM_HOME, 'session-facts.json'))?.facts?.find((row) => (
       row.harness === 'pi' && row.provider === 'golem-test' && row.observations?.launch_nonce
-    )), `managed Pi did not record resolved/requested model facts: ${nativeErr}`, 20_000);
+    )), `native Pi did not record resolved model facts: ${nativeErr}`, 20_000);
     nativeId = nativeFact.canonical_id;
     assert.equal(nativeFact.model, 'test-model');
-    assert.equal(nativeFact.observations.requested_provider, 'golem-test');
-    assert.equal(nativeFact.observations.requested_model, 'test-model');
+    assert.ok(nativeFact.locator.session_file.startsWith(path.join(env.HOME, '.pi')), 'native Pi stores the bridged session in its canonical profile');
     assert.equal(nativeFact.observations.pi_version, '0.80.10');
     assert.equal(nativeFact.observations.extension_version, JSON.parse(fs.readFileSync(path.join(repo, 'package.json'), 'utf8')).version);
     const nativeLease = await waitFor(() => readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json'))?.leases?.find((row) => row.canonical_id === nativeId), `native Pi did not register typed lease: ${nativeErr}`, 20_000);
@@ -630,7 +621,7 @@ async function main() {
   }
   assert.doesNotMatch(nativeOut, /"success":false/, `native Pi RPC reported failure: ${nativeOut}`);
   await waitFor(() => !readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json'))?.leases?.some((row) => row.canonical_id === nativeId), 'native Pi did not release endpoint lease');
-  assert.equal(fs.existsSync(path.join(env.HOME, '.pi')), false, 'native isolated Pi did not write the normal profile');
+  assert.ok(fs.existsSync(path.join(env.HOME, '.pi', 'agent')), 'native Pi used its canonical profile');
 
   console.log('Pi native typed-worker journey passed: quiet lease renewal, terminal cleanup, FIFO reservation, correlated acceptance, settlement, controls, crash recovery, reload/fork identity, facts/journal, and real Pi typed delivery');
 }

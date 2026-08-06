@@ -5,9 +5,8 @@
   have one source: `instructions/AGENTS.md`; cards and skills point to it.
 - `.claude/skills/` — repo-only doctrine for instructions, roles, and skills.
 - `cli/` `lib/` — entry point; runtime, role, compiler, managed-harness helpers. `golem pi`
-  version-gates Pi 0.80.10, syncs the render, launches with a Golem-owned isolated profile,
-  pins the Pi Ollama local/cloud provider there, and selectively bridges other requested custom
-  provider/model definitions.
+  version-gates Pi 0.80.10, syncs the render, and appends Golem's explicit bridge extension while
+  Pi keeps its normal profile, authentication, providers, models, extensions, and sessions.
 - `dashboard/server/` — Fastify API and tracker owner. `dashboard/web/` → `dashboard/dist/`.
 - `mcp/channel/` — channel server. `shims/{opencode,codex}/` — harness events onto hooks.
 - `test/` — journey tests.
@@ -34,7 +33,7 @@
   endpoint leases, terminal facts, and central journaling. The old Pi inbox is migration-read-only.
 - The Pi render also registers shared tools, injects Golem-owned authority plus the current
   builder/explorer/reviewer card at safe turn boundaries, exposes progressive skills, and executes
-  the shipped bounded L4 hook. The managed launcher and dashboard use one pinned compatibility
+  the shipped bounded L4 hook. The launcher and dashboard use one pinned compatibility
   contract. Its Tier-A worker capability is verified by the installed-artifact release matrix.
 ### `lib/typed-worker-endpoint.js`, `lib/typed-delivery-tombstones.js`
 - Shared protocol validates authenticated, versioned envelopes; rich supervisor history is never the

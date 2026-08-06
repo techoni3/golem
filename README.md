@@ -162,13 +162,10 @@ golem pi --provider ollama --model laguna-xs-2.1:q4_K_M
 golem pi --provider ollama-cloud --model deepseek-v4-flash
 ```
 
-The managed launcher pins Pi 0.80.10, syncs and loads the canonical render,
-keeps Pi profile/session state under `GOLEM_HOME`, supports `--resume <id>`,
-preserves native arguments after `--`, and installs the pinned
-`@ifi/pi-provider-ollama@0.5.1` package into its private profile on first use.
-Both `ollama/...` local models and `ollama-cloud/...` direct cloud models are
-available in the same `/model` picker; later launches reuse the installed package.
-Non-Ollama custom providers still use the selective source `models.json` bridge.
+The launcher version-gates Pi 0.80.10, syncs and appends the canonical Golem
+bridge render, and supports `--resume <id>` plus native arguments after `--`.
+Pi retains its own profile, authentication, models, providers, extensions, and
+sessions; `golem pi` does not copy, install, or rewrite any Pi configuration.
 Pi registers a typed live endpoint, shared tracker/project tools, Golem-owned
 authority and builder/explorer/reviewer role context, progressive skills, and
 bounded project context. The legacy next-input spool is migration-read-only.
