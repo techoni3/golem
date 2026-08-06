@@ -564,9 +564,9 @@ export async function readNativeSessions(registeredIdLookup, verifiedChannels = 
         : pidAlive(s.pid));
     // Drop dead sessions whose only evidence is a stale registry/golem file.
     // Keep a CLI-sourced row even if pid-check disagrees (CLI just listed it
-    // live), but mark alive honestly. Fact-only terminal Codex rows must not
-    // linger as ghost agents either.
-    if (!alive && (s._from === 'registry' || s._from === 'golem' || (harness === 'codex' && rowEnded))) continue;
+    // live), but mark alive honestly. A fact-only explicitly terminal row from
+    // any harness must not linger as a ghost agent.
+    if (!alive && (s._from === 'registry' || s._from === 'golem' || (s._fact && rowEnded))) continue;
 
     let project_id = null;
     let project_root = null;

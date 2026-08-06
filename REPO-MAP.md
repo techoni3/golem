@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-08-05 @ GOL-134 working tree — maintained via golem:docs-maintenance.
+> Last verified: 2026-08-06 @ GOL-135 working tree — maintained via golem:docs-maintenance.
 ## Directory structure
 - `substrate/` — plugin source; `plugin/` is its generated CC render, never hand-edited. Roles
   have one source: `instructions/AGENTS.md`; cards and skills point to it.
@@ -31,7 +31,7 @@
 ### `lib/pi-native-adapter.js`, `lib/pi-compatibility.js`, `shims/pi/golem.ts`
 - Pi 0.80.10 binds the shared typed-worker endpoint to native `sendUserMessage`, with a synchronous
   starting reservation, correlated agent acceptance/settlement, control abort/halt, durable replay,
-  endpoint leases, canonical facts, and central journaling. The old Pi inbox is migration-read-only.
+  endpoint leases, terminal facts, and central journaling. The old Pi inbox is migration-read-only.
 - The Pi render also registers shared tools, injects Golem-owned authority plus the current
   builder/explorer/reviewer card at safe turn boundaries, exposes progressive skills, and executes
   the shipped bounded L4 hook. The managed launcher and dashboard use one pinned compatibility

@@ -127,6 +127,14 @@ const piIdle = (await readNativeSessions(() => true, [{
 }])).find((row) => row.session_id === 'pi-stale-live');
 assert.equal(piIdle?.status, 'idle', 'live typed readiness outranks a stale active observation');
 
+upsertSessionFact({
+  canonical_id: 'pi-terminal-fact', continuation_key: 'pi-terminal-fact', harness: 'pi',
+  locator: { raw_session_id: 'pi-terminal-fact', session_file: '/tmp/pi-terminal.jsonl' },
+  project_path: process.cwd(), name: 'Pi terminal fact', status: 'stopped',
+  ended_at: new Date().toISOString(), observed_at: new Date().toISOString(),
+});
+assert.equal((await readNativeSessions(() => true, [])).some((row) => row.session_id === 'pi-terminal-fact'), false, 'fact-only terminal Pi worker is absent from the native-session projection');
+
 // GOL-109 merge overlay: the CLI row's updated_at is fabricated (= startedAt;
 // `claude agents --json` emits no updatedAt), so overlaying it must never
 // regress the golem registry's hook-driven recency — the shape that occurs in
@@ -147,4 +155,4 @@ assert.equal(factPresentationField('claudecode', 'idle', null), 'idle', 'CC fact
 assert.equal(factPresentationField('opencode', 'busy', 'idle'), 'busy', 'opencode fact status leads');
 assert.equal(factPresentationField('codex', 'active', null), 'active', 'codex fact status leads');
 
-console.log('canonical session facts + endpoint leases journey passed (35 assertions)');
+console.log('canonical session facts + endpoint leases journey passed (36 assertions)');
