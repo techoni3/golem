@@ -6,81 +6,182 @@ description: Write or revise clear instructions for a skill or agent persona. Us
 
 # Skill authoring
 
-Write the requested instructions. Do not design the system that loads, evaluates, or enforces them.
+Write instructions that help an agent make better decisions and produce a useful result. Treat the
+instructions as adaptable guidance unless the user asks for an exact procedure or output contract.
 
-## Boundary
+## Scope
 
-| In scope | Out of scope |
+| Write | Do not design |
 |---|---|
 | Skill name, description, front matter, and body | Skill loading, matching, or runtime evaluation |
-| Agent-persona instruction body | Roles, agent topology, delegation, model choice, or permissions |
-| Clear structure, language, examples, and references | Hooks, CI, tools, scripts, or other enforcement |
-| Revision of existing instructions | Automatic rules based on past failures |
+| Agent-persona instruction body | Roles, delegation, models, permissions, or agent topology |
+| Structure, wording, examples, and references | Hooks, CI, tools, scripts, or enforcement |
+| Revisions requested by the user | Automatic rules based on failure history |
 
-Writing instructions does not authorize supporting code or configuration. Add a supporting file
-only when the requested instructions require stable detail that does not fit in the main file.
+Instruction writing does not authorize supporting code or configuration.
 
-## Method
+## Authoring flow
 
-```mermaid
-flowchart LR
-  A[Read the request] --> B[Read the target and sources]
-  B --> C[State one purpose]
-  C --> D[Write the instructions]
-  D --> E[Remove noise and conflict]
-  E --> F[Check the result]
+| Step | Action | Done when |
+|---:|---|---|
+| 1 | **Ground.** Read the request, target file, local conventions, and sources needed for factual claims. | You can separate facts, user decisions, and your assumptions. |
+| 2 | **Frame.** State the purpose, variable context, useful guidance, boundaries, and expected result. | You can say what the instructions change in one sentence. |
+| 3 | **Choose forms.** Select the structures that fit the material. | Each section has a clear function from the form table below. |
+| 4 | **Write front matter.** Make the name valid and the description useful for routing. | The description states what the skill does and when it applies. |
+| 5 | **Write the core.** Put concrete steps and essential reference in the main file. | An agent can act without guessing or opening optional material. |
+| 6 | **Place conditional material.** Link a reference only for a distinct branch or use case. | Every reference has a stated read condition and no core rule is hidden. |
+| 7 | **Edit.** Simplify the language, resolve conflicts, and remove no-op content. | Every remaining line changes an action, decision, or interpretation. |
+
+## Frame the guidance
+
+Use this as a thinking frame, not as a required document schema. Fill only the parts that improve
+the target instructions.
+
+| Part | Question |
+|---|---|
+| Purpose | What should the agent be better able to do? |
+| Context | What facts, artifacts, or constraints can vary between uses? |
+| Guidance | Which actions, choices, or criteria improve the result? |
+| Boundaries | Which likely mistake needs a limit? |
+| Result | What useful outcome tells the agent to stop or return? |
+
+Most skills guide judgment. Do not turn variable work into fixed inputs, pass/fail gates, or an
+exhaustive workflow. Add exact checks only when the user requests deterministic behavior.
+
+## Choose the instruction form
+
+Combine forms when the skill needs them. Do not force the entire skill into one form.
+
+| Need | Form | Write |
+|---|---|---|
+| Judgment varies with context | Guidance | Goal, useful criteria, and room to adapt |
+| Order affects the result | Procedure | Numbered actions in execution order |
+| Behavior changes in one case | Condition | `If <observable condition>, <action>.` |
+| The agent must find or compare facts | Reference | A grouped list or mapping table |
+| A result needs a recognizable shape | Flexible template | A minimal frame with optional sections |
+| One wrong action has a high cost | Guardrail | The positive target and the necessary limit |
+
+## Write the front matter
+
+```yaml
+---
+name: skill-name
+description: State what the skill does. Use when the task needs this guidance or artifact.
+---
 ```
 
-1. **Read.** Read the user request, the current target, and every source needed for factual claims.
-2. **Set the purpose.** Complete this sentence: `These instructions help the agent ___`.
-3. **Set the contract.** Identify the inputs, actions, boundaries, and expected result.
-4. **Write.** Put actions in execution order. Use a table for mappings and a list for a sequence.
-5. **Reduce.** Remove duplication, generic advice, unrelated rationale, and conflicting terms.
-6. **Check.** Confirm the description, front matter, references, language, and completion condition.
-
-## Content map
-
-| Part | Write |
+| Field | Rule |
 |---|---|
-| `description` | What the instruction set does and when to use it |
-| Purpose | The result the agent must produce |
-| Inputs | Context or source material the agent needs |
-| Method | Actions in the order that matters |
-| Boundaries | Only limits needed to prevent a likely wrong action |
-| Completion | An observable result or stop condition |
-| References | Stable detail needed for some, but not all, uses |
+| `name` | Use lowercase letters, digits, and single hyphens. Match the directory name. |
+| `description` | State the action or result, then the high-level situation in which it applies. |
 
-For exact front-matter guidance, read
-[references/frontmatter.md](references/frontmatter.md).
+Use task words that a user or agent is likely to use. Keep the description broad enough to cover
+the skill and specific enough to distinguish it. Do not summarize the method or list low-level
+steps. Add an exclusion only when a nearby skill or task is easy to confuse with this one.
 
-For an agent persona, also read
+Preserve supported optional fields already present in the target. Change optional metadata only
+when the user or an authoritative local source requires it.
+
+## Organize the content
+
+| Put in the main file | Put in a reference |
+|---|---|
+| Concrete steps used in normal operation | A step used only for one branch or variant |
+| Essential terms, choices, and reference facts | Detail needed only under a stated condition |
+| Guidance that applies to every use | Persona- or environment-specific material |
+| Universal task boundaries | Large lookup material that only some uses need |
+
+A reference is justified by conditional relevance, not by length alone. Link it directly from the
+main file and state when to read it. Keep each rule in one place, and keep its definition, action,
+and caveat together.
+
+For agent-persona instructions, read
 [references/persona-writing.md](references/persona-writing.md).
 
-## Language
+## Use structure with purpose
 
-| Use | Avoid |
+Minimize the human's reading and navigation load. Use the smallest structure that makes the
+relationship clear.
+
+| Material | Best default |
 |---|---|
-| Short sentences with one main instruction | Several requirements in one sentence |
-| Active voice and direct verbs | Passive or indirect commands |
-| Common technical terms | Idioms, slogans, metaphors, and decorative jargon |
-| One term for one concept | Synonyms for the same role, state, or artifact |
-| Concrete actions and results | Generic advice such as “follow best practices” |
-| Positive instructions where practical | Long lists of prohibitions |
+| Context or a necessary reason | Lean prose |
+| Independent choices, rules, or checks | Bullets |
+| Ordered actions | Numbered list or step table |
+| Mappings, comparisons, or repeated fields | Table |
+| A non-obvious branch, loop, or relationship | Mermaid diagram |
+| Exact syntax or a reusable frame | Code block |
 
-Define an acronym at first use. State a necessary reason when it helps the agent apply a boundary
-correctly. Do not preserve history in an active instruction unless that history changes the action.
+Do not use a diagram for a linear sequence or a table for a single comparison. Structure must make
+the content faster to understand; it must not decorate the document.
 
-## Editorial check
+## Use simplified technical English
 
-- [ ] The purpose is one sentence.
-- [ ] The description says what the instructions do and when they apply.
-- [ ] Every factual statement comes from a source that was read.
-- [ ] The agent can identify its inputs, next action, and stop condition.
-- [ ] Each operational rule has one owner.
-- [ ] No line creates work outside the user's request.
-- [ ] No instruction requires runtime evaluation by the writer.
-- [ ] The text uses consistent, plain technical language.
-- [ ] Every reference exists and is linked from the main file.
+Use an ASD-STE100-inspired style; do not claim formal compliance. Use familiar words, active voice,
+short sentences, one main instruction per sentence, and one term per concept; define acronyms and
+avoid idioms, slogans, metaphors, and decorative jargon.
 
-The human evaluates runtime behavior. Finish when the instructions and their references are clear,
-complete, and structurally valid.
+Prefer a positive instruction that names the target behavior. Use a prohibition only for a real
+boundary, and pair it with the action the agent should take. Express an exception as a condition
+with an observable trigger. Use a compact established term when it reduces repetition; do not
+invent a term that needs more explanation than it saves.
+
+## Flexible skill frame
+
+Start with this frame. Remove any heading that does no work, and add a heading only when the
+material needs a distinct function.
+
+```markdown
+---
+name: <skill-name>
+description: <what it does>. Use when <high-level situation>.
+---
+
+# <Title>
+
+<Purpose and operating stance in one or two sentences.>
+
+## <Method or guidance>
+
+<Core actions, choices, or criteria.>
+
+## <Reference or decisions, when useful>
+
+<Compact facts, mappings, or conditions.>
+
+## <Boundaries, when needed>
+
+<Only the limits that prevent a likely wrong action.>
+
+## <Result, when it needs clarification>
+
+<What to return or when to stop.>
+```
+
+## Common errors
+
+| Error | Correction |
+|---|---|
+| Generic advice such as “follow best practices” | State the local choice or useful decision criterion. |
+| A rigid protocol for variable work | Give direction and criteria; preserve judgment. |
+| History presented as an active rule | Keep the current instruction; move history out. |
+| Core guidance hidden in references | Move it into the main file. |
+| Every possible branch in the main file | Move only conditional branches to named references. |
+| Long prohibition lists | State the desired behavior and keep only necessary limits. |
+| The same rule in several documents | Keep one owner and use a direct pointer elsewhere. |
+
+## Editorial pass
+
+This pass checks the written artifact. It does not evaluate runtime behavior.
+
+- [ ] The front matter is valid and the description gives a useful high-level route.
+- [ ] The purpose and expected result are clear without forcing variable work into a protocol.
+- [ ] Concrete steps and essential reference are in the main file.
+- [ ] Each conditional reference is linked and has a read condition.
+- [ ] The format of each block matches its function.
+- [ ] The language follows the simplified technical English rule above.
+- [ ] Factual claims come from sources that were read.
+- [ ] No rule is duplicated, contradicted, generic, or unrelated to the request.
+- [ ] No supporting artifact was added without user authority.
+
+The human decides whether the instructions work well in practice.

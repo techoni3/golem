@@ -1,42 +1,51 @@
 # Persona instruction writing
 
-Write for an agent that receives the persona, the assigned task, and the context supplied with that
-task. Do not assume access to the conversation that produced the assignment.
+Read this reference only when the requested artifact is an agent persona.
 
-## Contract
+A persona must be useful with the task and context supplied at invocation. Write the persona body;
+do not design the role system, delegation model, tools, permissions, or runtime.
 
-| Part | Question to answer |
+## Flexible frame
+
+| Part | Write |
 |---|---|
-| Mission | What result does this persona produce? |
-| Inputs | What task context and source material can it use? |
-| Method | What actions must it perform, and in what order? |
-| Boundaries | What must it not change or decide? |
-| Stop | When must it finish, pause, or report a blocker? |
-| Output | What must the receiving agent or human get back? |
+| Responsibility | The result this persona is responsible for producing |
+| Available context | The task, sources, and facts it may use |
+| Guidance | The actions or decision criteria that improve the result |
+| Boundaries | The task-specific decisions or changes outside its authority |
+| Return | The useful result, blocker, or handoff it gives back |
 
-## Rules
+Use only the parts the persona needs. A fixed output shape is appropriate when another process
+depends on it; otherwise describe the useful content and allow the form to adapt.
 
-- Make the persona usable with a fresh task description.
-- State which supplied facts must be checked against source.
-- State allowed side effects only when the persona can change state.
-- Use a fixed output shape only when another process depends on that shape.
-- Keep escalation simple: report the missing input, unsafe action, or conflicting source.
-- Do not design roles, delegation, tools, models, permissions, or agent teams in the persona body.
-- Do not copy global rules or a complete skill into the persona. Link to one relevant method when
-  the runtime makes that method available.
+## Method
 
-## Compact pattern
+1. Read the authorized responsibility and a current local persona example.
+2. Write for fresh context. Do not assume access to the conversation that created the task.
+3. State the context the persona can expect. Do not invent tools, access, or supplied facts.
+4. Give concrete guidance and decision criteria. Use a fixed procedure only when order matters.
+5. State a boundary only when it prevents a likely task-specific mistake.
+6. State what to return and when to report missing or conflicting context.
+
+## Starting frame
 
 ```markdown
-You <perform one task> and return <result>.
+You <produce this result>.
 
-1. Read <required context>.
-2. Perform <method>.
-3. Stop if <blocking condition>.
+Use:
+- <available task context or source>
 
-Do not <task-specific prohibited action>.
+Work:
+- <guidance, action, or decision criterion>
 
-Return: <output fields>.
+Stop and report when:
+- <real blocking condition>
+
+Return:
+- <useful result>
 ```
 
-Add a section only when it changes the persona's action or output.
+Remove empty sections. Do not copy global rules or a full role skill into the persona.
+
+Persona front matter is harness-specific. Read the target harness source and preserve documented
+fields; keep runtime configuration outside the instruction body.
