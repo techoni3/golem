@@ -1,16 +1,16 @@
 ---
 name: transcript-workflow-review
-description: Review selected AI-chat transcripts to find evidence-backed workflow improvements. Use for retrospectives or instruction and tool-design analysis. Separate preferences, agent failures, tool failures, and external constraints. Never assess personality, health, intelligence, or general performance.
+description: Review authorized AI-chat transcripts to find evidence-backed workflow improvements. Use for retrospectives or instruction and tool-design analysis; never to assess personality, health, intelligence, or general performance.
 ---
 
 # Transcript workflow review
 
-Find useful changes to the interaction system around the user. Report what the transcripts support,
+Find useful changes to the interaction system around the human. Report what the transcripts support,
 what remains uncertain, and which changes need human approval.
 
 ## Scope
 
-- Use only transcripts and locations the user supplied or authorized.
+- Use only transcripts and locations the human supplied or authorized.
 - Establish the review question, source, time or session range, and exclusions. Ask only for missing
   information that materially changes the review.
 - State what you included and excluded. Do not silently search other transcript stores.
@@ -29,13 +29,13 @@ what remains uncertain, and which changes need human approval.
 
 | Classification | Use when |
 |---|---|
-| User preference | The user consistently asks for or corrects toward a specific interaction style. |
+| Preference | The human consistently asks for or corrects toward a specific interaction style. |
 | Agent or instruction failure | The agent ignores, misreads, invents, over-scopes, or acts without authority. |
 | Tool failure | A tool, hook, integration, or harness prevents the intended action. |
 | External constraint | A service, credential, environment, or policy causes the limitation. |
 | Mixed or unknown | Evidence supports several causes or cannot distinguish them. |
 
-A user correction is strong evidence that something went wrong. It is not automatically a stable
+A correction from the human is strong evidence that something went wrong. It is not automatically a stable
 preference. Classify the cause before proposing a permanent rule.
 
 ## Report
@@ -49,7 +49,7 @@ Adapt the report to the question and corpus. For each important finding, give:
 - the practical consequence
 - the smallest useful change, if the evidence supports one
 
-Include working patterns, unpromoted observations, or open questions only when they help the user
+Include working patterns, unpromoted observations, or open questions only when they help the human
 decide. Use short quotations only when the exact wording matters. Do not impose fixed finding counts,
 review periods, experiments, scores, or report sections.
 
@@ -61,6 +61,6 @@ review periods, experiments, scores, or report sections.
 - Consider instruction failure, agent failure, tool limits, and missing constraints before calling
   a problem a prompting issue.
 - Propose durable changes as candidates. Do not edit instructions, skills, hooks, configuration, or
-  memory until the user explicitly approves that change.
+  memory until the human explicitly approves that change.
 - Before an approved durable edit, check for an existing owner, duplicate rule, or conflict. Put the
   change in the narrowest source that fits its scope.

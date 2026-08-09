@@ -596,9 +596,9 @@ try {
   }, /description is 46 words/);
 
   // Migration guard. Ownership used to be duplicated across the role card, the role skill,
-  // AGENTS.md, and regexes in the linter — four copies that drifted. Cards now carry
-  // Mission + Load only, so a card in the legacy Leads-with/Boundaries/Hand-offs shape must
-  // fail rather than be silently accepted.
+  // AGENTS.md, and regexes in the linter — four copies that drifted. Cards now carry the
+  // Load pointer only (missions live in AGENTS.md § Roles), so a card in the legacy
+  // Leads-with/Boundaries/Hand-offs shape must fail rather than be silently accepted.
   const oldCardsRoot = seedFixture('legacy-card-format');
   const oldCardsHome = path.join(tmp, 'legacy-card-format', 'home');
   write(path.join(oldCardsRoot, 'roles', 'lead.md'), '# Role: lead\nMission: Turn ideas into executable work.\nLeads with: golem:tracker\nBoundaries: never dispatch build tickets.\nHand-offs: hand off clearly.\n');

@@ -47,5 +47,7 @@ Return:
 
 Remove empty sections. Do not copy global rules or a full role skill into the persona.
 
-Persona front matter is harness-specific. Read the target harness source and preserve documented
-fields; keep runtime configuration outside the instruction body.
+Persona front matter is harness-specific. In the Golem repository, persona sources live in
+`substrate/agents/` and render per harness; read a current file there as the local example. Read
+the target harness source and preserve documented fields; keep runtime configuration outside the
+instruction body.
