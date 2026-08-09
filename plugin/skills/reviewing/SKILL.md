@@ -6,7 +6,8 @@ description: Read when acting as reviewer, or spawning fresh eyes on a spec or d
 
 # reviewing
 
-Method for the **reviewer** role. Ownership and boundaries: Global Rules § Roles.
+Method and boundaries for the **reviewer** role. Global Rules § Roles owns the compact role routing
+table.
 
 Review is not verification. Verification asks *did the claimed evidence actually happen?* and is
 bounded by the acceptance checklist. Review asks *is this right, including what the checklist

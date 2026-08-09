@@ -6,8 +6,8 @@ description: Read when acting as builder — survey code to ground a design, imp
 
 # building
 
-SoT for the **builder** role. Ownership and boundaries: **Global Rules § Roles**. This skill carries
-method only. In-process map: `worker`. Tracker: `golem:tracker`. Checks: `golem:test-policy`,
+Method and boundaries for the **builder** role. Global Rules § Roles owns the compact role routing
+table. In-process map: `worker`. Tracker: `golem:tracker`. Checks: `golem:test-policy`,
 `golem:verify-done`. Branches and worktrees: `golem:git-conventions`.
 
 ## Two jobs, usually in this order

@@ -20,8 +20,8 @@ function write(file, text) {
   fs.writeFileSync(file, text);
 }
 
-// Every role registered in lib/session-role.js needs a card AND a row in the instructions
-// Roles table — that table is the single source of role ownership.
+// Every role registered in lib/session-role.js needs a card AND a row in the compact
+// instructions Roles table.
 // Must track BUILTIN_ROLES in lib/session-role.js — the lint checks registered
 // roles against the fixture's cards and AGENTS.md table, so a stale list here
 // fails as a missing card rather than as a real defect.
@@ -47,8 +47,8 @@ function seedFixture(name) {
   }, null, 2) + '\n');
   write(path.join(root, 'hooks', 'hooks.json'), '{}\n');
   write(path.join(root, 'hooks', 'session-register.sh'), '#!/usr/bin/env bash\nexit 0\n');
-  // Cards carry identity + a skill pointer only; ownership lives in instructions/AGENTS.md
-  // § Roles, so no role needs card-specific content here.
+  // Cards carry identity + a skill pointer. The shared routing table is in
+  // instructions/AGENTS.md § Roles, so no role needs fixture-specific content here.
   for (const role of FIXTURE_ROLES) {
     write(path.join(root, 'roles', `${role}.md`), `# Role: ${role}\nMission: ${role} mission.\nLoad: golem:tracker\n`);
   }

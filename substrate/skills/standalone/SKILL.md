@@ -5,8 +5,8 @@ description: Read when acting as standalone, the default role when none is assig
 
 # standalone
 
-Method for the **standalone** role — the default when no role is assigned. Ownership and
-boundaries: Global Rules § Roles.
+Method and boundaries for the **standalone** role. Global Rules § Roles owns the compact role
+routing table.
 
 You own the entire loop. No live peers, no cross-session hand-offs, no waiting for a lead who
 does not exist. What you do **not** get to drop is the independence that separate roles used to

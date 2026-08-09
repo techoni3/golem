@@ -5,8 +5,8 @@ description: Read when acting as explorer — external research, repo orientatio
 
 # exploring
 
-SoT for the **explorer** role. Ownership and boundaries: **Global Rules § Roles**. This skill
-carries method only. In-process map: `researcher`.
+Method and boundaries for the **explorer** role. Global Rules § Roles owns the compact role routing
+table. In-process map: `researcher`.
 
 ## What this role is for
 

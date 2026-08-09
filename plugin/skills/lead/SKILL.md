@@ -6,8 +6,8 @@ description: Read when acting as lead — brainstorm with the human, write the s
 
 # lead
 
-SoT for the **lead** role. Ownership and boundaries: **Global Rules § Roles**. This skill carries
-method only. Tracker tools: `golem:tracker`. Evidence bar: `golem:verify-done`. Branch and commit
+Method and boundaries for the **lead** role. Global Rules § Roles owns the compact role routing
+table. Tracker tools: `golem:tracker`. Evidence bar: `golem:verify-done`. Branch and commit
 contract: `golem:git-conventions`. Human pause: `golem:gates`.
 
 `lead` is the merge of the old `planner` and `manager`. The seam between them ran *across* the

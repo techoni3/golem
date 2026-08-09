@@ -191,6 +191,11 @@ default is `scope: global`. Global renders ignore project-scoped files. Project
 sync renders only project-scoped files and records them under
 `substrate.lock.projects.<project_id>.targets`.
 
+This compiler path is for Golem-owned rendered artifacts. It is not the authoring layout for a
+project's own instructions. Hand-authored project content uses `AGENTS.md` and `.agents/skills/`;
+Claude compatibility uses an `@AGENTS.md` import and a `.claude/skills` link. Setup or migration
+creates those compatibility paths explicitly. Routine sync does not repair them.
+
 Current P6 artifact-set decision: no real project-scoped golem content ships yet.
 The mechanism is verified with scratch-only fixture substrate roots via
 `GOLEM_SUBSTRATE_ROOT`; generated project files are not written into real user

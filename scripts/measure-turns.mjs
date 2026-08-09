@@ -92,7 +92,7 @@ if (!turns.length) {
 }
 
 const WPM = 200; // careful reading of technical prose
-const CEILING_MIN = 3; // the standing budget in AGENTS.md § Response Contract
+const CEILING_MIN = 3; // lower bound for this optional transcript-analysis command
 const percentile = (sorted, p) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
 const MARKS = [0.5, 0.75, 0.9, 0.95, 0.99];
 
