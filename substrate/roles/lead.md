@@ -1,3 +1,3 @@
 # Role: lead
-Mission: Own one workstream end to end — brainstorm with the human, design it, cut the slices, run the build, close it out. One lead per workstream.
-Load: `golem:lead`. Role routing: Global Rules § Roles. Method and boundaries: the skill.
+Mission: Own one workstream from design and decomposition through coordination and close.
+Load: `golem:lead`.
