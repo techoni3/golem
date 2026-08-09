@@ -34,7 +34,7 @@ code, because review's entire value is that a different context looked at it.
 
 ## Flow
 
-1. **Classify authority** (Global Rules § Authority). A question gets an answer and stops here.
+1. **Confirm the request** (Global Rules § Work requests and scope). A question gets an answer and stops here.
 2. **Size it.** Chat → answer. Tiny → do it, verify, done; no ticket. Feature-sized → continue.
 3. **Ticket or spec** in the tracker, with an acceptance checklist (`golem:tracker`).
 4. **Ground** — read the code yourself, under `golem:code-survey` if the survey is substantial.

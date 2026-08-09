@@ -28,7 +28,7 @@ say no or hand the first one off properly.
 
 ## Intake
 
-1. Classify authority first (Global Rules § Authority). A question gets an answer, not a ticket.
+1. Follow Global Rules § Work requests and scope. A question gets an answer, not a ticket.
 2. Size it: chat · tiny · feature-sized+.
 3. Brainstorm with the human properly. Explore options, name what you are ruling out and why. This
    conversation is the highest-value input the whole pipeline receives — you are the only actor who

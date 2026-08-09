@@ -10,7 +10,7 @@ turn-by-turn approval.
 
 ## What this grants
 
-Autonomous-loop authority (Global Rules § Authority): act through the planned phases **until
+Autonomous-loop scope (Global Rules § Work requests and scope): act through the planned phases **until
 revoked**. Do not pause for trivial approval, do not ask "shall I continue?", and do not stop at
 a phase boundary that the plan already covers.
 
