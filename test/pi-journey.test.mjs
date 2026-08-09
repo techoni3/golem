@@ -166,7 +166,7 @@ async function main() {
   const roleResult = await harness.tools.get('session_role').execute('tool-role', { role: 'builder' }, undefined, undefined, harness.ctx);
   assert.equal(roleResult.details.ok, true, roleResult.content[0].text);
   const prompt = await harness.emit('before_agent_start', { prompt: 'inspect role context', systemPrompt: 'Pi base prompt' });
-  assert.match(prompt.systemPrompt, /## Work requests and scope/, 'Golem work-request rules are injected without a Pi profile file');
+  assert.match(prompt.systemPrompt, /## Authority and scope/, 'Golem authority rules are injected without a Pi profile file');
   assert.match(prompt.systemPrompt, /Role: builder/, 'role truth is read at the safe turn boundary');
   assert.match(prompt.systemPrompt, /Recent commits:/, 'bounded shipped L4 context is injected');
   let lease = readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json')).leases.find((row) => row.canonical_id === sessionId);
