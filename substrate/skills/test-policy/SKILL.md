@@ -1,29 +1,31 @@
 ---
 name: test-policy
-description: Read when writing tests, telling a worker how to test, or scoping a CI or check budget. Golem's policy is journey-level integration against real DBs and harnesses, no unit fan-out. Not for verifying a completion claim, use golem:verify-done.
+description: Read when writing tests, telling a builder how to test, or scoping a check budget. Prefer journey-level proof of observable behavior through real layers; follow the repository's existing test system. Not for verifying a completion claim, use golem:verify-done.
 ---
 
-# test-policy
+# Test policy
 
-Budget: **~10–20 tests per feature**, at journey level — integration / e2e /
-service-to-service. Each test = one user-visible behavior, end-to-end through every
-layer that makes it observable (route + validation + persistence, not a layer alone).
+Follow the repository's existing test system first — framework, layout, naming, and runners. The
+policy below governs the tests you add, not a rewrite of what exists.
 
-Banned:
-- **Per-function unit fan-out** — one test per internal function/method. Exception:
-  genuinely complex *pure* logic (a parser, a pricing calc) gets focused unit tests.
-- **Mock-heavy tests that re-state the implementation** — if the test asserts the same
-  call sequence the code makes, it tests the code's structure, not its behavior. Delete.
+Prefer tests that prove observable behavior through the layers that make it real: route plus
+validation plus persistence, not a layer alone, against real databases and harnesses where the
+repo supports it. Add the smallest set that covers the changed behavior and its affected
+consumers.
 
-Existing repo with test conventions: follow them (framework, layout, naming). The budget
-still applies to NEW tests you add — don't import a unit-fan-out habit because the repo has one.
+Use a focused unit test when isolated logic is the clearest proof — a parser, a pricing
+calculation, a tricky transform. Do not fan out one test per internal function; coverage of
+structure is not coverage of behavior.
 
-If a behavior can't be covered mechanically, say so explicitly and name the manual step;
-don't pad the count with hollow tests.
+Do not write mock-heavy tests that restate the implementation. A test that asserts the same call
+sequence the code makes tests the code's structure, not its behavior — delete it.
+
+If a behavior cannot be covered mechanically, say so explicitly and name the manual step. Do not
+pad the suite with hollow tests to look thorough.
 
 ## Scratch fixtures
 
-**Never create scratch or smoke tickets in a real project** — they pollute the board and burn
+Never create scratch or smoke tickets in a real project — they pollute the board and burn
 per-project ticket numbers. Use the repo's quarantined scratch path if it has one, and archive
 fixtures in a `finally` block so a failing test still cleans up. The repo's own `AGENTS.md` names
 the mechanism.

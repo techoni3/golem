@@ -27,7 +27,7 @@ Use a hybrid only when a broad direction also contains a local decision that can
 
 ## Distinctness test
 
-Write one pairwise sentence explaining why each neighboring option changes the user's experience. Rework an option when the sentence reduces to a single cosmetic substitution unrelated to the decision.
+Write one pairwise sentence explaining why each neighboring option changes the experience. Rework an option when the sentence reduces to a single cosmetic substitution unrelated to the decision.
 
 Seek coherent theses, not a bag of effects. Useful theses include compact command surface, calm guided workspace, scan-first ledger, progressive-focus flow, spatial navigation, or recovery-first form. Each thesis should affect at least two relevant axes.
 
@@ -46,7 +46,7 @@ Select only axes that influence the decision:
 - Brand or material fit
 - Implementation complexity, migration risk, and maintainability
 
-For every option, state one benefit, one cost, and one risk using the selected axes. Keep the comparison advisory; the user owns the decision.
+For every option, state one benefit, one cost, and one risk using the selected axes. Keep the comparison advisory; the human owns the decision.
 
 ## Representative state sets
 
@@ -58,4 +58,4 @@ Choose the smallest set that exposes the design decision:
 - **Flows:** entry, decision point, progress, recoverable failure, success, cancel or undo.
 - **Operational dashboards:** healthy, working, waiting, offline, queued, attention required.
 
-Do not add every state by habit. Include a state when it can change which option the user chooses.
+Do not add every state by habit. Include a state when it can change which option the human chooses.

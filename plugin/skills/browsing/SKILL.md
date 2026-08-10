@@ -33,15 +33,15 @@ ws://…` line in that stderr log; `<profile dir>/DevToolsActivePort` (line 1 = 
 (playwright-core, a raw WebSocket).
 
 Headed is the same command minus `--headless=new`. Default to headless — a visible window
-grabs the user's attention; open one deliberately (login handoff below, or a task that is
+grabs the human's attention; open one deliberately (login handoff below, or a task that is
 explicitly visual/interactive), not by habit.
 
 ## The two profiles
 
 | Profile | When | How |
 |---|---|---|
-| **Ephemeral** (default) | Anything that does NOT need the user's logins | Fresh temp `--user-data-dir`, killed on exit |
-| **Shared persistent** | The task needs the user's sessions: authenticated sites, logged-in dashboards | `~/.golem/chrome-profile/` — golem-wide, carries real logins/cookies |
+| **Ephemeral** (default) | Anything that does NOT need the human's logins | Fresh temp `--user-data-dir`, killed on exit |
+| **Shared persistent** | The task needs the human's sessions: authenticated sites, logged-in dashboards | `~/.golem/chrome-profile/` — golem-wide, carries real logins/cookies |
 
 Shared-profile rules:
 
@@ -60,7 +60,7 @@ A login page or expired session on the shared profile is not a dead end. Bring t
    remote-debugging endpoint is active ("This browser or app may not be secure"), and the
    login window needs no CDP — you are hands-off during login anyway.
 3. One-line chat ping: which site needs login, and what you'll continue with after. When
-   the human is present, chat only — no gate ceremony for a routine login.
+   the human is present, chat only — no ticket ceremony for a routine login.
 4. **Hands off while they log in.** The window is theirs and credentials are being typed
    into it — and with no debug port it has no endpoint you could drive or observe anyway.
    The human's "done" in chat is the only completion signal; wait for it.
@@ -71,8 +71,8 @@ A login page or expired session on the shared profile is not a dead end. Bring t
    by default, headed only if the task itself is visual/interactive.
 
 Running autonomously (night-shift, human away): a missing login is a missing credential —
-follow the credential path in `golem:night-shift`/`golem:gates` (question ticket, thread
-blocked), close the headed window, and work on something else. Chat has no reader at 3am;
+post a `kind:question` ticket and mark the thread blocked (`golem:tracker` § Blocked on the
+human), close the headed window, and work on something else. Chat has no reader at 3am;
 don't poll a login page for hours.
 
 ## What you may do on authenticated sites
@@ -81,12 +81,13 @@ Authority comes from **the task, not this skill**. Read-only browsing is always 
 Mutations are in scope exactly as far as the task names them — "file the issue upstream"
 includes submitting that form; a research task includes no writes at all. Beyond-mandate
 actions, anything involving payment, and irreversible account operations go to the human
-first (`golem:gates`). When unsure whether the mandate covers a write, it doesn't.
+first (ask in chat, or a `kind:question` ticket when the human is away). When unsure
+whether the mandate covers a write, it doesn't.
 
 ## Hard rules
 
-- **Never attach CDP to the user's own desktop Chrome** (port 9222 or any other). CDP
-  actions activate its windows and fight the user's typing. The only window an agent may
+- **Never attach CDP to the human's own desktop Chrome** (port 9222 or any other). CDP
+  actions activate its windows and fight the human's typing. The only window an agent may
   drive is one it spawned — headed handoff windows included, *after* the human is done.
 - One Chrome per process; kill what you spawn. Ephemeral profiles die with the run.
 - Screenshots and scratch scripts go to your scratchpad, not the repo.
