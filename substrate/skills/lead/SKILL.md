@@ -63,7 +63,8 @@ Cut work items so that:
 
 - each is independently buildable and does not reopen a design question;
 - no two items in the same wave write the same files — one writer per checkout;
-- dependencies are explicit, expressed as waves when order matters.
+- every child carries a `wave`, starting at 1 even for a single child (the tracker rejects
+  wave-less planning); order dependencies use later waves.
 
 Create the minimum number that keeps each change coherent. One child is normal for a small
 design.

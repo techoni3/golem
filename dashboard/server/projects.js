@@ -186,8 +186,9 @@ async function resolveGatesDir(projectPath, contractId) {
   };
 }
 
-// TKT-0194: parse a gate file's YAML frontmatter and body. Gates follow the
-// format described in plugin/skills/gates/SKILL.md: frontmatter with
+// TKT-0194: parse a gate file's YAML frontmatter and body. Legacy gate-file
+// format (the golem:gates skill that described it was retired by GOL-146;
+// this comment is now the format's home): frontmatter with
 // gate_id, kind (approval|input), status (awaiting|approved|denied|cancelled),
 // created_at, phase_just_completed, next_phase, target_file, required_keys —
 // followed by a markdown body describing what was completed and what approval

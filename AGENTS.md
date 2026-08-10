@@ -64,10 +64,11 @@ See `substrate/README.md` for the channel-consumer launch (`golemc`) and the ful
 ## Work Choreography
 
 Cross-session routing is **opt-in** — see `golem:live-team`. The default is a
-single session owning the whole loop (`golem:standalone`), using in-process
-agents for recon and both review gates. Specs and work items are phase-backed in
-the tracker. Live handoffs use authenticated `session_notify`; the event ledger
-is durable audit history, not a wake-up or subscription path.
+single session owning the whole loop (`golem:standalone`), spawning a fresh
+in-process reviewer only for the one-pass design and code reviews. Specs and
+work items are phase-backed in the tracker. Live handoffs use authenticated
+`session_notify`; the event ledger is durable audit history, not a wake-up or
+subscription path.
 
 When a live team **is** enabled: the dashboard preselects a lead as the
 Assignee/dispatch target and any explicit target overrides it; the team API
@@ -99,8 +100,9 @@ cp -Rc mcp/channel/node_modules .worktrees/<TICKET>-<slug>/mcp/channel/node_modu
   the installed plugin updating.**
 - If `substrate/instructions/AGENTS.md` changed, also `golem sync --target codex` — root rules
   render as a marked block into `$CODEX_HOME/AGENTS.md` as well as `~/.claude/CLAUDE.md`, and the
-  two are separate targets. `golem sync --check --all` reports both. `pi` has no instruction
-  surface, so it renders none.
+  two are separate targets. The `pi` render also carries instructions, roles, and skills — sync
+  `--target pi` too, unless uncommitted Pi work in `shims/pi/` is active in the checkout (the pi
+  render bundles that shim source). `golem sync --check --all` reports every target.
 - If dashboard server behavior changed, restart the dashboard from the main checkout.
 
 **Shared runtimes to avoid inside a worktree** (the generic rule is in
@@ -112,6 +114,7 @@ restarting the shared dashboard; port 7420, docker stacks, named volumes, contai
 
 When a dispatch brief explicitly names `workspace: worktree`, follow the
 worktree directive: one ticket branch in `.worktrees/<ticket>/`, self-contained
-checks only, `branch:` in the closing brief, and reconciliation on main by the
-orchestrating non-builder. Ad-hoc worktrees remain prohibited without an
-explicit directive.
+checks only, `branch:` in the closing brief, and merge ownership per
+`golem:git-conventions` § Spec branches and merge ownership (the builder merges
+into the spec branch; the owner lands `main`). Ad-hoc worktrees remain
+prohibited without an explicit directive.
