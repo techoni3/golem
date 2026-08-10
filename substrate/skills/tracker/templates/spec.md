@@ -2,32 +2,46 @@
 
 ## 1. Intent (raw thoughts, preserved)
 
-Capture the user's original goal and constraints in their own language; the lead may add brief orientation notes without deleting the raw thought.
+Capture the human's original goal and constraints in their own language; the owner may add brief
+orientation notes without deleting the raw thought.
 
-## 2. Behaviour
+## 2. Current behavior and constraints
 
-Describe the promised user/system behaviour, then list checkable acceptance criteria that child work items can inherit.
+What the grounded code and research say: relevant existing behavior, the constraints that shape
+the design, and anything that rules a direction out. Cite paths and sources.
 
-- [ ] <observable behaviour or outcome>
-- [ ] <observable behaviour or outcome>
+## 3. Design
 
-## 3. Decisions
+The chosen direction and its important trade-offs, in enough depth that a builder never
+reconstructs the design conversation. Record a rejected option only when its rejection explains
+an important choice.
 
-Record choices made while shaping the spec; include why and the road not taken.
+## 4. Decisions
 
-| Choice | Why | Road not taken |
-|--------|-----|----------------|
-| <decision> | <reason> | <rejected alternative> |
+Choices the human committed during the brainstorm. These are locked; reopen only with the human.
 
-## 4. Non-goals
+| Decision | Why | Road not taken |
+|----------|-----|----------------|
+| <decision> | <reason> | <rejected alternative, when it explains the choice> |
 
-State what this spec explicitly will not do so fan-out does not grow hidden scope.
+## 5. Scope and non-goals
 
-- <out of scope>
+What this spec delivers, and what it explicitly will not do so fan-out does not grow hidden
+scope.
 
-## 5. Open questions
+- In: <scope>
+- Out: <non-goal>
 
-Track unresolved questions for the human or lead; answer or defer each before finalisation.
+## 6. Acceptance
+
+Observable criteria that child work items inherit. A builder must be able to check each without
+re-interpreting intent.
+
+- [ ] <observable behavior or outcome>
+
+## 7. Open questions
+
+Unresolved questions for the human. Delete this section when none exist.
 
 - [ ] <question>
 

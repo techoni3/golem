@@ -26,9 +26,9 @@ const CT_PRIORITIES = [
 ];
 
 // TKT-0180: default genre template per ticket type. The template picker
-// defaults to the type's scaffold but the user can override via the dropdown
-// (e.g. pick prd/brainstorm for a work-item). 'question' has no default —
-// the user picks a template explicitly if they want one.
+// defaults to the type's scaffold but the user can override via the dropdown.
+// 'question' has no default — the user picks a template explicitly if they
+// want one.
 //
 // This map is the ONLY place the type→template default lives. The drawer's
 // `setTemplateIdByType` effect consults it whenever the user changes type;
