@@ -173,7 +173,7 @@ plugin/
   agents/researcher.md         # read-only investigation, structured summary
   skills/tracker/SKILL.md      # golem:tracker — tracker is the source of truth for work
   skills/standalone/SKILL.md   # golem:standalone — default role; one session owns the whole loop
-  skills/reviewing/SKILL.md    # golem:reviewing — spec + code review gates, binding verdict
+  skills/reviewing/SKILL.md    # golem:reviewing — one-pass advisory design/code review
   skills/consulting/SKILL.md   # golem:consulting — answer a peer's consult, advisory only
   skills/live-team/SKILL.md    # golem:live-team — opt-in cross-session dispatch and consults
   mcp/channel/index.js         # golem channel MCP — ack/respond + tracker + active session_notify

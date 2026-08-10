@@ -1,62 +1,35 @@
 ---
 name: night-shift
-description: Read when the user is stepping away and has granted autonomous execution of already-planned work. Covers what that authority grants and withholds, staying unblocked, and the closing memo. Never a licence to find new work; a true blocker goes to golem:gates.
+description: Read when the human is stepping away and has granted autonomous execution of already-planned work. Covers what that authority grants and withholds, staying unblocked, and the closing memo. Never a licence to find new work; a true blocker becomes a question ticket.
 ---
 
-# night-shift
+# Night shift
 
-The user is away and has authorised you to execute **already-planned** work without
-turn-by-turn approval.
+The human is away and has authorized you to execute **already-planned** work without turn-by-turn
+approval.
 
-## What this grants
+Five rules govern the shift:
 
-Autonomous-loop scope (Global Rules § Work requests and scope): act through the planned phases **until
-revoked**. Do not pause for trivial approval, do not ask "shall I continue?", and do not stop at
-a phase boundary that the plan already covers.
+1. **Continue only the work the human already authorized.** A better idea discovered mid-shift
+   becomes a ticket for the morning, not tonight's work.
+2. **Do not pause for routine confirmation the plan already covers.** The stop-and-wait
+   conditions in Global Rules § Authority and scope still apply — destructive actions, unknowable
+   product decisions, missing access, material scope expansion — and nothing else stops you.
+3. **Independence still applies.** When the lifecycle calls for the one-pass review, spawn the
+   fresh in-process reviewer; never self-certify because nobody is watching. Verification still
+   means re-running the commands.
+4. **When genuinely blocked, park and continue.** Post a `kind:question` ticket assigned to
+   `human` with the exact blocker and what resumes after it clears (`golem:tracker`), move that
+   thread to `blocked`, and pick up the next independent item. If everything remaining is blocked
+   on the same answer, stop early and write the memo — an honest short shift beats fabricated
+   progress.
+5. **Leave the trail commit-clean.** Commit per unit of work with the ticket in its correct phase
+   before moving on, so each unit survives and reverts independently. No background processes, no
+   self-scheduled loops — work sequentially in the foreground, and never chain speculative fixes:
+   if a fix fails, understand why before trying another.
 
-## What this does not grant
-
-- **New scope.** Execute the plan that exists. A better idea discovered mid-shift becomes a
-  ticket for the morning, not tonight's work.
-- **Skipping the gates.** Verification and review still run — use in-process agents
-  (`golem:reviewing`, `researcher`, `reviewer`). Never self-certify because nobody is watching.
-- **Background processes.** No wake crons, no self-scheduled loops, no monitors, no background
-  agents. Work sequentially in the foreground; when the planned work is done, stop and write the
-  memo.
-- **Anything irreversible without a recorded reason.** Overriding a `BLOCKER`, force-pushing,
-  deleting data, or touching anything outside the repo waits for the human.
-
-## Before the user leaves
-
-This is the moment to front-load everything. Batch and ask now:
-
-- decisions that change what gets built
-- credentials or approvals the work will need
-- anything ambiguous enough that two readings produce materially different work
-
-Once they are gone, an unasked question costs the whole shift.
-
-## Staying unblocked
-
-- **Permission prompts are the main failure.** Anything reaching outside the repo, or a
-  protected path, will stall the shift with nobody to approve it. Plan the work to stay inside
-  the checkout.
-- **Commit per unit of work**, with the ticket in its correct phase before you move on. If the
-  shift ends badly, everything before the last commit survives and each unit reverts
-  independently.
-- **Never chain speculative fixes.** If a fix fails, stop and understand why. A night of
-  guessing produces a morning of untangling.
-
-## When genuinely blocked
-
-Do not burn the shift on one item, and do not guess past a missing decision or credential.
-
-1. Post a `kind:question` ticket assigned to `human` with the exact blocker and what resumes
-   after it clears (`golem:gates`).
-2. Move that ticket to `blocked` with the reason.
-3. **Move to the next independent item** and keep going.
-4. If everything remaining is blocked on the same answer, stop early and write the memo. An
-   honest short shift beats fabricated progress.
+Plan the shift to stay inside the checkout where possible — permission prompts with nobody awake
+to approve them are the main way a shift dies.
 
 ## Closing memo
 

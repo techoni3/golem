@@ -142,6 +142,9 @@ L3 is a **staging area, not an archive.** The window is bounded, so an unpromote
 
 ## Mode: bootstrap — the project has none of this
 
+**Run this mode only when the human explicitly requests documentation bootstrap.** A request to
+update one document is never authority to create a map, index, ADR directory, or memory store.
+
 Lay the pattern down once, then hand off. These become ordinary project files — no golem markers, no
 re-render, no ownership claim.
 
@@ -244,8 +247,11 @@ lines. Everything else appends.
 
 ## Precedence
 
-**Code outranks docs, always.** When they disagree, trust the code and fix the doc in the same
-session. A disagreement you noticed and left is a defect you chose.
+Compare the document's purpose with the current source. A *living description of current
+behavior* that disagrees with the code is stale — fix it in the same session; a disagreement you
+noticed and left is a defect you chose. An *approved future design* is not stale just because the
+implementation has not reached it — do not overwrite intent with the present. Dated artifacts are
+history and are never edited to match today.
 
 ## Do not add a store
 
