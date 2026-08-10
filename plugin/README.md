@@ -186,6 +186,27 @@ Central state lives under `~/.golem/` (`projects.json`, `sessions.json`,
 `channels.json`, `journals/<project_id>/hook.jsonl`, optional `ntfy_topic`) —
 zero repo footprint.
 
+## Instruction ownership (GOL-143)
+
+Every operational rule has exactly one owning document; every other document points to the owner.
+Before changing a rule, search the whole tree for other statements of that fact — contradictions
+live in the copy nobody remembered. The skeleton:
+
+| Layer | Owns |
+|---|---|
+| `instructions/AGENTS.md` | Universal rules: response and recontextualization, authority + stop-and-wait, intake routing, ground-claims, protect-existing-work, canonical project sources, role missions and routing, skill routing |
+| `roles/*.md` | Role name + `Load:` pointer only (missions live in the AGENTS.md role table) |
+| Role skills (`lead`, `standalone`, `building`, `exploring`, `reviewing`) | The complete method for every decision that role owns |
+| Situational skills | One shared procedure each: ticket ops + blocked-on-human (`tracker`), evidence (`verify-done`), tests (`test-policy`), branch/commit/merge + worktrees (`git-conventions`), cross-session transport (`live-team`), consults (`consulting`), docs + project memory (`docs-maintenance`), hook journal (`journaling`), autonomous shifts (`night-shift`), browser (`browsing`), design labs (`compare-design-options`), instruction writing (`skill-authoring`), transcript review (`transcript-workflow-review`) |
+| `agents/*.md` personas | Self-contained fresh-context contracts; never a copy of a role skill |
+| Tool contracts (`lib/golem-tool-contracts.js`) + channel instructions | Tool facts and event contracts only — no workflow policy |
+| Project `AGENTS.md` | That repository's facts, constraints, and commands |
+
+Locked product decisions (D1–D17) live in spec GOL-143. Notably: reviews are one-pass and
+advisory (author discretion, no re-review); "gate" vocabulary is retired from instruction text;
+builders merge work items into the spec branch and only the owner lands `main`; "the human" is
+the one term for the person.
+
 ## Project-scoped substrate artifacts
 
 Canonical markdown artifacts can declare `scope: project` in frontmatter;

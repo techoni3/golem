@@ -2274,8 +2274,8 @@ async function main() {
     }
   });
 
-  // GET /api/templates — genre scaffolds (feature/bug/design-doc/prd/brainstorm/
-  // decision) shipped as Markdown bodies. Reads the templates dir at
+  // GET /api/templates — genre scaffolds (spec/feature/bug/decision) shipped
+  // as Markdown bodies. Reads the templates dir at
   // plugin/skills/tracker/templates/ (outside dashboard/), returns one entry per
   // .md file: { id, title, body }. id = filename stem; title = first `# ` heading
   // in the file, or the stem if none. body = the raw markdown, verbatim. Used by

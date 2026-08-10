@@ -261,7 +261,7 @@
     listStreams: (projectId) => getJSON(`/api/streams${qs({ project: projectId })}`),
     createStream: (body) => postJSON('/api/streams', body),
     updateStream: (id, patch) => patchJSON(`/api/streams/${encodeURIComponent(id)}`, patch),
-    // Genre template scaffolds (feature/bug/design-doc/prd/brainstorm/decision)
+    // Genre template scaffolds (spec/feature/bug/decision)
     // served as Markdown bodies from plugin/skills/tracker/templates/. Used by
     // the create-ticket composer's template picker to pre-fill an empty body.
     getTemplates: () => getJSON('/api/templates'),

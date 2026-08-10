@@ -17,8 +17,8 @@ broken, constrained, or contested right now? One tight paragraph.
 ## Decision
 
 The choice, stated as a single active-voice sentence. "We will X" — not
-"We should consider X". If you can't commit to a verb, this is a
-brainstorm, not a decision; switch templates.
+"We should consider X". If you can't commit to a verb, this is still a
+brainstorm, not a decision — keep it in the spec's open questions instead.
 
 ## Consequences
 
