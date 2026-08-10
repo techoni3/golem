@@ -49,9 +49,12 @@ every lifecycle move. Legacy state cannot express `verifying` or `verified` — 
 1. Find the ticket: `ticket_list({mine:true})` or `ticket_get` the id named in the brief.
 2. Builders claim dispatched work with `ticket_transition({phase:'building'})` and move to
    `built` only after posting the closing brief.
-3. The workstream owner moves `built -> verifying`, records the verification evidence
-   (`golem:verify-done`), then `verified -> done`. A delegated verifier posts its PASS/FAIL
-   report and moves `verifying -> verified` or `-> rejected`; it never writes legacy state.
+3. Close by route. **Delegated**: the owner moves `built -> verifying` (the server requires the
+   dispatch record naming the verifier); the verifier posts its PASS/FAIL report and moves
+   `verifying -> verified` or `-> rejected`; the owner moves `verified -> done`. **In-session**
+   (no dispatch): verify the evidence yourself (`golem:verify-done`), then move
+   `built -> done` with a `skip_reason` recording that self-verification — the `verifying` lane
+   is reserved for dispatched verifiers.
 4. Comment milestones with mechanical evidence: commands and real output, not claims.
 5. For a live handoff or return, follow `golem:live-team`.
 

@@ -70,8 +70,8 @@ const contracts = [
   },
   {
     name: 'ticket_transition',
-    description: 'Golem tracker — move one ticket through its phase machine. Builders: queued → building → built. The workstream owner: built → verifying and verified → done. A delegated verifier: verifying → verified (PASS) or rejected (FAIL). Read golem:tracker and golem:verify-done first; required artifacts are enforced by the server and rejection text is returned verbatim.',
-    inputSchema: object({ id: string('Display ticket id, e.g. GOL-244. Legacy TKT refs still resolve.'), phase: string('Target phase (kind-dependent), e.g. queued|building|blocked|built|verifying|verified|rejected|done.'), reason: string('Reason required by blocked/parked transitions.'), skip_reason: string('Explicit lifecycle skip reason; reserved for the lead-authorized escape hatch once phase enforcement lands.') }, ['id', 'phase']),
+    description: 'Golem tracker — move one ticket through its phase machine. Builders: queued → building → built. Delegated verification: the owner moves built → verifying (requires the dispatch record), the verifier moves verifying → verified/rejected, the owner moves verified → done. In-session work closes built → done with a skip_reason recording the self-verification. Read golem:tracker and golem:verify-done first; required artifacts are enforced by the server and rejection text is returned verbatim.',
+    inputSchema: object({ id: string('Display ticket id, e.g. GOL-244. Legacy TKT refs still resolve.'), phase: string('Target phase (kind-dependent), e.g. queued|building|blocked|built|verifying|verified|rejected|done.'), reason: string('Reason required by blocked/parked transitions.'), skip_reason: string('Why the delegated-verification lane was skipped — e.g. built → done for in-session work, naming the self-verification evidence.') }, ['id', 'phase']),
   },
   {
     name: 'ticket_comment',

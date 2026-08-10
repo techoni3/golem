@@ -29,11 +29,13 @@ Use phase transitions, never legacy state writes — see `golem:tracker`. Before
 - **`built`** — the ticket thread has the closing brief: what was done (prose plus commits/files),
   the acceptance checklist with every item tied to evidence, test instructions for the human, and
   not-done/deferred (explicit even when empty).
-- **`verifying`** — dispatch evidence names the verifier, or a skip reason exists.
+- **`verifying`** — the dispatch record names the verifier (the server calls this requirement
+  `managerDispatch`); this lane exists for delegated verification only.
 - **`verified` / `rejected`** — a verification report exists with PASS/FAIL, observed evidence,
   and concrete defects on FAIL.
-- **`done`** — the phase is `verified` or a skip reason is recorded. For specs: all children are
-  terminal and the close report exists.
+- **`done`** — the phase is `verified`, or a `skip_reason` records the in-session
+  self-verification (`built -> done` is the normal close for undispatched work). For specs: all
+  children are terminal and the close report exists.
 
 The server enforces some of these; if `ticket_transition` rejects a move, the ticket is not done.
 
