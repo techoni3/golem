@@ -105,13 +105,12 @@ Following roles typically assigned:
 
 | Role | Skills to load |
 |---|---|
-| **standalone** | `golem:standalone` |
 | **lead** | `golem:lead` |
 | **builder** | `golem:building` |
 | **explorer** | `golem:exploring` |
 | **reviewer** | `golem:reviewing` |
 
-When no role is explicitly assigned, assume **standalone** by default and load its corresponding skill for the SOP.
+When no role is explicitly assigned, assume **lead** by default and load its corresponding skill for the SOP.
 
 ### Dispatch
 
@@ -121,17 +120,9 @@ the corresponding ticket, spec as well as parent spec for full understanding of 
 
 ### Delegation and collaboration
 
-Role specific delegation and collaboration instructions are provided in the role corresponding skill.
-But here are some general guidance and preferences (mostly apply to standalone or lead role):
-- Skill `live-team` provides guidance to the list of agents active in the current team with their
-  assigned roles and other context.
-- Delegation and collaboration preference:
-  * First preference: Use agents from the team pool discovered via live-team as your team.
-  * Second preference: If delegation is required and no fitting agent is available in the team pool,
-    then create or resume an in-session/in-thread/inline agent for corresponding work and provide sufficient
-    context about its role so it can behave similar to team pool agent.
-  * Fallback: If neither the pool nor inline agent works, then work solo yourself for the current task only.
-    Assume the standalone role if delegation is not effectively working out.
+Role specific delegation and collaboration instructions are provided in the role corresponding
+skill. The lead's behaviour is defined in one place: `golem:lead` § Delegation protocol.
+`sessions_dispatchable` provides fresh state of agents in the team, use that whenever needed.
 
 ### Worktree and git conventions
 
