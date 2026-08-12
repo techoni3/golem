@@ -63,17 +63,12 @@ See `substrate/README.md` for the channel-consumer launch (`golemc`) and the ful
 
 ## Work Choreography
 
-Cross-session routing is **opt-in** — see `golem:live-team`. The default is a
-single session owning the whole loop (`golem:standalone`), spawning a fresh
-in-process reviewer only for the one-pass design and code reviews. Specs and
-work items are phase-backed in the tracker. Live handoffs use authenticated
-`session_notify`; the event ledger is durable audit history, not a wake-up or
-subscription path.
-
-When a live team **is** enabled: the dashboard preselects a lead as the
-Assignee/dispatch target and any explicit target overrides it; the team API
-suggests a least-loaded explorer, but the lead dispatches verification and
-review and records the transition evidence.
+The `lead` owns a workstream end to end and delegates per `golem:lead`
+§ Sequence and Delegation Protocol; builders, explorers, and reviewers work
+dispatched tickets and report back — durable report on the ticket first, then
+`session_notify` to the delegating session. Specs, tasks, and docs live in the
+tracker (`golem:tracker`); `state` is the single lifecycle. The event ledger is
+durable audit history, not a wake-up or subscription path.
 
 ## Repo-specific agent rules
 
