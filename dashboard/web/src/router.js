@@ -62,7 +62,7 @@
       kind: 'tracker', view: query.view || null,
       project: query.project || '', kindFilter: query.kind || '',
       assignee: query.assignee || '', q: query.q || '',
-      archived: query.archived === '1', needsAnswer: query.needsAnswer === '1',
+      archived: query.archived === '1',
     };
     if (p === '/specs') return { kind: 'specs' };
     if (p === '/projects') return { kind: 'projects' };
@@ -98,7 +98,6 @@
         if (route.assignee) q.assignee = route.assignee;
         if (route.q) q.q = route.q;
         if (route.archived) q.archived = '1';
-        if (route.needsAnswer) q.needsAnswer = '1';
         return `/tracker${stringifyQuery(q)}`;
       }
       case 'projects': return '/projects';
@@ -128,7 +127,7 @@
       composeProject: query.project || null,
       // TKT-0284: compose presets — Kind PopSelect + parent_id (silent).
       // `?compose=1&kind=spec` opens the composer with Kind=spec;
-      // `?compose=1&kind=work-item&parent=TKT-0284` opens it with a parent.
+      // `?compose=1&kind=task&parent=TKT-0284` opens it with a parent.
       composeKind: query.kind || null,
       composeParent: query.parent || null,
       chat: query.chat || null,
@@ -184,7 +183,7 @@
   // TKT-0284: openComposer accepts presets as an object OR (back-compat) a
   // bare projectId string. The presets carry kind + parent_id so the Specs
   // page can open the composer with Kind=spec, and the drawer's "+ Work item"
-  // can open it with Kind=work-item + Parent=<spec id>. `project` is kept
+  // can open it with Kind=task + Parent=<spec id>. `project` is kept
   // as the primary arg for back-compat with the existing tracker + project
   // openers (`Router.openComposer(projectId)`).
   const openComposer = (projectId, presets) => {

@@ -590,15 +590,6 @@ function reviewGroupFor(ticket, parent) {
       project_id: ticket.project_id,
     };
   }
-  if (!ticket.parent_id && ticket.kind === 'fix') {
-    return {
-      key: `fixes:${ticket.project_id}`,
-      title: `${project?.name || ticket.project_id} fixes`,
-      subtitle: 'Spec-less review fixes',
-      project,
-      project_id: ticket.project_id,
-    };
-  }
   return {
     key: `other:${ticket.parent_id || ticket.project_id}`,
     title: parent?.title || `${project?.name || ticket.project_id} review`,

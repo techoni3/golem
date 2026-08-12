@@ -16,7 +16,7 @@
 // annotation pill to `.drawer-ticket` and would collide). Width preset
 // persisted under `ct:width`.
 
-const CT_KINDS = ['work-item', 'decision', 'spec', 'question', 'fix'];
+const CT_KINDS = ['task', 'spec', 'doc'];
 const CT_PRIORITIES = [
   { value: '', label: 'None' },
   { value: 'P0', label: 'P0' },
@@ -27,18 +27,16 @@ const CT_PRIORITIES = [
 
 // TKT-0180: default genre template per ticket type. The template picker
 // defaults to the type's scaffold but the user can override via the dropdown.
-// 'question' has no default — the user picks a template explicitly if they
-// want one.
+// GOL-151: 'doc' has no default — a supporting doc is a plain page, so the
+// user picks a scaffold explicitly if they want one.
 //
 // This map is the ONLY place the type→template default lives. The drawer's
 // `setTemplateIdByType` effect consults it whenever the user changes type;
 // if the user has manually picked a different template since the last
 // type-change, that override sticks (see `templateOverride` below).
 const TYPE_TEMPLATE = {
-  'work-item': 'feature',
-  'fix': 'bug',
-  'spec': 'spec',
-  'decision': 'decision',
+  task: 'feature',
+  spec: 'spec',
 };
 
 // Drawer width presets (percentage of viewport). Persisted in localStorage so
@@ -67,7 +65,6 @@ function snapshot(fields) {
     title: fields.title,
     body: fields.body,
     priority: fields.priority,
-    stream_id: fields.streamId,
     assignee: fields.assignee,
     dispatch_session: fields.dispatchSession,
     uploads: (fields.uploads || [])
@@ -81,11 +78,10 @@ function snapshot(fields) {
 // is still preselected (not blank).
 function applyDraft(d, setProjectId, setters, fallbackPid, bodyTemplateIdRef) {
   setProjectId(d?.project_id || fallbackPid || '');
-  setters.setKind(d?.kind || 'work-item');
+  setters.setKind(d?.kind || 'task');
   setters.setTitle(d?.title || '');
   setters.setBody(d?.body || '');
   setters.setPriority(d?.priority || '');
-  setters.setStreamId(d?.stream_id || '');
   setters.setAssignee(d?.assignee || '');
   setters.setDispatchSession(d?.dispatch_session || '');
   setters.setUploads((d?.uploads || []).map((u, i) => ({
@@ -112,15 +108,13 @@ function CreateTicketDrawer({ open, preselectProject, preselectKind, preselectPa
   // FIELD (the ticket's project), so it stays internal — seeded from the
   // preselect prop on open, then mutable via the dropdown.
   const [projectId, setProjectId] = React.useState('');
-  const [kind, setKind] = React.useState('work-item');
+  const [kind, setKind] = React.useState('task');
   const [title, setTitle] = React.useState('');
   const [body, setBody] = React.useState('');
   const [priority, setPriority] = React.useState('');
-  const [streamId, setStreamId] = React.useState('');
   const [assignee, setAssignee] = React.useState('');
   const [dispatchSession, setDispatchSession] = React.useState('');
 
-  const [streams, setStreams] = React.useState([]);
   const [sessions, setSessions] = React.useState([]);
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState(null);
@@ -157,7 +151,7 @@ function CreateTicketDrawer({ open, preselectProject, preselectKind, preselectPa
     try { localStorage.setItem(CT_WIDTH_KEY, v); } catch {}
   };
 
-  const setters = { setKind, setTitle, setBody, setPriority, setStreamId, setAssignee, setDispatchSession, setUploads, setError, setSubmitting };
+  const setters = { setKind, setTitle, setBody, setPriority, setAssignee, setDispatchSession, setUploads, setError, setSubmitting };
 
   // ── Image paste/drop (ported verbatim from create-ticket.jsx) ──────────────
   const uploadOne = React.useCallback(async (file) => {
@@ -291,23 +285,17 @@ function CreateTicketDrawer({ open, preselectProject, preselectKind, preselectPa
     return () => window.removeEventListener('beforeunload', onUnload);
   }, []);
 
-  // Refetch streams + dispatchable sessions when the project changes (or open).
+  // Refetch dispatchable sessions when the project changes (or open).
   React.useEffect(() => {
-    if (!open || !projectId) { setStreams([]); setSessions([]); return; }
+    if (!open || !projectId) { setSessions([]); return; }
     let cancelled = false;
-    window.SubstrateAPI.listStreams(projectId)
-      .then((list) => { if (!cancelled) setStreams(Array.isArray(list) ? list : []); })
-      .catch(() => { if (!cancelled) setStreams([]); });
     window.SubstrateAPI.listDispatchable(projectId)
       .then((list) => { if (!cancelled) setSessions(Array.isArray(list) ? list : []); })
       .catch(() => { if (!cancelled) setSessions([]); });
     return () => { cancelled = true; };
   }, [open, projectId]);
 
-  // Drop stream/dispatch selections that no longer apply when lists change.
-  React.useEffect(() => {
-    if (streamId && !streams.some((s) => String(s.id) === String(streamId))) setStreamId('');
-  }, [streams]); // eslint-disable-line
+  // Drop a dispatch selection that no longer applies when the list changes.
   React.useEffect(() => {
     if (dispatchSession && !sessions.some((s) => s.session_id === dispatchSession)) setDispatchSession('');
   }, [sessions]); // eslint-disable-line
@@ -329,8 +317,8 @@ function CreateTicketDrawer({ open, preselectProject, preselectKind, preselectPa
   // indicator while you keep editing the restored draft).
   React.useEffect(() => {
     if (!open) return;
-    window.CtDraft.scheduleSave(projectId, snapshot({ projectId, kind, title, body, priority, streamId, assignee, dispatchSession, uploads }));
-  }, [open, projectId, kind, title, body, priority, streamId, assignee, dispatchSession, uploads]);
+    window.CtDraft.scheduleSave(projectId, snapshot({ projectId, kind, title, body, priority, assignee, dispatchSession, uploads }));
+  }, [open, projectId, kind, title, body, priority, assignee, dispatchSession, uploads]);
 
   // ── TKT-0174: genre templates ─────────────────────────────────────────────
   // Fetch the 6 scaffolds once per open; default-by-kind sets the dropdown,
@@ -428,7 +416,6 @@ function CreateTicketDrawer({ open, preselectProject, preselectKind, preselectPa
     title: title.trim(),
     body: body.trim() || undefined,
     priority: priority || undefined,
-    stream_id: streamId || undefined,
     assignee: assignee || undefined,
     parent_id: parentIdRef.current || undefined,
     created_by: 'human',
@@ -443,8 +430,8 @@ const discard = () => {
     // Clear the in-progress content but keep the project context — discarding
     // a draft shouldn't also wipe the project dropdown the user just picked.
     window.CtDraft.discard(projectId);
-    setKind('work-item'); setTitle(''); setBody(''); setPriority('');
-    setStreamId(''); setAssignee(''); setDispatchSession('');
+    setKind('task'); setTitle(''); setBody(''); setPriority('');
+    setAssignee(''); setDispatchSession('');
     setUploads([]); setError(null); setSubmitting(false); setRestored(false);
     setTemplateId(''); setTemplateOverride(false);
     bodyTemplateIdRef.current = null;
@@ -527,13 +514,6 @@ const discard = () => {
                 {projects.filter((p) => p.project_id).map((p) => (
                   <option key={p.project_id} value={p.project_id}>{p.name}</option>
                 ))}
-              </select>
-            </div>
-            <div className="ct-field">
-              <label className="ct-label">Stream</label>
-              <select className="ct-input" value={streamId} onChange={(e) => setStreamId(e.target.value)} disabled={submitting || !projectId}>
-                <option value="">None</option>
-                {streams.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
             <div className="ct-field">

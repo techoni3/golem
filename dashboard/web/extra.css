@@ -507,8 +507,8 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* Modal-textarea (shared by the create-ticket drawer body, ticket-drawer edit
-   buffer, and streams-panel description). The center-screen modal shell that
+/* Modal-textarea (shared by the create-ticket drawer body and the
+   ticket-drawer edit buffer). The center-screen modal shell that
    used to live here was retired when the composer moved into the right drawer
    — only the textarea + the orch-modal-in keyframe (still used by .tweaks-pop)
    remain. */
@@ -2100,29 +2100,17 @@
    variant sets color = the hue, background ≈ 12% mix, border ≈ 40% mix,
    matching the recipe the status pills / chips use. Pill size/typography is
    unchanged — color only. */
-.tracker-kind-pill[data-kind="work-item"],
-.td-kind-pill[data-kind="work-item"] {
+.tracker-kind-pill[data-kind="task"],
+.td-kind-pill[data-kind="task"] {
   color: var(--accent);
   background: color-mix(in oklab, var(--accent) 12%, transparent);
   border-color: color-mix(in oklab, var(--accent) 40%, transparent);
 }
-.tracker-kind-pill[data-kind="fix"],
-.td-kind-pill[data-kind="fix"] {
-  color: #fb6f92;
-  background: color-mix(in oklab, #fb6f92 12%, transparent);
-  border-color: color-mix(in oklab, #fb6f92 40%, transparent);
-}
-.tracker-kind-pill[data-kind="question"],
-.td-kind-pill[data-kind="question"] {
+.tracker-kind-pill[data-kind="doc"],
+.td-kind-pill[data-kind="doc"] {
   color: #b394ff;
   background: color-mix(in oklab, #b394ff 12%, transparent);
   border-color: color-mix(in oklab, #b394ff 40%, transparent);
-}
-.tracker-kind-pill[data-kind="decision"],
-.td-kind-pill[data-kind="decision"] {
-  color: #f5a623;
-  background: color-mix(in oklab, #f5a623 12%, transparent);
-  border-color: color-mix(in oklab, #f5a623 40%, transparent);
 }
 .tracker-kind-pill[data-kind="spec"],
 .td-kind-pill[data-kind="spec"] {
@@ -2449,120 +2437,6 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
 .pv-tracker-tools { display: flex; align-items: center; gap: 12px; }
 .pv-tracker .tracker-kanban { margin-top: 4px; }
 
-/* ===== WS6: Work-streams panel ===== */
-.pv-streams .pv-section-head { align-items: center; }
-.pv-streams-tools { margin-left: auto; display: flex; align-items: center; gap: 10px; }
-
-.sp-list { display: flex; flex-direction: column; gap: 12px; }
-
-.sp-stream {
-  background: var(--bg-1);
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-2);
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-}
-.sp-stream-head { display: flex; align-items: center; gap: 9px; }
-.sp-stream-name { font-size: 13px; font-weight: 600; color: var(--text-0); letter-spacing: -0.005em; }
-.sp-stream-count {
-  margin-left: auto;
-  font-size: 10.5px;
-  color: var(--text-3);
-  background: var(--bg-2);
-  border: 1px solid var(--border-2);
-  border-radius: 999px;
-  padding: 1px 7px;
-}
-.sp-stream-desc { font-size: 12px; color: var(--text-2); line-height: 1.5; }
-.sp-stream-empty { font-size: 12px; color: var(--text-3); font-style: italic; }
-
-/* Mode badge — distinct colors per mode */
-.sp-mode-pill { font-size: 9.5px; padding: 2px 7px; text-transform: uppercase; letter-spacing: 0.04em; }
-.sp-mode-sequential {
-  color: var(--status-running);
-  border-color: color-mix(in oklab, var(--status-running) 32%, transparent);
-  background: color-mix(in oklab, var(--status-running) 12%, transparent);
-}
-.sp-mode-parallel {
-  color: var(--status-triage);
-  border-color: color-mix(in oklab, var(--status-triage) 32%, transparent);
-  background: color-mix(in oklab, var(--status-triage) 12%, transparent);
-}
-
-.sp-members { display: flex; flex-direction: column; gap: 6px; }
-.sp-members.parallel {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 8px;
-}
-
-.sp-ticket {
-  background: var(--bg-2);
-  border: 1px solid var(--border-2);
-  border-radius: var(--radius-1);
-  padding: 8px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-.sp-ticket.sp-terminal { opacity: 0.62; }
-.sp-ticket.sp-next {
-  border-color: var(--accent-border);
-  box-shadow: 0 0 0 1px var(--accent-border), 0 0 12px -4px var(--accent);
-  background: color-mix(in oklab, var(--accent) 6%, var(--bg-2));
-}
-.sp-ticket-lead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.sp-ticket-ord {
-  font-size: 10px;
-  color: var(--text-3);
-  background: var(--bg-3);
-  border-radius: 999px;
-  min-width: 16px;
-  height: 16px;
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-}
-.sp-ticket.sp-next .sp-ticket-ord { color: var(--accent); background: var(--accent-soft); }
-.sp-ticket-id { font-size: 10px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.05em; }
-.sp-ticket-state { font-size: 9.5px; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.04em; }
-.sp-state-in_progress { color: var(--status-running); }
-.sp-state-blocked { color: var(--status-blocked); }
-.sp-state-review { color: var(--status-review); }
-.sp-state-done { color: var(--status-done); }
-.sp-next-tag {
-  margin-left: auto;
-  font-size: 9.5px;
-  font-weight: 600;
-  color: var(--accent);
-  background: var(--accent-soft);
-  border: 1px solid var(--accent-border);
-  border-radius: 999px;
-  padding: 1px 7px;
-  letter-spacing: 0.02em;
-}
-.sp-ticket-title { font-size: 12.5px; color: var(--text-0); line-height: 1.4; font-weight: 500; }
-
-/* New-stream inline form */
-.sp-new-form {
-  background: var(--bg-1);
-  border: 1px solid var(--border-2);
-  border-radius: var(--radius-2);
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  margin-bottom: 12px;
-}
-.sp-new-row { display: flex; gap: 10px; }
-.sp-new-name { flex: 1; min-width: 0; }
-.sp-new-mode { width: 140px; flex-shrink: 0; }
-.sp-new-desc { width: 100%; }
-.sp-new-error { margin: 0; }
-.sp-new-actions { display: flex; justify-content: flex-end; gap: 8px; }
-
 /* ===== TKT-0010: stale-project demotion ===== */
 .stale-toggle {
   font-size: 12px;
@@ -2601,14 +2475,8 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
 }
 .sidebar-stale-toggle input { accent-color: var(--accent); cursor: pointer; }
 
-/* ===== WS6: Question → answer → return loop ===== */
-/* Board card accent + badge */
-.ticket-needs-answer {
-  border-color: color-mix(in oklab, var(--status-review) 42%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in oklab, var(--status-review) 22%, transparent);
-}
-.tracker-answer-badge,
-.td-answer-badge {
+/* Dispatch-acknowledgement badge on board cards. */
+.tracker-answer-badge {
   font-size: 9px;
   padding: 2px 7px;
   color: var(--status-review);
@@ -2641,79 +2509,6 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
 .td-comment-dispatch-hint { font-size: 11px; color: var(--text-3); line-height: 1.45; }
 .td-comment-dispatch-select { width: 100%; }
 .td-comment-batch-dispatch { align-self: flex-start; }
-/* Board toolbar "Needs my answer" toggle */
-.tracker-needs-answer { white-space: nowrap; }
-.tracker-needs-answer.on {
-  color: var(--status-review);
-}
-.tracker-needs-answer.on input { accent-color: var(--status-review); }
-
-/* Drawer "Answer & return" composer area */
-.td-question-return {
-  border-top: 1px solid color-mix(in oklab, var(--status-review) 30%, var(--border-1));
-  background: color-mix(in oklab, var(--status-review) 5%, var(--bg-1));
-  padding: 12px 22px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  /* TKT-0204: leave room for the floating comment FAB (which sits
-     bottom-right at right:16, bottom:16 + ~38px tall). Without this
-     padding, the right-most "Answer & return" button gets covered. */
-  padding-bottom: 60px;
-}
-.td-qr-title {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--status-review);
-}
-/* TKT-0204: one-line explainer that the user said they were missing. */
-.td-qr-help {
-  font-size: 11.5px;
-  color: var(--text-2);
-  line-height: 1.45;
-}
-.td-qr-input { width: 100%; }
-.td-qr-return-row { display: flex; align-items: center; gap: 10px; }
-.td-qr-return-label {
-  font-size: 11px;
-  color: var(--text-2);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  flex-shrink: 0;
-}
-.td-qr-select { flex: 1; min-width: 0; }
-.td-qr-hint { font-size: 11px; color: var(--text-3); line-height: 1.5; }
-.td-qr-hint .mono { color: var(--text-2); }
-.td-qr-note {
-  font-size: 11.5px;
-  color: var(--status-review);
-  line-height: 1.5;
-}
-.td-qr-actions { display: flex; justify-content: flex-end; gap: 8px; }
-/* TKT-0204: brief "Answer posted ✓" indicator right under the textarea.
-   Shows for ~2s after a successful post. Green-tinted to signal success. */
-.td-qr-posted {
-  font-size: 11.5px;
-  font-family: var(--font-mono);
-  color: var(--status-active);
-  background: color-mix(in oklab, var(--status-active) 10%, var(--bg-1));
-  border: 1px solid color-mix(in oklab, var(--status-active) 30%, transparent);
-  border-radius: var(--radius-1);
-  padding: 4px 9px;
-  align-self: flex-start;
-  animation: td-qr-posted-fade 2.2s ease-out forwards;
-}
-@keyframes td-qr-posted-fade {
-  0%, 80% { opacity: 1; }
-  100% { opacity: 0; }
-}
-/* TKT-0204: the floating comment FAB is redundant when the user has a
-   dedicated answer composer right in front of them. Hide it on
-   question-for-human tickets in both drawer and page variants. */
-.td-has-question-return #anno-fab { display: none !important; }
-
 /* ===== TKT-0013 / TKT-0173: Markdown ticket bodies + annotations ===== */
 
 /* Wrapper that hosts the rendered Markdown body + absolute-positioned annotation UI. */
@@ -3507,11 +3302,9 @@ mark.anno.anno-tail::after {
    meta-role palette so the visual language is consistent with the chat
    composer and other role-tagged UI. The stripe replaces the existing
    left border so it reads as a single accent. */
-.ticket.kind-work-item { border-left: 3px solid var(--status-open); padding-left: 8px; }
-.ticket.kind-decision { border-left: 3px solid var(--status-review); padding-left: 8px; }
+.ticket.kind-task { border-left: 3px solid var(--status-open); padding-left: 8px; }
 .ticket.kind-spec { border-left: 3px solid #60a5fa; padding-left: 8px; }
-.ticket.kind-question { border-left: 3px solid #c08bff; padding-left: 8px; }
-.ticket.kind-fix { border-left: 3px solid var(--status-blocked); padding-left: 8px; }
+.ticket.kind-doc { border-left: 3px solid #c08bff; padding-left: 8px; }
 
 /* Priority accent — strong for P0/P1, subdued for P2/P3. */
 .ticket-priority.p0 { background: rgba(248, 113, 113, 0.18); color: #fca5a5; border: 1px solid rgba(248, 113, 113, 0.45); }
@@ -3520,27 +3313,13 @@ mark.anno.anno-tail::after {
 .ticket-priority.p3 { background: transparent; color: var(--text-3); border: 1px solid var(--border-2); opacity: 0.85; }
 .ticket-priority { padding: 1px 6px; border-radius: 4px; font-size: 10px; font-family: var(--font-mono); letter-spacing: 0.04em; }
 
-/* Question for human — pulsing left stripe + glow border */
-.ticket.ticket-needs-answer {
-  border-color: #c08bff !important;
-  box-shadow: 0 0 0 1px rgba(192, 139, 255, 0.4), 0 0 8px rgba(192, 139, 255, 0.18);
-  animation: question-pulse 2.4s ease-in-out infinite;
-}
-.ticket.ticket-needs-answer.kind-question { border-left: 3px solid #c08bff; padding-left: 8px; }
-@keyframes question-pulse {
-  0%, 100% { box-shadow: 0 0 0 1px rgba(192, 139, 255, 0.4), 0 0 8px rgba(192, 139, 255, 0.18); }
-  50%      { box-shadow: 0 0 0 1px rgba(192, 139, 255, 0.7), 0 0 14px rgba(192, 139, 255, 0.32); }
-}
-
 /* Done / archived — dim and freeze; archived cards lose the kind stripe. */
 .ticket.state-done { opacity: 0.62; }
 .ticket.state-archived { opacity: 0.5; filter: grayscale(0.6); }
 .ticket.state-archive { opacity: 0.5; filter: grayscale(0.6); }
-.ticket.state-archived.kind-work-item,
-.ticket.state-archived.kind-decision,
+.ticket.state-archived.kind-task,
 .ticket.state-archived.kind-spec,
-.ticket.state-archived.kind-question,
-.ticket.state-archived.kind-fix { border-left-color: var(--border-2); }
+.ticket.state-archived.kind-doc { border-left-color: var(--border-2); }
 
 /* ===== TKT-0106: Image upload preview strip ===== */
 .ct-uploads {
@@ -3815,10 +3594,11 @@ mark.anno.anno-tail::after {
   font-size: 13px;
 }
 
-/* Spec drawer → Work items panel (TKT-0284). Aligned to the 1200px document
+/* Spec drawer → Children panel (TKT-0284). Aligned to the 1200px document
    column like .td-props; sits inside .td-main after the body. Lists the
-   spec's children (work items with parent_id = this spec) with a + Work item
-   button that opens the composer preset to Kind=work-item + Parent=this spec. */
+   spec's children (tasks and supporting docs with parent_id = this spec) with
+   a + Task button that opens the composer preset to Kind=task + Parent=this
+   spec. */
 .td-children {
   max-width: 1200px; width: 100%; margin: 0 auto; box-sizing: border-box;
   padding: 16px 40px 28px;

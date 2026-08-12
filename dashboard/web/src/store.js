@@ -4,7 +4,7 @@
 //   - projects with PLAN.md progress + milestone feeds
 //   - native Golem harness sessions
 //   - live channel registrations
-//   - cross-project tracker.db tickets + streams + comments
+//   - cross-project tracker.db tickets + comments
 //   - chat messages
 //
 // v3 journal-synthesized agents, markdown tickets, agent detail, and the v3
@@ -35,7 +35,6 @@
     // WS5: cross-project tracker (tracker.db) — a FLAT ticket list across all
     // projects, kept in a Map by id for O(1) upsert.
     trackerTickets: new Map(),
-    streams: [],
     // WS5b: per-ticket comment threads, keyed by ticket id.
     ticketComments: new Map(),
     // TKT-0286: bumped on every dispatch-queue-updated WS signal so queue-aware
@@ -94,7 +93,6 @@
       }
       state.trackerTickets = m;
     }
-    if (Array.isArray(snap.streams)) state.streams = snap.streams.slice();
     state.ready = true;
     notify();
   }
@@ -140,18 +138,6 @@
     }
     notify();
   }
-  function applyStreamUpdated({ stream }) {
-    if (!stream || stream.id == null) return;
-    const idx = state.streams.findIndex((s) => s.id === stream.id);
-    if (idx === -1) state.streams = [...state.streams, stream];
-    else {
-      const next = state.streams.slice();
-      next[idx] = stream;
-      state.streams = next;
-    }
-    notify();
-  }
-
   function applyNativeSessionsUpdate({ native_sessions, channels }) {
     if (Array.isArray(native_sessions)) state.nativeSessions = native_sessions.slice();
     if (Array.isArray(channels)) state.channels = channels.slice();
@@ -250,10 +236,6 @@
   }
   function getTicketComments(id) {
     return state.ticketComments.get(id) ?? [];
-  }
-  function getStreams(project_id) {
-    if (project_id == null) return state.streams.slice();
-    return state.streams.filter((s) => s.project_id === project_id);
   }
   function getRole(role) {
     if (!role) return state.roles.UNK;
@@ -359,9 +341,6 @@
           case 'ticket-comment-updated':
             applyTicketCommentUpdated(msg);
             break;
-          case 'stream-updated':
-            applyStreamUpdated(msg);
-            break;
           case 'dispatch-queue-updated':
             // TKT-0286: payload-free signal — bump a rev counter so queue-aware
             // surfaces refetch /api/dispatch-queue. No polling.
@@ -416,7 +395,6 @@
     getProjectByContractId,
     getProjects: () => state.projects,
     getTrackerTickets,
-    getStreams,
     getTicketComments,
     seedTicketComments,
     upsertTrackerTicket,

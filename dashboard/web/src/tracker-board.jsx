@@ -20,7 +20,7 @@ const TRACKER_ARCHIVED_COL = { id: 'archived', label: 'Archived', color: 'var(--
 
 // TKT-0284/GOL-166: specs live on their own Specs surface — excluded from the tracker
 // (filter.exclude_kind below) and dropped from this kind dropdown.
-const TRACKER_KINDS = ['work-item', 'decision', 'question', 'fix'];
+const TRACKER_KINDS = ['task', 'doc'];
 
 // TKT-0103: drag-and-drop. The dashboard loads @dnd-kit/core via an ES module
 // in index.html that registers window.__dndkit (and signals __dndkitReady).
@@ -37,17 +37,6 @@ function useDndKit() {
     return () => window.removeEventListener('dndkit-ready', onReady);
   }, [ready]);
   return ready && typeof window !== 'undefined' ? window.__dndkit : null;
-}
-
-// WS6: a question FOR the user — a question-kind ticket assigned to 'human' that
-// isn't done/archived. Surfaced with a "needs answer" accent on cards + in the
-// drawer, and matched by the board's "Needs my answer" quick filter.
-function isQuestionForHuman(t) {
-  return !!t
-    && t.kind === 'question'
-    && t.assignee === 'human'
-    && t.state !== 'done'
-    && t.state !== 'archived';
 }
 
 // TKT-0266: a ticket is "actively worked" when it is in_progress AND its
@@ -102,7 +91,6 @@ function TrackerBoard({ view, route = {} }) {
   const [kindFilter, setKindFilter] = React.useState(route.kindFilter || '');
   const [assigneeFilter, setAssigneeFilter] = React.useState(route.assignee || '');
   const [showArchived, setShowArchived] = React.useState(!!route.archived);
-  const [needsAnswer, setNeedsAnswer] = React.useState(!!route.needsAnswer);
   // TKT-0104: client-side search. Debounced 80ms to avoid jank on fast typing.
   // Matches against id, title, kind, priority, assignee label, project name
   // (cross-project view only). Body text intentionally NOT matched (would
@@ -117,9 +105,9 @@ function TrackerBoard({ view, route = {} }) {
     window.Router.go({
       kind: 'tracker', view, project: projectFilter, kindFilter,
       assignee: assigneeFilter, q: searchInput.trim(),
-      archived: showArchived, needsAnswer,
+      archived: showArchived,
     }, { replace: true });
-  }, [view, projectFilter, kindFilter, assigneeFilter, searchInput, showArchived, needsAnswer]);
+  }, [view, projectFilter, kindFilter, assigneeFilter, searchInput, showArchived]);
 
   // Build a label resolver for assignees from the dispatchable sessions of the
   // currently-selected project (so session_id → friendly label where known).
@@ -139,26 +127,16 @@ function TrackerBoard({ view, route = {} }) {
     return m;
   }, [dispatchable]);
 
-  // "Needs my answer" is a self-contained quick filter: it forces
-  // kind=question + assignee=human + state∉{done,archived}, overriding the
-  // kind/assignee/archived controls while engaged.
-  const filter = needsAnswer
-    ? {
-      project_id: projectFilter || undefined,
-      kind: 'question',
-      assignee: 'human',
-      includeArchived: false,
-    }
-    : {
-      project_id: projectFilter || undefined,
-      kind: kindFilter || undefined,
-      exclude_kind: 'spec',
-      assignee:
-        assigneeFilter === 'human' ? 'human'
-          : assigneeFilter === '__unassigned__' ? '__unassigned__'
-            : undefined,
-      includeArchived: showArchived,
-    };
+  const filter = {
+    project_id: projectFilter || undefined,
+    kind: kindFilter || undefined,
+    exclude_kind: 'spec',
+    assignee:
+      assigneeFilter === 'human' ? 'human'
+        : assigneeFilter === '__unassigned__' ? '__unassigned__'
+          : undefined,
+    includeArchived: showArchived,
+  };
   const tickets = window.Store.getTrackerTickets(filter);
 
   const projectByContract = React.useMemo(() => {
@@ -232,17 +210,13 @@ function TrackerBoard({ view, route = {} }) {
             <option value="">All kinds</option>
             {TRACKER_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
           </select>
-          <select className="tracker-select" value={assigneeFilter} onChange={(e) => setAssigneeFilter(e.target.value)} title="Assignee" disabled={needsAnswer}>
+          <select className="tracker-select" value={assigneeFilter} onChange={(e) => setAssigneeFilter(e.target.value)} title="Assignee">
             <option value="">All assignees</option>
             <option value="human">Human</option>
             <option value="__unassigned__">Unassigned</option>
           </select>
-          <label className={`tracker-toggle tracker-needs-answer ${needsAnswer ? 'on' : ''}`} title="Show only questions assigned to you that need an answer">
-            <input type="checkbox" checked={needsAnswer} onChange={(e) => setNeedsAnswer(e.target.checked)}/>
-            ❓ Needs my answer
-          </label>
           <label className="tracker-toggle">
-            <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} disabled={needsAnswer}/>
+            <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)}/>
             Show archived
           </label>
           <button className="orch-btn primary" onClick={onNewTicket}>+ New ticket</button>
@@ -408,7 +382,6 @@ function TrackerCard({ ticket: t, project, assigneeLabel }) {
     window.Router.openTicket(t.id);
   };
   const prio = t.priority ? String(t.priority).toLowerCase() : null;
-  const needsAnswer = isQuestionForHuman(t);
   // TKT-0266: durable label preferred; live resolver is the fallback for
   // never-persisted sessions. The enriched field comes from the server-side
   // session_labels JOIN (board snapshot) or getTicket lookup.
@@ -443,7 +416,7 @@ function TrackerCard({ ticket: t, project, assigneeLabel }) {
   return (
     <div
       ref={setNodeRef}
-      className={`ticket cc-clickable kind-${t.kind || 'work-item'} state-${t.state} ${needsAnswer ? 'ticket-needs-answer' : ''} ${isDragging ? 'is-dragging' : ''}`}
+      className={`ticket cc-clickable kind-${t.kind || 'task'} state-${t.state} ${isDragging ? 'is-dragging' : ''}`}
       data-ticket-id={t.id}
       role="button"
       tabIndex={0}
@@ -463,7 +436,6 @@ function TrackerCard({ ticket: t, project, assigneeLabel }) {
           </span>
         )}
         <span className="pill tracker-kind-pill" data-kind={t.kind}>{t.kind}</span>
-        {needsAnswer && <span className="pill tracker-answer-badge">❓ needs answer</span>}
         {unacked && (window.UnackedDispatchBadge
           ? <window.UnackedDispatchBadge warning={unackedWarning} compact/>
           : <span className="pill tracker-answer-badge" title="dispatch needs explicit acknowledgement">⚠ awaiting ack</span>)}
@@ -486,9 +458,6 @@ function TrackerCard({ ticket: t, project, assigneeLabel }) {
 window.TrackerBoard = TrackerBoard;
 window.TrackerCard = TrackerCard;
 window.TicketColumns = TicketColumns;
-// WS6: shared question-for-human predicate, reused by the ticket drawer to
-// decide when to surface the "Answer & return" affordance + header badge.
-window.isQuestionForHuman = isQuestionForHuman;
 // TKT-0266: shared active-work + staleness predicates, reused by the ticket
 // drawer for the header gear.
 window.isActivelyWorked = isActivelyWorked;

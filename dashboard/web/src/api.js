@@ -257,10 +257,7 @@
     // TKT-0245: cancel a queued dispatch (DELETE /api/dispatch-queue/:qid).
     cancelDispatchQueue: (qid) =>
       delJSON(`/api/dispatch-queue/${encodeURIComponent(qid)}`),
-    listStreams: (projectId) => getJSON(`/api/streams${qs({ project: projectId })}`),
-    createStream: (body) => postJSON('/api/streams', body),
-    updateStream: (id, patch) => patchJSON(`/api/streams/${encodeURIComponent(id)}`, patch),
-    // Genre template scaffolds (spec/feature/bug/decision)
+    // Genre template scaffolds (spec/feature)
     // served as Markdown bodies from plugin/skills/tracker/templates/. Used by
     // the create-ticket composer's template picker to pre-fill an empty body.
     getTemplates: () => getJSON('/api/templates'),

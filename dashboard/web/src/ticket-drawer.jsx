@@ -8,7 +8,7 @@
 // annotation UI renders them as anchored highlights + a right rail.
 
 const TD_STATES = ['todo', 'in_progress', 'blocked', 'review', 'done', 'archived'];
-const TD_KINDS = ['work-item', 'decision', 'spec', 'question', 'fix'];
+const TD_KINDS = ['spec', 'task', 'doc'];
 const TD_PRIORITIES = [
   { value: '', label: 'None' },
   { value: 'P0', label: 'P0' },
@@ -48,7 +48,6 @@ const TD_STATE_PILL = {
   done: 'done',
   archived: 'done',
 };
-const TD_TERMINAL_STATES = new Set(['done', 'archived']);
 
 
 function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
@@ -59,7 +58,6 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
   // Dispatchable sessions for the open ticket's project (for assignee + dispatch).
   const [dispatchable, setDispatchable] = React.useState([]);
   const [dispatchableLoaded, setDispatchableLoaded] = React.useState(false);
-  const [streams, setStreams] = React.useState([]);
 
   // Edit buffer for title/body. null when not editing.
   const [editBuf, setEditBuf] = React.useState(null);
@@ -94,11 +92,6 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
   const [workspaceMode, setWorkspaceMode] = React.useState(false); // worktree toggle
   const [cancelling, setCancelling] = React.useState(false);
 
-  // WS6: question return state. `returnSession` is the live session the answered
-  // question is handed back to (defaults to the asker `created_by` when live).
-  const [returnSession, setReturnSession] = React.useState('');
-  const [returnNote, setReturnNote] = React.useState(null);
-  const [returning, setReturning] = React.useState(false);
   const [revival, setRevival] = React.useState(null);
   const [revivalSession, setRevivalSession] = React.useState('');
   const [revivalNote, setRevivalNote] = React.useState(null);
@@ -155,8 +148,6 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
     setEditBuf(null);
     setDispatchSession('');
     setDispatchNote(null);
-    setReturnSession('');
-    setReturnNote(null);
     setRevival(null);
     setRevivalSession('');
     setRevivalNote(null);
@@ -182,18 +173,15 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
     return () => { cancelled = true; };
   }, [open, ticketId]);
 
-  // Fetch dispatchable sessions + streams for the ticket's project.
+  // Fetch dispatchable sessions for the ticket's project.
   const projectId = ticket?.project_id || null;
   React.useEffect(() => {
-    if (!open || !projectId) { setDispatchable([]); setDispatchableLoaded(false); setStreams([]); return; }
+    if (!open || !projectId) { setDispatchable([]); setDispatchableLoaded(false); return; }
     let cancelled = false;
     setDispatchableLoaded(false);
     window.SubstrateAPI.listDispatchable(projectId)
       .then((list) => { if (!cancelled) { setDispatchable(Array.isArray(list) ? list : []); setDispatchableLoaded(true); } })
       .catch(() => { if (!cancelled) setDispatchable([]); });
-    window.SubstrateAPI.listStreams(projectId)
-      .then((list) => { if (!cancelled) setStreams(Array.isArray(list) ? list : []); })
-      .catch(() => { if (!cancelled) setStreams([]); });
     return () => { cancelled = true; };
   }, [open, projectId]);
 
@@ -317,25 +305,6 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
       .catch(() => { if (!cancelled) setRevival(null); });
     return () => { cancelled = true; };
   }, [ticketId, ticket?.kind, pendingDispatch?.id]);
-
-  // WS6: this ticket is a question FOR the user (question-kind, assignee=human,
-  // not done/archived) — drives the "Answer & return" affordance.
-  const isQuestion = ticket
-    ? (window.isQuestionForHuman
-      ? window.isQuestionForHuman(ticket)
-      : (ticket.kind === 'question' && ticket.assignee === 'human'
-        && ticket.state !== 'done' && ticket.state !== 'archived'))
-    : false;
-
-  // Default the "Return to" select to the asker (created_by) when that session
-  // is live in this project; else leave it empty so the user picks one.
-  React.useEffect(() => {
-    if (!isQuestion) return;
-    const asker = ticket?.created_by || null;
-    if (asker && asker !== 'human' && labelBySession.has(asker)) {
-      setReturnSession((cur) => cur || asker);
-    }
-  }, [isQuestion, ticket?.created_by, labelBySession]);
 
   const resolveActor = React.useCallback((a, persistedLabel) => {
     if (a === 'human') return 'You';
@@ -581,57 +550,6 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
     return window.SubstrateAPI.replyComment(ticketId, parentId, { author: 'human', body: reply.text });
   }, [ticketId]);
 
-  // WS6: return an answered question to a live session. The dispatch is durable
-  // (assignment lands on disk) even if the channel is offline — the note tells
-  // the session to re-read the latest comment.
-  const RETURN_NOTE = 'Your question was answered — re-read the latest comment.';
-  const doReturn = React.useCallback(() => {
-    if (!ticketId || !returnSession) return Promise.resolve();
-    return window.SubstrateAPI.dispatchTicket(ticketId, { session_id: returnSession, note: RETURN_NOTE })
-      .then((res) => {
-        if (res?.ticket?.id) window.Store.upsertTrackerTicket(res.ticket);
-        if (res && res.channel && res.channel.ok === false) {
-          setReturnNote("returned — no live channel, the session will re-read on resume");
-        } else {
-          setReturnNote('returned — the session was pinged to re-read the answer');
-        }
-        return res;
-      });
-  }, [ticketId, returnSession]);
-
-  const onReturn = React.useCallback(() => {
-    if (!ticketId || !returnSession || returning) return;
-    setReturning(true);
-    setReturnNote(null);
-    doReturn()
-      .catch((err) => {
-        console.error('return failed', err);
-        setReturnNote(err?.payload?.error || err?.message || 'Return failed');
-      })
-      .finally(() => setReturning(false));
-  }, [ticketId, returnSession, returning, doReturn]);
-
-  // Answer & return — post the composer's comment, THEN dispatch back in one go.
-  const onAnswerAndReturn = React.useCallback((body) => {
-    if (!ticketId) return Promise.resolve();
-    return window.SubstrateAPI.addComment(ticketId, { author: 'human', body })
-      .then(() => {
-        if (returnSession) return doReturn();
-        return null;
-      });
-  }, [ticketId, returnSession, doReturn]);
-
-  // TKT-0519: resolve a question WITHOUT returning it anywhere — for stale
-  // questions whose asker is gone (dead session, smoke fixture, obsolete ask).
-  // Posts the typed answer first when there is one, then marks the ticket done,
-  // which clears the needs-answer block and the board badge (both key off
-  // isQuestionForHuman → state done fails the check).
-  const onResolve = React.useCallback(async (body) => {
-    if (!ticketId) return;
-    if (body && body.trim()) await onAddComment(body.trim());
-    commitField({ state: 'done' });
-  }, [ticketId, onAddComment, commitField]);
-
   // GOL-150: state is the only lifecycle, so the history strip reads
   // state_change events alone (older rows may still carry phase_change).
   const stateEvents = React.useMemo(() => {
@@ -657,8 +575,8 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
     : null;
   const Shell = isPage ? 'div' : DrawerPanel;
   const shellClass = isPage
-    ? `ticket-page${isQuestion ? ' td-has-question-return' : ''}${editBuf ? ' td-editing' : ''}`
-    : `drawer-ticket${isQuestion ? ' td-has-question-return' : ''}${editBuf ? ' td-editing' : ''}`;
+    ? `ticket-page${editBuf ? ' td-editing' : ''}`
+    : `drawer-ticket${editBuf ? ' td-editing' : ''}`;
   const shellStyle = isPage ? undefined : { width: `${widthPct}vw` };
 
   return (
@@ -709,14 +627,6 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                 )}
                 <span className={`pill ${statePill}`}>{ticket.state}</span>
                 {activelyWorked && <Icon.Gear size={12} className="gear gear-working" title="assignee is actively working"/>}
-                {isQuestion && (
-                  <span
-                    className="pill td-answer-badge"
-                    title="This is a question-kind ticket assigned to you. The asking session is blocked until you post an answer in the composer below. You can post just the answer, or post + re-dispatch the question back to a live session."
-                  >
-                    ❓ needs answer
-                  </span>
-                )}
                 {undispatchedCount > 0 && (
                   <span className="pill td-comment-dispatch-badge" title="Human comments that have not been dispatched to a session">
                     undispatched: {undispatchedCount}
@@ -827,17 +737,6 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                     onChange={(v) => commitField({ kind: v })}
                   />
                 </div>
-                <div className="td-prop td-prop-full">
-                  <span className="td-prop-label">Stream</span>
-                  <PopSelect
-                    value={ticket.stream_id || ''}
-                    placeholder="None"
-                    compact
-                    options={[{ value: '', label: 'None' }, ...streams.map((s) => ({ value: s.id, label: s.name }))]}
-                    onChange={(v) => commitField({ stream_id: v || null })}
-                  />
-                </div>
-
                 {/* Dispatch — an action, not a property; full-width, separated.
                     TKT-0245: when a dispatch is queued (ticket.pending_dispatch
                     set), the row becomes a status line + Cancel; otherwise the
@@ -969,7 +868,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                 {dispatchNote && !pendingDispatch && <div className="td-dispatch-note">{dispatchNote}</div>}
                 {/* GOL-101: every human comment is queued `undispatched`
                     regardless of ticket kind, so the panel has to exist for
-                    every kind — spec-only left work-item feedback with no way
+                    every kind — spec-only left task feedback with no way
                     out. */}
                 <div className="td-comment-dispatch-panel">
                     <div className="td-comment-dispatch-line">
@@ -1077,7 +976,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                 )}
               </div>
 
-              {/* TKT-0284: spec → work-items panel. Specs surface their children
+              {/* TKT-0284: spec → children panel. Specs surface their children
                   (work items with parent_id = this spec) as a clickable list
                   under the body, aligned to the 1200px column. Children are
                   read LIVE from the store so a newly-created work item appears
@@ -1104,20 +1003,6 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                   {saving ? 'Saving…' : 'Save'}
                 </button>
               </div>
-            ) : isQuestion ? (
-              <QuestionReturn
-                onComment={onAddComment}
-                onReturn={onReturn}
-                onAnswerAndReturn={onAnswerAndReturn}
-                onResolve={onResolve}
-                returnSession={returnSession}
-                setReturnSession={setReturnSession}
-                dispatchable={dispatchable}
-                returning={returning}
-                note={returnNote}
-                ticket={ticket}
-                labelBySession={labelBySession}
-              />
             ) : null}
           </>
         )}
@@ -1133,14 +1018,16 @@ function tdAgo(iso) {
   return window.SubstrateFmt?.fmtTimeAgo?.(t) || '';
 }
 
-// TKT-0284: spec → work-items panel. Renders the spec's children (work items
-// with parent_id = this spec) as a clickable list, aligned to the 1200px
-// document column like .td-props. Children are read LIVE from the store on
-// every render (useStore re-renders on store changes, so a newly-created work
-// item appears instantly — its creation broadcasts ticket-created, not a
-// parent ticket-updated, so the server's ticket.children would go stale
-// without a re-fetch). "+ Work item" opens the composer with Kind=work-item
-// + Parent=this spec (Router.openComposer presets).
+// TKT-0284: spec → children panel. Renders the spec's children (tasks and
+// supporting docs with parent_id = this spec) as a clickable list, aligned to
+// the 1200px document column like .td-props. Children are read LIVE from the
+// store on every render (useStore re-renders on store changes, so a newly
+// created task appears instantly — its creation broadcasts ticket-created, not
+// a parent ticket-updated, so the server's ticket.children would go stale
+// without a re-fetch). "+ Task" opens the composer with Kind=task + Parent=this
+// spec (Router.openComposer presets).
+// GOL-151: the list is flat and creation-ordered. Dependency waves are gone —
+// sequencing lives in the spec body as prose, not in ticket metadata.
 function SpecChildrenPanel({ specId, projectContractId, seedChildren = [], resolveAssignee }) {
   useStore();
   // No memo: the store Map mutates in place on upsert (applyTicketCreated /
@@ -1157,62 +1044,35 @@ function SpecChildrenPanel({ specId, projectContractId, seedChildren = [], resol
   }
   const children = [...byId.values()];
   children.sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
-  const currentWave = children
-    .filter((c) => c.wave != null && !TD_TERMINAL_STATES.has(c.state))
-    .reduce((min, c) => Math.min(min, Number(c.wave)), Infinity);
-  const byWave = new Map();
-  const unwaved = [];
-  for (const child of children) {
-    if (child.wave == null) { unwaved.push(child); continue; }
-    const wave = Number(child.wave);
-    const list = byWave.get(wave) || [];
-    list.push(child);
-    byWave.set(wave, list);
-  }
-  const groups = [...byWave.keys()]
-    .sort((a, b) => a - b)
-    .map((wave) => ({ key: `wave-${wave}`, label: `Wave ${wave}`, wave, children: byWave.get(wave) }));
-  if (unwaved.length) groups.push({ key: 'unwaved', label: 'Unwaved', wave: null, children: unwaved });
-  const onNewWorkItem = () => {
-    window.Router.openComposer(projectContractId, { kind: 'work-item', parent: specId });
+  const onNewTask = () => {
+    window.Router.openComposer(projectContractId, { kind: 'task', parent: specId });
   };
   return (
     <div className="td-children">
       <div className="td-children-header">
-        <span className="td-children-title">Work items</span>
+        <span className="td-children-title">Children</span>
         <span className="td-children-count tnum">{children.length}</span>
-        <button className="orch-btn small ghost td-children-add" onClick={onNewWorkItem}
-          title="Create a work item under this spec">+ Work item</button>
+        <button className="orch-btn small ghost td-children-add" onClick={onNewTask}
+          title="Create a task under this spec">+ Task</button>
       </div>
       {children.length === 0 ? (
-        <div className="td-children-empty">No work items yet — they'll emerge as sections lock in.</div>
+        <div className="td-children-empty">No children yet — they'll emerge as sections lock in.</div>
       ) : (
         <div className="td-children-list">
-          {groups.map((group) => {
-            const isCurrent = group.wave != null && group.wave === currentWave;
-            return (
-              <div key={group.key} className="td-child-wave" style={{ display: 'grid', gap: 6 }}>
-                <div className="td-child-wave-head" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px', borderRadius: 10, background: isCurrent ? 'color-mix(in oklab, var(--accent) 12%, transparent)' : 'rgba(255,255,255,.025)', border: isCurrent ? '1px solid color-mix(in oklab, var(--accent) 34%, transparent)' : '1px solid var(--line)' }}>
-                  <span className="mono" style={{ fontSize: 11, fontWeight: 700 }}>{group.label}</span>
-                  <span className="pill">{group.children.length}</span>
-                  {isCurrent && <span className="pill active">current open wave</span>}
-                </div>
-                {group.children.map((c) => (
-                  <a key={c.id}
-                    className="td-child-row"
-                    href={window.Router.buildHref({ kind: 'ticket', id: c.id })}
-                    onClick={(e) => { e.preventDefault(); window.Router.openTicket(c.id); }}
-                    title={c.title}
-                  >
-                    <span className="td-child-id mono">{c.display_id || c.id}</span>
-                    <span className="td-child-title">{c.title}</span>
-                    <span className={`pill ${TD_STATE_PILL[c.state] || 'idle'}`}>{c.state}</span>
-                    <span className="td-child-assignee">{resolveAssignee(c.assignee, c.assignee_label)}</span>
-                  </a>
-                ))}
-              </div>
-            );
-          })}
+          {children.map((c) => (
+            <a key={c.id}
+              className="td-child-row"
+              href={window.Router.buildHref({ kind: 'ticket', id: c.id })}
+              onClick={(e) => { e.preventDefault(); window.Router.openTicket(c.id); }}
+              title={c.title}
+            >
+              <span className="td-child-id mono">{c.display_id || c.id}</span>
+              <span className="pill td-kind-pill" data-kind={c.kind}>{c.kind}</span>
+              <span className="td-child-title">{c.title}</span>
+              <span className={`pill ${TD_STATE_PILL[c.state] || 'idle'}`}>{c.state}</span>
+              <span className="td-child-assignee">{resolveAssignee(c.assignee, c.assignee_label)}</span>
+            </a>
+          ))}
         </div>
       )}
     </div>
@@ -1220,171 +1080,5 @@ function SpecChildrenPanel({ specId, projectContractId, seedChildren = [], resol
 }
 
 // TKT-0233: the unused TdField component was removed (fields now use .td-prop).
-
-// WS6: the "Answer & return" affordance for a question-kind ticket. Combines the
-// comment composer (the answer) with a "Return to ▾" live-session select and two
-// actions: "Return" (re-dispatch to ping the asker) and "Answer & return" (post
-// the comment THEN dispatch in one go). The answer always posts even with no
-// live session — only the return ping is gated on a reachable session.
-function QuestionReturn({
-  onComment, onReturn, onAnswerAndReturn, onResolve, returnSession, setReturnSession,
-  dispatchable, returning, note, ticket, labelBySession,
-}) {
-  const [text, setText] = React.useState('');
-  const [busy, setBusy] = React.useState(false);
-  // TKT-0204: brief "posted ✓" indicator so the user sees the result of
-  // their post. The user reported "I did write an answer and try to
-  // post the answer, nothing happened" — the action did work, but the
-  // textarea clearing + a new comment in the rail was easy to miss.
-  // This makes the success explicit.
-  const [postedFlash, setPostedFlash] = React.useState(false);
-  const taRef = React.useRef(null);
-
-  const hasSessions = dispatchable.length > 0;
-  const trimmed = text.trim();
-
-  // The asker (created_by) may be offline — surface it as a disabled note rather
-  // than hiding it, so the user understands why the default isn't pre-selected.
-  const asker = ticket?.created_by && ticket.created_by !== 'human' ? ticket.created_by : null;
-  const askerOffline = asker && !labelBySession.has(asker);
-
-  const postComment = React.useCallback(async () => {
-    if (busy || !trimmed) return;
-    setBusy(true);
-    try {
-      await onComment(trimmed);
-      setText('');
-      taRef.current?.focus();
-      setPostedFlash(true);
-      setTimeout(() => setPostedFlash(false), 2200);
-    } catch (err) {
-      console.error('answer comment failed', err);
-    } finally {
-      setBusy(false);
-    }
-  }, [busy, trimmed, onComment]);
-
-  const answerAndReturn = React.useCallback(async () => {
-    if (busy || !trimmed || !returnSession) return;
-    setBusy(true);
-    try {
-      await onAnswerAndReturn(trimmed);
-      setText('');
-    } catch (err) {
-      console.error('answer & return failed', err);
-    } finally {
-      setBusy(false);
-    }
-  }, [busy, trimmed, returnSession, onAnswerAndReturn]);
-
-  // TKT-0519: resolve without returning — posts the typed answer (if any), then
-  // marks the question done. No returnSession requirement. For stale questions
-  // whose asker is gone.
-  const resolveNoReturn = React.useCallback(async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      await onResolve(trimmed);
-      setText('');
-    } catch (err) {
-      console.error('resolve failed', err);
-    } finally {
-      setBusy(false);
-    }
-  }, [busy, trimmed, onResolve]);
-
-  const onKey = (e) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); postComment(); }
-  };
-
-  const disabled = busy || returning;
-
-  return (
-    <div className="td-question-return">
-      <div className="td-qr-title">❓ Answer &amp; return</div>
-      <div className="td-qr-help">
-        The asker is blocked on your answer. Post below, then optionally
-        re-dispatch the question back to a live session so they can resume.
-      </div>
-      <textarea
-        ref={taRef}
-        className="ceo-composer-input td-qr-input"
-        rows={2}
-        placeholder="Write your answer…  (⌘/Ctrl + Enter posts the answer)"
-        value={text}
-        onChange={(e) => { setText(e.target.value); setPostedFlash(false); }}
-        onKeyDown={onKey}
-        disabled={disabled}
-      />
-      {postedFlash && <div className="td-qr-posted">Answer posted ✓</div>}
-      <div className="td-qr-return-row">
-        <label className="td-qr-return-label">Return to</label>
-        <select
-          className="td-select td-qr-select"
-          value={returnSession}
-          onChange={(e) => setReturnSession(e.target.value)}
-          disabled={disabled || !hasSessions}
-          title={hasSessions ? 'Pick a live session to hand the answer back to' : 'No live session in this project'}
-        >
-          <option value="">
-            {hasSessions ? 'Select a live session…' : 'No live session in this project'}
-          </option>
-          {dispatchable.map((s) => (
-            <option key={s.session_id} value={s.session_id}>
-              {s.label}{s.session_id === asker ? ' (asker)' : ''}{s.delivery_ready === false && (s.delivery_reason === 'busy' || s.delivery_reason === 'waiting') ? ' (will queue)' : (s.delivery_ready === false || (s.delivery_ready == null && s.reachable === false)) ? ' (unreachable)' : ''}
-            </option>
-          ))}
-        </select>
-      </div>
-      {askerOffline && (
-        <div className="td-qr-hint">
-          The asking session <span className="mono">{String(asker).slice(0, 8)}</span> is offline — your answer still
-          posts; pick another live session to ping, or it'll be re-read on resume.
-          If the asker is gone for good, use Resolve to close this question.
-        </div>
-      )}
-      {!hasSessions && (
-        <div className="td-qr-hint">
-          No live session in this project — your answer posts regardless; the asker re-reads it on resume.
-        </div>
-      )}
-      {note && <div className="td-qr-note">{note}</div>}
-      <div className="td-qr-actions">
-        <button
-          className="orch-btn"
-          onClick={postComment}
-          disabled={disabled || !trimmed}
-          title="Post the answer as a comment without returning"
-        >
-          {busy ? 'Posting…' : 'Post answer'}
-        </button>
-        <button
-          className="orch-btn ghost"
-          onClick={onReturn}
-          disabled={disabled || !returnSession}
-          title={returnSession ? 'Re-dispatch this question to the selected session' : 'Pick a live session first'}
-        >
-          {returning ? 'Returning…' : 'Return'}
-        </button>
-        <button
-          className="orch-btn primary"
-          onClick={answerAndReturn}
-          disabled={disabled || !trimmed || !returnSession}
-          title={!returnSession ? 'Pick a live session to return to' : 'Post the answer then return to the selected session'}
-        >
-          Answer &amp; return
-        </button>
-        <button
-          className="orch-btn ghost"
-          onClick={resolveNoReturn}
-          disabled={disabled}
-          title="Mark this question done without pinging any session — use when the asker is gone or the question is stale. Posts your typed answer first if present."
-        >
-          Resolve
-        </button>
-      </div>
-    </div>
-  );
-}
 
 window.TicketDrawer = TicketDrawer;

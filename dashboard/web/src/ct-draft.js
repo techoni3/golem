@@ -10,7 +10,7 @@
 // babel-compiled create-ticket-drawer.jsx so the drawer can call it on mount.
 //
 // Snapshot shape (matches the composer fields 1:1):
-//   { project_id, kind, title, body, priority, stream_id, assignee,
+//   { project_id, kind, title, body, priority, assignee,
 //     dispatch_session, uploads: [{url, filename}] }
 
 (function () {

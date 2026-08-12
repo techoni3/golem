@@ -14,7 +14,7 @@ const { useState: usePVState } = React;
 // PAGE-scoped, not project-scoped: one layout for the project-detail page no
 // matter which project is open (explicit product decision on the ticket).
 const PV_LAYOUT_KEY = 'golem.pv.layout.v1';
-const PV_SECTION_IDS = ['plan', 'tickets', 'specs', 'milestones', 'sessions', 'streams'];
+const PV_SECTION_IDS = ['plan', 'tickets', 'specs', 'milestones', 'sessions'];
 const PV_DEFAULT_COLLAPSED = { specs: true }; // today's defaults: specs closed, rest open
 
 function pvLoadLayout() {
@@ -118,7 +118,6 @@ function ProjectView({ projectId, tab, setRoute }) {
       case 'specs':      return <ProjectSpecsBoard key={id} contractId={cid} {...shell}/>;
       case 'milestones': return <ProjectMilestoneTimeline key={id} milestones={milestones} {...shell}/>;
       case 'sessions':   return <ProjectSessions key={id} sessions={sessions} setRoute={setRoute} {...shell}/>;
-      case 'streams':    return window.StreamsPanel ? <window.StreamsPanel key={id} contractId={cid}/> : null;
       default: return null;
     }
   };

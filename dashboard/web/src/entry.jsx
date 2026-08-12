@@ -45,7 +45,6 @@ await import('./icons.jsx');
 await import('./atoms.jsx');
 await import('./shell.jsx');
 await import('./dashboard.jsx');
-await import('./streams-panel.jsx');
 await import('./project-view.jsx');
 await import('./tracker-board.jsx');
 await import('./specs-board.jsx');
