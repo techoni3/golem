@@ -1,150 +1,94 @@
 ---
 name: tracker
-description: Read when picking up a dispatched or assigned ticket, decomposing work into work items, transitioning phase, or blocking on a human answer. Covers the MCP ticket tools and the phase model. The tracker is the source of truth, not PLAN.md. Cross-session messaging lives in golem:live-team.
+description: The tracker MCP tools and model — three doc types (spec/task/doc), the single state lifecycle, bodies, comments and anchoring. Read before creating, updating, or commenting tickets.
 ---
 
 # Tracker
 
-The tracker is THE source of truth for work. The dashboard owns the SQLite DB; agents use MCP
-tracker tools or dashboard REST, never direct writes.
-Tickets store Markdown bodies and comments. Use the genre template that matches the kind:
-`work-item -> feature`, `fix -> bug`, `spec -> spec`, `decision -> decision`.
+The tracker is THE source of truth for work. The dashboard owns the SQLite DB; agents use the
+MCP tracker tools or dashboard REST, never direct writes.
 
 ## Tools
 
 | Tool | Use |
-|------|-----|
-| `ticket_list({mine:true})` | find work assigned to you |
-| `ticket_get({id})` | read body, comments, links, children, events |
-| `ticket_create({title, body, ...})` | create a ticket in the current project |
-| `ticket_update({id, ...})` | patch fields or legacy state |
-| `ticket_comment({id, body, ...})` | add progress/evidence/commentary |
-| `ticket_comment_update` / `ticket_comment_reply` | resolve/edit/thread comments |
-| `ticket_dispatch({id, session_id, when_idle})` | dispatch to a live session |
-| `stream_create` / `stream_list` | group related tickets |
-| `sessions_dispatchable` | inspect live sessions, roles, workload, pending queue |
+|---|---|
+| `ticket_list({mine:true})` | find work assigned to you; filters: state, kind, assignee, project |
+| `ticket_get({id})` | full read: body, comments, children, events |
+| `ticket_create({title, kind, body, parent_id?})` | new ticket; kind defaults to `task`; fill the kind's template |
+| `ticket_update({id, ...})` | metadata and state; `body` replaces the WHOLE body — read first, rewrite in full, preserve the sections you are not changing |
+| `ticket_comment({id, body, ...})` | progress and evidence; anchor with quote/prefix/suffix/section; tag: confirmed, partial, disputed, fix, risk, question, note |
+| `ticket_comment_update` | resolve/reopen, retag, or edit a comment |
+| `ticket_comment_reply` | thread a reply under a comment |
+| `ticket_dispatch({id, session_id})` | hand a ticket to a live session |
+| `sessions_dispatchable` | see live sessions, their roles and workload |
 
-Kinds: `work-item | decision | spec | question | fix`.
+## Operating guidelines
 
-Legacy states: `todo -> in_progress -> review -> done`, plus `blocked` and `archived`.
+There are three doc types in the tracker:
 
-Phase-backed workflow is canonical when `phase` is present:
+| Kind | Is | Template |
+|---|---|---|
+| `spec` | the living design doc for a workstream | `templates/spec` |
+| `task` | a unit of work — its body is the implementation plan | `templates/task` |
+| `doc` | a supporting page: research, survey, comparison | `templates/doc` |
 
-- Specs: `drafting`, `grounding`, `grounded`, `designing`, `designed`, `planning`, `planned`, `building`, `done`, `parked`.
-- Work items/fixes: `queued`, `building`, `blocked`, `built`, `verifying`, `verified`, `rejected`, `done`.
-- Questions: `open`, `answered`, `closed`.
-- Decisions: `open`, `decided`, `closed`.
+### Writing and maintaining
 
-The server derives board state from phase and enforces transition artifacts. If a transition
-fails, add the required comment or evidence, or stay put.
+- Tasks and docs hang under their spec via `parent_id`; specs can also parent child specs. Other
+  kinds don't typically have children.
+- The body is a living document: fold agreements, decisions, and outcomes in at decision
+  boundaries instead of letting them rot in chat or comments.
+- Editing rewrites the whole body, so batch changes at boundaries rather than folding in every
+  tiny change iteratively.
 
-Prefer `ticket_transition({id, phase, reason?, skip_reason?})` over `ticket_update({state})` for
-every lifecycle move. Legacy state cannot express `verifying` or `verified` — `built`,
-`verifying`, and `verified` all collapse to `review`, so state-based lifecycle writes are lossy.
+### Spec driven development
 
-## Flow on a brief or dispatch
+- Starts when the human asks you to create a spec, or dispatches/assigns a (possibly partial)
+  one directly to you.
+- Human interacts in chat => interact in chat first.
+- Human drops a comment on the spec => respond via a comment on the spec, as well as in chat to
+  maintain continuity and flexibility for him.
+- In case of ambiguity, ask for clarification rather than making assumptions.
+- Most often, the goal is to end up with a locked spec with full alignment.
+- Over-engineering is as bad as doing it incorrectly.
 
-1. Find the ticket: `ticket_list({mine:true})` or `ticket_get` the id named in the brief.
-2. Builders claim dispatched work with `ticket_transition({phase:'building'})` and move to
-   `built` only after posting the closing brief.
-3. Close by route. **Delegated**: the owner moves `built -> verifying` (the server requires the
-   dispatch record naming the verifier); the verifier posts its PASS/FAIL report and moves
-   `verifying -> verified` or `-> rejected`; the owner moves `verified -> done`. **In-session**
-   (no dispatch): verify the evidence yourself (`golem:verify-done`), then move
-   `built -> done` with a `skip_reason` recording that self-verification — the `verifying` lane
-   is reserved for dispatched verifiers.
-4. Comment milestones with mechanical evidence: commands and real output, not claims.
-5. For a live handoff or return, follow `golem:live-team`.
+### Implementation tasks
 
-## Event ledger
+- After the spec is finalised, decompose it into manageable tasks — a single task for a small
+  spec, more when the design warrants it.
+- The trade-off: a single task is faster and low-overhead but leaves things non-working until it
+  finishes; multiple tasks can each land in a working, verifiable state. Choose wisely. Rough
+  guidance — decompose when:
+  * boundaries don't overlap and the tasks can run in parallel;
+  * the features are relatively independent and can land sequentially, each stage producing a
+    working, verifiable state.
 
-Ticket mutations emit tracker events on `ticket/<display_id>`; child mutations mirror to
-`spec/<parent-display-id>/tree`. Events are durable audit history. They do not wake sessions, and
-there is no subscription or passive-delta delivery path. Use ticket comments for large reports;
-the recipient fetches them with `ticket_get`.
+## Lifecycle of docs
 
-## The spec is the intent record
+One state field: `todo -> in_progress -> review -> done`, plus `blocked` and `archived`.
 
-A spec carries more than the plan: the option space, the directions that were rejected **and
-why**, and the non-goals. Those are the parts that cannot be recovered later — everything else
-eventually shows up in the code. Write them while the conversation is still live.
+- Move state with `ticket_update({id, state})` at real boundaries; do not choreograph metadata.
+- `review` means finished and awaiting the human's read.
+- `blocked` always carries a reason naming what unblocks it.
 
-Supporting documents attach to the spec. Every code survey, research report, and finding lands
-there, so a work item can point at work it did not commission and nothing an agent discovered
-dies with its session.
+## Bodies
 
-## Decompose larger work
+- Markdown, plus fenced ```mermaid diagrams, GitHub admonitions (`> [!NOTE]`), and `<details>`
+  collapsibles — leave a blank line after `</summary>` so inner markdown renders.
+- Never start a body with an HTML tag; the renderer would treat the entire body as raw HTML.
 
-**Default to one work item per spec.** Split only for a reason stated on the ticket, and only
-these qualify:
+## Comments
 
-- a genuine wave dependency — B cannot start until A lands;
-- parallelism you will actually use;
-- a surface boundary needing different hands or a different skill.
+- Evidence over claims: the commands you ran and their real output.
+- The human's comments may be dispatched to your session. Reply in that comment's thread or on
+  the same block — that marks them addressed; the human resolves.
+- Large reports go in a comment or a child `doc`. Events are durable audit history only: they do
+  not wake sessions, and there is no subscription path.
+- Secrets: values never enter a ticket, comment, or chat. Name the required key NAMES and a
+  git-ignored target file; the human writes the values there directly.
 
-**Never split to make tickets smaller or clearer.** That instinct turns a medium spec into eight
-tickets, and every extra work item is another cold start for whoever picks it up. The test: if
-two work items would go to the same builder one after the other, they should have been one.
+## Hygiene
 
-**Work items point; they do not restate.** Each child carries its implementation plan, its
-acceptance, its non-goals, and a link to the parent — not a copy of the parent's reasoning. The
-builder reads the chain instead.
-
-- Create children with `parent_id` and group them with a stream when useful.
-- **Every child needs a `wave`, including the only one — start at 1.** `planning -> planned` is
-  rejected without waves. Wave N+1 must not start until every open wave N child is terminal.
-- Give each child a checkable acceptance list of its own, derived from the parent's behavior
-  items.
-
-## Blocked on the human
-
-When work needs an answer, approval, or credential that only the human can give:
-
-- Ask directly in chat when the human is present.
-- Otherwise create a `kind:question` ticket assigned to `human`, stating in plain language what
-  is blocked, the exact decision or input needed, and what resumes after the answer. For
-  spec-level design ambiguity, prefer a `tag:'question'` comment on the parent spec so the
-  design thread stays coherent.
-- Mark only the affected work `blocked` and continue other authorized work.
-- **Secrets:** the question names the required key NAMES and the git-ignored target file. The
-  human writes VALUES into that file directly; secret values never enter a ticket, comment,
-  chat, or journal. After the answer, verify each required key is present and non-empty without
-  echoing values.
-- The dashboard notifies your session when the human resolves the question; resuming does not
-  require polling.
-- Do not guess past a missing credential, approval, or product decision.
-
-## GitHub bridge
-
-Specs may link to a GitHub issue; work items never leave golem. GitHub is touched at exactly two
-moments — ingest and spec close. No daemon, no background sync.
-
-**Precondition**: the project's `origin` remote is a GitHub repo; otherwise skip entirely.
-
-- **Link**: `source_ref: "github:<owner>/<repo>#<N>"` on the spec, set at creation. Agent tools
-  cannot rewrite it afterwards; a wrong ref needs the human (REST `PATCH /api/tickets/:id`).
-- **GitHub-origin**: the ingested issue seeds the brief and the spec MUST carry the source_ref.
-  The issue stays open and untouched while the spec is in flight. At spec close: post the spec's
-  high-level content (design and outcome) as an issue comment, then close the issue with the
-  spec (`gh`).
-- **Golem-origin** (no source_ref): at spec close, create the replica issue with the same
-  high-level content, then close it immediately — a durable record for collaborators, not a work
-  item.
-- **Append-only on pre-existing issues**: never edit a title or body you did not author.
-- The spec's closing artifact records the issue URL as evidence.
-
-## Body annotations
-
-Inline comments use the same comments table as thread comments. The UI assigns rendered blocks a
-`block_id`; agents usually write clear Markdown and let the dashboard handle anchoring. If
-anchoring via MCP, provide `quote`, optional `prefix`/`suffix`, `section`, `section_id`, and
-`tag`.
-
-## State hygiene
-
-- Keep at most one active in-progress ticket per writing stream.
-- Before going idle, sweep assigned work. Advance finished work with `ticket_transition` to the
-  correct phase; never use legacy `review`. Parked work gets a reason and moves to `blocked`, or
-  is unassigned.
-- Stale assigned work is a defect: comment current status and fix the state before starting new
-  work.
+- Before going idle, sweep your assigned tickets to their true state.
+- Stale assigned work is a defect: comment the current status and fix the state before starting
+  new work.
