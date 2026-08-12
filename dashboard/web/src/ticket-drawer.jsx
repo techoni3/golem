@@ -162,7 +162,6 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
     setRevivalNote(null);
     setCommentDispatchSession('');
     setCommentDispatchNote(null);
-    setTransitionNote(null);
     setLoadError(null);
     setLoading(true);
     let cancelled = false;
