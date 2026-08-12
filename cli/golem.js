@@ -641,7 +641,6 @@ async function cmdPi(args) {
     fatal(1, `golem pi supports Pi ${SUPPORTED_PI_VERSION}; found ${piVersion || '(no version)'}. Install the pinned baseline before launching.`);
   }
 
-  await cmdSync(['--target', 'pi']);
   const extension = join(renderDirFor('pi'), 'golem.ts');
   if (!existsSync(extension)) fatal(1, `golem pi render is missing ${extension}; run golem sync --target pi`);
 
@@ -1742,7 +1741,7 @@ async function cmdDoctor() {
   log('Substrate sync');
   try {
     const clean = await cmdSyncCheckAll({ quiet: true });
-    clean ? ok('sync --check --all clean') : fail('sync --check --all drifted or lint failed — run `golem sync --check --all`');
+    clean ? ok('sync --check --all clean') : fail('sync --check --all drifted — run `golem sync --check --all`');
   } catch (e) {
     fail(`could not run sync --check --all — ${e.message}`);
   }

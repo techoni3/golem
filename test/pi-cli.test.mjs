@@ -111,6 +111,9 @@ try {
   assert.match(help.stdout, /retains its\s+own profile, authentication, models, providers, extensions, and sessions/);
   assert.match(help.stdout, /Pi 0\.80\.10/);
 
+  const synced = run(['sync', '--target', 'pi']);
+  assert.equal(synced.status, 0, synced.stderr);
+
   const launched = run([
     'pi', '--provider', 'ollama', '--model', 'deepseek-v4-flash:0731-cloud',
     '--resume', 'native-session-id', '--', '--thinking', 'high', 'prompt with spaces',
@@ -179,12 +182,12 @@ try {
   await proveForwardedSignal('SIGTERM');
   await proveForwardedSignal('SIGHUP');
 
-  fs.writeFileSync(path.join(state, 'renders', 'pi', 'golem.ts'), '// user tamper\n');
+  fs.rmSync(path.join(state, 'renders', 'pi'), { recursive: true, force: true });
   fs.rmSync(capture);
-  const drift = run(['pi']);
-  assert.equal(drift.status, 1, drift.stderr);
-  assert.match(`${drift.stdout}\n${drift.stderr}`, /TAMPER.*refused to overwrite/);
-  assert.equal(fs.existsSync(capture), false, 'tampered render fails before Pi launch');
+  const missingRender = run(['pi']);
+  assert.equal(missingRender.status, 1, missingRender.stderr);
+  assert.match(`${missingRender.stdout}\n${missingRender.stderr}`, /render is missing .*run golem sync --target pi/);
+  assert.equal(fs.existsSync(capture), false, 'missing render fails before Pi launch');
 
   console.log('Pi CLI journey passed: native profile/session/provider/extension behavior with the Golem bridge, render guard, diagnostics, and exit/signal propagation');
 } finally {
