@@ -593,7 +593,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   // --- Golem tracker tools ---------------------------------------------------
   // Each delegates to the HTTP client and returns compact JSON the agent can act
   // on. Identity defaults are injected here so the agent rarely passes ids.
-  if (name.startsWith('ticket_') || name.startsWith('stream_') || name === 'sessions_dispatchable') {
+  if (name.startsWith('ticket_') || name === 'sessions_dispatchable') {
     const displayCache = new Map();
     const displayForRef = async (ref) => {
       if (typeof ref !== 'string' || !/^TKT-/.test(ref)) return ref;
@@ -633,8 +633,8 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       const sessionId = caller.sessionId;
       const defaultProject = tracker.currentProjectId(sessionId);
       const writeTools = new Set([
-        'ticket_create', 'ticket_update', 'ticket_transition', 'ticket_comment',
-        'ticket_comment_update', 'ticket_comment_reply', 'ticket_dispatch', 'stream_create',
+        'ticket_create', 'ticket_update', 'ticket_comment',
+        'ticket_comment_update', 'ticket_comment_reply', 'ticket_dispatch',
       ]);
       if (writeTools.has(name) && !sessionId) throw new Error(caller.error);
 
@@ -678,9 +678,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           priority: args.priority,
           state: args.state,
           labels: args.labels,
-          stream_id: args.stream_id,
           parent_id: args.parent_id,
-          wave: args.wave,
           assignee: args.assignee,
           source_ref: args.source_ref,
           created_by: sessionId ?? undefined,
@@ -691,22 +689,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       if (name === 'ticket_update') {
         if (!args.id) throw new Error('ticket_update: id is required');
         const patch = { actor: sessionId ?? undefined };
-        for (const k of ['state', 'title', 'body', 'kind', 'priority', 'labels', 'stream_id', 'parent_id', 'wave', 'assignee']) {
+        for (const k of ['state', 'title', 'body', 'kind', 'priority', 'labels', 'parent_id', 'assignee']) {
           if (args[k] !== undefined) patch[k] = args[k];
         }
         return await jsonResult(await tracker.updateTicket(args.id, patch));
-      }
-
-      if (name === 'ticket_transition') {
-        if (!args.id) throw new Error('ticket_transition: id is required');
-        if (!args.phase) throw new Error('ticket_transition: phase is required');
-        if (!sessionId) throw new Error('ticket_transition: no current session id to record as actor');
-        return await jsonResult(await tracker.transitionTicket(args.id, {
-          phase: args.phase,
-          reason: args.reason,
-          skip_reason: args.skip_reason,
-          actor: sessionId,
-        }));
       }
 
       if (name === 'ticket_comment') {
@@ -757,22 +743,6 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           workspace: args.workspace || undefined,
           sender_id: sessionId,
         }));
-      }
-
-      if (name === 'stream_create') {
-        const project_id = args.project || defaultProject;
-        if (!project_id) throw new Error('stream_create: could not resolve a project — pass project:"<contract-id>"');
-        return await jsonResult(await tracker.createStream({
-          project_id,
-          name: args.name,
-          mode: args.mode,
-          description: args.description,
-        }));
-      }
-
-      if (name === 'stream_list') {
-        const proj = args.project || defaultProject || undefined;
-        return await jsonResult(await tracker.listStreams(proj));
       }
 
       if (name === 'sessions_dispatchable') {

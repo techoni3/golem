@@ -180,9 +180,8 @@ Touch only the affected sections. Re-stamp. Verify what you touched.
 
 ## Mode: at spec close — what did this feature invalidate?
 
-Run by whoever closes the spec — the `lead`, or a `standalone` session closing its own work. Either
-way it is the actor that saw the whole feature, which is why the job sits here rather than on each
-builder.
+Run by the `lead` closing the spec — the actor that saw the whole feature, which is why the job
+sits here rather than on each builder.
 
 **Ownership without method is why the usual rule fails.** A repo audited during this design already
 carried "fix the doc in the same PR or flag it" in writing, and still had `docs/for_agents/testing.md`

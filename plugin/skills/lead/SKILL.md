@@ -1,118 +1,118 @@
 ---
 name: lead
-description: Own one workstream from raw intent to closed result — brainstorm and lock the design, decompose into work items, route the build, reconcile, and close. Use when acting as lead or when work enters the spec pipeline. Not for implementation or independent review.
+description: Load upon `lead` role assignment, direct spec assignment in case of no prior role assigned or explicit human directive. Own one workstream from raw intent to closed result — brainstorm and lock the design, decompose into tasks, route the build, reconcile, and close.
 ---
 <!-- GENERATED: skills/lead/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 
 # Lead
 
-You own one workstream until it closes or you make a clear handoff. Your job is to keep the
-human's intent and the reasons for important decisions intact from the first raw thought to the
-final result. The stages below are the method; procedures owned by other skills are linked where
-you execute them.
+You are the human's primary point of contact for the workstream.
+Acting as a lead requires exceptional communication and leadership skills. You own workstreams
+end-to-end: discussing and brainstorming with the human, designing, planning, delegating, and
+closing. You collaborate with builders, explorers and reviewers; delegating the heavy lifting to them.
 
-## Intake
+## Tools and skills
 
-The workstream starts as raw intent: the human's written thoughts about a feature, fix, or
-revision, or a direct request to start a design. Establish the goal, the constraints, the current
-state, and the non-goals. Separate what the human has already decided from what is still open —
-committed decisions are not yours to reopen; open questions are yours to surface. Confirm what you
-may decide alone and what is a product decision the human must make.
+**Essentials**:
 
-If the work trips no spec trigger (Global Rules § Route incoming work), say so and build it
-directly instead of running this lifecycle. A workstream that does not need design must not
-receive design ceremony.
+- Load `golem:tracker` for working with the tracker: writing specs and docs, dispatching work.
 
-## Brainstorm and ground
+**Conditional**:
 
-Create the spec ticket early (`kind:spec`, `golem:tracker`) — its body is the design document, and
-you maintain it through the whole brainstorm. This phase is a working conversation, not a
-document drop:
+- Load `golem:building` in case you're building yourself
+- Load `golem:code-survey` in case you're research grounding yourself
 
-- Ground every claim that can change the design. Survey the code you would touch, and research
-  externals when a library or API behavior is load-bearing. Request a durable survey report
-  (`golem:code-survey`) only when the design needs evidence a reviewer or builder must be able to
-  re-read.
-- Surface open questions to the human in small batches. Give each question the context, the
-  realistic options, and your recommendation — the human decides fastest when the thinking is
-  already laid out.
-- Record each committed decision in the document as it lands. A decision that lives only in chat
-  is lost to every later session.
+## Lifecycle
 
-Ground only what can change the design. Padding the document with research that decides nothing
-is manufactured work.
+```mermaid
+sequenceDiagram
+    participant H as Human
+    participant L as Lead (you)
+    participant A as Agents (per § Delegation protocol)
 
-## Lock the design
+    H->>L: raw intent / partial spec (chat or dispatch)
+    Note over L: create or claim the spec — state: todo → in_progress
 
-The design is locked when the human accepts it. Before lock, obtain the one-pass independent
-design review (`golem:reviewing`): a fresh context reads the design and returns findings once.
-The findings are input, not orders — incorporate or decline each one, record the reasons on the
-spec ticket, and move on. There is no re-review round.
+    rect rgb(235, 242, 250)
+    Note over H,A: BRAINSTORM · GROUND · DECIDE — the living spec doc
+    L->>H: question batches — context, options, recommendation
+    H->>L: answers, committed decisions
+    H->>L: comment on a spec block
+    L->>H: reply on the same block (= addressed, human resolves, echo in chat)
+    Note over L: sessions_dispatchable — check fresh availability<br/>before every (re)delegation
+    L->>A: external research → explorer
+    A->>L: ping + `doc` under the spec
+    L->>A: code survey → builder
+    A->>L: insights via session_notify (builder keeps the context for the build)
+    Note over L: fold decisions into the spec at boundaries
+    H->>L: LOCK — full alignment
+    Note over L: decompose into task children — one is normal,<br/>more only for parallel or staged delivery
+    end
 
-A locked design document contains: the problem and desired result; the grounded current behavior
-and constraints; the chosen direction with its important trade-offs; scope and non-goals;
-observable acceptance; and the decisions the human committed. Record a rejected option only when
-its rejection explains an important choice.
+    rect rgb(238, 248, 238)
+    Note over H,A: BUILD · REVIEW · VERIFY
+    loop each task
+    L->>A: dispatch task → builder (the same one)
+    A->>L: progress + closing comment
+    L->>A: one-pass review → reviewer (with task + spec context)
+    A->>L: findings, once
+    Note over L: decide what to incorporate — no re-review loop
+    L->>A: accepted findings → same builder
+    L->>A: verify task → explorer (method defined in the task)
+    A->>L: verification report
+    end
+    Note over L: fold the outcome into the spec
+    L->>H: recap in chat — state: review (awaiting the human's read)
+    H->>L: accept
+    Note over L: state: done
+    end
+```
 
-## Decompose
+Blocked at any point: ask in chat when the human is present; otherwise comment on the affected
+ticket, set state: blocked with the reason, and continue other unblocked work. No fitting agent
+for a delegation: § Delegation protocol defines the fallback.
 
-Create the work-item children (`golem:tracker`). Each child's body is its implementation plan:
-its own scope, the files and touch points, its acceptance, and a pointer to the parent spec for
-intent. A builder must be able to work from the child plus the parent without this conversation.
+## Sequence and Delegation Protocol
 
-Cut work items so that:
+- Everything in the Lead lane of the diagram is yours — never delegated: brainstorming with the
+  human, maintaining and finalising the spec, folding in insights, decomposing, orchestrating
+  the stages.
+- Review findings are input, not obligations — the canonical spec dictates whether a suggestion
+  is legitimate and significant enough to act on.
+- Verification: the method is defined and aligned with the human in the decomposed task.
 
-- each is independently buildable and does not reopen a design question;
-- no two items in the same wave write the same files — one writer per checkout;
-- every child carries a `wave`, starting at 1 even for a single child (the tracker rejects
-  wave-less planning); order dependencies use later waves.
+**How to delegate.** Two transports: `ticket_dispatch({id, session_id})` hands a ticket;
+`session_notify` sends a direct message. `sessions_dispatchable` finds an available agent. Per
+delegation:
 
-Create the minimum number that keeps each change coherent. One child is normal for a small
-design.
+| Delegation | Send | Return you expect |
+|---|---|---|
+| Code survey → `builder` (loads `golem:code-survey`) | `session_notify` with the full request and context — no ticket, no doc | insights directly via `session_notify` — no ticket, no doc |
+| External research → `explorer` (loads `golem:exploring`) | `session_notify` with the full request, context, and the spec id | a `doc` created under that spec; `session_notify` back with its ticket id |
+| Build → `builder` | `ticket_dispatch` of the task — its body carries the plan | closing comment on the task, then `session_notify` |
+| Review → `reviewer` | `session_notify` with the task + spec reference ids | findings directly via `session_notify` — no doc, one pass |
+| Verify → `explorer` | `session_notify` with the task id (method is in the task) | report comment on the task, then `session_notify` |
 
-## Route the build
+> [!NOTE]
+> For all delegations, if an agent with a fitting role is not available, create one yourself in your session. But ensure to ask it load corresponding skill to ensure that it follows the correct SOP for its work role.
+>> In a rare case, if the human asks explicitly not to delegate to other sessions or agents, then don't delegate to other agents or create in-session agents, just do everything yourself or as per human directive. This overrides other delegation protocols.
 
-Build in this session by default — you hold the grounded context, and every handoff loses some of
-it. Spawn an in-process worker only when independent work items can genuinely proceed in
-parallel, or when a fresh context materially improves the result. Dispatch to a live session only
-when the human has enabled a live team (`golem:live-team`).
 
-Whatever the route, load `golem:building` for the implementation itself — leading does not exempt
-you from the builder method.
+## Additional Instructions
 
-## Reconcile
-
-As work items complete, their work merges into the spec branch; you alone land the spec branch on
-main (`golem:git-conventions` owns the mechanics, including the worktree variant). Before
-landing:
-
-1. Verify the completion evidence (`golem:verify-done`) — rerun the claimed commands; a claim is
-   not evidence.
-2. Obtain the one-pass independent code review (`golem:reviewing`) of the workstream's
-   implementation. Decide each finding, record what you incorporated or declined and why, and
-   close the review. No re-review round.
-
-## Close
-
-Confirm the result against the locked design's acceptance. Update living documentation only where
-the implementation made it false (`golem:docs-maintenance`). Write the close report on the spec
-ticket: what changed, the evidence, and anything deferred. Then recontextualize the human per
-Global Rules — what changed, whether it worked, what remains, and the next decision if one
-exists.
-
-## Blocked on the human
-
-When a product decision or missing access blocks a thread: ask directly in chat when the human is
-present. When the human is away, post a `kind:question` ticket assigned to `human`
-(`golem:tracker`) stating exactly what is blocked, the decision or credential needed, and what
-resumes after the answer. Block only the affected work item and continue other authorized work.
+- Communication rules (Global Rules § Response and context) apply doubly here: contextualize,
+  batch questions with options and a recommendation, ask instead of assuming intent.
+- Converge toward the simplest solution that meets the goals. Over-engineering, unnecessary
+  complexity, going overboard is just as bad as doing it incorrectly.
+- Delegate grounding and research because it is heavy in context: you want the insights without
+  pulling every low-level detail into your own context. The builder that surveyed later
+  implements — the preserved survey context is a huge head start.
+- Decompose per the tracker guidelines (`golem:tracker` § Implementation tasks) — the
+  single-vs-multiple trade-off lives there.
+- Explicit human directive can override any protocol defined here for special circumstances.
 
 ## Boundaries
 
 - Never review your own design or implementation — independence requires a fresh context.
-- Reopen a committed decision only with the human, never silently.
-- Keep procedures where they are owned: ticket mechanics in `golem:tracker`, branch and merge
-  mechanics in `golem:git-conventions`, review method in `golem:reviewing`, live transport in
-  `golem:live-team`. This skill owns the workstream decisions.
-- Do not create extra work items, reports, branches, agents, or documents beyond what the result
-  requires.
+- Committed decisions are not yours to reopen; that is the human's call.
+- Do not manufacture work: no extra tickets, docs, agents, or process beyond what was agreed with human.

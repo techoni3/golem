@@ -123,8 +123,8 @@ target channel transport accepted the notification. OpenCode uses its separate
 
 ## Active session messaging
 
-Cross-session coordination is deliberately simple and harness-agnostic. In an authorized live-team
-flow, call `sessions_dispatchable` immediately before choosing a new recipient; never rely on the
+Cross-session coordination is deliberately simple and harness-agnostic. Call
+`sessions_dispatchable` immediately before choosing a new recipient; never rely on the
 boot-time roster. Send to the exact immutable `session_id`, never a label or `/rename` name.
 
 For delegated work, the receiver writes the durable report/comment first and then sends a concise
@@ -168,14 +168,9 @@ plugin/
   instructions/AGENTS.md       # source for global managed instruction blocks
   hooks/journal-route.sh       # all events → central journal (+ legacy guard)
   hooks/notify.sh              # Notification → ntfy push (backgrounded)
-  agents/worker.md             # implements one tracker ticket, reports evidence
-  agents/reviewer.md           # fresh-context diff review, findings only
-  agents/researcher.md         # read-only investigation, structured summary
   skills/tracker/SKILL.md      # golem:tracker — tracker is the source of truth for work
-  skills/standalone/SKILL.md   # golem:standalone — default role; one session owns the whole loop
   skills/reviewing/SKILL.md    # golem:reviewing — one-pass advisory design/code review
   skills/consulting/SKILL.md   # golem:consulting — answer a peer's consult, advisory only
-  skills/live-team/SKILL.md    # golem:live-team — opt-in cross-session dispatch and consults
   mcp/channel/index.js         # golem channel MCP — ack/respond + tracker + active session_notify
   mcp/channel/tracker-client.js# HTTP client of the dashboard tracker REST API
   mcp/channel/node_modules/    # bundled deps (@modelcontextprotocol/sdk)
@@ -196,9 +191,8 @@ live in the copy nobody remembered. The skeleton:
 |---|---|
 | `instructions/AGENTS.md` | Universal rules: response and recontextualization, authority + stop-and-wait, intake routing, ground-claims, protect-existing-work, canonical project sources, role missions and routing, skill routing |
 | `roles/*.md` | Role name + `Load:` pointer only (missions live in the AGENTS.md role table) |
-| Role skills (`lead`, `standalone`, `building`, `exploring`, `reviewing`) | The complete method for every decision that role owns |
-| Situational skills | One shared procedure each: ticket ops + blocked-on-human (`tracker`), evidence (`verify-done`), tests (`test-policy`), branch/commit/merge + worktrees (`git-conventions`), cross-session transport (`live-team`), consults (`consulting`), docs + project memory (`docs-maintenance`), hook journal (`journaling`), autonomous shifts (`night-shift`), browser (`browsing`), design labs (`compare-design-options`), instruction writing (`skill-authoring`), transcript review (`transcript-workflow-review`) |
-| `agents/*.md` personas | Self-contained fresh-context contracts; never a copy of a role skill |
+| Role skills (`lead`, `building`, `exploring`, `reviewing`) | The complete method for every decision that role owns |
+| Situational skills | One shared procedure each: ticket ops + blocked-on-human (`tracker`), evidence (`verify-done`), tests (`test-policy`), branch/commit/merge + worktrees (`git-conventions`), consults (`consulting`), docs + project memory (`docs-maintenance`), hook journal (`journaling`), autonomous shifts (`night-shift`), browser (`browsing`), design labs (`compare-design-options`), instruction writing (`skill-authoring`), transcript review (`transcript-workflow-review`) |
 | Tool contracts (`lib/golem-tool-contracts.js`) + channel instructions | Tool facts and event contracts only — no workflow policy |
 | Project `AGENTS.md` | That repository's facts, constraints, and commands |
 

@@ -31,14 +31,14 @@ const contracts = [
   },
   {
     name: 'ticket_list',
-    description: 'Golem tracker — the cross-project source of truth for work (replaces PLAN.md). List tickets. Pass mine:true to find work assigned to YOU (this session). Defaults to your current project; pass project:"<contract-id>" for another, or all:true (or project:"*") to list across every project. Optional filters: state (todo|in_progress|blocked|review|done|archived), assignee, kind (work-item|decision|spec|question|fix).',
+    description: 'Golem tracker — the cross-project source of truth for work (replaces PLAN.md). List tickets. Pass mine:true to find work assigned to YOU (this session). Defaults to your current project; pass project:"<contract-id>" for another, or all:true (or project:"*") to list across every project. Optional filters: state (todo|in_progress|blocked|review|done|archived), assignee, kind (spec|task|doc).',
     inputSchema: object({
       project: string('Contract project_id `<slug>-<6hex>`. Defaults to your current project. Use "*" to list across all projects.'),
       all: { type: 'boolean', description: 'List across all projects (same as project:"*").' },
       mine: { type: 'boolean', description: 'Only tickets assigned to you (this session).' },
       state: string('todo|in_progress|blocked|review|done|archived'),
       assignee: string('session_id | "human" | null. Overridden by mine:true.'),
-      kind: string('work-item|decision|spec|question|fix'),
+      kind: string('spec|task|doc'),
     }),
   },
   {
@@ -48,30 +48,24 @@ const contracts = [
   },
   {
     name: 'ticket_create',
-    description: 'Golem tracker — create a ticket (the unit of work; replaces a PLAN.md line item). The body is Markdown (+ fenced ```mermaid; GitHub-style > [!NOTE]/[!WARNING]/[!IMPORTANT] admonitions). Pick the genre template matching the kind — work-item→feature, fix→bug, spec→spec, decision→decision — from plugin/skills/tracker/templates/ or GET /api/templates, and fill it in. Defaults to your current project and records you as created_by. Use parent_id to decompose larger work; stream_id to group. For a blocking human question, pass kind:"question" and assignee:"human", then park that thread.',
+    description: 'Golem tracker — create a ticket. Three doc types: `task` (the unit of work; default), `spec` (the living design doc), `doc` (a supporting page — research report, survey, comparison). The body is Markdown (+ fenced ```mermaid; GitHub-style > [!NOTE]/[!WARNING]/[!IMPORTANT] admonitions). Pick the genre template matching the kind — task→feature, spec→spec (a doc needs no template) — from plugin/skills/tracker/templates/ or GET /api/templates, and fill it in. Defaults to your current project and records you as created_by. Use parent_id to hang tasks and supporting docs under their spec.',
     inputSchema: object({
-      title: string('Short imperative title.'), body: string('Full description / acceptance criteria. Markdown (+ fenced ```mermaid; GitHub-style > [!NOTE]/[!WARNING]/[!IMPORTANT] admonitions). Pick the template matching the kind: work-item→feature, fix→bug, spec→spec, decision→decision (plugin/skills/tracker/templates/ or GET /api/templates).'),
-      kind: string('work-item|decision|spec|question|fix (default work-item).'), priority: string('Optional priority label.'), state: string('todo|in_progress|blocked|review|done (default todo).'),
-      stream_id: string('Optional stream to group this ticket under.'), parent_id: string('Optional parent display ticket id (sub-ticket).'),
-      wave: { anyOf: [{ type: 'integer' }, { type: 'null' }], description: 'Optional positive dependency wave number; null/omitted means not wave-managed.' },
-      assignee: string('session_id | "human" | null. Use "human" for questions.'), source_ref: string('Optional provenance link, e.g. "github:<owner>/<repo>#<N>" for a spec ingested from a GitHub issue (see golem:tracker § GitHub Bridge).'),
+      title: string('Short imperative title.'), body: string('Full description / acceptance criteria. Markdown (+ fenced ```mermaid; GitHub-style > [!NOTE]/[!WARNING]/[!IMPORTANT] admonitions). Pick the template matching the kind: task→feature, spec→spec (plugin/skills/tracker/templates/ or GET /api/templates).'),
+      kind: string('spec|task|doc (default task).'), priority: string('Optional priority label.'), state: string('todo|in_progress|blocked|review|done (default todo).'),
+      parent_id: string('Optional parent display ticket id — hangs this ticket under a spec.'),
+      assignee: string('session_id | "human" | null.'), source_ref: string('Optional provenance link, e.g. "github:<owner>/<repo>#<N>" for a spec ingested from a GitHub issue (see golem:tracker § GitHub Bridge).'),
       project: string('Contract project_id. Defaults to your current project.'),
     }, ['title']),
   },
   {
     name: 'ticket_update',
-    description: 'Golem tracker — patch ticket metadata or use the legacy state field. Use ticket_transition for every lifecycle phase move; do not add phase here. The body field is Markdown (+ fenced ```mermaid). Records you as the actor.',
+    description: 'Golem tracker — patch ticket metadata, including `state`: the single ticket lifecycle (todo → in_progress → review → done, plus blocked and archived). Every lifecycle move goes through this tool. The body field is Markdown (+ fenced ```mermaid). Records you as the actor.',
     inputSchema: object({
-      id: string('Display ticket id, e.g. GOL-244. Legacy TKT refs still resolve.'), state: string('todo|in_progress|blocked|review|done|archived'), title: string(),
-      body: string('Markdown body replacement (+ fenced ```mermaid; GitHub-style admonitions).'), kind: string('work-item|decision|spec|question|fix'), priority: string(),
-      labels: { type: 'array', items: { type: 'string' }, description: 'Full replacement label set.' }, stream_id: string(), parent_id: string(),
-      wave: { anyOf: [{ type: 'integer' }, { type: 'null' }], description: 'Optional positive dependency wave number; pass null to clear.' }, assignee: string('session_id | "human" | null.'),
+      id: string('Display ticket id, e.g. GOL-244. Legacy TKT refs still resolve.'), state: string('todo|in_progress|blocked|review|done|archived — the ticket lifecycle.'), title: string(),
+      body: string('Markdown body replacement (+ fenced ```mermaid; GitHub-style admonitions).'), kind: string('spec|task|doc'), priority: string(),
+      labels: { type: 'array', items: { type: 'string' }, description: 'Full replacement label set.' }, parent_id: string('Parent display ticket id — hangs this ticket under a spec.'),
+      assignee: string('session_id | "human" | null.'),
     }, ['id']),
-  },
-  {
-    name: 'ticket_transition',
-    description: 'Golem tracker — move one ticket through its phase machine. Builders: queued → building → built. Delegated verification: the owner moves built → verifying (requires the dispatch record), the verifier moves verifying → verified/rejected, the owner moves verified → done. In-session work closes built → done with a skip_reason recording the self-verification. Read golem:tracker and golem:verify-done first; required artifacts are enforced by the server and rejection text is returned verbatim.',
-    inputSchema: object({ id: string('Display ticket id, e.g. GOL-244. Legacy TKT refs still resolve.'), phase: string('Target phase (kind-dependent), e.g. queued|building|blocked|built|verifying|verified|rejected|done.'), reason: string('Reason required by blocked/parked transitions.'), skip_reason: string('Why the delegated-verification lane was skipped — e.g. built → done for in-session work, naming the self-verification evidence.') }, ['id', 'phase']),
   },
   {
     name: 'ticket_comment',
@@ -94,23 +88,13 @@ const contracts = [
   },
   {
     name: 'session_role',
-    description: 'Set or clear this live session role. role must be lead|builder|explorer|reviewer|standalone or null/clear. Legacy names (manager, planner, general, researcher, ui-tester) are rejected on write — existing sessions carrying them are rewritten by the registry migration, not by this tool.',
-    inputSchema: object({ role: string('lead|builder|explorer|reviewer|standalone|clear') }, ['role']),
+    description: 'Set or clear this live session role. role must be lead|builder|explorer|reviewer or null/clear. Legacy names (manager, planner, general, researcher, ui-tester) are rejected on write — existing sessions carrying them are rewritten by the registry migration, not by this tool.',
+    inputSchema: object({ role: string('lead|builder|explorer|reviewer|clear') }, ['role']),
   },
   {
     name: 'ticket_dispatch',
     description: 'Golem tracker — dispatch a ticket to a live session: assigns the ticket and pushes a brief to it over the channel. Use sessions_dispatchable to find live session ids (each carries a status: idle|busy|waiting, and a pending_count of queued dispatches). The target session must be a channel consumer (golemc) to receive the push. By default the brief is pushed immediately (mode "now"); pass when_idle:true to queue it until the target is idle — use this when the session is busy/waiting so the brief is not buried mid-turn.',
     inputSchema: object({ id: string('Display ticket id to dispatch, e.g. GOL-244. Legacy TKT refs still resolve.'), session_id: string('Live session id to dispatch to (from sessions_dispatchable).'), note: string('Optional note to include with the dispatch.'), when_idle: { type: 'boolean', description: 'Queue the dispatch until the target session is idle instead of pushing immediately. Use when the target is busy/waiting so the brief is delivered when it can be acted on.' }, workspace: string("Optional workspace directive. Pass 'worktree' to instruct the builder to use a git worktree (branch + dir derived from ticket id/title). Only valid when the project has worktrees enabled.") }, ['id', 'session_id']),
-  },
-  {
-    name: 'stream_create',
-    description: 'Golem tracker — create a stream (a named group of tickets) in your current project. mode "sequential" = one in-progress at a time; "parallel" = independent sub-work. Defaults to your current project.',
-    inputSchema: object({ name: string('Stream name.'), mode: string('sequential|parallel (default sequential).'), description: string('Optional description.'), project: string('Contract project_id. Defaults to your current project.') }, ['name']),
-  },
-  {
-    name: 'stream_list',
-    description: 'Golem tracker — list streams for a project (defaults to your current project; omit project / pass nothing for all-project view depends on dashboard).',
-    inputSchema: object({ project: string('Contract project_id. Defaults to your current project.') }),
   },
   {
     name: 'sessions_dispatchable',
@@ -132,6 +116,8 @@ const contracts = [
 export const RETIRED_GOLEM_TOOL_CONTRACTS = Object.freeze({
   subscriptions: 'Retired with passive handoffs; active delivery uses exact session_notify and tracker-backed dispatch.',
   dedicated_gate_tools: 'Gate decisions arrive as correlated channel envelopes and are acknowledged through ack.',
+  ticket_transition: 'Retired with the phase machine (GOL-150); ticket_update({state}) is the only ticket lifecycle API.',
+  streams: 'Retired with the doc-model lean-down (GOL-151); parent_id is the only grouping — hang tasks and supporting docs under their spec.',
 });
 
 function deepFreeze(value) {

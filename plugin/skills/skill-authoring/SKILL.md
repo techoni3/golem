@@ -1,6 +1,6 @@
 ---
 name: skill-authoring
-description: Write or revise clear instructions for a skill or agent persona. Use for a SKILL.md, its description or front matter, or a persona body. Covers scope, structure, plain technical language, and editorial review. Not for runtime, evaluation, or enforcement design.
+description: Write or revise clear instructions for a skill. Use for a SKILL.md, its description or front matter, or a persona body. Covers scope, structure, plain technical language, and editorial review. Not for runtime, evaluation, or enforcement design.
 ---
 <!-- GENERATED: skills/skill-authoring/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
 
@@ -14,7 +14,6 @@ instructions as adaptable guidance unless the human asks for an exact procedure 
 | Write | Do not design |
 |---|---|
 | Skill name, description, front matter, and body | Skill loading, matching, or runtime evaluation |
-| Agent-persona instruction body | Roles, delegation, models, permissions, or agent topology |
 | Structure, wording, examples, and references | Hooks, CI, tools, scripts, or enforcement |
 | Revisions requested by the human | Automatic rules based on failure history |
 
@@ -86,8 +85,6 @@ A reference is justified by conditional relevance, not by length alone. Link it 
 main file and state when to read it. Keep each rule in one place, and keep its definition, action,
 and caveat together.
 
-For agent-persona instructions, read
-[references/persona-writing.md](references/persona-writing.md).
 
 ## Use simplified technical English
 

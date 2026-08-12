@@ -75,7 +75,7 @@ const [home, start, cardPath] = process.argv.slice(2);
 // Shed order, by RE-FETCHABILITY rather than size: commits are one
 // dependency-free command a session can run itself and recently-closed needs
 // node:sqlite plus the tracker schema. The live recipient pool is deliberately
-// absent from boot context; live-team flows fetch it just in time.
+// absent from boot context; delegation flows fetch it just in time.
 const sections = new Map();
 function rootFrom(dir) {
   let cur = path.resolve(dir);

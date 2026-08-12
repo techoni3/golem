@@ -2,9 +2,9 @@ import { GolemClientError } from './golem-client.js';
 import { GOLEM_TOOL_CONTRACTS, registerGolemTools } from './golem-tool-contracts.js';
 
 const WRITE_TOOLS = new Set([
-  'ticket_create', 'ticket_update', 'ticket_transition', 'ticket_comment',
+  'ticket_create', 'ticket_update', 'ticket_comment',
   'ticket_comment_update', 'ticket_comment_reply', 'ticket_dispatch',
-  'stream_create', 'session_notify',
+  'session_notify',
 ]);
 
 function invalid(message) {
@@ -84,22 +84,16 @@ export function createGolemToolRuntime({
       return client.createTicket({
         project_id: scopedProject, title: args.title, body: args.body, kind: args.kind,
         priority: args.priority, state: args.state, labels: args.labels,
-        stream_id: args.stream_id, parent_id: args.parent_id, wave: args.wave,
-        assignee: args.assignee, source_ref: args.source_ref, created_by: trustedSessionId,
+        parent_id: args.parent_id, assignee: args.assignee,
+        source_ref: args.source_ref, created_by: trustedSessionId,
       });
     }
     if (name === 'ticket_update') {
       const patch = { actor: trustedSessionId };
-      for (const key of ['state', 'title', 'body', 'kind', 'priority', 'labels', 'stream_id', 'parent_id', 'wave', 'assignee']) {
+      for (const key of ['state', 'title', 'body', 'kind', 'priority', 'labels', 'parent_id', 'assignee']) {
         if (args[key] !== undefined) patch[key] = args[key];
       }
       return client.updateTicket(required(args.id, 'ticket_update: id is required'), patch);
-    }
-    if (name === 'ticket_transition') {
-      return client.transitionTicket(required(args.id, 'ticket_transition: id is required'), {
-        phase: required(args.phase, 'ticket_transition: phase is required'),
-        reason: args.reason, skip_reason: args.skip_reason, actor: trustedSessionId,
-      });
     }
     if (name === 'ticket_comment') {
       return client.addComment(required(args.id, 'ticket_comment: id is required'), {
@@ -123,10 +117,6 @@ export function createGolemToolRuntime({
         workspace: args.workspace || undefined, sender_id: trustedSessionId,
       });
     }
-    if (name === 'stream_create') {
-      return client.createStream({ project_id: required(args.project || trustedProjectId, 'stream_create: could not resolve a project — pass project:"<contract-id>"'), name: args.name, mode: args.mode, description: args.description });
-    }
-    if (name === 'stream_list') return client.listStreams(args.project || trustedProjectId || undefined);
     if (name === 'sessions_dispatchable') return client.listDispatchable(args.project || trustedProjectId || undefined);
     if (name === 'session_notify') {
       const to = required(args.to, 'session_notify: exact `to` session_id is required.');
