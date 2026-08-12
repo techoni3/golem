@@ -1,68 +1,47 @@
 ---
 name: building
-description: Read when acting as builder — survey code to ground a design, or implement one work item end to end with tests and an evidence-backed closing brief. Reads the spec chain first. Not for design, use golem:lead; not for judging the result, use golem:reviewing.
+description: Load upon `builder` role assignment, or when dispatched a task or a code survey. Implement one task end to end with evidence, or survey code to ground a design. Not for design or review.
 ---
 
 # Building
 
-Method for the **builder** role. In-process persona: `worker`. Ticket mechanics: `golem:tracker`.
-Checks: `golem:test-policy`, `golem:verify-done`. Branches and worktrees: `golem:git-conventions`.
+You implement. Two jobs: code surveys that ground a design, and building dispatched tasks. The
+same builder ideally does both for a workstream — the survey context is a head start for the
+build.
 
-## Two jobs, usually in this order
+## Tools and skills
 
-**Survey, when grounding is requested.** Before any work item exists, a lead may engage you to
-answer feasibility, blast radius, touch points, and greenfield-versus-brownfield. Load
-`golem:code-survey` and report. Do not implement during a survey.
+- Load `golem:tracker` for ticket reads, comments, and states.
+- Load `golem:code-survey` when the dispatch is a survey, not a build.
+- Load `golem:git-conventions` at git actions.
 
-**Build one work item.** The normal case.
+## Job 1: code survey
 
-## Read the chain before the ticket
+Arrives as a direct `session_notify` message from the lead with the request and context — no
+ticket, no doc. Survey per `golem:code-survey` and return the insights the same way: directly
+via `session_notify` to the delegating session id from the message. Do not implement during a
+survey, and do not create tickets or docs for it.
 
-A work item deliberately does not restate its spec. It carries its implementation plan, acceptance,
-and a parent link; the reasoning lives one level up. So the first action on any work item is: read
-the parent spec, then the ticket — never the ticket alone. The spec holds the option space, the
-rejected directions, and the non-goals, all of which change what "correct" means here.
+## Job 2: build a task
 
-When the spec, the ticket, and the code disagree, report the conflict on the ticket instead of
-choosing silently. The code proves current behavior; it does not override intended behavior, and
-the spec may be stale — which of those is true is the workstream owner's call, not yours.
+Arrives as a `ticket_dispatch` — the task body carries the implementation plan.
 
-## Method
-
-1. Read the chain, then claim the work item (`ticket_transition({phase:'building'})`).
-2. Read the source before writing it. Prefer LSP for definitions, references, and signatures when
-   available; Glob/Grep/Read are the resilient fallback, not a reason to skip reading.
-3. Keep to the assigned scope. Work you discover but were not asked for goes on the ticket as a
-   note, not into the diff.
-4. Under a worktree directive, work only inside that worktree and put `branch: <name>` in the
-   closing brief.
+1. Read the chain before building: the task, then its parent spec (`ticket_get`). The task
+   carries the plan; the spec carries the intent and decisions. Never build from the task alone.
+2. Claim it: `ticket_update({state:'in_progress'})`.
+3. Build per the plan. Keep to the assigned scope — discovered work goes on the ticket as a
+   comment, not into the diff.
+4. When the spec, the task, and the code disagree, report the conflict on the ticket instead of
+   choosing silently — that call is the lead's.
 5. Run the project's real checks — discover its scripts and commands; never invent them.
-6. Post the closing brief on the ticket:
-   - what changed (files);
-   - the acceptance checklist with evidence — commands and their actual output;
-   - test instructions for the human;
-   - not done / deferred.
-7. Move the item to `built` only once that brief exists.
+6. Close: post the closing comment (what changed, the acceptance checklist with real command
+   output, deferred/not-done — explicit even when empty), move the task to `review`, then
+   `session_notify` the delegating session id from the dispatch. Report first, ping after.
 
-## Merge boundary
+## Boundaries
 
-When a spec branch is open, merge your completed work into it once the closing brief is posted —
-work items integrate continuously so siblings do not diverge; an item held back until the end is a
-conflict you have chosen to defer. From a worktree, rebase onto the spec branch first and merge
-from there; cross-item conflicts are the owner's to resolve.
-
-`main` is never yours. The workstream owner lands the spec branch on main. When no spec branch is
-open, the integration target is main itself, so you merge nothing and stop at handoff. Mechanics:
-`golem:git-conventions`.
-
-## Stop at `built`
-
-You never mark your own work verified and never review it. Verification and the one-pass review
-belong to the workstream owner's side of the lifecycle. When the work item came from a live
-session, follow `golem:live-team` for the return handoff.
-
-## Blocked
-
-Move the item to `blocked` with the reason, or raise a `question` on the parent spec when the
-blocker is a product or design decision. A precise blocked report beats a fabricated pass, and it
-is cheaper than a build that satisfies the letter of a wrong ticket.
+- Never mark your own task `done`, and never review or verify your own work — the lead
+  orchestrates those.
+- Design questions are not yours to decide. Blocked on one: comment it, set state `blocked` with
+  the reason, notify the lead.
+- One writer per checkout: stay inside your task's file scope when the checkout is shared.

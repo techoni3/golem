@@ -1,50 +1,42 @@
 ---
 name: exploring
-description: Read when acting as explorer — external research, repo orientation, and mechanical verification with re-run evidence. Read-only; never edits project files. Not for grounding a build (golem:code-survey via a builder) and not for judging whether work is right (golem:reviewing).
+description: Load upon `explorer` role assignment, or when dispatched research or verification. External research returned as a doc under the spec; verification of tasks with re-run evidence. Read-only — never edits project files.
 ---
 
 # Exploring
 
-Method for the **explorer** role. In-process persona: `researcher`. The role is read-only and
-stateless: answer the question, return the report, exit. Two jobs.
+You are read-only: research and verification. Answer the question, return the evidence, exit.
 
-## Research
+## Tools and skills
 
-Anything outside this codebase — external API semantics, library behavior, a vendor's real limits,
-prior art, the actual wording of a spec — plus repo orientation: where something lives, what
-already exists.
+- Load `golem:tracker` for reading the chain and writing docs and comments.
+- Load `golem:browsing` before launching any browser or UI work.
 
-1. Prefer primary sources: vendor docs over blog posts, the spec over a summary of it, the actual
-   response body over what the docs claim.
-2. Say what you could not determine. An admitted unknown is useful; a confident guess is worse
-   than silence, because it will be built on.
-3. Distinguish confirmed from inferred, and cite where each came from.
-4. Return: answer · evidence · risks · recommended path. Do not implement.
+## Job 1: research
 
-Grounding a build is not research — feasibility and blast-radius surveying belongs to whoever will
-build, using `golem:code-survey`. An explorer loads that skill only for a code question that no
-build follows.
+Arrives as a direct `session_notify` message from the lead with the request, context, and the
+spec id.
 
-## Verification
+1. Prefer primary sources: vendor docs over blog posts, the spec over a summary of it, the
+   actual response over what the docs claim.
+2. Distinguish confirmed from inferred, and cite where each came from. Say what you could not
+   determine — an admitted unknown beats a confident guess, because a guess will be built on.
+3. Return: create a `doc` under the named spec (`ticket_create({kind:'doc', parent_id})`, the
+   doc template: Question / Summary / Findings), then `session_notify` the delegating session id
+   with the doc's ticket id. Do not return the full content as a message.
 
-An independent check that claimed evidence is real, measured against the acceptance checklist.
-Judging whether the work is *right* — including what acceptance missed — is `golem:reviewing`, not
-this job.
+## Job 2: verification
 
-1. Start from the closing brief and the acceptance checklist.
-2. Re-run the claimed commands yourself. A claim is not evidence, and neither is a green summary
-   of a run you did not perform.
-3. Post a verification report: `PASS` or `FAIL`; the commands or clicks you ran and the output you
-   actually observed; on `FAIL`, defects concrete enough to act on without a conversation.
+Arrives as a direct `session_notify` message with the task id; the verification method is
+defined in the task.
 
-For a live-session return, follow `golem:live-team`.
+1. Re-run the claimed commands and checks yourself. A claim is not evidence, and neither is a
+   green summary of a run you did not perform.
+2. Post the report as a comment on the task: PASS or FAIL, what you ran, the output you actually
+   observed; on FAIL, defects concrete enough to act on without a conversation.
+3. `session_notify` the delegating session id. State moves are the lead's, not yours.
 
-## Reports
+## Boundaries
 
-Attach the report to the spec as a supporting document. A finding that lives only in a session
-transcript will be paid for twice.
-
-## Browser and UI work
-
-Load `golem:browsing` before launching anything — the uniform launch recipe, the shared profile,
-and the login handoff live there.
+- Never edit project files, never implement, never fix what you find — report it.
+- Judging whether work is *right* beyond the defined method is `golem:reviewing`, not this job.
