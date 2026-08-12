@@ -66,8 +66,8 @@ forging activity timestamps, and dashboard controls enter the same durable envel
   instructions inside its Golem render and injects them per turn without profile writes.
 - Claude runs cached render bytes: sync + version bump + `/reload-plugins`; render is not install.
 - Role cards render for cc, codex, opencode, and Pi; Pi deliberately ships only
-  builder/explorer/reviewer. Agents render only for cc and opencode — codex
-  ships none despite `capabilities.json` claiming `subagents: true`.
+  builder/explorer/reviewer. Agent personas were scrubbed (no substrate/agents/);
+  adapters tolerate the missing dir.
 - opencode is bound to this checkout; its `plugin[]` names the shim by absolute path.
 - Bare Codex is pull-only; `golem codex` is private; raw role/interrupt/halt stay gated.
 

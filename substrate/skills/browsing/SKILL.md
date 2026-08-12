@@ -70,9 +70,9 @@ A login page or expired session on the shared profile is not a dead end. Bring t
    by default, headed only if the task itself is visual/interactive.
 
 Running autonomously (night-shift, human away): a missing login is a missing credential —
-post a `kind:question` ticket and mark the thread blocked (`golem:tracker` § Blocked on the
-human), close the headed window, and work on something else. Chat has no reader at 3am;
-don't poll a login page for hours.
+comment the blocker on the affected ticket, set its state to `blocked` with the reason,
+close the headed window, and work on something else. Chat has no reader at 3am; don't poll
+a login page for hours.
 
 ## What you may do on authenticated sites
 
@@ -80,8 +80,8 @@ Authority comes from **the task, not this skill**. Read-only browsing is always 
 Mutations are in scope exactly as far as the task names them — "file the issue upstream"
 includes submitting that form; a research task includes no writes at all. Beyond-mandate
 actions, anything involving payment, and irreversible account operations go to the human
-first (ask in chat, or a `kind:question` ticket when the human is away). When unsure
-whether the mandate covers a write, it doesn't.
+first (ask in chat, or comment the ask on the ticket and set it `blocked` when the human
+is away). When unsure whether the mandate covers a write, it doesn't.
 
 ## Hard rules
 

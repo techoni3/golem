@@ -166,9 +166,6 @@ plugin/
   instructions/AGENTS.md       # source for global managed instruction blocks
   hooks/journal-route.sh       # all events → central journal (+ legacy guard)
   hooks/notify.sh              # Notification → ntfy push (backgrounded)
-  agents/worker.md             # implements one tracker ticket, reports evidence
-  agents/reviewer.md           # fresh-context diff review, findings only
-  agents/researcher.md         # read-only investigation, structured summary
   skills/tracker/SKILL.md      # golem:tracker — tracker is the source of truth for work
   skills/reviewing/SKILL.md    # golem:reviewing — one-pass advisory design/code review
   skills/consulting/SKILL.md   # golem:consulting — answer a peer's consult, advisory only
@@ -194,7 +191,6 @@ live in the copy nobody remembered. The skeleton:
 | `roles/*.md` | Role name + `Load:` pointer only (missions live in the AGENTS.md role table) |
 | Role skills (`lead`, `building`, `exploring`, `reviewing`) | The complete method for every decision that role owns |
 | Situational skills | One shared procedure each: ticket ops + blocked-on-human (`tracker`), evidence (`verify-done`), tests (`test-policy`), branch/commit/merge + worktrees (`git-conventions`), consults (`consulting`), docs + project memory (`docs-maintenance`), hook journal (`journaling`), autonomous shifts (`night-shift`), browser (`browsing`), design labs (`compare-design-options`), instruction writing (`skill-authoring`), transcript review (`transcript-workflow-review`) |
-| `agents/*.md` personas | Self-contained fresh-context contracts; never a copy of a role skill |
 | Tool contracts (`lib/golem-tool-contracts.js`) + channel instructions | Tool facts and event contracts only — no workflow policy |
 | Project `AGENTS.md` | That repository's facts, constraints, and commands |
 
