@@ -225,15 +225,6 @@ export function updateTicket(id, patch) {
   return request('PATCH', `/api/tickets/${encodeURIComponent(id)}`, { body: patch });
 }
 
-/** POST /api/tickets/:id/transition {phase,reason?,skip_reason?,actor} */
-export function transitionTicket(id, input) {
-  if (!id) throw new GolemClientError('transitionTicket: id is required', { code: 'GOLEM_INVALID_ARGUMENT' });
-  return request('POST', `/api/tickets/${encodeURIComponent(id)}/transition`, {
-    body: input,
-    verbatimError: true,
-  });
-}
-
 /** POST /api/tickets/:id/comments {author,body,quote?,prefix?,suffix?,section?,section_id?,tag?,status?,parent_id?} */
 export function addComment(id, input = {}) {
   if (!id) throw new GolemClientError('addComment: id is required', { code: 'GOLEM_INVALID_ARGUMENT' });

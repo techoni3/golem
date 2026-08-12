@@ -74,7 +74,7 @@ let currentSessionID = "";
 // only golem's suffixes so injected identity keys never reach foreign tools.
 const GOLEM_TOOL_SUFFIXES = new Set([
   "ticket_list", "ticket_get", "ticket_create", "ticket_update", "ticket_comment",
-  "ticket_comment_update", "ticket_comment_reply", "ticket_dispatch", "ticket_transition",
+  "ticket_comment_update", "ticket_comment_reply", "ticket_dispatch",
   "ack", "respond", "session_notify", "session_role", "sessions_dispatchable",
   "stream_create", "stream_list",
 ]);

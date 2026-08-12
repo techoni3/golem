@@ -232,7 +232,7 @@ async function main() {
   });
   const registered = [];
   nativeRuntime.register((definition) => registered.push(definition), {
-    names: ['ticket_get', 'ticket_create', 'ticket_transition'],
+    names: ['ticket_get', 'ticket_create', 'ticket_update'],
   });
   check('native runtime registers wrappers from shared contracts',
     registered.length === 3 && registered.every((entry) => typeof entry.execute === 'function'),
@@ -850,9 +850,17 @@ async function main() {
   check('MCP omits retired subscription and consult wrapper tools', !tools.tools.some((tool) => ['subscribe', 'unsubscribe', 'subscriptions_list', 'consult_request', 'consult_reply', 'consult_status'].includes(tool.name)), tools.tools.map((tool) => tool.name).join(', '));
   const respondTool = tools.tools.find((tool) => tool.name === 'respond');
   check('respond is user-facing only; no correlated envelope reply input', !!respondTool && !respondTool.inputSchema?.properties?.envelope_id && /not a correlated peer-handoff reply/.test(respondTool.description || ''), JSON.stringify(respondTool));
-  const transitionTool = tools.tools.find((tool) => tool.name === 'ticket_transition');
-  check('MCP lists ticket_transition', !!transitionTool, tools.tools.map((tool) => tool.name).join(', '));
-  check('ticket_transition description teaches the phase ladder', /queued.*building.*built.*verifying.*verified.*done/s.test(transitionTool?.description || ''), transitionTool?.description);
+  // GOL-150: the phase machine is gone. ticket_update({state}) is the only
+  // lifecycle API, so no transition tool may reappear in the advertised set.
+  check('MCP no longer lists ticket_transition', !tools.tools.some((tool) => tool.name === 'ticket_transition'), tools.tools.map((tool) => tool.name).join(', '));
+  check('shared contract source records the retired transition surface',
+    GOLEM_TOOL_CONTRACTS.every((entry) => entry.name !== 'ticket_transition') && !!RETIRED_GOLEM_TOOL_CONTRACTS.ticket_transition);
+  const updateTool = tools.tools.find((tool) => tool.name === 'ticket_update');
+  check('ticket_update teaches the single state lifecycle',
+    /todo.*in_progress.*review.*done/s.test(updateTool?.description || '') && !/phase/i.test(updateTool?.description || ''),
+    updateTool?.description);
+  check('no advertised tool mentions phases', !tools.tools.some((tool) => /phase/i.test(JSON.stringify(tool))),
+    tools.tools.filter((tool) => /phase/i.test(JSON.stringify(tool))).map((tool) => tool.name).join(', '));
 
   const createViaMcp = async (title) => {
     const out = await callTool('ticket_create', { project: PROJECT_ID, title, kind: 'work-item', assignee: SESSION_ID });
@@ -915,60 +923,56 @@ async function main() {
       && !scopedSpecs.json.some((ticket) => ticket.id === foreignSpec.id),
     scopedSpecs.text);
 
-  const simple = await createViaMcp('MCP transition success');
-  const simpleBuilding = await callTool('ticket_transition', { id: simple.id, phase: 'building' });
-  check('ticket_transition queued -> building succeeds', !simpleBuilding.result.isError && simpleBuilding.json?.phase === 'building', simpleBuilding.text);
-  check('building derives legacy state in_progress', simpleBuilding.json?.state === 'in_progress', simpleBuilding.text);
+  // GOL-150: the whole lifecycle runs through ticket_update({state}) — one
+  // walk from creation to done, with every hop re-read through ticket_get so
+  // the state is proven persisted rather than echoed.
+  const walk = await createViaMcp('MCP full state lifecycle walk');
+  check('new tickets start in todo', walk.state === 'todo', JSON.stringify(walk.state));
+  check('created ticket payload carries no phase field', !('phase' in walk), JSON.stringify(Object.keys(walk)));
 
-  const illegal = await createViaMcp('MCP transition illegal');
-  const illegalDone = await callTool('ticket_transition', { id: illegal.id, phase: 'done' });
-  check('illegal transition returns MCP error', illegalDone.result.isError === true, illegalDone.text);
-  check('illegal transition preserves server error verbatim', illegalDone.text === 'transitionTicket: illegal transition queued -> done', illegalDone.text);
-  const illegalAfter = await callTool('ticket_get', { id: illegal.id });
-  check('illegal transition leaves ticket unchanged', illegalAfter.json?.phase === 'queued', illegalAfter.text);
+  const started = await callTool('ticket_update', { id: walk.id, state: 'in_progress' });
+  check('ticket_update moves todo -> in_progress', !started.result.isError && started.json?.state === 'in_progress', started.text);
+  check('ticket_update response carries no phase field', started.json && !('phase' in started.json), started.text);
 
-  const missing = await createViaMcp('MCP transition missing artifact');
-  await callTool('ticket_transition', { id: missing.id, phase: 'building' });
-  const missingBuilt = await callTool('ticket_transition', { id: missing.id, phase: 'built' });
-  check('missing artifact returns MCP error', missingBuilt.result.isError === true, missingBuilt.text);
-  check('missing artifact preserves server error verbatim', missingBuilt.text === 'transitionTicket: missing required artifact(s): closingBrief', missingBuilt.text);
-  const missingAfter = await callTool('ticket_get', { id: missing.id });
-  check('missing artifact leaves ticket in building', missingAfter.json?.phase === 'building', missingAfter.text);
-
-  const walk = await createViaMcp('MCP full legal phase walk');
-  await callTool('ticket_transition', { id: walk.id, phase: 'building' });
   await callTool('ticket_comment', { id: walk.id, body: 'Closing brief: implementation complete with mechanical evidence.' });
-  const walkedBuilt = await callTool('ticket_transition', { id: walk.id, phase: 'built' });
-  check('full walk reaches built', !walkedBuilt.result.isError && walkedBuilt.json?.phase === 'built', walkedBuilt.text);
+  const review = await callTool('ticket_update', { id: walk.id, state: 'review' });
+  check('ticket_update moves in_progress -> review', !review.result.isError && review.json?.state === 'review', review.text);
+
   const dispatched = await callTool('ticket_dispatch', { id: walk.id, session_id: SESSION_ID, note: 'verification routing' });
-  check('full walk records manager dispatch artifact', !dispatched.result.isError, dispatched.text);
+  check('review work still dispatches for verification', !dispatched.result.isError, dispatched.text);
   const dispatchBody = channelEvents.filter((event) => event.params?.meta?.kind === 'brief').at(-1)?.params?.content || '';
   check('ticket dispatch carries authenticated return route',
     dispatchBody.includes(`Authenticated delegating session_id: ${SESSION_ID}`)
       && dispatchBody.includes('Return notification: call session_notify'),
     dispatchBody);
-  const walkedVerifying = await callTool('ticket_transition', { id: walk.id, phase: 'verifying' });
-  check('full walk reaches verifying', !walkedVerifying.result.isError && walkedVerifying.json?.phase === 'verifying', walkedVerifying.text);
-  await callTool('ticket_comment', { id: walk.id, body: 'Verification PASS: journey test completed.' });
-  const walkedVerified = await callTool('ticket_transition', { id: walk.id, phase: 'verified' });
-  check('full walk reaches verified', !walkedVerified.result.isError && walkedVerified.json?.phase === 'verified', walkedVerified.text);
-  const walkedDone = await callTool('ticket_transition', { id: walk.id, phase: 'done' });
-  check('full walk reaches done through MCP alone', !walkedDone.result.isError && walkedDone.json?.phase === 'done', walkedDone.text);
 
-  const blocked = await createViaMcp('MCP transition reason forwarding');
-  const blockedOut = await callTool('ticket_transition', { id: blocked.id, phase: 'blocked', reason: 'waiting for credentials' });
-  check('ticket_transition forwards reason', !blockedOut.result.isError && blockedOut.json?.phase === 'blocked', blockedOut.text);
+  const closed = await callTool('ticket_update', { id: walk.id, state: 'done' });
+  check('ticket_update closes review -> done through MCP alone', !closed.result.isError && closed.json?.state === 'done', closed.text);
+  const closedRead = await callTool('ticket_get', { id: walk.id });
+  check('done state persists through REST and SQLite', closedRead.json?.state === 'done', closedRead.text);
+  check('ticket_get payload carries no phase field', closedRead.json && !('phase' in closedRead.json), closedRead.text);
 
-  const skipped = await createViaMcp('MCP transition skip reason forwarding');
-  await callTool('ticket_transition', { id: skipped.id, phase: 'building' });
-  await callTool('ticket_comment', { id: skipped.id, body: 'Closing brief: ready for exceptional closure.' });
-  await callTool('ticket_transition', { id: skipped.id, phase: 'built' });
-  const skippedDone = await callTool('ticket_transition', { id: skipped.id, phase: 'done', skip_reason: 'manager-approved test skip' });
-  check('ticket_transition forwards skip_reason', !skippedDone.result.isError && skippedDone.json?.phase === 'done', skippedDone.text);
+  // No ladder, no gates: any state is reachable in one hop, in either
+  // direction, with no artifact enforcement in the way.
+  const jump = await createViaMcp('MCP direct state jump');
+  const jumped = await callTool('ticket_update', { id: jump.id, state: 'done' });
+  check('todo -> done needs no intermediate hop or artifact', !jumped.result.isError && jumped.json?.state === 'done', jumped.text);
+  const reopened = await callTool('ticket_update', { id: jump.id, state: 'in_progress' });
+  check('done -> in_progress reopens without a rejection lane', !reopened.result.isError && reopened.json?.state === 'in_progress', reopened.text);
+  const blockedOut = await callTool('ticket_update', { id: jump.id, state: 'blocked' });
+  check('blocked needs no reason artifact', !blockedOut.result.isError && blockedOut.json?.state === 'blocked', blockedOut.text);
 
-  const legacy = await createViaMcp('MCP legacy update compatibility');
-  const legacyUpdated = await callTool('ticket_update', { id: legacy.id, state: 'in_progress' });
-  check('ticket_update legacy state remains compatible', !legacyUpdated.result.isError && legacyUpdated.json?.state === 'in_progress', legacyUpdated.text);
+  const badState = await callTool('ticket_update', { id: jump.id, state: 'building' });
+  check('a retired phase name is not a valid state', badState.result.isError === true, badState.text);
+  check('invalid state error is preserved verbatim', /invalid state 'building'/.test(badState.text), badState.text);
+  const afterBadState = await callTool('ticket_get', { id: jump.id });
+  check('rejected state update leaves the ticket unchanged', afterBadState.json?.state === 'blocked', afterBadState.text);
+
+  const listed = await callTool('ticket_list', { project: PROJECT_ID, state: 'blocked' });
+  check('state filter still lists tickets by lifecycle',
+    Array.isArray(listed.json) && listed.json.some((ticket) => ticket.id === jump.id), listed.text);
+  check('list payloads carry no phase field',
+    Array.isArray(listed.json) && listed.json.every((ticket) => !('phase' in ticket)), listed.text);
 }
 
 main()

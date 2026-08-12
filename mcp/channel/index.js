@@ -633,7 +633,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       const sessionId = caller.sessionId;
       const defaultProject = tracker.currentProjectId(sessionId);
       const writeTools = new Set([
-        'ticket_create', 'ticket_update', 'ticket_transition', 'ticket_comment',
+        'ticket_create', 'ticket_update', 'ticket_comment',
         'ticket_comment_update', 'ticket_comment_reply', 'ticket_dispatch', 'stream_create',
       ]);
       if (writeTools.has(name) && !sessionId) throw new Error(caller.error);
@@ -695,18 +695,6 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           if (args[k] !== undefined) patch[k] = args[k];
         }
         return await jsonResult(await tracker.updateTicket(args.id, patch));
-      }
-
-      if (name === 'ticket_transition') {
-        if (!args.id) throw new Error('ticket_transition: id is required');
-        if (!args.phase) throw new Error('ticket_transition: phase is required');
-        if (!sessionId) throw new Error('ticket_transition: no current session id to record as actor');
-        return await jsonResult(await tracker.transitionTicket(args.id, {
-          phase: args.phase,
-          reason: args.reason,
-          skip_reason: args.skip_reason,
-          actor: sessionId,
-        }));
       }
 
       if (name === 'ticket_comment') {
