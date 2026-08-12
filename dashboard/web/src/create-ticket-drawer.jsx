@@ -35,8 +35,9 @@ const CT_PRIORITIES = [
 // if the user has manually picked a different template since the last
 // type-change, that override sticks (see `templateOverride` below).
 const TYPE_TEMPLATE = {
-  task: 'feature',
+  task: 'task',
   spec: 'spec',
+  doc: 'doc',
 };
 
 // Drawer width presets (percentage of viewport). Persisted in localStorage so
