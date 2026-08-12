@@ -55,13 +55,13 @@ Only facts that change a decision. Three facts is a normal section; a system tou
 Debate lives here; when decided, the entry collapses to call + why and the conclusion is written
 into Requirements or Design where it belongs. Reopen a decided entry only with the human.
 
-### D1 — <title> · open
+### D1 — title · open
 
 - Context: <what forces this decision>
 - Options: <the realistic options with trade-offs>
 - Recommendation: <yours, with the reason>
 
-### D2 — <title> · decided
+### D2 — title · decided
 
 - Call: <what was decided>
 - Why: <the reason, one or two lines>
