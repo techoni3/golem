@@ -286,7 +286,7 @@ async function main() {
     project_id: PROJECT_ID,
     title: 'Test ticket from client',
     body: 'acceptance: round-trips',
-    kind: 'work-item',
+    kind: 'task',
     assignee: SESSION_ID,
     created_by: SESSION_ID,
   });
@@ -335,11 +335,11 @@ async function main() {
   check('getTicket now has the comment', withComment.comments.some((c) => /did the thing/.test(c.body)),
     `n=${withComment.comments.length}`);
 
-  // 7) createStream → listStreams.
-  const stream = await client.createStream({ project_id: PROJECT_ID, name: 'Test stream', mode: 'sequential' });
-  check('createStream returns an id', !!stream?.id, JSON.stringify(stream));
-  const streams = await client.listStreams(PROJECT_ID);
-  check('listStreams finds the stream', streams.some((s) => s.id === stream.id), `n=${streams.length}`);
+  // 7) GOL-151: streams are gone from the client surface and the REST API.
+  check('client exposes no stream helpers', client.createStream === undefined && client.listStreams === undefined,
+    Object.keys(client).filter((k) => /stream/i.test(k)).join(', '));
+  const streamRoute = await fetch(`http://${HOST}:${port}/api/streams`);
+  check('GET /api/streams is gone', streamRoute.status === 404, String(streamRoute.status));
 
   // 8) listDispatchable (no live native sessions in the sandbox → empty array, but must 200).
   const dispatchable = await client.listDispatchable(PROJECT_ID);
@@ -861,9 +861,32 @@ async function main() {
     updateTool?.description);
   check('no advertised tool mentions phases', !tools.tools.some((tool) => /phase/i.test(JSON.stringify(tool))),
     tools.tools.filter((tool) => /phase/i.test(JSON.stringify(tool))).map((tool) => tool.name).join(', '));
+  // GOL-151: three doc types, no streams, no waves.
+  check('MCP no longer lists stream tools', !tools.tools.some((tool) => /^stream_/.test(tool.name)), tools.tools.map((tool) => tool.name).join(', '));
+  check('shared contract source records the retired stream surface',
+    GOLEM_TOOL_CONTRACTS.every((entry) => !entry.name.startsWith('stream_')) && !!RETIRED_GOLEM_TOOL_CONTRACTS.streams);
+  check('no advertised tool mentions streams or waves',
+    !tools.tools.some((tool) => /\bstream|\bwave/i.test(JSON.stringify(tool))),
+    tools.tools.filter((tool) => /\bstream|\bwave/i.test(JSON.stringify(tool))).map((tool) => tool.name).join(', '));
+  const createTool = tools.tools.find((tool) => tool.name === 'ticket_create');
+  check('ticket_create teaches the three doc types',
+    /spec\|task\|doc \(default task\)/.test(createTool?.inputSchema?.properties?.kind?.description || '')
+      && !/work-item|question|decision/.test(JSON.stringify(createTool)),
+    JSON.stringify(createTool?.inputSchema?.properties?.kind));
+
+  const defaultKind = await callTool('ticket_create', { project: PROJECT_ID, title: 'MCP default kind' });
+  check('ticket_create defaults to task', !defaultKind.result.isError && defaultKind.json?.kind === 'task', defaultKind.text);
+  check('created payload carries no stream_id or wave',
+    defaultKind.json && !('stream_id' in defaultKind.json) && !('wave' in defaultKind.json), defaultKind.text);
+  const supportingDoc = await callTool('ticket_create', { project: PROJECT_ID, title: 'MCP supporting doc', kind: 'doc' });
+  check('ticket_create accepts the doc type', !supportingDoc.result.isError && supportingDoc.json?.kind === 'doc', supportingDoc.text);
+  for (const retired of ['work-item', 'fix', 'question', 'decision']) {
+    const rejected = await callTool('ticket_create', { project: PROJECT_ID, title: `MCP retired kind ${retired}`, kind: retired });
+    check(`retired kind ${retired} is rejected`, rejected.result.isError === true && /invalid kind/.test(rejected.text), rejected.text);
+  }
 
   const createViaMcp = async (title) => {
-    const out = await callTool('ticket_create', { project: PROJECT_ID, title, kind: 'work-item', assignee: SESSION_ID });
+    const out = await callTool('ticket_create', { project: PROJECT_ID, title, kind: 'task', assignee: SESSION_ID });
     check(`ticket_create succeeds: ${title}`, !out.result.isError && !!out.json?.id, out.text);
     return out.json;
   };

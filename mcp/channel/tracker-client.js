@@ -194,7 +194,7 @@ async function request(method, pathname, {
 
 // --- API wrappers (one per dashboard tracker route) ------------------------
 
-/** GET /api/tickets?project&state&assignee&kind&stream&includeArchived */
+/** GET /api/tickets?project&state&assignee&kind&includeArchived */
 export function listTickets(params = {}) {
   const query = { ...params };
   if (query.project != null) query.project = requireProjectScope(query.project, 'listTickets');
@@ -207,7 +207,7 @@ export function getTicket(id) {
   return request('GET', `/api/tickets/${encodeURIComponent(id)}`);
 }
 
-/** POST /api/tickets {project_id,kind?,title,body?,priority?,labels?,stream_id?,parent_id?,assignee?,created_by?} */
+/** POST /api/tickets {project_id,kind?,title,body?,priority?,labels?,parent_id?,assignee?,created_by?} */
 export function createTicket(body = {}) {
   // `project_id` is routing scope required by the legacy REST contract, not
   // caller identity. Identity scrubbers may remove actor-like fields, but must
@@ -251,16 +251,6 @@ export function dispatchTicket(id, { session_id, note, when_idle, workspace, sen
   return request('POST', `/api/tickets/${encodeURIComponent(id)}/dispatch`, {
     body: { session_id, note, mode: when_idle ? 'when_idle' : 'now', workspace: workspace || undefined, sender_id: sender_id || undefined },
   });
-}
-
-/** GET /api/streams?project */
-export function listStreams(project) {
-  return request('GET', '/api/streams', { params: project ? { project } : {} });
-}
-
-/** POST /api/streams {project_id,name,mode?,description?} */
-export function createStream(body) {
-  return request('POST', '/api/streams', { body });
 }
 
 /** GET /api/sessions/dispatchable?project */
