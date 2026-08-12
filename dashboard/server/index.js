@@ -1207,28 +1207,8 @@ async function main() {
     }
   });
 
-  // GOL-314: explicit phase-machine transition endpoint. State is derived by
-  // the tracker DB from the target phase; legacy PATCH {state} stays supported.
-  fastify.post('/api/tickets/:id/transition', async (req, reply) => {
-    const existing = resolveTicketRef(req.params.id);
-    if (!existing) return reply.code(404).send({ error: 'not_found' });
-    try {
-      const patch = { ...(req.body ?? {}) };
-      const attribution = enforceAttribution(reply, patch, 'actor', 'transitionTicket');
-      if (attribution) return attribution;
-      const ticket = tracker.transitionTicket(existing.id, patch);
-      const closeResult = handleSpecClosed(tracker, existing, ticket, patch.actor || 'human');
-      if (closeResult) {
-        broadcastWS({ type: 'ticket-comment', ticket_id: closeResult.ticket.id, comment: closeResult.comment });
-        broadcastWS({ type: 'ticket-updated', ticket: closeResult.ticket });
-        return closeResult.ticket;
-      }
-      broadcastWS({ type: 'ticket-updated', ticket });
-      return ticket;
-    } catch (err) {
-      return reply.code(400).send({ error: String(err?.message ?? err) });
-    }
-  });
+  // GOL-150: POST /api/tickets/:id/transition is gone with the phase machine.
+  // PATCH /api/tickets/:id with {state} is the lifecycle path.
 
   // TKT-0105: POST /api/tickets/:id/move — atomic state + rank change used by
   // drag-and-drop. Body: { state, before_id?, after_id?, actor? }. The endpoint

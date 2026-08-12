@@ -19,7 +19,6 @@ import { gfm as turndownGfm } from 'turndown-plugin-gfm';
 import { trackerDbPath } from '../../lib/golem-home.js';
 import { loadConfig } from '../../lib/golem-config.js';
 import { createCommentDispatchService, defaultDispatchStateForComment } from './comment-dispatch.js';
-import { canonicalStateForPhase, initialPhaseForKind, isKnownPhase, legalNextPhases, phaseFromLegacyState, requirementsForPhase } from './phase-machine.js';
 
 const SCHEMA_VERSION = 17;
 
@@ -165,9 +164,13 @@ function toMarkdownBody(raw) {
 }
 
 // Hydrate a raw ticket row into a plain object with labels parsed to an array.
+// GOL-150: `phase` is a dormant column (kept for history, never read or
+// written by live code). It is stripped here so no API/tool consumer can
+// mistake it for lifecycle truth — `state` is the only lifecycle.
 function hydrateTicket(row) {
   if (!row) return null;
-  return { ...row, labels: parseLabels(row.labels) };
+  const { phase: _dormantPhase, ...fields } = row;
+  return { ...fields, labels: parseLabels(row.labels) };
 }
 
 /**
@@ -195,6 +198,9 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
         title         TEXT NOT NULL,
         body          TEXT NOT NULL DEFAULT '',
         state         TEXT NOT NULL DEFAULT 'todo',
+        -- GOL-150: dormant. The phase machine is gone; state is the only
+        -- lifecycle. The column survives so historical rows keep their value
+        -- (no destructive migration), but nothing reads or writes it.
         phase         TEXT,
         priority      TEXT,
         labels        TEXT NOT NULL DEFAULT '[]',
@@ -631,22 +637,13 @@ WHERE state_changed_at IS NULL`).run();
       WHERE topic IS NULL OR class IS NULL OR actor_kind IS NULL OR actor_label IS NULL
     `).run();
 
-    // Schema migration v9 -> v10 (GOL-314): phase machines. Phase is the
-    // workflow source of truth; state remains a derived board-column cache.
+    // Schema migration v9 -> v10 (GOL-314) added the `phase` column. GOL-150
+    // retired the phase machine outright: `state` is the only lifecycle, and
+    // the column is dormant. Keep the additive ALTER so a pre-v10 DB still
+    // matches the declared table shape; the phase backfill is gone (state was
+    // already authoritative before v10, and every phase mapped onto it).
     const ticketCols10 = db.prepare('PRAGMA table_info(tickets)').all().map((c) => c.name);
     if (!ticketCols10.includes('phase')) db.exec('ALTER TABLE tickets ADD COLUMN phase TEXT');
-    if (schemaVersion && Number(schemaVersion) < 10) {
-      const setPhase = db.prepare('UPDATE tickets SET phase = ?, state = ? WHERE id = ?');
-      for (const row of db.prepare("SELECT id, kind, state FROM tickets WHERE phase IS NULL OR phase = ''").all()) {
-        const phase = phaseFromLegacyState(row.kind, row.state);
-        const state = row.state === 'archived' ? 'archived' : canonicalStateForPhase(row.kind, phase);
-        setPhase.run(phase, state, row.id);
-      }
-    }
-    const setDefaultPhase = db.prepare('UPDATE tickets SET phase = ? WHERE id = ?');
-    for (const row of db.prepare("SELECT id, kind FROM tickets WHERE phase IS NULL OR phase = ''").all()) {
-      setDefaultPhase.run(initialPhaseForKind(row.kind), row.id);
-    }
 
     // Schema migration v10 -> v11 (GOL-313): external hook ingest is
     // idempotent by source event UUID. Existing tracker events remain null.
@@ -734,11 +731,11 @@ WHERE state_changed_at IS NULL`).run();
         INSERT INTO tickets
           (id, seq, project_id, kind, title, body, state, priority, labels,
            stream_id, parent_id, wave, assignee, created_by, dispatched_to,
-           dispatched_at, source_ref, created_at, updated_at, pseq, display_id, phase)
+           dispatched_at, source_ref, created_at, updated_at, pseq, display_id)
         VALUES
           (@id, @seq, @project_id, @kind, @title, @body, @state, @priority, @labels,
            @stream_id, @parent_id, @wave, @assignee, @created_by, @dispatched_to,
-           @dispatched_at, @source_ref, @created_at, @updated_at, @pseq, @display_id, @phase)
+           @dispatched_at, @source_ref, @created_at, @updated_at, @pseq, @display_id)
       `),
       getTicket: db.prepare('SELECT * FROM tickets WHERE id = ?'),
       getComments: db.prepare('SELECT * FROM comments WHERE ticket_id = ? ORDER BY created_at ASC, id ASC'),
@@ -1540,43 +1537,6 @@ WHERE state_changed_at IS NULL`).run();
       return stmts.getSessionLabel.get(session_id) ?? null;
     },
 
-    normalizePhase(kind, phase, context = 'ticket') {
-      const nextPhase = phase ?? initialPhaseForKind(kind);
-      if (!isKnownPhase(kind, nextPhase)) throw new Error(`${context}: invalid phase '${nextPhase}' for kind '${kind}'`);
-      return nextPhase;
-    },
-
-    validatePhaseTransition(ticket, toPhase, input = {}) {
-      const current = ticket.phase ?? phaseFromLegacyState(ticket.kind, ticket.state);
-      if (!legalNextPhases(ticket.kind, current).includes(toPhase)) {
-        throw new Error(`transitionTicket: illegal transition ${current} -> ${toPhase}`);
-      }
-      const comments = stmts.getComments.all(ticket.id);
-      const hasComment = (re) => comments.some((c) => re.test(String(c.body || '')));
-      const missing = [];
-      const req = requirementsForPhase(ticket.kind, toPhase);
-      if (req.reason && !String(input.reason || '').trim()) missing.push('reason');
-      if (req.closingBrief && !hasComment(/closing\s+brief/i) && !input.closingBrief) missing.push('closingBrief');
-      if (req.managerDispatch && !ticket.dispatched_to && !input.managerDispatch) missing.push('managerDispatch');
-      if (req.verificationReport && !hasComment(/verification|verify-done|smoke|test/i) && !input.verificationReport) missing.push('verificationReport');
-      if (req.verifiedOrSkipReason && current !== 'verified' && !String(input.skip_reason || input.reason || '').trim()) missing.push('verifiedOrSkipReason');
-      if (req.answerComment && comments.length === 0 && !input.answerComment) missing.push('answerComment');
-      if (req.decisionComment && !hasComment(/decision|decided/i) && !input.decisionComment) missing.push('decisionComment');
-      if (req.children || req.childrenTerminal || req.childStarted) {
-        const children = db.prepare('SELECT state FROM tickets WHERE parent_id = ?').all(ticket.id);
-        if (req.children && children.length === 0) missing.push('children');
-        if (req.childrenTerminal && children.some((c) => c.state !== 'done' && c.state !== 'archived')) missing.push('childrenTerminal');
-        if (req.childStarted && !children.some((c) => c.state !== 'todo')) missing.push('childStarted');
-      }
-      if (req.waves) {
-        const wave = db.prepare('SELECT COUNT(*) AS n FROM tickets WHERE parent_id = ? AND wave IS NOT NULL').get(ticket.id)?.n ?? 0;
-        if (!wave) missing.push('waves');
-      }
-      if (req.comment instanceof RegExp && !hasComment(req.comment)) missing.push('comment');
-      if (missing.length) throw new Error(`transitionTicket: missing required artifact(s): ${missing.join(', ')}`);
-      return { from: current, to: toPhase, missing: [] };
-    },
-
     createTicket(input = {}) {
       const {
         project_id,
@@ -1584,7 +1544,6 @@ WHERE state_changed_at IS NULL`).run();
         title,
         body = '',
         state = 'todo',
-        phase = null,
         priority = null,
         labels = [],
         stream_id = null,
@@ -1600,8 +1559,6 @@ WHERE state_changed_at IS NULL`).run();
       if (!KINDS.has(kind)) throw new Error(`createTicket: invalid kind '${kind}'`);
       if (!STATES.has(state)) throw new Error(`createTicket: invalid state '${state}'`);
       const normalizedWave = normalizeWave(wave, 'createTicket');
-      const nextPhase = api.normalizePhase(kind, phase ?? phaseFromLegacyState(kind, state), 'createTicket');
-      const nextState = state === 'archived' ? 'archived' : canonicalStateForPhase(kind, nextPhase);
 
       const ts = now();
       const bodyMd = toMarkdownBody(body);
@@ -1614,8 +1571,7 @@ WHERE state_changed_at IS NULL`).run();
           kind,
           title,
           body: bodyMd,
-          state: nextState,
-          phase: nextPhase,
+          state,
           priority,
           labels: serializeLabels(labels),
           stream_id,
@@ -1637,7 +1593,7 @@ WHERE state_changed_at IS NULL`).run();
           project_id,
           type: 'created',
           actor: created_by,
-          data: { kind, state: nextState, phase: nextPhase, title },
+          data: { kind, state, title },
         });
         return row;
       });
@@ -1663,7 +1619,7 @@ WHERE state_changed_at IS NULL`).run();
       // but populating children is cheap and any ticket can have them. Ordered
       // by created_at so the spec's work items appear in creation order.
       const children = db.prepare(
-        "SELECT id, display_id, title, body, kind, state, phase, assignee, wave FROM tickets WHERE parent_id = ? ORDER BY created_at ASC, id ASC"
+        "SELECT id, display_id, title, body, kind, state, assignee, wave FROM tickets WHERE parent_id = ? ORDER BY created_at ASC, id ASC"
       ).all(id).map((c) => ({
         ...c,
         assignee_label: resolveAssigneeLabel(c.assignee),
@@ -1811,7 +1767,7 @@ WHERE state_changed_at IS NULL`).run();
       }
       where.push("(title LIKE @q ESCAPE '\\' OR body LIKE @q ESCAPE '\\' OR display_id LIKE @q ESCAPE '\\')");
       const sql =
-        'SELECT id, title, kind, state, phase, body, updated_at, display_id FROM tickets ' +
+        'SELECT id, title, kind, state, body, updated_at, display_id FROM tickets ' +
         'WHERE ' + where.join(' AND ') + ' ' +
         'ORDER BY updated_at DESC LIMIT @limit';
       const rows = db.prepare(sql).all(params);
@@ -1840,7 +1796,6 @@ WHERE state_changed_at IS NULL`).run();
           title,
           kind: r.kind,
           state: r.state,
-          phase: r.phase,
           updated_at: r.updated_at,
           snippet,
           title_match: titleMatch,
@@ -1860,7 +1815,7 @@ WHERE state_changed_at IS NULL`).run();
       // not rewritable through the agent-facing tracker surface. That is a
       // guardrail against casual edits, not enforcement — anything with shell
       // access can reach this route directly.
-      const ALLOWED = ['title', 'body', 'kind', 'state', 'phase', 'priority', 'labels', 'stream_id', 'parent_id', 'wave', 'assignee', 'source_ref'];
+      const ALLOWED = ['title', 'body', 'kind', 'state', 'priority', 'labels', 'stream_id', 'parent_id', 'wave', 'assignee', 'source_ref'];
       const updates = {};
       for (const key of ALLOWED) {
         if (Object.prototype.hasOwnProperty.call(patch, key)) {
@@ -1881,18 +1836,6 @@ WHERE state_changed_at IS NULL`).run();
       }
       if ('wave' in updates) {
         updates.wave = normalizeWave(updates.wave, 'updateTicket');
-      }
-      if ('kind' in updates || 'state' in updates || 'phase' in updates) {
-        const nextKind = updates.kind ?? existing.kind;
-        const nextPhase = api.normalizePhase(
-          nextKind,
-          updates.phase ?? phaseFromLegacyState(nextKind, updates.state ?? existing.state),
-          'updateTicket'
-        );
-        updates.phase = nextPhase;
-        updates.state = (updates.state ?? existing.state) === 'archived'
-          ? 'archived'
-          : canonicalStateForPhase(nextKind, nextPhase);
       }
 
       const ts = now();
@@ -1926,23 +1869,18 @@ WHERE state_changed_at IS NULL`).run();
             project_id: existing.project_id,
             type: 'state_change',
             actor,
-            data: { from: existing.state, to: updates.state, from_phase: existing.phase, to_phase: updates.phase ?? existing.phase },
-          });
-          commentDispatch.markAddressedForTicketActivity(id, actor);
-        } else if ('phase' in updates && updates.phase !== existing.phase) {
-          recordEvent({
-            ticket_id: id,
-            project_id: existing.project_id,
-            type: 'phase_change',
-            actor,
-            data: { from: existing.phase, to: updates.phase, state: updates.state ?? existing.state },
+            data: { from: existing.state, to: updates.state },
           });
           commentDispatch.markAddressedForTicketActivity(id, actor);
         }
-        const terminalPhase = updates.phase ?? null;
-        if (['built', 'verified', 'rejected', 'done'].includes(terminalPhase) && actor && actor !== 'human') {
+        // GOL-150: an agent handing work back (review) or closing it (done) is
+        // what stamps dispatch completion. This used to key off the terminal
+        // phases (built/verified/rejected/done); those collapse onto exactly
+        // these two states.
+        const handedBackState = 'state' in updates && updates.state !== existing.state ? updates.state : null;
+        if (['review', 'done'].includes(handedBackState) && actor && actor !== 'human') {
           const completion = recordEvent({ ticket_id: id, project_id: existing.project_id, type: 'dispatch_completion_stamped', actor,
-            data: { phase: terminalPhase } });
+            data: { state: handedBackState } });
           db.prepare(`UPDATE message_envelopes SET completed_at = COALESCE(completed_at, @ts),
               completed_event_id = COALESCE(completed_event_id, @event_id)
             WHERE ticket_id = @ticket_id AND recipient_session_id = @actor
@@ -1962,14 +1900,6 @@ WHERE state_changed_at IS NULL`).run();
       return hydrateTicket(txn());
     },
 
-    transitionTicket(id, input = {}) {
-      const existing = stmts.getTicket.get(id);
-      if (!existing) throw new Error(`transitionTicket: ticket '${id}' not found`);
-      const toPhase = api.normalizePhase(existing.kind, input.phase, 'transitionTicket');
-      api.validatePhaseTransition(existing, toPhase, input);
-      return api.updateTicket(id, { phase: toPhase, actor: input.actor ?? 'human' });
-    },
-
     // TKT-0105: state + rank move in a single transaction. Used by the
     // /api/tickets/:id/move endpoint (drag-and-drop, archive drop, etc.).
     //   { state, before_id?, after_id?, actor? }
@@ -1986,8 +1916,7 @@ WHERE state_changed_at IS NULL`).run();
       const existing = stmts.getTicket.get(id);
       if (!existing) throw new Error(`moveTicket: ticket '${id}' not found`);
       if (!STATES.has(state)) throw new Error(`moveTicket: invalid state '${state}'`);
-      const nextPhase = api.normalizePhase(existing.kind, phaseFromLegacyState(existing.kind, state), 'moveTicket');
-      const nextState = state === 'archived' ? 'archived' : canonicalStateForPhase(existing.kind, nextPhase);
+      const nextState = state;
       const ts = now();
       const txn = db.transaction(() => {
         // Compute new rank based on neighbours within the target state.
@@ -2018,22 +1947,21 @@ WHERE state_changed_at IS NULL`).run();
         const setArchivedAt = state === 'archived' ? ', archived_at = @ts' : '';
         db.prepare(`UPDATE tickets SET
           state = @state,
-          phase = @phase,
           rank = @rank,
           state_changed_at = @ts,
           updated_at = @ts
           ${setDoneAt}
           ${setArchivedAt}
-        WHERE id = @id`).run({ state: nextState, phase: nextPhase, rank: newRank, ts, id });
+        WHERE id = @id`).run({ state: nextState, rank: newRank, ts, id });
         // Audit event for the state change. Rank-only moves within the
         // same state still record an event for traceability.
-        if (nextState !== existing.state || nextPhase !== existing.phase) {
+        if (nextState !== existing.state) {
           recordEvent({
             ticket_id: id,
             project_id: existing.project_id,
             type: 'state_change',
             actor,
-            data: { from: existing.state, to: nextState, from_phase: existing.phase, to_phase: nextPhase, before_id, after_id, new_rank: newRank },
+            data: { from: existing.state, to: nextState, before_id, after_id, new_rank: newRank },
           });
           commentDispatch.markAddressedForTicketActivity(id, actor);
         } else {
