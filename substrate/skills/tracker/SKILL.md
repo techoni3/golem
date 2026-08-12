@@ -7,7 +7,6 @@ description: Read when picking up a dispatched or assigned ticket, decomposing w
 
 The tracker is THE source of truth for work. The dashboard owns the SQLite DB; agents use MCP
 tracker tools or dashboard REST, never direct writes.
-
 Tickets store Markdown bodies and comments. Use the genre template that matches the kind:
 `work-item -> feature`, `fix -> bug`, `spec -> spec`, `decision -> decision`.
 
