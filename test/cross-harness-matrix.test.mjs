@@ -23,6 +23,14 @@ const project = path.join(temp, 'project');
 const hooks = path.join(temp, 'hooks');
 const channelEntrypoint = path.join(repo, 'mcp', 'channel', 'index.js');
 
+function linkPiTui(render) {
+  const piCli = fs.realpathSync(execFileSync('which', ['pi'], { encoding: 'utf8' }).trim());
+  const source = path.join(path.dirname(path.dirname(piCli)), 'node_modules', '@earendil-works', 'pi-tui');
+  const scope = path.join(render, 'node_modules', '@earendil-works');
+  fs.mkdirSync(scope, { recursive: true });
+  fs.symlinkSync(source, path.join(scope, 'pi-tui'), 'dir');
+}
+
 process.env.GOLEM_HOME = home;
 process.env.XDG_CONFIG_HOME = xdg;
 process.env.GOLEM_TRACKER_DB = dbPath;
@@ -150,7 +158,7 @@ async function createTicket(title) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       project_id: projectId,
-      kind: 'work-item',
+      kind: 'task',
       title,
       body: 'Cross-harness controlled delivery journey. Do not edit files or call external tools.',
       created_by: 'human',
@@ -405,6 +413,7 @@ try {
     cwd: repo, env: { ...process.env, GOLEM_HOME: home, XDG_CONFIG_HOME: xdg }, stdio: 'pipe',
   });
   const renderedPi = path.join(home, 'renders', 'pi');
+  linkPiTui(renderedPi);
   const executablePi = path.join(renderedPi, 'golem.mjs');
   fs.copyFileSync(path.join(renderedPi, 'golem.ts'), executablePi);
   const piExtension = (await import(`${pathToFileURL(executablePi).href}?gol130=${Date.now()}`)).default;

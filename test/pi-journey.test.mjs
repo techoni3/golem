@@ -37,6 +37,14 @@ function readJson(file, fallback = null) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
 }
 
+function linkPiTui(render) {
+  const piCli = fs.realpathSync(execFileSync('which', ['pi'], { encoding: 'utf8' }).trim());
+  const source = path.join(path.dirname(path.dirname(piCli)), 'node_modules', '@earendil-works', 'pi-tui');
+  const scope = path.join(render, 'node_modules', '@earendil-works');
+  fs.mkdirSync(scope, { recursive: true });
+  fs.symlinkSync(source, path.join(scope, 'pi-tui'), 'dir');
+}
+
 function createHarness(extension, sessionId, { reason = 'startup', previousSessionFile } = {}) {
   const handlers = new Map();
   const tools = new Map();
@@ -47,7 +55,31 @@ function createHarness(extension, sessionId, { reason = 'startup', previousSessi
   let shutdown = false;
   let name = 'pi-native-test';
   let nextPrompt = null;
+  let footer;
+  let renderRequests = 0;
+  let contextUsage = { tokens: 14_000, contextWindow: 1_000_000, percent: 1.4 };
   const models = new Map();
+  const entries = [{
+    type: 'message',
+    message: {
+      role: 'assistant',
+      usage: {
+        input: 2_200_000, output: 30_000, cacheRead: 9_700, cacheWrite: 0,
+        cost: { total: 0.066 },
+      },
+    },
+  }];
+  const tui = { requestRender() { renderRequests += 1; } };
+  const theme = {
+    fg(color, text) { return `\x1b[${color === 'accent' ? 36 : color === 'warning' ? 33 : color === 'error' ? 31 : 90}m${text}\x1b[0m`; },
+    bold(text) { return `\x1b[1m${text}\x1b[22m`; },
+  };
+  const footerData = {
+    getGitBranch: () => 'main',
+    getAvailableProviderCount: () => 2,
+    getExtensionStatuses: () => new Map(),
+    onBranchChange: () => () => {},
+  };
   const pi = {
     on(event, handler) {
       const list = handlers.get(event) || [];
@@ -57,21 +89,27 @@ function createHarness(extension, sessionId, { reason = 'startup', previousSessi
     registerTool(tool) { tools.set(tool.name, tool); },
     sendUserMessage(text) { sent.push(text); },
     async setModel(model) { await sleep(5); ctx.model = model; return true; },
+    getThinkingLevel: () => 'medium',
   };
   extension(pi);
   const ctx = {
     cwd: repo,
     mode: 'tui',
-    model: { provider: 'ollama', id: 'deepseek-v4-flash:0731-cloud' },
+    model: { provider: 'ollama', id: 'deepseek-v4-flash:0731-cloud', contextWindow: 1_000_000, reasoning: true },
     isIdle: () => idle,
     hasPendingMessages: () => pending,
     abort: () => { aborted = true; idle = true; },
     shutdown: () => { shutdown = true; },
+    getContextUsage: () => contextUsage,
+    ui: {
+      setFooter(factory) { footer = factory(tui, theme, footerData); },
+    },
     sessionManager: {
       getSessionId: () => sessionId,
       getSessionFile: () => path.join(temp, `${sessionId}.jsonl`),
       getSessionName: () => name,
       getLeafId: () => `leaf-${sent.length}`,
+      getEntries: () => entries,
     },
     modelRegistry: {
       find: (provider, model) => models.get(`${provider}/${model}`) ?? null,
@@ -102,9 +140,12 @@ function createHarness(extension, sessionId, { reason = 'startup', previousSessi
     setIdle(value) { idle = value; },
     setPending(value) { pending = value; },
     setName(value) { name = value; },
+    setContextUsage(value) { contextUsage = value; },
     addModel(model) { models.set(`${model.provider}/${model.id}`, model); },
     get aborted() { return aborted; },
     get shutdown() { return shutdown; },
+    get footer() { return footer; },
+    get renderRequests() { return renderRequests; },
     start: () => emit('session_start', { reason, previousSessionFile }),
   };
 }
@@ -152,6 +193,7 @@ async function main() {
   }
 
   const executable = path.join(render, 'golem.mjs');
+  linkPiTui(render);
   fs.copyFileSync(path.join(render, 'golem.ts'), executable);
   const extension = (await import(`${pathToFileURL(executable).href}?t=${Date.now()}`)).default;
   const { PiNativeAdapter } = await import(`${pathToFileURL(path.join(render, 'lib', 'pi-native-adapter.js')).href}?t=${Date.now()}`);
@@ -159,6 +201,37 @@ async function main() {
   const sessionId = 'pi-native-session';
   const harness = createHarness(extension, sessionId);
   await harness.start();
+  const stripAnsi = (value) => value.replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, '');
+  const footerLines = harness.footer.render(140).map(stripAnsi);
+  assert.match(footerLines[0], /^software\/golem \(main\) • pi-native-test$/, 'footer shortens cwd and follows it with branch and session name');
+  assert.doesNotMatch(footerLines[0], /Documents/, 'footer omits the full home-relative path');
+  assert.match(footerLines[1], /▏░{9} 1\.4% 14k\/1\.0M/, 'footer renders context as a fractional progress bar with used and total tokens');
+  assert.match(footerLines[1], /\(ollama\) deepseek-v4-flash:0731-cloud • medium$/, 'footer retains provider, model, and thinking level');
+  for (const width of [80, 90, 100]) {
+    const metrics = stripAnsi(harness.footer.render(width)[1]);
+    assert.match(metrics, /deepseek-v4-flash:0731-cloud • medium$/, `footer retains model and thinking at ${width} columns`);
+    assert.ok(metrics.length <= width, `footer metrics fit ${width} columns`);
+  }
+  const rendersBeforeRename = harness.renderRequests;
+  harness.setName('renamed-worker');
+  await harness.emit('session_info_changed', { name: 'renamed-worker' });
+  assert.ok(harness.renderRequests > rendersBeforeRename, 'session rename requests a footer rerender');
+  assert.match(stripAnsi(harness.footer.render(140)[0]), /• renamed-worker$/, 'footer reads the current session name on rerender');
+  assert.ok(harness.footer.render(24).every((line) => stripAnsi(line).length <= 24), 'footer truncates every line to narrow terminal width');
+  harness.ctx.cwd = path.join(temp, '软件', 'golem');
+  assert.equal(stripAnsi(harness.footer.render(10)[0]), '软件/gole…', 'footer truncation measures CJK path segments in terminal cells');
+  harness.ctx.cwd = path.join(temp, 'software', 'go\u0301lem');
+  assert.equal(stripAnsi(harness.footer.render(15)[0]), 'software/go\u0301lem…', 'footer truncation keeps combining graphemes intact');
+  harness.ctx.cwd = path.join(temp, 'software', '🇺');
+  assert.equal(stripAnsi(harness.footer.render(11)[0]), 'software/…', 'footer treats isolated regional indicators as two terminal cells');
+  harness.ctx.cwd = path.join(temp, 'software', 'กำ');
+  assert.equal(stripAnsi(harness.footer.render(11)[0]), 'software/…', 'footer accounts for Thai spacing vowels within a grapheme');
+  harness.ctx.cwd = repo;
+  for (const [percent, colorCode] of [[70, 33], [90, 33], [90.1, 31]]) {
+    harness.setContextUsage({ tokens: percent * 10_000, contextWindow: 1_000_000, percent });
+    assert.match(harness.footer.render(140)[1], new RegExp(`\\x1b\\[${colorCode}m`), `footer applies the expected context color at ${percent}%`);
+  }
+  harness.setContextUsage({ tokens: 14_000, contextWindow: 1_000_000, percent: 1.4 });
   assert.equal(harness.tools.has('ticket_get'), true, 'shipped Pi extension registers shared tracker tools');
   assert.equal(harness.tools.has('project_context'), true, 'shipped Pi extension registers project context');
   const discovered = await harness.emit('resources_discover', { cwd: repo, reason: 'startup' });
@@ -166,7 +239,9 @@ async function main() {
   const roleResult = await harness.tools.get('session_role').execute('tool-role', { role: 'builder' }, undefined, undefined, harness.ctx);
   assert.equal(roleResult.details.ok, true, roleResult.content[0].text);
   const prompt = await harness.emit('before_agent_start', { prompt: 'inspect role context', systemPrompt: 'Pi base prompt' });
-  assert.match(prompt.systemPrompt, /## Authority and scope/, 'Golem authority rules are injected without a Pi profile file');
+  const renderedInstructions = fs.readFileSync(path.join(render, 'instructions', 'AGENTS.md'), 'utf8');
+  const instructionsTitle = renderedInstructions.split('\n').find((line) => line.trim().length > 0).trim();
+  assert.ok(prompt.systemPrompt.includes(instructionsTitle), 'Golem instructions are injected without a Pi profile file');
   assert.match(prompt.systemPrompt, /Role: builder/, 'role truth is read at the safe turn boundary');
   assert.match(prompt.systemPrompt, /Recent commits:/, 'bounded shipped L4 context is injected');
   let lease = readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json')).leases.find((row) => row.canonical_id === sessionId);

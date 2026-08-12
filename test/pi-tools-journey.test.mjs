@@ -15,6 +15,13 @@ const trackerDb = path.join(temp, 'tracker.db');
 fs.mkdirSync(state, { recursive: true });
 
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+function linkPiTui(render) {
+  const piCli = fs.realpathSync(execFileSync('which', ['pi'], { encoding: 'utf8' }).trim());
+  const source = path.join(path.dirname(path.dirname(piCli)), 'node_modules', '@earendil-works', 'pi-tui');
+  const scope = path.join(render, 'node_modules', '@earendil-works');
+  fs.mkdirSync(scope, { recursive: true });
+  fs.symlinkSync(source, path.join(scope, 'pi-tui'), 'dir');
+}
 async function waitFor(predicate, message, timeoutMs = 15_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -89,6 +96,7 @@ try {
 
   execFileSync(process.execPath, [path.join(repo, 'cli/golem.js'), 'sync', '--target', 'pi'], { cwd: repo, env });
   const render = path.join(state, 'renders', 'pi');
+  linkPiTui(render);
   fs.copyFileSync(path.join(render, 'golem.ts'), path.join(render, 'golem.mjs'));
   const extension = (await import(`${pathToFileURL(path.join(render, 'golem.mjs')).href}?t=${Date.now()}`)).default;
   worker = harness(extension, 'pi-tools-worker');
@@ -109,15 +117,15 @@ try {
   assert.equal(commented.details.ok, true, commented.content[0].text);
   assert.equal(commented.details.result.author, 'pi-tools-worker', 'caller identity is injected by the adapter');
 
-  const transitioned = await worker.tools.get('ticket_transition').execute('transition-call', {
-    id: ticket.display_id, phase: 'building',
+  const transitioned = await worker.tools.get('ticket_update').execute('state-call', {
+    id: ticket.display_id, state: 'in_progress',
   }, undefined, undefined, worker.ctx);
   assert.equal(transitioned.details.ok, true, transitioned.content[0].text);
-  assert.equal(transitioned.details.result.phase, 'building');
+  assert.equal(transitioned.details.result.state, 'in_progress');
 
   const context = await worker.tools.get('project_context').execute('context-call', {}, undefined, undefined, worker.ctx);
   assert.equal(context.details.ok, true, context.content[0].text);
-  assert.match(context.content[0].text, /Role: builder/);
+  assert.match(context.content[0].text, /Recent commits:/, 'project context renders bounded repo context');
 
   const response = await worker.tools.get('respond').execute('respond-call', { text: 'Pi native response', kind: 'brief' }, undefined, undefined, worker.ctx);
   assert.equal(response.details.ok, true, response.content[0].text);
@@ -135,7 +143,7 @@ try {
   const prompt = await worker.emit('before_agent_start', { prompt: 'review next', systemPrompt: 'Pi base prompt' });
   assert.match(prompt.systemPrompt, /Role: reviewer/, 'dashboard role change applies at the next safe boundary');
 
-  for (const unsupported of ['lead', 'standalone']) {
+  for (const unsupported of ['lead']) {
     const rejected = await fetch(`${baseUrl}/api/sessions/pi-tools-worker/role`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role: unsupported }),
     });
