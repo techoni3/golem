@@ -111,7 +111,7 @@ try {
     return result.ticket || result;
   };
   const hostile = await create('Hostile markdown fixture', '# Safe heading\n\n<img src=x onerror="window.__xss=1">\n<script>window.__xss=2</script>\n\n```mermaid\ngraph TD; A-->B\n```');
-  const phaseTicket = await create('Phase control fixture', '# Phase control');
+  const stateTicket = await create('State control fixture', '# State control');
   const anchored = await create('Anchored comment fixture', '# Original\n\nAnchor sentence remains.');
   const dispatchable = await json(`/api/sessions/dispatchable?project=${encodeURIComponent(alphaId)}`);
   ok(!dispatchable.some((s) => s.session_id === 'stale-fixture-session'), 'stale session is not dispatchable');
@@ -127,7 +127,7 @@ try {
   const page = await chrome.browser.newPage({ viewport: { width: 1280, height: 800 } });
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.goto(`${base}/project/${encodeURIComponent(alphaUiId)}?ticket=${encodeURIComponent(phaseTicket.id)}`, { waitUntil: 'networkidle' });
+  await page.goto(`${base}/project/${encodeURIComponent(alphaUiId)}?ticket=${encodeURIComponent(stateTicket.id)}`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(500);
   if (errors.length) console.log('page errors', errors);
   await page.waitForSelector('[role="dialog"]');
@@ -147,8 +147,8 @@ try {
   const stateControl = page.locator('.td-prop').filter({ has: page.locator('.td-prop-label', { hasText: 'State' }) }).locator('.ps-trigger');
   await stateControl.click();
   await page.locator('.ps-option').filter({ hasText: 'in_progress' }).click();
-  await page.waitForFunction(async (id) => (await (await fetch(`/api/tickets/${id}`)).json()).phase === 'building', phaseTicket.id);
-  ok(true, 'phase update is driven through the exposed ticket state control');
+  await page.waitForFunction(async (id) => (await (await fetch(`/api/tickets/${id}`)).json()).state === 'in_progress', stateTicket.id);
+  ok(true, 'lifecycle update is driven through the exposed ticket state control');
   await page.goto(`${base}/project/${encodeURIComponent(alphaUiId)}?ticket=${encodeURIComponent(hostile.id)}`, { waitUntil: 'networkidle' });
   await page.waitForSelector('.drawer-ticket[role="dialog"]');
   ok(await page.locator('script').evaluateAll((nodes) => nodes.every((n) => !/window\.__xss/.test(n.textContent || ''))), 'hostile script is absent from rendered body');

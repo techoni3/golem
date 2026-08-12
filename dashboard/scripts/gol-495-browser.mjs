@@ -153,8 +153,8 @@ try {
     }),
   });
   const currentTicket = await createTicket('H1 current ticket', { assignee: 'ticket-owner' });
-  await json(`/api/tickets/${encodeURIComponent(currentTicket.id)}/transition`, {
-    method: 'POST', body: JSON.stringify({ phase: 'building', actor: 'gol-495-browser' }),
+  await json(`/api/tickets/${encodeURIComponent(currentTicket.id)}`, {
+    method: 'PATCH', body: JSON.stringify({ state: 'in_progress', actor: 'gol-495-browser' }),
   });
   const queuedTicket = await createTicket('H1 queued delivery');
   const queueResult = await json(`/api/tickets/${encodeURIComponent(queuedTicket.id)}/dispatch`, {
