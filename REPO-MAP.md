@@ -12,9 +12,11 @@
 - `test/` — journey tests.
 
 ## Key modules
-### `dashboard/server/` — `index.js`, `tracker-db.js`, `phase-machine.js`, `comment-dispatch.js`
-- Agents use HTTP/MCP, never direct DB writes. Phase is truth; `state` derives from it.
-- `planning → planned` needs children **and** waves — a single child still needs `wave: 1`.
+### `dashboard/server/` — `index.js`, `tracker-db.js`, `comment-dispatch.js`
+- Agents use HTTP/MCP, never direct DB writes. `state`
+  (`todo|in_progress|blocked|review|done|archived`) is the only ticket lifecycle for every kind —
+  phases were removed in GOL-150 (the `phase` column is dormant history). `wave` on children is
+  plain ordering metadata.
 - Dispatch is durable-first, rolled back to `undispatched` on an undelivered push. Active
   `session_notify` envelopes wake exact session ids; the event ledger is audit-only.
 - Ticket rows and retries share one typed lifecycle and total per-session order. Acceptance retains
