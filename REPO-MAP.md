@@ -15,8 +15,11 @@
 ### `dashboard/server/` — `index.js`, `tracker-db.js`, `comment-dispatch.js`
 - Agents use HTTP/MCP, never direct DB writes. `state`
   (`todo|in_progress|blocked|review|done|archived`) is the only ticket lifecycle for every kind —
-  phases were removed in GOL-150 (the `phase` column is dormant history). `wave` on children is
-  plain ordering metadata.
+  phases were removed in GOL-150 (the `phase` column is dormant history).
+- Three doc types: `spec` (living design doc), `task` (unit of work, the default), `doc`
+  (supporting page). GOL-151 remapped the old five (work-item/fix→task, decision/question→doc) and
+  retired streams and dependency waves — `parent_id` is the only grouping, sequencing is prose in
+  the spec body, and `stream_id`/`wave` are dormant columns.
 - Dispatch is durable-first, rolled back to `undispatched` on an undelivered push. Active
   `session_notify` envelopes wake exact session ids; the event ledger is audit-only.
 - Ticket rows and retries share one typed lifecycle and total per-session order. Acceptance retains
