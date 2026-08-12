@@ -1,49 +1,98 @@
 # Spec: <subject>
 
-## 1. Intent (raw thoughts, preserved)
+## 1. TLDR
 
-Capture the human's original goal and constraints in their own language; the owner may add brief
-orientation notes without deleting the raw thought.
+Five lines, always current: what this is and where it stands. Rewrite as the spec evolves — a
+reader should never have to reconstruct status from the sections below.
 
-## 2. Current behavior and constraints
+## 2. Intent
 
-What the grounded code and research say: relevant existing behavior, the constraints that shape
-the design, and anything that rules a direction out. Cite paths and sources.
+The distilled canonical why: the problem or desire, in a few sentences.
 
-## 3. Design
+<details>
+<summary>Raw thoughts (preserved verbatim)</summary>
 
-The chosen direction and its important trade-offs, in enough depth that a builder never
-reconstructs the design conversation. Record a rejected option only when its rejection explains
-an important choice.
+The human's original notes, in their own language. Never rewrite or tidy these.
 
-## 4. Decisions
+</details>
 
-Choices the human committed during the brainstorm. These are locked; reopen only with the human.
+## 3. Grounding
 
-| Decision | Why | Road not taken |
-|----------|-----|----------------|
-| <decision> | <reason> | <rejected alternative, when it explains the choice> |
+<details open>
+<summary>Load-bearing facts only — each with a source ref, each tied to a decision</summary>
 
-## 5. Scope and non-goals
+Only facts that change a decision. Three facts is a normal section; a system tour is a violation.
 
-What this spec delivers, and what it explicitly will not do so fan-out does not grow hidden
-scope.
+- <fact> (`path/file.js:123`) — feeds D<n>
+- <fact> (<link>) — feeds D<n>
 
-- In: <scope>
-- Out: <non-goal>
+</details>
 
-## 6. Acceptance
+## 4. Requirements
 
-Observable criteria that child work items inherit. A builder must be able to check each without
-re-interpreting intent.
+<details open>
+<summary>Goals / Qualities / Non-goals — all the whats</summary>
 
-- [ ] <observable behavior or outcome>
+**Goals**
 
-## 7. Open questions
+- <functional requirement, checkable>
 
-Unresolved questions for the human. Delete this section when none exist.
+**Qualities**
 
-- [ ] <question>
+- <only the non-functionals that matter here; delete when none>
+
+**Non-goals**
+
+- <explicit exclusions, so scope cannot grow silently>
+
+</details>
+
+## 5. Decisions
+
+<details open>
+<summary>Living register — an open question is an undecided decision</summary>
+
+Debate lives here; when decided, the entry collapses to call + why and the conclusion is written
+into Requirements or Design where it belongs. Reopen a decided entry only with the human.
+
+### D1 — <title> · open
+
+- Context: <what forces this decision>
+- Options: <the realistic options with trade-offs>
+- Recommendation: <yours, with the reason>
+
+### D2 — <title> · decided
+
+- Call: <what was decided>
+- Why: <the reason, one or two lines>
+
+</details>
+
+## 6. Design
+
+<details open>
+<summary>The hows — grounded, referencing decisions by id</summary>
+
+The chosen direction, contracts, data shapes, and touch points — deep enough that a builder never
+reconstructs the design conversation. Reference D<n> instead of re-arguing it.
+
+</details>
+
+## 7. Acceptance
+
+<details open>
+<summary>Agent-runnable end-to-end scenarios</summary>
+
+Each criterion is an executable scenario — an agent with a browser or simulator can run this
+section directly and drop the evidence as comments.
+
+- [ ] <open X, do Y, observe Z>
+
+</details>
+
+## Rollout
+
+Optional — delete unless migration or sequencing genuinely exists.
 
 > [!NOTE]
-> No fan-out section here. Child work items render below the spec body automatically.
+> Child tasks and supporting docs hang under this ticket via parent_id and render below the body.
