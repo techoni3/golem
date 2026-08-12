@@ -20,11 +20,16 @@ import { trackerDbPath } from '../../lib/golem-home.js';
 import { loadConfig } from '../../lib/golem-config.js';
 import { createCommentDispatchService, defaultDispatchStateForComment } from './comment-dispatch.js';
 
-const SCHEMA_VERSION = 17;
+const SCHEMA_VERSION = 18;
 
-const KINDS = new Set(['work-item', 'decision', 'spec', 'question', 'fix']);
+// GOL-151: three doc types. `task` is the default unit of work, `spec` is the
+// living design doc, `doc` is any supporting page (research, survey,
+// comparison) — no per-kind machinery, all three run on the same six states.
+const KINDS = new Set(['spec', 'task', 'doc']);
+const DEFAULT_KIND = 'task';
+// v17 kinds mapped onto the three that survive (one-shot, see migrate()).
+const KIND_REMAP = { 'work-item': 'task', fix: 'task', decision: 'doc', question: 'doc' };
 const STATES = new Set(['todo', 'in_progress', 'blocked', 'review', 'done', 'archived']);
-const STREAM_MODES = new Set(['sequential', 'parallel']);
 const LINK_TYPES = new Set(['blocks', 'relates', 'duplicates']);
 const COMMENT_TAGS = new Set(['confirmed', 'partial', 'disputed', 'fix', 'risk', 'question', 'note']);
 const EVENT_CLASSES = new Set(['tracker', 'lifecycle', 'activity', 'custom']);
@@ -66,14 +71,6 @@ function serializeLabels(labels) {
     return JSON.stringify(parsed.length ? parsed : []);
   }
   return JSON.stringify(Array.isArray(labels) ? labels : []);
-}
-
-function normalizeWave(value, context = 'wave') {
-  if (value == null) return null;
-  if (!Number.isInteger(value) || value < 1) {
-    throw new Error(`${context}: wave must be a positive integer or null`);
-  }
-  return value;
 }
 
 function normalizeEventClass(value) {
@@ -164,12 +161,13 @@ function toMarkdownBody(raw) {
 }
 
 // Hydrate a raw ticket row into a plain object with labels parsed to an array.
-// GOL-150: `phase` is a dormant column (kept for history, never read or
-// written by live code). It is stripped here so no API/tool consumer can
-// mistake it for lifecycle truth — `state` is the only lifecycle.
+// Dormant columns are stripped here so no API/tool consumer can mistake one for
+// live truth: `phase` (GOL-150 — `state` is the only lifecycle) and
+// `stream_id` / `wave` (GOL-151 — grouping is parent_id, ordering is prose).
+// The columns keep their historical values in SQLite; nothing serializes them.
 function hydrateTicket(row) {
   if (!row) return null;
-  const { phase: _dormantPhase, ...fields } = row;
+  const { phase: _phase, stream_id: _streamId, wave: _wave, ...fields } = row;
   return { ...fields, labels: parseLabels(row.labels) };
 }
 
@@ -194,7 +192,7 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
         id            TEXT PRIMARY KEY,
         seq           INTEGER NOT NULL,
         project_id    TEXT NOT NULL,
-        kind          TEXT NOT NULL DEFAULT 'work-item',
+        kind          TEXT NOT NULL DEFAULT 'task',
         title         TEXT NOT NULL,
         body          TEXT NOT NULL DEFAULT '',
         state         TEXT NOT NULL DEFAULT 'todo',
@@ -204,6 +202,9 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
         phase         TEXT,
         priority      TEXT,
         labels        TEXT NOT NULL DEFAULT '[]',
+        -- GOL-151: dormant. Streams and dependency waves are gone; children
+        -- are a flat list and sequencing is prose in the parent spec. Both
+        -- columns survive for history only.
         stream_id     TEXT,
         parent_id     TEXT,
         wave          INTEGER,
@@ -263,17 +264,6 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
       );
       CREATE INDEX IF NOT EXISTS idx_comment_dispatches_comment ON comment_dispatches(comment_id);
       CREATE INDEX IF NOT EXISTS idx_comment_dispatches_pending ON comment_dispatches(status) WHERE status IN ('pending','delivered');
-
-      CREATE TABLE IF NOT EXISTS streams (
-        id          TEXT PRIMARY KEY,
-        project_id  TEXT NOT NULL,
-        name        TEXT NOT NULL,
-        mode        TEXT NOT NULL DEFAULT 'parallel',
-        description TEXT NOT NULL DEFAULT '',
-        created_at  TEXT NOT NULL,
-        updated_at  TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_streams_project ON streams(project_id);
 
       CREATE TABLE IF NOT EXISTS links (
         from_ticket TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
@@ -584,24 +574,13 @@ WHERE state_changed_at IS NULL`).run();
       `).run();
     }
 
-    // Schema migration v7 -> v8 (TKT-0643): dependency-wave metadata for
-    // spec fan-out tickets. NULL means the ticket is not wave-managed.
+    // Schema migration v7 -> v8 (TKT-0643) added the `wave` column. GOL-151
+    // retired dependency waves: children are a flat list and sequencing is
+    // prose in the parent spec. The additive ALTER stays so a pre-v8 DB still
+    // matches the declared shape; the wave backfill is gone with the feature.
     const ticketCols8 = db.prepare("PRAGMA table_info(tickets)").all().map((c) => c.name);
     if (!ticketCols8.includes('wave')) {
       db.exec('ALTER TABLE tickets ADD COLUMN wave INTEGER');
-    }
-    if (schemaVersion && Number(schemaVersion) < 8) {
-      db.prepare(`
-        UPDATE tickets
-        SET wave = CASE
-          WHEN title LIKE '[W1]%' THEN 1
-          WHEN title LIKE '[W2]%' THEN 2
-          WHEN title LIKE '[W3]%' THEN 3
-          ELSE wave
-        END
-        WHERE parent_id = 'TKT-0638'
-          AND (title LIKE '[W1]%' OR title LIKE '[W2]%' OR title LIKE '[W3]%')
-      `).run();
     }
 
     // Schema migration v8 -> v9 (GOL-311): tracker events gain topic/class
@@ -713,6 +692,18 @@ WHERE state_changed_at IS NULL`).run();
       DROP TABLE IF EXISTS subscriptions;
     `);
 
+    // Schema migration v17 -> v18 (GOL-151): five ticket kinds collapse onto
+    // three doc types. Data-only and idempotent — it rewrites any row still
+    // carrying a retired kind, so a DB that skipped a release still lands on
+    // the three types. Counts are logged once per remapped kind.
+    const remapKind = db.prepare('UPDATE tickets SET kind = ? WHERE kind = ?');
+    const remapped = [];
+    for (const [from, to] of Object.entries(KIND_REMAP)) {
+      const changes = remapKind.run(to, from).changes;
+      if (changes) remapped.push(`${from}->${to}: ${changes}`);
+    }
+    if (remapped.length) console.log(`[tracker-db] GOL-151 kind remap — ${remapped.join(', ')}`);
+
     // Indexes that depend on lifecycle columns. Idempotent: no-op on fresh
     // DBs (CREATE TABLE above already created them), first-time-create on
     // existing DBs (where the ALTER TABLE above just added the columns).
@@ -730,11 +721,11 @@ WHERE state_changed_at IS NULL`).run();
       insertTicket: db.prepare(`
         INSERT INTO tickets
           (id, seq, project_id, kind, title, body, state, priority, labels,
-           stream_id, parent_id, wave, assignee, created_by, dispatched_to,
+           parent_id, assignee, created_by, dispatched_to,
            dispatched_at, source_ref, created_at, updated_at, pseq, display_id)
         VALUES
           (@id, @seq, @project_id, @kind, @title, @body, @state, @priority, @labels,
-           @stream_id, @parent_id, @wave, @assignee, @created_by, @dispatched_to,
+           @parent_id, @assignee, @created_by, @dispatched_to,
            @dispatched_at, @source_ref, @created_at, @updated_at, @pseq, @display_id)
       `),
       getTicket: db.prepare('SELECT * FROM tickets WHERE id = ?'),
@@ -748,12 +739,6 @@ WHERE state_changed_at IS NULL`).run();
             @tag, @status, @dispatch_state, @parent_id, @block_id, @created_at, @updated_at)
       `),
       touchTicket: db.prepare('UPDATE tickets SET updated_at = ? WHERE id = ?'),
-      insertStream: db.prepare(`
-        INSERT INTO streams (id, project_id, name, mode, description, created_at, updated_at)
-        VALUES (@id, @project_id, @name, @mode, @description, @created_at, @updated_at)
-      `),
-      getStream: db.prepare('SELECT * FROM streams WHERE id = ?'),
-      listStreams: db.prepare('SELECT * FROM streams WHERE project_id = ? ORDER BY created_at ASC, id ASC'),
       insertLink: db.prepare('INSERT OR IGNORE INTO links (from_ticket, to_ticket, type) VALUES (?, ?, ?)'),
       deleteLink: db.prepare('DELETE FROM links WHERE from_ticket = ? AND to_ticket = ? AND type = ?'),
       listLinks: db.prepare('SELECT * FROM links WHERE from_ticket = ? OR to_ticket = ? ORDER BY type ASC'),
@@ -1540,15 +1525,13 @@ WHERE state_changed_at IS NULL`).run();
     createTicket(input = {}) {
       const {
         project_id,
-        kind = 'work-item',
+        kind = DEFAULT_KIND,
         title,
         body = '',
         state = 'todo',
         priority = null,
         labels = [],
-        stream_id = null,
         parent_id = null,
-        wave = null,
         assignee = null,
         created_by = 'human',
         source_ref = null,
@@ -1558,7 +1541,6 @@ WHERE state_changed_at IS NULL`).run();
       if (!title) throw new Error('createTicket: title is required');
       if (!KINDS.has(kind)) throw new Error(`createTicket: invalid kind '${kind}'`);
       if (!STATES.has(state)) throw new Error(`createTicket: invalid state '${state}'`);
-      const normalizedWave = normalizeWave(wave, 'createTicket');
 
       const ts = now();
       const bodyMd = toMarkdownBody(body);
@@ -1574,9 +1556,7 @@ WHERE state_changed_at IS NULL`).run();
           state,
           priority,
           labels: serializeLabels(labels),
-          stream_id,
           parent_id,
-          wave: normalizedWave,
           assignee,
           created_by,
           dispatched_to: null,
@@ -1619,7 +1599,7 @@ WHERE state_changed_at IS NULL`).run();
       // but populating children is cheap and any ticket can have them. Ordered
       // by created_at so the spec's work items appear in creation order.
       const children = db.prepare(
-        "SELECT id, display_id, title, body, kind, state, assignee, wave FROM tickets WHERE parent_id = ? ORDER BY created_at ASC, id ASC"
+        "SELECT id, display_id, title, body, kind, state, assignee FROM tickets WHERE parent_id = ? ORDER BY created_at ASC, id ASC"
       ).all(id).map((c) => ({
         ...c,
         assignee_label: resolveAssigneeLabel(c.assignee),
@@ -1650,7 +1630,7 @@ WHERE state_changed_at IS NULL`).run();
     },
 
     listTickets(filter = {}) {
-      const { project_id, state, assignee, kind, exclude_kind, stream_id, parent_id, includeArchived } = filter;
+      const { project_id, state, assignee, kind, exclude_kind, parent_id, includeArchived } = filter;
       const where = [];
       const params = {};
       if (project_id != null) {
@@ -1675,10 +1655,6 @@ WHERE state_changed_at IS NULL`).run();
       if (exclude_kind != null) {
         where.push('t.kind != @exclude_kind');
         params.exclude_kind = exclude_kind;
-      }
-      if (stream_id != null) {
-        where.push('t.stream_id = @stream_id');
-        params.stream_id = stream_id;
       }
       // TKT-0284: parent_id filter — used by the drawer's children panel and
       // any future "show children of X" view.
@@ -1730,7 +1706,7 @@ WHERE state_changed_at IS NULL`).run();
     // Params:
     //   project_id — required (cross-project search is a later iteration).
     //   kind       — optional filter (specs page passes 'spec'; the later PM
-    //                iteration wants work-item search too).
+    //                iteration wants task search too).
     //   q          — required, ≥1 char (REST layer enforces ≥2).
     //   limit      — default 50, capped here for safety.
     //
@@ -1815,7 +1791,7 @@ WHERE state_changed_at IS NULL`).run();
       // not rewritable through the agent-facing tracker surface. That is a
       // guardrail against casual edits, not enforcement — anything with shell
       // access can reach this route directly.
-      const ALLOWED = ['title', 'body', 'kind', 'state', 'priority', 'labels', 'stream_id', 'parent_id', 'wave', 'assignee', 'source_ref'];
+      const ALLOWED = ['title', 'body', 'kind', 'state', 'priority', 'labels', 'parent_id', 'assignee', 'source_ref'];
       const updates = {};
       for (const key of ALLOWED) {
         if (Object.prototype.hasOwnProperty.call(patch, key)) {
@@ -1833,9 +1809,6 @@ WHERE state_changed_at IS NULL`).run();
       }
       if ('body' in updates) {
         updates.body = toMarkdownBody(updates.body);
-      }
-      if ('wave' in updates) {
-        updates.wave = normalizeWave(updates.wave, 'updateTicket');
       }
 
       const ts = now();
@@ -2278,7 +2251,7 @@ WHERE state_changed_at IS NULL`).run();
       return txn();
     },
 
-    // Busy and wave-held work can legitimately outlive the original TTL. A
+    // Busy or queued work can legitimately outlive the original TTL. A
     // typed endpoint still validates expiry strictly, so renew only the durable
     // pending envelope immediately before a new publish attempt and render that
     // same persisted expiry into the protocol metadata.
@@ -2631,29 +2604,6 @@ WHERE state_changed_at IS NULL`).run();
       return stmts.listPendingDispatches.all();
     },
 
-    waveGateForTicket(ticketId) {
-      const ticket = stmts.getTicket.get(ticketId);
-      if (!ticket) return { blocked: false, missing: true };
-      if (!ticket.parent_id || ticket.wave == null) {
-        return { blocked: false, ticket_id: ticket.id, parent_id: ticket.parent_id ?? null, wave: ticket.wave ?? null, min_open_wave: null };
-      }
-      const row = db.prepare(`
-        SELECT MIN(wave) AS min_open_wave
-        FROM tickets
-        WHERE parent_id = ?
-          AND wave IS NOT NULL
-          AND state NOT IN ('done', 'archived')
-      `).get(ticket.parent_id);
-      const minOpenWave = row?.min_open_wave ?? null;
-      return {
-        blocked: minOpenWave != null && ticket.wave > minOpenWave,
-        ticket_id: ticket.id,
-        parent_id: ticket.parent_id,
-        wave: ticket.wave,
-        min_open_wave: minOpenWave,
-      };
-    },
-
     listPendingDispatchesForSession(sessionId) {
       // TKT-0286: thin wrapper over the enriched listDispatchQueue so 0245's
       // REST (?session_id=) keeps working — rows now also carry ticket_title
@@ -2934,46 +2884,6 @@ WHERE state_changed_at IS NULL`).run();
         data: { comment_id },
       });
       return db.prepare('SELECT * FROM comments WHERE id = ?').get(comment_id);
-    },
-
-    createStream(input = {}) {
-      const { project_id, name, mode = 'parallel', description = '' } = input;
-      if (!project_id) throw new Error('createStream: project_id is required');
-      if (!name) throw new Error('createStream: name is required');
-      if (!STREAM_MODES.has(mode)) throw new Error(`createStream: invalid mode '${mode}'`);
-      const ts = now();
-      const row = { id: crypto.randomUUID(), project_id, name, mode, description, created_at: ts, updated_at: ts };
-      stmts.insertStream.run(row);
-      return row;
-    },
-
-    listStreams(project_id) {
-      return stmts.listStreams.all(project_id);
-    },
-
-    updateStream(id, patch = {}) {
-      const existing = stmts.getStream.get(id);
-      if (!existing) throw new Error(`updateStream: stream '${id}' not found`);
-      const ALLOWED = ['name', 'mode', 'description'];
-      const updates = {};
-      for (const key of ALLOWED) {
-        if (Object.prototype.hasOwnProperty.call(patch, key)) updates[key] = patch[key];
-      }
-      if ('mode' in updates && !STREAM_MODES.has(updates.mode)) {
-        throw new Error(`updateStream: invalid mode '${updates.mode}'`);
-      }
-      const ts = now();
-      if (Object.keys(updates).length) {
-        const setClause = Object.keys(updates).map((k) => `${k} = @${k}`).join(', ');
-        db.prepare(`UPDATE streams SET ${setClause}, updated_at = @updated_at WHERE id = @id`).run({
-          ...updates,
-          updated_at: ts,
-          id,
-        });
-      } else {
-        db.prepare('UPDATE streams SET updated_at = ? WHERE id = ?').run(ts, id);
-      }
-      return stmts.getStream.get(id);
     },
 
     addLink(from_ticket, to_ticket, type) {

@@ -122,9 +122,8 @@ function ticketSlug(title) {
 
 function workspaceBlock(ticket) {
   const id = ticket.display_id || ticket.id;
-  const kind = ticket.kind === 'fix' ? 'fix' : 'feat';
   const slug = ticketSlug(ticket.title);
-  const branch = `${kind}/${id.toLowerCase()}-${slug}`;
+  const branch = `feat/${id.toLowerCase()}-${slug}`;
   const dir = `.worktrees/${id}-${slug}/`;
   return [
     '',
@@ -169,7 +168,7 @@ function buildDispatchBrief(ticket, note, workspace, messageId = null, senderSes
     `You've been assigned tracker ticket ${id}: "${ticket.title}" (project ${ticket.project_id}, kind ${ticket.kind}).\n\n` +
     `${note ? note + '\n\n' : ''}` +
     `Load it with the golem tracker tools (ticket_get ${id}) to read the full body, acceptance criteria, and comment thread, then pick it up: move it to in_progress, do the work, comment progress, and move it to review/done when complete. ` +
-    `If you have blocking questions, create a question-kind ticket in this project assigned to 'human'.` +
+    `If something blocks you, comment the blocker on the ticket, move it to blocked, and notify the delegating session.` +
     (messageId ? `\n\nDispatch message_id: ${messageId}\nAcknowledge this dispatch first with ack({ kind: 'brief', summary: '<one sentence>', envelope_id: '${messageId}' }).` : ''),
     ...authenticatedReturnBlock(senderSessionId, id),
   ].join('\n');
@@ -192,13 +191,13 @@ function buildSpecBrief(ticket, note, workspace, messageId = null, senderSession
     ].filter((line) => line != null).join('\n')).join('\n\n')
     : 'No undispatched/dispatched comments.';
   const childSection = children.length
-    ? children.map((c) => `- ${c.display_id || c.id}: ${c.title} — ${c.state}${c.wave ? ` — W${c.wave}` : ''}`).join('\n')
-    : 'No child work items.';
+    ? children.map((c) => `- ${c.display_id || c.id}: ${c.title} — ${c.state}`).join('\n')
+    : 'No children.';
   const lines = [
     `You've been assigned spec ticket ${id}: "${ticket.title}" (project ${ticket.project_id}).`,
     '',
     note || null,
-    'This is a full-context spec dispatch. Re-read the spec, the active comment feedback, and child work-item summaries before proceeding.',
+    'This is a full-context spec dispatch. Re-read the spec, the active comment feedback, and the child summaries before proceeding.',
     '',
     `Spec: ${id}`,
     `State: ${ticket.state}`,
@@ -209,11 +208,11 @@ function buildSpecBrief(ticket, note, workspace, messageId = null, senderSession
     '## Active Comments',
     commentSection,
     '',
-    '## Child Work Items',
+    '## Children',
     childSection,
     '',
     `Load it with the golem tracker tools (ticket_get ${id}) to read the full body, comment thread, and links, then pick it up: move it to in_progress, do the work, comment progress, and move it to review/done when complete.`,
-    `If you have blocking questions, create a question-kind ticket in this project assigned to 'human'.`,
+    'If something blocks you, comment the blocker on the spec, move it to blocked, and notify the delegating session.',
     messageId ? `Dispatch message_id: ${messageId}\nAcknowledge this dispatch first with ack({ kind: 'brief', summary: '<one sentence>', envelope_id: '${messageId}' }).` : null,
     ...authenticatedReturnBlock(senderSessionId, id),
   ];
@@ -302,7 +301,7 @@ function specRetroBody(tracker, spec) {
   });
   return [
     '## What shipped',
-    shipped.length ? shipped.join('\n') : '- No child work items found.',
+    shipped.length ? shipped.join('\n') : '- No child tickets found.',
     '',
     '## Lessons',
     '- ',
@@ -539,13 +538,6 @@ async function main() {
     return requested;
   }
 
-  // WS2: all streams across every project (no all-streams helper on the DB,
-  // and discovered projects may lag behind tickets an agent just created — so
-  // read the table directly rather than iterating the projects list).
-  function listAllStreams() {
-    return tracker.raw().prepare('SELECT * FROM streams ORDER BY created_at ASC, id ASC').all();
-  }
-
   function resolveTicketRef(ref) {
     if (!ref) return null;
     return tracker.getTicket(ref) || tracker.getTicketByDisplayId(ref);
@@ -771,14 +763,12 @@ async function main() {
 
   // WS2: fold the tracker tables into every snapshot so a fresh client renders
   // the board immediately (no extra round-trip). v4 snapshot carries projects,
-  // native_sessions, channels, recent_milestones; the tracker DB adds tickets
-  // and streams.
+  // native_sessions, channels, recent_milestones; the tracker DB adds tickets.
   function trackerSnapshot() {
     return {
       // The client owns the archived visibility toggle/search. Include those
       // rows in the canonical snapshot so toggling never depends on a refetch.
       tickets: tracker.listTickets({ includeArchived: true }),
-      streams: listAllStreams(),
     };
   }
 
@@ -1125,7 +1115,6 @@ async function main() {
     // cheap WHERE additions, no new entity.
     if (q.excludeKind != null) filter.exclude_kind = q.excludeKind;
     if (q.parent != null) filter.parent_id = resolveTicketIdField(q.parent);
-    if (q.stream != null) filter.stream_id = q.stream;
     if (q.includeArchived != null) {
       filter.includeArchived = q.includeArchived === 'true' || q.includeArchived === true || q.includeArchived === '1';
     }
@@ -1162,9 +1151,7 @@ async function main() {
         body: b.body,
         priority: b.priority,
         labels: b.labels,
-        stream_id: b.stream_id,
         parent_id: resolveTicketIdField(b.parent_id),
-        wave: b.wave,
         assignee: b.assignee,
         created_by: b.created_by,
         source_ref: b.source_ref,
@@ -1538,7 +1525,7 @@ async function main() {
   // comments on a ticket using one shared batch_id and deliver one combined
   // brief. GOL-101: any ticket kind, not just specs — every human comment is
   // queued `undispatched` regardless of kind, so a spec-only dispatch left
-  // work-item feedback with no way out.
+  // task feedback with no way out.
   fastify.post('/api/tickets/:id/comments/batch-dispatch', async (req, reply) => {
     const ticketRef = resolveTicketRef(req.params.id);
     if (!ticketRef) return reply.code(404).send({ error: 'not_found' });
@@ -2016,42 +2003,8 @@ async function main() {
     }
   });
 
-  // GET /api/streams — streams for one project, or all if `project` omitted.
-  fastify.get('/api/streams', async (req) => {
-    const project = req.query?.project;
-    if (project != null) return tracker.listStreams(resolveProjectId(project));
-    return listAllStreams();
-  });
-
-  // POST /api/streams — create a stream. 400 on validation error.
-  fastify.post('/api/streams', async (req, reply) => {
-    const b = req.body ?? {};
-    try {
-      const stream = tracker.createStream({
-        project_id: b.project_id,
-        name: b.name,
-        mode: b.mode,
-        description: b.description,
-      });
-      broadcastWS({ type: 'stream-updated', stream });
-      return reply.code(201).send(stream);
-    } catch (err) {
-      return reply.code(400).send({ error: String(err?.message ?? err) });
-    }
-  });
-
-  // PATCH /api/streams/:id — update a stream. 404 if missing, 400 on invalid.
-  fastify.patch('/api/streams/:id', async (req, reply) => {
-    try {
-      const stream = tracker.updateStream(req.params.id, req.body ?? {});
-      broadcastWS({ type: 'stream-updated', stream });
-      return stream;
-    } catch (err) {
-      const msg = String(err?.message ?? err);
-      const code = /not found/i.test(msg) ? 404 : 400;
-      return reply.code(code).send({ error: msg });
-    }
-  });
+  // GOL-151: the /api/streams routes are gone with the streams concept.
+  // Grouping is parent_id (a spec and its children), nothing else.
 
   // GET /api/sessions/dispatchable — live native sessions in a project (alive,
   // matching the requested contract project_id). Channel presence is an

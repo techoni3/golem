@@ -62,7 +62,6 @@ export function initDispatchDrainer({
   // session_id → ts(ms) of the most recent successful delivery. Used by the
   // cooldown check so we never deliver twice to a session within 60s.
   const lastDeliveredAt = new Map();
-  const waveHoldLogged = new Set();
   const publishing = new Set();
   const publishingOwner = crypto.randomUUID();
   const ackOwner = crypto.randomUUID();
@@ -242,10 +241,6 @@ export function initDispatchDrainer({
       const olderQueue = (queueRowsBySession.get(retry.session_id) ?? []).find((row) => (
         row.envelope_id !== retry.envelope_id
         && compareDeliveryOrder(row, retry) < 0
-        && (() => {
-          try { return tracker.waveGateForTicket(row.ticket_id)?.blocked !== true; }
-          catch { return true; }
-        })()
       ));
       if (olderQueue) continue;
       queueBlockedByRetry.add(retry.session_id);
@@ -410,22 +405,11 @@ export function initDispatchDrainer({
       const s = byId.get(sessionId);
       const isTypedWorker = isTypedWorkerChannel(channelsBySession.get(sessionId));
 
-      const waveGate = (row) => {
-        try {
-          return tracker.waveGateForTicket(row.ticket_id);
-        } catch (err) {
-          console.error('[dispatch-drainer] wave gate check failed:', err);
-          return { blocked: false };
-        }
-      };
-
-      const isWaveHeld = (row) => waveGate(row)?.blocked === true;
-
       // Session unknown, dead, OR unreachable (channel MCP down — TKT-0369):
       // hold rows pending (60m expiry), never burn one on a push that can't land.
       if (!s || !s.alive || !channelIds.has(sessionId)) {
-        const oldest = rows.find((row) => !isWaveHeld(row));
-        if (!oldest) continue; // all rows are wave-held; do not expire them as offline.
+        const oldest = rows[0];
+        if (!oldest) continue;
         const createdMs = Date.parse(oldest.created_at);
         if (Number.isFinite(createdMs) && now - createdMs > OFFLINE_EXPIRY_MS) {
           try {
@@ -456,24 +440,9 @@ export function initDispatchDrainer({
       // the original bug. Both busy AND waiting hold.
       if (s.status !== 'idle') continue;
 
-      // Deliver FIRST wave-eligible pending row only (one per session per tick).
-      // Wave-held rows remain pending and do not block unrelated non-wave rows
-      // queued behind them for the same session.
-      let row = null;
-      for (const candidate of rows) {
-        const gate = waveGate(candidate);
-        if (!gate.blocked) { row = candidate; break; }
-        if (!waveHoldLogged.has(candidate.id)) {
-          waveHoldLogged.add(candidate.id);
-          chat.record(
-            'system',
-            'info',
-            `queued dispatch ${candidate.id.slice(0, 8)} for ${candidate.ticket_id} is wave-held (W${gate.wave}; open wave W${gate.min_open_wave})`,
-            { session_id: sessionId, ticket_id: candidate.ticket_id },
-          );
-          queueChanged = true;
-        }
-      }
+      // GOL-151: dependency waves are gone, so the queue is plain FIFO —
+      // deliver the oldest pending row only (one per session per tick).
+      const row = rows[0];
       if (!row) continue;
       const requiresPublishingLease = isTypedWorker;
       try {
@@ -547,8 +516,8 @@ export function initDispatchDrainer({
         if (assigned.revoked_session_id) {
           try { await pushBrief(`Dispatch revoked for ${assigned.display_id || assigned.id}: ${assigned.title || ''}\n\nReason: queued dispatch delivered to another session. Stand down unless you receive a new dispatch.`, assigned.revoked_session_id); } catch { /* best-effort */ }
         }
-        // A queued typed envelope may wait behind a busy turn or an earlier
-        // wave longer than its original TTL. Extend the durable source before
+        // A queued typed envelope may wait behind a busy turn longer than its
+        // original TTL. Extend the durable source before
         // rendering, so the endpoint receives exactly the expiry the tracker
         // now authorizes rather than a synthetic or stale timestamp.
         if (isTypedWorker && envelope) envelope = tracker.renewEnvelopeExpiry(envelope.id);
@@ -665,9 +634,6 @@ export function initDispatchDrainer({
 
         const delivered = tracker.getTicket(ticket.id);
         if (delivered) broadcastWS({ type: 'ticket-updated', ticket: delivered });
-        if (waveHoldLogged.delete(row.id)) {
-          chat.record('system', 'info', `wave hold released for ${ticket.id}; dispatch delivered to ${sessionId}`, { session_id: sessionId, ticket_id: ticket.id });
-        }
         queueChanged = true;
         lastDeliveredAt.set(sessionId, nowMs());
       } catch (err) {
