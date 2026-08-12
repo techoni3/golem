@@ -28,7 +28,6 @@ import { golemHome, legacyConfigDir, migratedHomeDir, trackerDbPath, renderDirFo
 import { projectIdFor } from '../lib/project-id.js';
 import { SESSION_ROLES, pushRoleBriefDirect, setSessionRole } from '../lib/session-role.js';
 import { updateProjectLsp } from '../lib/lsp.js';
-import { lintSubstrate, formatLintResult } from '../lib/substrate-lint.js';
 import * as compiler from '../lib/compiler/engine.js';
 import * as ccAdapter from '../lib/compiler/adapters/cc.js';
 import * as ocAdapter from '../lib/compiler/adapters/opencode.js';
@@ -1363,10 +1362,6 @@ async function cmdSync(args) {
     return cmdSyncCheckAll();
   }
 
-  const lint = lintSubstrate({ substrateRoot: substrateRoot() });
-  if (lint.warnings.length) err(formatLintResult({ warnings: lint.warnings }));
-  if (!lint.ok) fatal(1, formatLintResult(lint));
-
   if (projectArg) {
     if (target === 'cc-marketplace') fatal(2, '--project is not valid with cc-marketplace');
     return cmdSyncProject({ target, projectRoot: resolve(projectArg), checkOnly, force });
@@ -1512,12 +1507,6 @@ async function cmdSyncCheckAll({ quiet = false } = {}) {
   const say = quiet ? () => {} : log;
   if (!quiet) log('');
   say('golem sync --check --all');
-
-  const lint = lintSubstrate({ substrateRoot: substrateRoot() });
-  if (!quiet) log('');
-  say('substrate lint:');
-  for (const line of formatLintResult(lint).split('\n')) say(`  ${line}`);
-  drift = drift || !lint.ok;
 
   const ccOut = renderDirFor('cc');
   const cc = compiler.checkDrift({ target: 'cc', outDir: ccOut, items: planForTarget('cc') });
