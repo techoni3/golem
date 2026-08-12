@@ -156,7 +156,7 @@ try {
 
   // ── 3. Scratch ticket ────────────────────────────────────────────────────
   const ticket = await post('/tickets', {
-    project_id: PROJECT, kind: 'work-item', created_by: 'smoke',
+    project_id: PROJECT, kind: 'task', created_by: 'smoke',
     title: 'SMOKE-0245 scratch', body: 'Scratch ticket for the TKT-0245 async dispatch smoke.',
   });
   ticketId = ticket.id;

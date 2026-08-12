@@ -7,7 +7,7 @@
 //      named session without a channel still gets a persisted name.
 //   2. Rotating gear on actively-worked tickets — in_progress + busy live
 //      assignee → gear on the card; idle → gear gone; offline → gear gone.
-//   3. Color-coded kind pills — work-item/fix/question/spec/decision each get
+//   3. Color-coded kind pills — spec/task/doc each get
 //      a distinct hue on both the board card and the drawer header.
 //   4. Done column in reverse-chronological order — most recently done first.
 //   5. Agent proactiveness is plugin text only (no dashboard assertion here).
@@ -132,14 +132,14 @@ try {
   // is alive + named.
   assert.ok(fake.alive, 'fake session is alive (own pid)');
 
-  // ── 2. Create scratch tickets A (work-item), B (fix), C (question) ────────
-  ticketA = await post('/tickets', { project_id: PROJECT, kind: 'work-item', created_by: 'smoke', title: 'SMOKE-0266 A', body: 'Scratch A.' });
-  ticketB = await post('/tickets', { project_id: PROJECT, kind: 'fix', created_by: 'smoke', title: 'SMOKE-0266 B', body: 'Scratch B.' });
-  ticketC = await post('/tickets', { project_id: PROJECT, kind: 'question', created_by: 'smoke', title: 'SMOKE-0266 C', body: 'Scratch C.' });
+  // ── 2. Create scratch tickets A (task), B (spec), C (doc) ────────────
+  ticketA = await post('/tickets', { project_id: PROJECT, kind: 'task', created_by: 'smoke', title: 'SMOKE-0266 A', body: 'Scratch A.' });
+  ticketB = await post('/tickets', { project_id: PROJECT, kind: 'spec', created_by: 'smoke', title: 'SMOKE-0266 B', body: 'Scratch B.' });
+  ticketC = await post('/tickets', { project_id: PROJECT, kind: 'doc', created_by: 'smoke', title: 'SMOKE-0266 C', body: 'Scratch C.' });
   assert.ok(ticketA.id && ticketB.id && ticketC.id, 'created scratch tickets A, B, C');
-  assert.equal(ticketA.kind, 'work-item', 'A is work-item');
-  assert.equal(ticketB.kind, 'fix', 'B is fix');
-  assert.equal(ticketC.kind, 'question', 'C is question');
+  assert.equal(ticketA.kind, 'task', 'A is task');
+  assert.equal(ticketB.kind, 'spec', 'B is spec');
+  assert.equal(ticketC.kind, 'doc', 'C is doc');
 
   // ── 3. PATCH A: assignee = fake session, state = in_progress ──────────────
   // Wait ≤10s (the plan) — the session is already discovered, so assign now.
@@ -220,9 +220,9 @@ try {
   const kb = await page.evaluate(cardKindPillStyle(ticketB.id));
   const kc = await page.evaluate(cardKindPillStyle(ticketC.id));
   assert.ok(ka && kb && kc, 'all three board kind pills found');
-  assert.equal(ka.kind, 'work-item', 'A board pill data-kind=work-item');
-  assert.equal(kb.kind, 'fix', 'B board pill data-kind=fix');
-  assert.equal(kc.kind, 'question', 'C board pill data-kind=question');
+  assert.equal(ka.kind, 'task', 'A board pill data-kind=task');
+  assert.equal(kb.kind, 'spec', 'B board pill data-kind=spec');
+  assert.equal(kc.kind, 'doc', 'C board pill data-kind=doc');
   // Pairwise different color AND background.
   assert.notEqual(ka.color, kb.color, 'A vs B kind pill color differs');
   assert.notEqual(ka.color, kc.color, 'A vs C kind pill color differs');
@@ -237,7 +237,7 @@ try {
   await page.waitForSelector('.td-kind-pill', { timeout: 8000 });
   const da = await page.evaluate(drawerKindPillStyle());
   assert.ok(da, 'drawer .td-kind-pill found');
-  assert.equal(da.kind, 'work-item', 'drawer pill data-kind=work-item');
+  assert.equal(da.kind, 'task', 'drawer pill data-kind=task');
   assert.equal(da.color, ka.color, 'drawer A kind pill color matches board A');
   assert.equal(da.background, ka.background, 'drawer A kind pill background matches board A');
 

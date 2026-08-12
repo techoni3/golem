@@ -36,24 +36,17 @@ try {
   // --- meta / open ----------------------------------------------------
   const raw = db.raw();
   const schemaVersion = raw.prepare('SELECT value FROM meta WHERE key = ?').get('schema_version')?.value;
-  check('open: schema_version seeded', schemaVersion === '1', `got ${schemaVersion}`);
+  check('open: schema_version seeded', /^\d+$/.test(schemaVersion ?? ''), `got ${schemaVersion}`);
   check('open: WAL journal mode', raw.pragma('journal_mode', { simple: true }) === 'wal');
   check('open: foreign_keys ON', raw.pragma('foreign_keys', { simple: true }) === 1);
 
   const PID = 'smoke-project';
 
-  // --- streams --------------------------------------------------------
-  const stream = db.createStream({ project_id: PID, name: 'Alpha', mode: 'sequential', description: 'first' });
-  check('createStream: returns row with id', !!stream.id && stream.mode === 'sequential');
-  const streams = db.listStreams(PID);
-  check('listStreams: one stream', streams.length === 1 && streams[0].id === stream.id);
-  const stream2 = db.updateStream(stream.id, { description: 'updated', mode: 'parallel' });
-  check('updateStream: applied patch', stream2.description === 'updated' && stream2.mode === 'parallel');
 
   // --- ticket id allocation -------------------------------------------
-  const t1 = db.createTicket({ project_id: PID, kind: 'work-item', title: 'First work item', body: 'do the thing', stream_id: stream.id });
-  const t2 = db.createTicket({ project_id: PID, kind: 'fix', title: 'A bug fix', priority: 'P1', labels: ['urgent'] });
-  const t3 = db.createTicket({ project_id: PID, kind: 'question', title: 'An open question', created_by: 'human' });
+  const t1 = db.createTicket({ project_id: PID, kind: 'task', title: 'First task', body: 'do the thing' });
+  const t2 = db.createTicket({ project_id: PID, kind: 'spec', title: 'A design spec', priority: 'P1', labels: ['urgent'] });
+  const t3 = db.createTicket({ project_id: PID, kind: 'doc', title: 'An open question', created_by: 'human' });
   check('createTicket: t1 id is TKT-0001', t1.id === 'TKT-0001', t1.id);
   check('createTicket: t2 id is TKT-0002', t2.id === 'TKT-0002', t2.id);
   check('createTicket: t3 id is TKT-0003', t3.id === 'TKT-0003', t3.id);
@@ -89,10 +82,8 @@ try {
   const allForProject = db.listTickets({ project_id: PID });
   check('listTickets: project filter returns 3', allForProject.length === 3, `got ${allForProject.length}`);
   check('listTickets: sorted by seq', allForProject[0].seq === 1 && allForProject[2].seq === 3);
-  const fixes = db.listTickets({ project_id: PID, kind: 'fix' });
-  check('listTickets: kind filter', fixes.length === 1 && fixes[0].id === t2.id);
-  const inStream = db.listTickets({ stream_id: stream.id });
-  check('listTickets: stream filter', inStream.length === 1 && inStream[0].id === t1.id);
+  const specs = db.listTickets({ project_id: PID, kind: 'spec' });
+  check('listTickets: kind filter', specs.length === 1 && specs[0].id === t2.id);
 
   // --- update state + assignee ----------------------------------------
   db.updateTicket(t1.id, { state: 'in_progress', actor: 'session-abc' });

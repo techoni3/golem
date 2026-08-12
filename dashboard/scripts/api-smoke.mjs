@@ -102,20 +102,14 @@ async function run() {
 
   const PID = 'smoke-proj-abc123'; // a canonical-ish contract id
 
-  // --- streams --------------------------------------------------------
-  const mkStream = await jsend('POST', '/api/streams', { project_id: PID, name: 'Alpha', mode: 'sequential', description: 'first' });
-  check('POST /api/streams: 201 + id', mkStream.status === 201 && !!mkStream.body?.id, `status ${mkStream.status}`);
-  const streamId = mkStream.body?.id;
 
-  const badStream = await jsend('POST', '/api/streams', { name: 'no project' });
-  check('POST /api/streams: 400 on missing project_id', badStream.status === 400, `status ${badStream.status}`);
 
   // --- create tickets -------------------------------------------------
-  const mk1 = await jsend('POST', '/api/tickets', { project_id: PID, kind: 'work-item', title: 'First item', body: 'do it', stream_id: streamId });
-  check('POST /api/tickets: 201 + TKT id (with stream)', mk1.status === 201 && /^TKT-\d{4}$/.test(mk1.body?.id ?? ''), `status ${mk1.status} id ${mk1.body?.id}`);
+  const mk1 = await jsend('POST', '/api/tickets', { project_id: PID, kind: 'task', title: 'First item', body: 'do it' });
+  check('POST /api/tickets: 201 + TKT id', mk1.status === 201 && /^TKT-\d{4}$/.test(mk1.body?.id ?? ''), `status ${mk1.status} id ${mk1.body?.id}`);
   const t1 = mk1.body?.id;
 
-  const mk2 = await jsend('POST', '/api/tickets', { project_id: PID, kind: 'fix', title: 'A bug', priority: 'P1', labels: ['urgent'] });
+  const mk2 = await jsend('POST', '/api/tickets', { project_id: PID, kind: 'task', title: 'A bug', priority: 'P1', labels: ['urgent'] });
   check('POST /api/tickets: 201 second ticket', mk2.status === 201 && !!mk2.body?.id);
   check('POST /api/tickets: labels round-trip as array', Array.isArray(mk2.body?.labels) && mk2.body.labels[0] === 'urgent');
   const t2 = mk2.body?.id;
@@ -130,8 +124,6 @@ async function run() {
   check('GET /api/tickets?project: filtered to 2', Array.isArray(listProj.body) && listProj.body.length === 2, `got ${listProj.body?.length}`);
   const listFix = await jget(`/api/tickets?project=${PID}&kind=fix`);
   check('GET /api/tickets?kind=fix: filtered to 1', listFix.body?.length === 1 && listFix.body[0].id === t2);
-  const listStream = await jget(`/api/tickets?stream=${streamId}`);
-  check('GET /api/tickets?stream: filtered to 1', listStream.body?.length === 1 && listStream.body[0].id === t1);
   const listOtherProj = await jget('/api/tickets?project=nonexistent-xyz');
   check('GET /api/tickets?project=unknown: empty array (no 500)', Array.isArray(listOtherProj.body) && listOtherProj.body.length === 0);
 
@@ -169,13 +161,9 @@ async function run() {
   const unlink = await jsend('DELETE', `/api/tickets/${t1}/links`, { to_ticket: t2, type: 'blocks' });
   check('DELETE /api/tickets/:id/links: removed', unlink.status === 200 && unlink.body?.removed === 1, `status ${unlink.status}`);
 
-  // --- streams list + patch -------------------------------------------
-  const streamsForProj = await jget(`/api/streams?project=${PID}`);
-  check('GET /api/streams?project: one stream', Array.isArray(streamsForProj.body) && streamsForProj.body.length === 1);
-  const streamsAll = await jget('/api/streams');
-  check('GET /api/streams (no project): all streams', Array.isArray(streamsAll.body) && streamsAll.body.length >= 1);
-  const patchStream = await jsend('PATCH', `/api/streams/${streamId}`, { description: 'updated', mode: 'parallel' });
-  check('PATCH /api/streams/:id: applied', patchStream.status === 200 && patchStream.body?.description === 'updated' && patchStream.body?.mode === 'parallel', `status ${patchStream.status}`);
+  // GOL-151: streams are gone — the routes must 404.
+  const goneStreams = await jget('/api/streams');
+  check('GET /api/streams: 404 (retired)', goneStreams.status === 404, `status ${goneStreams.status}`);
 
   // --- dispatchable sessions (empty but must not 500) -----------------
   const disp = await jget(`/api/sessions/dispatchable?project=${PID}`);
@@ -219,7 +207,7 @@ async function run() {
   // --- snapshot folds tracker tables ----------------------------------
   const snap = await jget('/api/snapshot');
   check('GET /api/snapshot: tickets present', Array.isArray(snap.body?.tickets) && snap.body.tickets.length === 2, `tickets ${snap.body?.tickets?.length}`);
-  check('GET /api/snapshot: streams present', Array.isArray(snap.body?.streams) && snap.body.streams.length >= 1, `streams ${snap.body?.streams?.length}`);
+  check('GET /api/snapshot: no streams key (retired)', !('streams' in (snap.body ?? {})));
 
   // --- WS delta on mutation -------------------------------------------
   await new Promise((resolve) => {

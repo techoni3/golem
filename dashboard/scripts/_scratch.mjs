@@ -18,7 +18,7 @@ export async function createScratchTicket(fields = {}) {
     body: JSON.stringify({
       project_id: SMOKE_PROJECT,
       created_by: 'smoke',
-      kind: 'work-item',
+      kind: 'task',
       ...fields,
       title: `SMOKE-${fields.title ?? 'scratch'}`,
     }),

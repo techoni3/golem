@@ -84,7 +84,7 @@ try {
   await page.evaluate(() => { const c = document.querySelector('.drawer-ticket .drawer-close'); if (c) c.click(); });
 
   // ── 4. Part A journey: resolve a question ticket ──────────────────────────
-  const q = await createScratchTicket({ kind: 'question', title: '0519-resolve-q', body: 'A stale question.', assignee: 'human' });
+  const q = await createScratchTicket({ kind: 'doc', title: '0519-resolve-q', body: 'A stale question.', assignee: 'human' });
   created.push(q.id);
   await page.goto(`${ORIGIN}/tickets/${encodeURIComponent(q.id)}`, { waitUntil: 'networkidle' });
   await wait(800);

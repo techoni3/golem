@@ -20,7 +20,7 @@ const BODY = 'This is the comment body — it must survive status/tag/block_id P
 
 let ticketId = null, commentId = null;
 try {
-  ticketId = (await post('/tickets', { project_id: PROJECT, kind: 'work-item', created_by: 'smoke', title: 'SMOKE-0244 comment-patch', body: 'scratch' })).id;
+  ticketId = (await post('/tickets', { project_id: PROJECT, kind: 'task', created_by: 'smoke', title: 'SMOKE-0244 comment-patch', body: 'scratch' })).id;
   assert.ok(ticketId, 'created scratch ticket');
   const c = await post(`/tickets/${encodeURIComponent(ticketId)}/comments`, { author: 'smoke', body: BODY, tag: 'note' });
   commentId = c.id;

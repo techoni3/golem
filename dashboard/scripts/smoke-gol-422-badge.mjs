@@ -24,7 +24,7 @@ const child = spawn('node', [server], { env: { ...process.env, PORT: String(port
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 try {
   for (let i = 0; i < 100; i++) { try { if ((await fetch(`${base}/api/health`)).ok) break; } catch {} await wait(100); }
-  const created = await fetch(`${base}/api/tickets`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ project_id: 'badge-demo', kind: 'work-item', title: 'GOL-422 badge', body: '' }) }).then((r) => r.json());
+  const created = await fetch(`${base}/api/tickets`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ project_id: 'badge-demo', kind: 'task', title: 'GOL-422 badge', body: '' }) }).then((r) => r.json());
   const dispatched = await fetch(`${base}/api/tickets/${created.id}/dispatch`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session_id: 'badge-target' }) }).then((r) => r.json());
   const db = new Database(dbPath);
   db.prepare("UPDATE message_envelopes SET delivery_attempted_at = ?, delivery_opportunity_at = ?, escalation_envelope_id = ? WHERE id = ?")

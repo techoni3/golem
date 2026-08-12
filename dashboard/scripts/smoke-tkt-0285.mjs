@@ -62,7 +62,7 @@ page.on('pageerror', (e) => pageerrors.push(e.message));
 let ticketId = null;
 try {
   // ── Scratch ticket with a long body ──────────────────────────────────────
-  ticketId = (await post('/tickets', { project_id: PROJECT, kind: 'work-item', created_by: 'smoke', title: 'SMOKE-0285 sidebar', body: `# SMOKE-0285 scratch\n\n${LONG_BODY}` })).id;
+  ticketId = (await post('/tickets', { project_id: PROJECT, kind: 'task', created_by: 'smoke', title: 'SMOKE-0285 sidebar', body: `# SMOKE-0285 scratch\n\n${LONG_BODY}` })).id;
   assert.ok(ticketId, 'created scratch ticket');
 
   // ── 1. Page view: sidebar left of main, body centered within main ──────────

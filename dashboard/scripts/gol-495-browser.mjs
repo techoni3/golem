@@ -147,7 +147,7 @@ try {
       project_id: alphaId,
       title,
       body: '# Isolated H1 browser fixture',
-      kind: 'work-item',
+      kind: 'task',
       created_by: 'gol-495-browser',
       ...extra,
     }),

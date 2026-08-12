@@ -313,7 +313,7 @@ async function assertPayloadBudgetAndRefusal() {
   const db = new DatabaseSync(path.join(home, 'tracker.db'));
   db.exec('CREATE TABLE tickets (display_id TEXT, kind TEXT, title TEXT, project_id TEXT, state TEXT, done_at TEXT)');
   const ins = db.prepare('INSERT INTO tickets VALUES (?,?,?,?,?,?)');
-  // 'spec', not 'work-item': recent-closes lists spec closes only. A work-item
+  // 'spec', not 'task': recent-closes lists spec closes only. A task
   // fixture renders an empty section and the shed-order assertion below would
   // then be checking that nothing got dropped from nothing.
   for (let i = 0; i < 8; i += 1) ins.run(`GOL-${i}`, 'spec', `closed item ${i} ${'y'.repeat(60)}`, 'budget-fixture', 'done', '2026-07-30');

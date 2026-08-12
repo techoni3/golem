@@ -1,14 +1,14 @@
-// TKT-0339: specs are project-scoped. The Tracker serves both work items and
+// TKT-0339: specs are project-scoped. The Tracker serves both tasks and
 // specs (Work items | Specs toggle), specs are a sub-board in the project view,
 // every ticket shows a read-only Project field, and the standalone /specs page
 // is gone (redirected to /tracker?view=specs). Web-assets only — no restart.
 //
-// Journey (scratch spec w/ a unique body token + a scratch work-item in
+// Journey (scratch spec w/ a unique body token + a scratch task in
 // golem-1eba80; archive both in finally):
 //   1. /specs redirects to the tracker specs view (pathname /tracker, ?view=specs).
-//   2. Tracker default (work-items): work-item card visible, spec NOT.
-//   3. Toggle Specs → spec card visible under Draft, work-item gone; URL ?view=specs.
-//   4. Browser Back → work-items mode (work-item visible, spec gone).
+//   2. Tracker default (tasks): task card visible, spec NOT.
+//   3. Toggle Specs → spec card visible under Draft, task gone; URL ?view=specs.
+//   4. Browser Back → tasks mode (task visible, spec gone).
 //   5. Content search in specs mode (token → 1 flat result with <mark>).
 //   6. Project view: Specs collapsible section (count ≥ 1); expand → spec card;
 //      + New spec → composer with the project pre-set.
@@ -51,8 +51,8 @@ try {
   const registryId = proj.id;
 
   specId = (await post('/tickets', { project_id: PROJECT, kind: 'spec', created_by: 'smoke', title: 'SMOKE-0339 spec', body: SPEC_BODY })).id; created.push(specId);
-  workId = (await post('/tickets', { project_id: PROJECT, kind: 'work-item', created_by: 'smoke', title: 'SMOKE-0339 work item', body: 'A scratch work item.' })).id; created.push(workId);
-  assert.ok(specId && workId, 'created scratch spec + work-item');
+  workId = (await post('/tickets', { project_id: PROJECT, kind: 'task', created_by: 'smoke', title: 'SMOKE-0339 task', body: 'A scratch task.' })).id; created.push(workId);
+  assert.ok(specId && workId, 'created scratch spec + task');
 
   // ── 1. /specs redirects to the tracker specs view ─────────────────────────
   await page.goto(`${ORIGIN}/specs`, { waitUntil: 'networkidle' });
@@ -61,17 +61,17 @@ try {
   assert.equal(redir.pathname, '/tracker', `/specs redirected to /tracker (got ${redir.pathname})`);
   assert.ok(/view=specs/.test(redir.search), `redirect URL carries view=specs (got ${redir.search})`);
 
-  // ── 2. Tracker default (work-items): work-item visible, spec NOT ──────────
+  // ── 2. Tracker default (tasks): task visible, spec NOT ──────────
   await page.goto(`${ORIGIN}/tracker`, { waitUntil: 'networkidle' });
   await wait(600);
   let wi = await page.evaluate(({ w, s }) => ({
     workVisible: !!document.querySelector(`.ticket[data-ticket-id="${w}"]`),
     specVisible: !!document.querySelector(`.ticket[data-ticket-id="${s}"]`),
   }), { w: workId, s: specId });
-  assert.ok(wi.workVisible, 'work-item card visible on /tracker (work-items mode)');
-  assert.ok(!wi.specVisible, 'spec card NOT visible on /tracker (work-items mode excludes specs)');
+  assert.ok(wi.workVisible, 'task card visible on /tracker (tasks mode)');
+  assert.ok(!wi.specVisible, 'spec card NOT visible on /tracker (tasks mode excludes specs)');
 
-  // ── 3. Toggle Specs → spec card under Draft, work-item gone; URL ?view=specs ──
+  // ── 3. Toggle Specs → spec card under Draft, task gone; URL ?view=specs ──
   await page.evaluate(() => {
     const btn = Array.from(document.querySelectorAll('.tracker-view-btn')).find((b) => /Specs/.test(b.textContent));
     if (btn) btn.click();
@@ -84,18 +84,18 @@ try {
   }), { w: workId, s: specId });
   assert.ok(sp.specDraft, 'spec card visible under the Draft column in specs mode');
   assert.match(sp.draftHeader, /Draft/, `Draft column header (got "${sp.draftHeader}")`);
-  assert.ok(sp.workGone, 'work-item card NOT visible in specs mode');
+  assert.ok(sp.workGone, 'task card NOT visible in specs mode');
   let specsUrl = await page.evaluate(() => location.search);
   assert.ok(/view=specs/.test(specsUrl), `URL carries view=specs after the toggle (got ${specsUrl})`);
 
-  // ── 4. Browser Back → work-items mode ─────────────────────────────────────
+  // ── 4. Browser Back → tasks mode ─────────────────────────────────────
   await page.goBack();
   await wait(600);
   let back = await page.evaluate(({ w, s }) => ({
     workVisible: !!document.querySelector(`.ticket[data-ticket-id="${w}"]`),
     specGone: !document.querySelector(`.ticket[data-ticket-id="${s}"]`),
   }), { w: workId, s: specId });
-  assert.ok(back.workVisible, 'Back → work-item visible again (work-items mode)');
+  assert.ok(back.workVisible, 'Back → task visible again (tasks mode)');
   assert.ok(back.specGone, 'Back → spec card gone');
 
   // ── 5. Content search in tracker specs mode ───────────────────────────────

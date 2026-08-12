@@ -24,7 +24,7 @@ let ticketId = null;
 try {
   // ── Setup via REST: scratch ticket + one LONG + one SHORT comment ────────
   const ticket = await post('/tickets', {
-    project_id: PROJECT, kind: 'work-item', created_by: 'smoke',
+    project_id: PROJECT, kind: 'task', created_by: 'smoke',
     title: 'SMOKE-0237 scratch',
     body: 'Scratch ticket for the TKT-0237 collapsible-comments smoke.\n\nA couple of paragraphs so the body renders.',
   });

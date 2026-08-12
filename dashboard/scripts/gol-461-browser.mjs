@@ -107,7 +107,7 @@ try {
   const betaUiId = projectRows.find((p) => p.project_id === betaId)?.id;
   ok(alphaUiId && betaUiId, 'isolated projects are discovered with canonical contract ids');
   const create = async (title, body) => {
-    const result = await json('/api/tickets', { method: 'POST', body: JSON.stringify({ project_id: alphaId, title, body, kind: 'work-item', created_by: 'browser-fixture' }) });
+    const result = await json('/api/tickets', { method: 'POST', body: JSON.stringify({ project_id: alphaId, title, body, kind: 'task', created_by: 'browser-fixture' }) });
     return result.ticket || result;
   };
   const hostile = await create('Hostile markdown fixture', '# Safe heading\n\n<img src=x onerror="window.__xss=1">\n<script>window.__xss=2</script>\n\n```mermaid\ngraph TD; A-->B\n```');

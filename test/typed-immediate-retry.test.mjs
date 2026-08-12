@@ -231,7 +231,7 @@ try {
   const created = await fetch(`${dashboard.baseUrl}/api/tickets`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      project_id: 'typed-immediate-000000', kind: 'work-item',
+      project_id: 'typed-immediate-000000', kind: 'task',
       title: 'typed immediate lost response', body: 'controlled production journey', created_by: 'human',
     }),
   });
@@ -317,7 +317,7 @@ try {
   await restartDashboardForIndependentRetry();
 
   const commentTicket = await postJson(dashboard.baseUrl, '/api/tickets', {
-    project_id: 'typed-immediate-000000', kind: 'work-item', title: 'typed comment retry', body: 'controlled', created_by: 'human',
+    project_id: 'typed-immediate-000000', kind: 'task', title: 'typed comment retry', body: 'controlled', created_by: 'human',
   });
   assert.equal(commentTicket.response.status, 201, commentTicket.text);
   const createdComment = await postJson(dashboard.baseUrl, `/api/tickets/${encodeURIComponent(commentTicket.json.id)}/comments`, {
@@ -403,7 +403,7 @@ try {
   hangingResponse = false;
   hangNextResponse = true;
   const crashTicket = await postJson(dashboard.baseUrl, '/api/tickets', {
-    project_id: 'typed-immediate-000000', kind: 'work-item', title: 'typed immediate ticket crash window', body: 'controlled', created_by: 'human',
+    project_id: 'typed-immediate-000000', kind: 'task', title: 'typed immediate ticket crash window', body: 'controlled', created_by: 'human',
   });
   assert.equal(crashTicket.response.status, 201, crashTicket.text);
   const crashRequest = fetch(`${dashboard.baseUrl}/api/tickets/${encodeURIComponent(crashTicket.json.id)}/dispatch`, {
@@ -456,7 +456,7 @@ try {
   const requestsBeforeQueuedCrash = endpointRequests;
   releaseEndpointLeases(ownerToken, { canonicalId });
   const queuedCrashTicket = await postJson(dashboard.baseUrl, '/api/tickets', {
-    project_id: 'typed-immediate-000000', kind: 'work-item', title: 'typed queued ticket crash window', body: 'controlled', created_by: 'human',
+    project_id: 'typed-immediate-000000', kind: 'task', title: 'typed queued ticket crash window', body: 'controlled', created_by: 'human',
   });
   assert.equal(queuedCrashTicket.response.status, 201, queuedCrashTicket.text);
   const queuedCrashDispatch = await postJson(
@@ -516,7 +516,7 @@ try {
   // response is lost, then allow only the older retry to settle.
   await restartDashboardForIndependentRetry();
   const exactCommentTicket = await postJson(dashboard.baseUrl, '/api/tickets', {
-    project_id: 'typed-immediate-000000', kind: 'work-item', title: 'typed exact comment settlement', body: 'controlled', created_by: 'human',
+    project_id: 'typed-immediate-000000', kind: 'task', title: 'typed exact comment settlement', body: 'controlled', created_by: 'human',
   });
   assert.equal(exactCommentTicket.response.status, 201, exactCommentTicket.text);
   const olderComment = await postJson(dashboard.baseUrl, `/api/tickets/${encodeURIComponent(exactCommentTicket.json.id)}/comments`, {

@@ -42,7 +42,7 @@ async function waitForServer() {
 async function createTicket(title) {
   return request('/api/tickets', {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ project_id: 'health-demo', kind: 'work-item', title, body: '', created_by: 'smoke' }),
+    body: JSON.stringify({ project_id: 'health-demo', kind: 'task', title, body: '', created_by: 'smoke' }),
   });
 }
 async function expectBadRequest(pathname) {

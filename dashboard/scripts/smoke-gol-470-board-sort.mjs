@@ -87,7 +87,7 @@ try {
   await waitForHealth();
 
   const fixtures = { work: new Map(), spec: new Map() };
-  for (const [fixtureName, kind] of [['work', 'work-item'], ['spec', 'spec']]) {
+  for (const [fixtureName, kind] of [['work', 'task'], ['spec', 'spec']]) {
     for (const state of STATES) {
       const olderCreated = await createScratchTicket({
         kind,

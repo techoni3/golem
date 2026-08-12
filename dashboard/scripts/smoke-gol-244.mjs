@@ -44,7 +44,7 @@ async function main() {
   try {
     const work = await request('POST', '/api/tickets', {
       project_id: PROJECT,
-      kind: 'work-item',
+      kind: 'task',
       title: `GOL-244 smoke work ${stamp}`,
       body: 'REST display-id route smoke.',
       created_by: 'smoke:gol-244',
@@ -87,7 +87,7 @@ async function main() {
 
     const linked = await request('POST', '/api/tickets', {
       project_id: PROJECT,
-      kind: 'fix',
+      kind: 'task',
       title: `GOL-244 smoke linked ${stamp}`,
       body: 'linked REST display-id route smoke.',
       created_by: 'smoke:gol-244',

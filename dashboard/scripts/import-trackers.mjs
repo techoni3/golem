@@ -49,15 +49,15 @@ const STATE_MAP = {
 
 // Old category → new kind.
 const KIND_MAP = {
-  feature: 'work-item',
-  fix: 'fix',
-  infra: 'work-item',
+  feature: 'task',
+  fix: 'task',
+  infra: 'task',
   docs: 'spec',
   spike: 'spec',
 };
 function kindForCategory(category) {
-  if (!category) return 'work-item';
-  return KIND_MAP[String(category).toLowerCase()] ?? 'work-item';
+  if (!category) return 'task';
+  return KIND_MAP[String(category).toLowerCase()] ?? 'task';
 }
 
 function parseArgs(argv) {

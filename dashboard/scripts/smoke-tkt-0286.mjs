@@ -119,9 +119,9 @@ try {
   appendFakeChannel(channelPort);
 
   // ── 2. Scratch tickets A + B (queued) + C (plain, never dispatched) ─────
-  ticketA = (await post('/tickets', { project_id: PROJECT, kind: 'work-item', created_by: 'smoke', title: 'SMOKE-0286 A', body: 'First scratch ticket for the dispatch-queue smoke.' })).id; created.push(ticketA);
-  ticketB = (await post('/tickets', { project_id: PROJECT, kind: 'work-item', created_by: 'smoke', title: 'SMOKE-0286 B', body: 'Second scratch ticket for the dispatch-queue smoke.' })).id; created.push(ticketB);
-  ticketC = (await post('/tickets', { project_id: PROJECT, kind: 'work-item', created_by: 'smoke', title: 'SMOKE-0286 C plain', body: 'Plain — never dispatched.' })).id; created.push(ticketC);
+  ticketA = (await post('/tickets', { project_id: PROJECT, kind: 'task', created_by: 'smoke', title: 'SMOKE-0286 A', body: 'First scratch ticket for the dispatch-queue smoke.' })).id; created.push(ticketA);
+  ticketB = (await post('/tickets', { project_id: PROJECT, kind: 'task', created_by: 'smoke', title: 'SMOKE-0286 B', body: 'Second scratch ticket for the dispatch-queue smoke.' })).id; created.push(ticketB);
+  ticketC = (await post('/tickets', { project_id: PROJECT, kind: 'task', created_by: 'smoke', title: 'SMOKE-0286 C plain', body: 'Plain — never dispatched.' })).id; created.push(ticketC);
   assert.ok(ticketA && ticketB && ticketC, 'created scratch tickets A + B + C');
 
   // ── 3. Poll dispatchable until the fake session appears busy ─────────────

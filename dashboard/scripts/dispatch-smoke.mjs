@@ -106,7 +106,7 @@ async function run() {
   const SESSION = 'bogus-session-not-registered';
 
   // --- create a ticket to dispatch ------------------------------------
-  const mk = await jsend('POST', '/api/tickets', { project_id: PID, kind: 'work-item', title: 'Wire the widget', body: 'do the thing' });
+  const mk = await jsend('POST', '/api/tickets', { project_id: PID, kind: 'task', title: 'Wire the widget', body: 'do the thing' });
   check('POST /api/tickets: 201 + TKT id', mk.status === 201 && /^TKT-\d{4}$/.test(mk.body?.id ?? ''), `status ${mk.status} id ${mk.body?.id}`);
   const tid = mk.body?.id;
 
@@ -143,7 +143,7 @@ async function run() {
 
   // A target with no live session/channel must remain queued, with a durable
   // envelope linked from the nullable queue column (legacy rows may still be null).
-  const queuedTicket = await jsend('POST', '/api/tickets', { project_id: PID, kind: 'work-item', title: 'Queue the widget' });
+  const queuedTicket = await jsend('POST', '/api/tickets', { project_id: PID, kind: 'task', title: 'Queue the widget' });
   const queued = await jsend('POST', `/api/tickets/${queuedTicket.body?.id}/dispatch`, { session_id: 'offline-queued-session', mode: 'when_idle', sender_id: 'sender-session' });
   check('when_idle: truthful queued:true + delivered:false', queued.status === 200 && queued.body?.queued === true && queued.body?.delivered === false, JSON.stringify(queued.body));
   const queuedRows = await jget('/api/dispatch-queue?status=pending');

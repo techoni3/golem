@@ -135,7 +135,7 @@ try {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       project_id: first.project_id,
-      kind: 'work-item',
+      kind: 'task',
       title: 'GOL-474 real App Server delivery journey',
       body: 'The managed Codex supervisor must receive this through a durable tracker envelope.',
       created_by: 'human',
@@ -290,7 +290,7 @@ try {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       project_id: first.project_id,
-      kind: 'work-item',
+      kind: 'task',
       title: 'GOL-474 accepted process crash journey',
       body: 'Crash after native acceptance must become recovery-required.',
       created_by: 'human',

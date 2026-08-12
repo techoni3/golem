@@ -57,7 +57,7 @@ try {
   const created = await fetch(`${base}/api/tickets`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ project_id: projectId, title: 'Theme persistence journey', body: '# Loam & Linen\n\nA production surface.', kind: 'work-item', created_by: 'browser-fixture' }),
+    body: JSON.stringify({ project_id: projectId, title: 'Theme persistence journey', body: '# Loam & Linen\n\nA production surface.', kind: 'task', created_by: 'browser-fixture' }),
   });
   ok(created.ok, 'tracker fixture is created through the real API');
 

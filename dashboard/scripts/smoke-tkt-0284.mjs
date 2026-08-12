@@ -1,15 +1,15 @@
 // TKT-0284: specs management v1 — specs board (separation by view), content
-// search, spec→work-item children. Journey smoke: REST-creates a scratch spec
-// (with a unique body token) + two work-items parented to it + one plain work-
+// search, spec→task children. Journey smoke: REST-creates a scratch spec
+// (with a unique body token) + two tasks parented to it + one plain work-
 // item, then drives the UI headlessly to verify:
 //   1. separation — scratch spec on /specs Draft, NOT on /tracker
-//      (work-items); plain work-item on /tracker, NOT on the specs view.
+//      (tasks); plain task on /tracker, NOT on the specs view.
 //   2. bounded board — overflowing spec columns scroll independently.
 //   3. column relabel — PATCH spec → in_progress → card under "Refining".
 //   4. content search — token → flat list with <mark> snippet; click → drawer;
 //      clear → board; gibberish → empty state.
 //   5. spec drawer Work-items panel — both children listed; + Work item opens
-//      the composer with Kind=work-item; clicking a child navigates.
+//      the composer with Kind=task; clicking a child navigates.
 //   6. + New spec → composer with Kind=spec.
 //   7. API contract — /api/tickets/search returns 1 row with snippet+offsets;
 //      /api/tickets?excludeKind=spec has no spec rows.
@@ -73,13 +73,13 @@ try {
   const specRes = await post('/tickets', { project_id: PROJECT, kind: 'spec', created_by: 'smoke', title: 'SMOKE-0284 scratch spec', body: SPEC_BODY });
   specId = specRes.id;
   created.push(specId);
-  const childARes = await post('/tickets', { project_id: PROJECT, kind: 'work-item', created_by: 'smoke', title: 'SMOKE-0284 child A', parent_id: specId, body: 'First work item under the scratch spec.' }); childA = childARes.id;
+  const childARes = await post('/tickets', { project_id: PROJECT, kind: 'task', created_by: 'smoke', title: 'SMOKE-0284 child A', parent_id: specId, body: 'First task under the scratch spec.' }); childA = childARes.id;
   childADisplay = childARes.display_id || childA;
   created.push(childA);
-  const childBRes = await post('/tickets', { project_id: PROJECT, kind: 'work-item', created_by: 'smoke', title: 'SMOKE-0284 child B', parent_id: specId, body: 'Second work item under the scratch spec.' }); childB = childBRes.id;
+  const childBRes = await post('/tickets', { project_id: PROJECT, kind: 'task', created_by: 'smoke', title: 'SMOKE-0284 child B', parent_id: specId, body: 'Second task under the scratch spec.' }); childB = childBRes.id;
   childBDisplay = childBRes.display_id || childB;
   created.push(childB);
-  plain = (await post('/tickets', { project_id: PROJECT, kind: 'work-item', created_by: 'smoke', title: 'SMOKE-0284 plain work item', body: 'A plain work item with no parent.' })).id;
+  plain = (await post('/tickets', { project_id: PROJECT, kind: 'task', created_by: 'smoke', title: 'SMOKE-0284 plain task', body: 'A plain task with no parent.' })).id;
   created.push(plain);
   assert.ok(specId && childA && childB && plain, 'created scratch spec + 2 children + 1 plain');
 
@@ -152,7 +152,7 @@ try {
     plainOnTracker: !!document.querySelector(`.ticket[data-ticket-id="${pid}"]`),
   }), { id: specId, pid: plain });
   assert.ok(!trk.specOnTracker, 'scratch spec is NOT on /tracker (excluded by exclude_kind=spec)');
-  assert.ok(trk.plainOnTracker, 'plain work-item IS on /tracker');
+  assert.ok(trk.plainOnTracker, 'plain task IS on /tracker');
 
   // ── 2. Column relabel: PATCH spec → in_progress → "Refining" ───────────────
   await patch(`/tickets/${encodeURIComponent(specId)}`, { state: 'in_progress', actor: 'smoke' });
@@ -234,11 +234,11 @@ try {
   assert.deepEqual(panel.ids.sort(), [childADisplay, childBDisplay].sort(), `child ids match (got ${panel.ids.join(', ')})`);
   assert.ok(panel.pills.every(Boolean), 'each child row has a state pill');
 
-  // + Work item → composer with Kind=work-item
+  // + Work item → composer with Kind=task
   await page.evaluate(() => document.querySelector('.td-children-add')?.click());
   await wait(600);
   let composerKind = await page.evaluate(ctFieldSelectValue('Type'));
-  assert.equal(composerKind, 'work-item', `+ Work item opens composer with Kind=work-item (got ${composerKind})`);
+  assert.equal(composerKind, 'task', `+ Work item opens composer with Kind=task (got ${composerKind})`);
   await page.evaluate(() => document.querySelector('.drawer-compose .drawer-close')?.click());
   await wait(500);
 
@@ -276,7 +276,7 @@ try {
   let listApi = await get(`/tickets?project=${PROJECT}&excludeKind=spec`);
   assert.ok(Array.isArray(listApi), 'excludeKind list is an array');
   assert.ok(listApi.every((t) => t.kind !== 'spec'), 'no spec-kind rows in excludeKind=spec list');
-  assert.ok(listApi.some((t) => t.id === plain), 'plain work-item present in excludeKind=spec list');
+  assert.ok(listApi.some((t) => t.id === plain), 'plain task present in excludeKind=spec list');
   assert.ok(!listApi.some((t) => t.id === specId), 'scratch spec absent from excludeKind=spec list');
 
   // ── 7. Zero pageerror ─────────────────────────────────────────────────────

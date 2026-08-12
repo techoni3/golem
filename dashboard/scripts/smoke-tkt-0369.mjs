@@ -114,7 +114,7 @@ try {
   // ── 1. Fake alive+idle session A with NO channel + a scratch ticket ──────
   fs.mkdirSync(SESSIONS_DIR, { recursive: true });
   writeRegistry(REG_A, FAKE_A, 'idle');
-  ticketId = (await post('/tickets', { project_id: PROJECT, kind: 'work-item', created_by: 'smoke', title: 'SMOKE-0369 unreach', body: 'scratch for the unreachable-session smoke.' })).id;
+  ticketId = (await post('/tickets', { project_id: PROJECT, kind: 'task', created_by: 'smoke', title: 'SMOKE-0369 unreach', body: 'scratch for the unreachable-session smoke.' })).id;
   created.push(ticketId);
   assert.ok(ticketId, 'created scratch ticket');
 

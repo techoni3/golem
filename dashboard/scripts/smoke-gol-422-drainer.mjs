@@ -12,7 +12,7 @@ import { initDispatchDrainer } from '../server/dispatch-queue.js';
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'golem-422-'));
 const dbPath = path.join(dir, 'tracker.db');
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const ticket = { project_id: 'smoketests-000000', kind: 'work-item', title: 'SMOKE-GOL-422 recovery', body: '', created_by: 'smoke' };
+const ticket = { project_id: 'smoketests-000000', kind: 'task', title: 'SMOKE-GOL-422 recovery', body: '', created_by: 'smoke' };
 let tracker;
 let pushed = [];
 const state = { nativeSessions: () => [] };

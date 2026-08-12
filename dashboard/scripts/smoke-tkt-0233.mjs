@@ -36,7 +36,7 @@ page.on('pageerror', (e) => pageerrors.push(e.message));
 let ticketId = null;
 try {
   // ── Scratch ticket ───────────────────────────────────────────────────────
-  const ticket = await post('/tickets', { project_id: PROJECT, kind: 'work-item', created_by: 'smoke', title: 'SMOKE-0233 scratch', body: 'Scratch ticket for the TKT-0233 field-UX smoke.\n\nA couple of paragraphs so the body renders.' });
+  const ticket = await post('/tickets', { project_id: PROJECT, kind: 'task', created_by: 'smoke', title: 'SMOKE-0233 scratch', body: 'Scratch ticket for the TKT-0233 field-UX smoke.\n\nA couple of paragraphs so the body renders.' });
   ticketId = ticket.id;
   assert.ok(ticketId, 'created scratch ticket');
 

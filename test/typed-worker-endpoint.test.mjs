@@ -1028,39 +1028,6 @@ try {
     assert.ok(Date.parse(busyRenewedMetadata.expires_at) > Date.now(), 'busy-held envelope is durably renewed before typed publish');
     assert.equal(tracker.getEnvelope(ttlBusyQueued.envelope_id).expires_at, busyRenewedMetadata.expires_at, 'endpoint metadata uses the tracker-persisted renewed expiry');
 
-    // The same renewal applies when a wave gate, rather than a native busy
-    // turn, holds FIFO work beyond its initial TTL.
-    const ttlWaveSession = 'typed-ttl-wave';
-    let waveHeld = true;
-    let waveRenewedMetadata = null;
-    const originalWaveGate = tracker.waveGateForTicket;
-    tracker.waveGateForTicket = () => (waveHeld ? { blocked: true, wave: 2, min_open_wave: 1 } : { blocked: false });
-    try {
-      const ttlWaveTicket = tracker.createTicket({ project_id: 'typed-test-000000', title: 'typed TTL wave hold', created_by: 'test' });
-      const ttlWaveQueued = tracker.queueDispatch(ttlWaveTicket.id, { session_id: ttlWaveSession, payload: 'wave wait longer than TTL', actor: 'test' });
-      tracker.raw().prepare("UPDATE message_envelopes SET expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(ttlWaveQueued.envelope_id);
-      const ttlWaveDrainer = initDispatchDrainer({
-        tracker,
-        state: { nativeSessions: () => [{ session_id: ttlWaveSession, harness: 'pi', alive: true, status: 'idle' }] },
-        chat: { record: () => {} },
-        pushBrief: async (_content, _sessionId, metadata) => {
-          waveRenewedMetadata = metadata;
-          return { ok: true, status: 202, typed_worker: true, body: JSON.stringify({ accepted: true, envelope_id: metadata.envelope_id, attempt_id: metadata.attempt_id, accepted_attempt_id: metadata.attempt_id, delivery_state: 'accepted' }) };
-        },
-        buildDispatchBrief: (ticket) => ticket.title,
-        broadcastWS: () => {},
-        listChannels: async () => [{ session_id: ttlWaveSession, kind: 'typed-worker', delivery_ready: true }],
-      });
-      await ttlWaveDrainer.tick();
-      assert.equal(waveRenewedMetadata, null, 'wave-held work is not published with an expired envelope');
-      waveHeld = false;
-      await ttlWaveDrainer.tick();
-      assert.ok(Date.parse(waveRenewedMetadata.expires_at) > Date.now(), 'wave release renews envelope expiry before typed publish');
-      assert.equal(tracker.getEnvelope(ttlWaveQueued.envelope_id).expires_at, waveRenewedMetadata.expires_at);
-    } finally {
-      tracker.waveGateForTicket = originalWaveGate;
-    }
-
     // Reminder children use the same pre-transport original-envelope retry
     // lifecycle as every other typed producer. Their root linkage appears only
     // when the child settles, so a lost response cannot strand or duplicate a

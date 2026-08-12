@@ -1,4 +1,4 @@
-// Regression journey: a work-item composer opened from a spec owns the top
+// Regression journey: a task composer opened from a spec owns the top
 // overlay layer, while the spec remains available when the composer closes.
 
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -75,7 +75,7 @@ try {
   });
   await api('/tickets', {
     method: 'POST',
-    body: JSON.stringify({ project_id: projectId, kind: 'work-item', parent_id: spec.id, created_by: 'browser-fixture', title: 'Existing child', body: 'Fixture child.' }),
+    body: JSON.stringify({ project_id: projectId, kind: 'task', parent_id: spec.id, created_by: 'browser-fixture', title: 'Existing child', body: 'Fixture child.' }),
   });
 
   chrome = await acquireChrome();

@@ -169,7 +169,7 @@ try {
   assert.equal(readCodexSupervisor(sessionId).inbox.deliveries.find((row) => row.envelope_id === notify.json.envelope_id)?.sender_session_id, 'cc-control-source');
 
   const ticketCreate = await post(dashboard.base, '/api/tickets', {
-    project_id: first.project_id, kind: 'work-item', title: 'GOL-476 gate control journey', body: 'controlled', created_by: 'human',
+    project_id: first.project_id, kind: 'task', title: 'GOL-476 gate control journey', body: 'controlled', created_by: 'human',
   });
   assert.equal(ticketCreate.response.status, 201, ticketCreate.text);
   const gateComment = await post(dashboard.base, `/api/tickets/${encodeURIComponent(ticketCreate.json.id)}/comments`, {

@@ -1,6 +1,6 @@
 // TKT-0649: full-context spec dispatch. Creates a scratch spec with body,
-// active human comment feedback, and a child work item, then dispatches it to a
-// live session. Also dispatches a scratch work item to prove the non-spec path
+// active human comment feedback, and a child task, then dispatches it to a
+// live session. Also dispatches a scratch task to prove the non-spec path
 // still uses the regular brief shape. The received briefs are visible on the
 // golem channel during the run.
 
@@ -33,11 +33,10 @@ try {
   created.push(spec.id);
   const child = await post('/tickets', {
     project_id: PROJECT,
-    kind: 'work-item',
+    kind: 'task',
     created_by: 'smoke',
-    title: `${marker} child work item`,
+    title: `${marker} child task`,
     parent_id: spec.id,
-    wave: 2,
     body: 'child body',
   });
   created.push(child.id);
@@ -55,15 +54,15 @@ try {
 
   const work = await post('/tickets', {
     project_id: PROJECT,
-    kind: 'work-item',
+    kind: 'task',
     created_by: 'smoke',
-    title: `${marker} regular work item`,
-    body: 'regular work item body',
+    title: `${marker} regular task`,
+    body: 'regular task body',
   });
   created.push(work.id);
   const workDispatch = await post(`/tickets/${encodeURIComponent(work.id)}/dispatch`, { session_id: target.session_id });
-  assert.equal(workDispatch.ok, true, 'work-item dispatch ok');
-  assert.equal(workDispatch.ticket.kind, 'work-item', 'work-item dispatch returned work-item ticket');
+  assert.equal(workDispatch.ok, true, 'task dispatch ok');
+  assert.equal(workDispatch.ticket.kind, 'task', 'task dispatch returned task ticket');
 
   console.log(JSON.stringify({
     ok: true,
