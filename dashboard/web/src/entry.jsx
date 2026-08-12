@@ -39,7 +39,6 @@ window.runMermaid = async (nodes) => {
 await import('./api.js');
 await import('./store.js');
 await import('./format.js');
-await import('./phase-data.js');
 await import('./model-providers.js');
 await import('./router.js');
 await import('./icons.jsx');

@@ -428,7 +428,6 @@ function TrackerCard({ ticket: t, project, assigneeLabel }) {
   const queued = !!(t.has_pending_dispatch || t.pending_dispatch);
   const unackedWarning = (t.active_unacked_dispatches || [])[0] || null;
   const unacked = !!unackedWarning;
-  const phase = window.PhaseMachine?.phaseFor?.(t) || t.phase || t.state;
   // TKT-0103: drag handle. Activation distance (6px, set in TicketColumns's
   // PointerSensor activationConstraint) prevents accidental drags on click.
   // The drag listeners are bound to the card root; a click without a drag
@@ -464,7 +463,6 @@ function TrackerCard({ ticket: t, project, assigneeLabel }) {
           </span>
         )}
         <span className="pill tracker-kind-pill" data-kind={t.kind}>{t.kind}</span>
-        <span className="pill tracker-phase-pill" data-phase={phase}>phase: {phase}</span>
         {needsAnswer && <span className="pill tracker-answer-badge">❓ needs answer</span>}
         {unacked && (window.UnackedDispatchBadge
           ? <window.UnackedDispatchBadge warning={unackedWarning} compact/>
