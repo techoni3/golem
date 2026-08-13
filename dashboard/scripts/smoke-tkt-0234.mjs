@@ -58,6 +58,7 @@ try {
     return {
       rootId: clone.id,
       fill: getComputedStyle(clone.querySelector('.shape')).fill,
+      overlayBackground: getComputedStyle(document.querySelector('.mermaid-fs-overlay')).backgroundColor,
       controls: Array.from(document.querySelectorAll('.mermaid-fs-toolbar button')).map((b) => b.getAttribute('aria-label') || b.textContent),
       zoom: document.querySelector('.mermaid-fs-zoom-level').textContent,
       stageWidth: stage.clientWidth,
@@ -66,6 +67,7 @@ try {
   });
   assert.ok(initialViewport.rootId.startsWith('mermaid-fs-'), 'clone has a private, non-duplicated SVG id');
   assert.equal(initialViewport.fill, 'rgb(238, 224, 255)', 'ID-scoped Mermaid styles survive in the fullscreen clone');
+  assert.equal(initialViewport.overlayBackground, 'rgb(37, 42, 44)', 'fullscreen overlay stays pinned to the Graphite canvas color');
   assert.deepEqual(initialViewport.controls, ['Zoom out', 'Zoom in', 'Fit', '100%'], 'fullscreen controls are available');
   assert.ok(Number.parseInt(initialViewport.zoom, 10) < 100, 'large diagram starts fitted to the viewport');
 

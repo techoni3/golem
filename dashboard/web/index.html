@@ -7,11 +7,14 @@
   <title>Golem · Dashboard</title>
   <script>
     // Apply the saved appearance before CSS is requested so reloads never
-    // paint the dark shell underneath Loam & Linen. Dark remains the default.
+    // Apply a saved non-default theme before CSS is requested. Dark remains
+    // the default when the preference is missing or not recognized.
     (() => {
       try {
         const theme = localStorage.getItem('golem.tweaks.theme');
-        if (theme === 'loam') document.documentElement.dataset.theme = 'loam';
+        if (['loam', 'graphite', 'nocturne'].includes(theme)) {
+          document.documentElement.dataset.theme = theme;
+        }
       } catch {}
     })();
   </script>

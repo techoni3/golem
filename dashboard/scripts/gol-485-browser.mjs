@@ -118,7 +118,7 @@ try {
   });
   ok(desktopPanel.aboveFooter && desktopPanel.insideViewport,
     `desktop appearance panel opens above the pinned footer without clipping (${JSON.stringify(desktopPanel)})`);
-  ok(await page.locator('.theme-choice').count() === 2 && await page.locator('.swatch').count() === 6, 'dialog exposes two themes and the retained six-color palette');
+  ok(await page.locator('.theme-choice').count() === 4 && await page.locator('.swatch').count() === 6, 'dialog exposes four themes and the retained six-color palette');
   const darkAppearanceContrast = await page.evaluate(() => {
     const rgb = (value) => {
       const channels = value.match(/[\d.]+/g)?.slice(0, 3).map(Number);
@@ -146,10 +146,22 @@ try {
   await page.getByRole('button', { name: 'Berry' }).click();
   ok(await page.evaluate(() => localStorage.getItem('golem.tweaks.accent') === '#f472b6'), 'accent keeps the legacy hex preference contract');
   ok(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#884f65'), 'saved Berry id maps to its Loam-safe accent');
+  await page.locator('.theme-choice-graphite').click();
+  ok(await page.evaluate(() => document.documentElement.dataset.theme === 'graphite'
+    && localStorage.getItem('golem.tweaks.theme') === 'graphite'
+    && getComputedStyle(document.documentElement).getPropertyValue('--bg-0').trim() === '#252a2c'
+    && getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#e1a1b7'),
+  'Graphite & Moss applies, persists, and remaps the selected Berry accent');
+  await page.locator('.theme-choice-nocturne').click();
+  ok(await page.evaluate(() => document.documentElement.dataset.theme === 'nocturne'
+    && localStorage.getItem('golem.tweaks.theme') === 'nocturne'
+    && getComputedStyle(document.documentElement).getPropertyValue('--bg-0').trim() === '#171c22'
+    && getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#e0a0b8'),
+  'Nocturne & Inkstone applies, persists, and remaps the selected Berry accent');
   await page.locator('.theme-choice-dark').click();
   ok(await page.evaluate(() => !document.documentElement.dataset.theme && localStorage.getItem('golem.tweaks.theme') === 'dark' && getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#f472b6'), 'switching back to Dark restores the original accent value');
   await page.locator('.theme-choice-loam').click();
-  ok(await page.evaluate(() => document.documentElement.dataset.theme === 'loam'), 'theme control completes the Dark ↔ Loam round trip');
+  ok(await page.evaluate(() => document.documentElement.dataset.theme === 'loam'), 'theme control completes the Dark ↔ Loam round trip after the new dark themes');
 
   // Validate contrast with the WCAG G18 sRGB formula against actual theme pairs.
   const contrast = await page.evaluate(() => {

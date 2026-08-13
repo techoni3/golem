@@ -115,6 +115,97 @@
     radial-gradient(circle at 84% 92%, rgba(85,105,58,.07), transparent 30%);
 }
 
+/* Graphite & Moss — lifted charcoal with a visible surface ramp. This keeps
+   the focus of Dark while giving borders, comments, and diagrams more room
+   to read during long sessions. */
+:root[data-theme="graphite"] {
+  color-scheme: dark;
+
+  --bg-0: #252a2c;
+  --bg-1: #2d3335;
+  --bg-2: #363e3f;
+  --bg-3: #414949;
+  --bg-4: #4c5555;
+  --sidebar-bg: #293032;
+
+  --border-1: #3a4344;
+  --border-2: #505a5a;
+  --border-3: #697473;
+
+  --text-0: #f0f2ec;
+  --text-1: #d2d8d1;
+  --text-2: #b0b9b1;
+  --text-3: #8e9990;
+  --text-4: #707d73;
+
+  --accent: #8faa72;
+  --accent-soft: rgba(143, 170, 114, .14);
+  --accent-border: rgba(143, 170, 114, .42);
+
+  --status-active: #8faa72;
+  --status-running: #9cbcd0;
+  --status-review: #dfb56d;
+  --status-blocked: #e28d82;
+  --status-done: #abb6ad;
+  --status-triage: #c2a5d5;
+  --status-open: #a8b6ae;
+
+  --shadow-1: 0 1px 0 rgba(255,255,255,.025) inset, 0 1px 2px rgba(0,0,0,.25);
+  --shadow-2: 0 12px 28px rgba(0,0,0,.28), 0 1px 0 rgba(255,255,255,.025) inset;
+  --shadow-drawer: -16px 0 48px rgba(0,0,0,.42);
+  --surface-pattern:
+    linear-gradient(135deg, rgba(255,255,255,.018), transparent 42%),
+    repeating-linear-gradient(90deg, transparent 0 8px, rgba(255,255,255,.014) 8px 9px);
+  --canvas-pattern:
+    radial-gradient(circle at 15% 0%, rgba(127,158,116,.07), transparent 32%),
+    radial-gradient(circle at 90% 95%, rgba(117,133,121,.05), transparent 34%);
+}
+
+/* Nocturne & Inkstone — the deepest candidate, lifted above pure black with
+   a blue-stone ramp and pale sage signal. */
+:root[data-theme="nocturne"] {
+  color-scheme: dark;
+
+  --bg-0: #171c22;
+  --bg-1: #20272e;
+  --bg-2: #29323a;
+  --bg-3: #343e47;
+  --bg-4: #404b54;
+  --sidebar-bg: #1b2128;
+
+  --border-1: #2e3841;
+  --border-2: #424e58;
+  --border-3: #5d6a73;
+
+  --text-0: #f2f3ef;
+  --text-1: #d8dcd7;
+  --text-2: #b2bbb7;
+  --text-3: #8d9794;
+  --text-4: #6d7977;
+
+  --accent: #9baa91;
+  --accent-soft: rgba(155, 170, 145, .14);
+  --accent-border: rgba(155, 170, 145, .42);
+
+  --status-active: #8fb18f;
+  --status-running: #9dbbd0;
+  --status-review: #dfb16a;
+  --status-blocked: #e28e84;
+  --status-done: #adb8b2;
+  --status-triage: #c2a5d9;
+  --status-open: #a8b8b1;
+
+  --shadow-1: 0 1px 0 rgba(255,255,255,.025) inset, 0 1px 2px rgba(0,0,0,.30);
+  --shadow-2: 0 12px 30px rgba(0,0,0,.34), 0 1px 0 rgba(255,255,255,.025) inset;
+  --shadow-drawer: -16px 0 48px rgba(0,0,0,.50);
+  --surface-pattern:
+    linear-gradient(135deg, rgba(255,255,255,.018), transparent 42%),
+    repeating-linear-gradient(90deg, transparent 0 8px, rgba(255,255,255,.012) 8px 9px);
+  --canvas-pattern:
+    radial-gradient(circle at 12% 0%, rgba(116,145,170,.08), transparent 32%),
+    radial-gradient(circle at 90% 95%, rgba(146,162,130,.05), transparent 34%);
+}
+
 * { box-sizing: border-box; }
 
 html, body {

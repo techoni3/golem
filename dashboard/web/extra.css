@@ -124,6 +124,7 @@
   left: 14px;
   bottom: 62px;
   width: min(340px, calc(100vw - 24px));
+  z-index: 40;
   background-color: var(--bg-1);
   background-image: var(--surface-pattern);
   border: 1px solid var(--border-2);
@@ -217,6 +218,14 @@
 .theme-choice-loam .theme-choice-preview i:first-child { background: #e8deca; border-color: #d6c9b3; }
 .theme-choice-loam .theme-choice-preview i:nth-child(2) { background: #fbf8f0; border-color: #d6c9b3; }
 .theme-choice-loam .theme-choice-preview i:nth-child(3) { background: #f4efe4; }
+.theme-choice-graphite .theme-choice-preview { background: #252a2c; border-color: #505a5a; }
+.theme-choice-graphite .theme-choice-preview i:first-child { background: #293032; border-color: #505a5a; }
+.theme-choice-graphite .theme-choice-preview i:nth-child(2) { background: #363e3f; border-color: #505a5a; }
+.theme-choice-graphite .theme-choice-preview i:nth-child(3) { background: #2d3335; }
+.theme-choice-nocturne .theme-choice-preview { background: #171c22; border-color: #424e58; }
+.theme-choice-nocturne .theme-choice-preview i:first-child { background: #1b2128; border-color: #424e58; }
+.theme-choice-nocturne .theme-choice-preview i:nth-child(2) { background: #29323a; border-color: #424e58; }
+.theme-choice-nocturne .theme-choice-preview i:nth-child(3) { background: #20272e; }
 .theme-choice strong { display: block; color: var(--text-0); font-size: 11.5px; }
 .theme-choice small { display: block; color: var(--text-2); font-size: 9.5px; line-height: 1.35; margin-top: 2px; }
 .appearance-accent-label { margin-top: 16px; }
@@ -2731,7 +2740,10 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
 
 .mermaid-fs-overlay {
   position: fixed; inset: 0; z-index: 10000;
-  background: rgba(8, 10, 16, 0.92);
+  /* Mermaid's SVG keeps its own palette. Pin the fullscreen canvas to the
+     Graphite & Moss page color in every dashboard theme so the diagram gets a
+     stable, opaque neutral surface and the ticket underneath cannot compete. */
+  background: #252a2c;
   display: grid; overflow: hidden; isolation: isolate;
   opacity: 0; transition: opacity .2s ease;
 }

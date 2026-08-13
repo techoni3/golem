@@ -1,6 +1,6 @@
 // Sidebar appearance control — theme + accent, persisted in localStorage.
 // Dark remains the default. Existing golem.tweaks.accent hex values are kept
-// as stable palette ids and translated to AA-safe Loam variants at render time.
+// as stable palette ids and translated to AA-safe variants at render time.
 
 const THEME_KEY = 'golem.tweaks.theme';
 const ACCENT_KEY = 'golem.tweaks.accent';
@@ -8,19 +8,24 @@ const ACCENT_KEY = 'golem.tweaks.accent';
 const THEME_OPTIONS = [
   { id: 'dark', name: 'Dark', note: 'Original command center' },
   { id: 'loam', name: 'Loam & Linen', note: 'Woven ivory and olive leaf' },
+  { id: 'graphite', name: 'Graphite & Moss', note: 'Lifted charcoal and moss' },
+  { id: 'nocturne', name: 'Nocturne & Inkstone', note: 'Blue-stone and pale sage' },
 ];
 
 const ACCENT_OPTIONS = [
-  { id: '#4ade80', name: 'Leaf', dark: '#4ade80', loam: '#596b3b' },
-  { id: '#60a5fa', name: 'River', dark: '#60a5fa', loam: '#3f6680' },
-  { id: '#f59e0b', name: 'Ochre', dark: '#f59e0b', loam: '#885a1e' },
-  { id: '#c084fc', name: 'Heather', dark: '#c084fc', loam: '#72517f' },
-  { id: '#f472b6', name: 'Berry', dark: '#f472b6', loam: '#884f65' },
-  { id: '#22d3ee', name: 'Juniper', dark: '#22d3ee', loam: '#3d6f6e' },
+  { id: '#4ade80', name: 'Leaf', dark: '#4ade80', loam: '#596b3b', graphite: '#8faa72', nocturne: '#9baa91' },
+  { id: '#60a5fa', name: 'River', dark: '#60a5fa', loam: '#3f6680', graphite: '#9cbcd0', nocturne: '#9dbbd0' },
+  { id: '#f59e0b', name: 'Ochre', dark: '#f59e0b', loam: '#885a1e', graphite: '#dfb56d', nocturne: '#dfb16a' },
+  { id: '#c084fc', name: 'Heather', dark: '#c084fc', loam: '#72517f', graphite: '#c2a5d5', nocturne: '#c2a5d9' },
+  { id: '#f472b6', name: 'Berry', dark: '#f472b6', loam: '#884f65', graphite: '#e1a1b7', nocturne: '#e0a0b8' },
+  { id: '#22d3ee', name: 'Juniper', dark: '#22d3ee', loam: '#3d6f6e', graphite: '#86b7b1', nocturne: '#8eb9b6' },
 ];
 
 function savedTheme() {
-  try { return localStorage.getItem(THEME_KEY) === 'loam' ? 'loam' : 'dark'; }
+  try {
+    const value = localStorage.getItem(THEME_KEY);
+    return THEME_OPTIONS.some((option) => option.id === value) ? value : 'dark';
+  }
   catch { return 'dark'; }
 }
 
@@ -76,8 +81,8 @@ function TweaksButton() {
   }, [open]);
 
   React.useEffect(() => {
-    if (theme === 'loam') document.documentElement.dataset.theme = 'loam';
-    else delete document.documentElement.dataset.theme;
+    if (theme === 'dark') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = theme;
     try { localStorage.setItem(THEME_KEY, theme); } catch {}
     applyAccent(accent, theme);
   }, [theme, accent]);
@@ -119,6 +124,7 @@ function TweaksButton() {
   }, [close, open]);
 
   const currentAccent = ACCENT_OPTIONS.find((option) => option.id === accent) || ACCENT_OPTIONS[0];
+  const currentTheme = THEME_OPTIONS.find((option) => option.id === theme) || THEME_OPTIONS[0];
 
   return (
     <div className={`appearance-control ${open ? 'open' : ''}`}>
@@ -188,7 +194,7 @@ function TweaksButton() {
 
           <div className="appearance-current" aria-live="polite">
             <span className="appearance-current-dot" style={{ background: currentAccent[theme] }}/>
-            {theme === 'loam' ? 'Loam & Linen' : 'Dark'} · {currentAccent.name}
+            {currentTheme.name} · {currentAccent.name}
           </div>
           <div className="tweaks-pop-version">
             Toggle with <span className="kbd">⌘ ,</span> <span className="appearance-platform-note">Ctrl+, on Linux/Windows</span>
