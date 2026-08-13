@@ -1,98 +1,162 @@
 # Spec: <subject>
 
+<!-- FORM RULES — keep this comment block; it governs how every section below is written.
+Goal: maximum human scan-efficiency. Diagrams over prose. Tables over lists. Bullets over
+paragraphs. STE: short sentences, active voice, one term per concept.
+Emoji anchors (one meaning each, never decorative — same vocabulary as Global Rules):
+  ✅ done/pass · ❌ fail/rejected · ⚠️ risk/caveat · 🔒 locked · ❓ open · 🎯 goal ·
+  🚫 non-goal · 📌 load-bearing fact · ▶ next/action
+Contrast: > [!NOTE] context · > [!WARNING] risk · > [!IMPORTANT] locked/critical.
+No inline HTML color/style spans.
+Diagram palette — pick by relevance, ONE concern per diagram, several small over one crammed:
+  flowchart (+subgraphs): architecture, topology, wiring, control/data flow
+  sequenceDiagram: protocols, cross-service interactions over time
+  classDiagram: data models, types, ontology
+  erDiagram: storage schemas, entities + cardinality
+  stateDiagram-v2: lifecycles, state machines
+  journey: user/UX flows
+  timeline: rollout/migration phases
+  eventmodeling: command → event → read-model loops ONLY (rigid grammar: no spaces in names,
+    numeric frame ids, enforced ui→cmd→evt→rmo chains — do not force other shapes into it)
+  quadrantChart: option positioning (rare)
+Mermaid gotchas: no ";" inside sequenceDiagram message text; escape "|" as "\|" inside table
+cells; blank line after </summary> before markdown; the body must never START with an HTML tag.
+Validate every block before saving: mermaid-cli exits 0 even on broken langium-based types
+(eventmodeling) — render to SVG and check it for an error marker, not just the exit code.
+-->
+
 ## 1. TLDR
 
-Five lines, always current: what this is and where it stands. Rewrite as the spec evolves — a
-reader should never have to reconstruct status from the sections below.
+<!-- form: ≤7 short STE bullets — clauses with anchors, not paragraph-length sentences — then
+one status line. -->
+
+- <bullet>
+
+**Status:** <one line — where this spec stands, what awaits whom>
 
 ## 2. Intent
 
-The distilled canonical why: the problem or desire, in a few sentences.
+<!-- form: short prose — the canonical why. Raw thoughts verbatim in the collapsed block. -->
 
 <details>
 <summary>Raw thoughts (preserved verbatim)</summary>
 
-The human's original notes, in their own language. Never rewrite or tidy these.
+<original notes — never rewritten>
 
 </details>
 
 ## 3. Grounding
 
-<details open>
-<summary>Load-bearing facts only — each with a source ref, each tied to a decision</summary>
+<!-- form: CURRENT reality, diagram-first. 2–4 palette diagrams showing what exists today
+(topology, data shape, lifecycle — whichever are load-bearing), one-line caption under each.
+📌 bullets only for facts a diagram cannot carry (constraints, numbers, gotchas).
+ALL file:line refs live in the collapsed Evidence table — never inline in the reading flow. -->
 
-Only facts that change a decision. Three facts is a normal section; a system tour is a violation.
+```mermaid
+flowchart LR
+  A[<today's topology>] --> B[<one concern per diagram>]
+```
 
-- <fact> (`path/file.js:123`) — feeds D<n>
-- <fact> (<link>) — feeds D<n>
+*Caption: <one line — what this diagram shows>.*
+
+- 📌 <fact a diagram cannot carry>
+
+### Evidence
+
+<details>
+<summary>fact → source refs</summary>
+
+<!-- form: columns flex to the spec — add a Repo column for multi-repo grounding. -->
+
+| 📌 Fact | Refs |
+|---|---|
+| <fact> | `path/file.ext:12-34`, `path/other.ext:56` |
 
 </details>
 
 ## 4. Requirements
 
-<details open>
-<summary>Goals / Qualities / Non-goals — all the whats</summary>
+<!-- form: three tables, no prose between them. The Value/Measure columns are optional — drop
+them when a requirement is its own value; do not invent framing to fill a cell. -->
 
-**Goals**
+### 🎯 Goals
 
-- <functional requirement, checkable>
+| # | Requirement | Value |
+|---|---|---|
+| G1 | <requirement, checkable> | <why it matters> |
 
-**Qualities**
+### Qualities
 
-- <only the non-functionals that matter here; delete when none>
+| Quality | Constraint | Measure |
+|---|---|---|
+| <quality> | <the limit it imposes> | <how it is judged> |
 
-**Non-goals**
+### 🚫 Non-goals
 
-- <explicit exclusions, so scope cannot grow silently>
-
-</details>
+| Non-goal | Why excluded |
+|---|---|
+| <exclusion> | <reason> |
 
 ## 5. Decisions
 
-<details open>
-<summary>Living register — an open question is an undecided decision</summary>
+<!-- form: the master table is the glance index — every decision gets a row with a one-line
+call. Status = emoji + optional qualifier ("🔒 pending sign-off", "❓ recommendation drafted").
+Below the table, EVERY decision keeps a block:
+  ❓ open — expanded: context / options / recommendation (the human's comment surface);
+  🔒 decided — call + why (+ grounded consequences worth keeping), wrapped in <details>.
+On decide: update the row, rewrite the block as decided, collapse it. -->
 
-Debate lives here; when decided, the entry collapses to call + why and the conclusion is written
-into Requirements or Design where it belongs. Reopen a decided entry only with the human.
+| D# | Decision | Status | Call |
+|---|---|---|---|
+| D1 | <title> | 🔒 | <one-line call> |
+| D2 | <title> | ❓ | see below |
 
-### D1 — title · open
-
-- Context: <what forces this decision>
-- Options: <the realistic options with trade-offs>
-- Recommendation: <yours, with the reason>
-
-### D2 — title · decided
+<details>
+<summary>🔒 D1 — <title></summary>
 
 - Call: <what was decided>
-- Why: <the reason, one or two lines>
+- Why: <the reason; keep grounded consequences that must not be lost>
 
 </details>
+
+### ❓ D2 — <title>
+
+- Context: <what forces this decision>
+- Options: <realistic options with trade-offs>
+- Recommendation: <yours, with the reason>
 
 ## 6. Design
 
-<details open>
-<summary>The hows — grounded, referencing decisions by id</summary>
+<!-- form: the LARGEST section of a locked spec. Target reality in ~4 subsections chosen by
+relevance from: Architecture · Components · Data model · Schema/storage · Interfaces & APIs ·
+Control flow · Data flow · Lifecycles · UX journey. Each subsection: its palette-matched
+diagram(s) + technical bullets keyed to D#. APIs and contracts as tables. -->
 
-The chosen direction, contracts, data shapes, and touch points — deep enough that a builder never
-reconstructs the design conversation. Reference D<n> instead of re-arguing it.
+### Architecture
 
-</details>
+```mermaid
+flowchart LR
+  X[<target topology>] --> Y[<per D#>]
+```
+
+- <technical bullet, keyed to D#>
+
+### Interfaces & APIs
+
+| Endpoint | In | Out | Notes |
+|---|---|---|---|
 
 ## 7. Acceptance
 
-<details open>
-<summary>Agent-runnable end-to-end scenarios</summary>
+<!-- form: table checklist. Every scenario agent-runnable (do X, observe Z). "Verify by" states
+the probe when known; mark inferred probes as such rather than inventing certainty.
+Status: ⬜ todo · ✅ pass · ❌ fail -->
 
-Each criterion is an executable scenario — an agent with a browser or simulator can run this
-section directly and drop the evidence as comments.
-
-- [ ] <open X, do Y, observe Z>
-
-</details>
+| # | Scenario | Verify by | Status |
+|---|---|---|---|
+| A1 | <do X, observe Z> | <command / page / probe> | ⬜ |
 
 ## Rollout
 
-Optional — delete unless migration or sequencing genuinely exists.
-
-> [!NOTE]
-> Child tasks and supporting docs hang under this ticket via parent_id and render below the body.
+<!-- form: optional — delete unless migration/sequencing is real. timeline diagram + steps
+table. -->
