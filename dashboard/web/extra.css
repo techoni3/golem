@@ -2740,10 +2740,7 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
 
 .mermaid-fs-overlay {
   position: fixed; inset: 0; z-index: 10000;
-  /* Mermaid's SVG keeps its own palette. Pin the fullscreen canvas to the
-     Graphite & Moss page color in every dashboard theme so the diagram gets a
-     stable, opaque neutral surface and the ticket underneath cannot compete. */
-  background: #252a2c;
+  background: rgba(8, 10, 16, 0.92);
   display: grid; overflow: hidden; isolation: isolate;
   opacity: 0; transition: opacity .2s ease;
 }

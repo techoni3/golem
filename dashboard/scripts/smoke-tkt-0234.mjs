@@ -67,7 +67,7 @@ try {
   });
   assert.ok(initialViewport.rootId.startsWith('mermaid-fs-'), 'clone has a private, non-duplicated SVG id');
   assert.equal(initialViewport.fill, 'rgb(238, 224, 255)', 'ID-scoped Mermaid styles survive in the fullscreen clone');
-  assert.equal(initialViewport.overlayBackground, 'rgb(37, 42, 44)', 'fullscreen overlay stays pinned to the Graphite canvas color');
+  assert.equal(initialViewport.overlayBackground, 'rgba(8, 10, 16, 0.92)', 'fullscreen overlay uses the dark neutral canvas color');
   assert.deepEqual(initialViewport.controls, ['Zoom out', 'Zoom in', 'Fit', '100%'], 'fullscreen controls are available');
   assert.ok(Number.parseInt(initialViewport.zoom, 10) < 100, 'large diagram starts fitted to the viewport');
 
