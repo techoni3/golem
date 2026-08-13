@@ -62,6 +62,10 @@ jargon.
 - Always keep the in-chat prose light to non-existent.
 - Structured formats like lean bullet points, tables, unicode diagrams pack more information and
   are easier to grasp; use those instead where appropriate.
+- Use emoji anchors at bullet and table-row starts for glance efficiency — in chat and in docs
+  alike. One meaning each: ✅ done/pass · ❌ fail/rejected · ⚠️ risk/caveat · 🔒 locked ·
+  ❓ open · 🎯 goal · 🚫 non-goal · 📌 load-bearing fact · ▶ next/action.
+- No decorative emoji beyond that vocabulary.
 - Imagine human has ADHD, or is multi-tasking quite a lot; heavy in-chat prose creates enormous
   resistance in his head making him less productive.
 - Preserve full details where exact content matters like error messages, code snippets, or when
