@@ -228,8 +228,7 @@ function HarnessIcon({ harness }) {
 
 function ModelPill({ model, provider: providerId }) {
   const modelLabel = typeof model === 'string' && model.trim() ? model.trim() : 'model unavailable';
-  const provider = window.ModelProviders?.providerForId?.(providerId)
-    || window.ModelProviders?.providerForModel?.(model)
+  const provider = window.ModelProviders?.resolveProvider?.(providerId, model)
     || window.ModelProviders?.fallback || { id: 'fallback', label: 'Unknown' };
   const providerLabel = provider.id === 'fallback' ? 'Unknown provider' : provider.label;
   return (

@@ -1040,8 +1040,10 @@
   object-fit: contain;
 }
 .agent-harness-icon.opencode img,
+.agent-harness-icon.harness-pi img,
 .agent-model-icon.provider-openai img,
-.agent-model-icon.provider-z-ai img {
+.agent-model-icon.provider-z-ai img,
+.agent-model-icon.provider-grok img {
   filter: invert(1) grayscale(1) opacity(.82);
 }
 .agent-harness-icon.claudecode { color: var(--status-review); }
@@ -4307,6 +4309,7 @@ mark.anno.anno-tail::after {
 .agent-harness-icon.harness-claudecode { color: var(--status-review); }
 .agent-harness-icon.harness-opencode { color: var(--status-active); }
 .agent-harness-icon.harness-codex { color: var(--accent); }
+.agent-harness-icon.harness-pi { color: var(--text-1); }
 .agent-card.state-busy .agent-card-orb {
   box-shadow: inset -10px -12px 23px rgba(0, 0, 0, .35), 0 0 25px var(--agent-card-signal-soft);
 }
@@ -4388,7 +4391,9 @@ mark.anno.anno-tail::after {
 }
 .agent-model-icon { width: 15px; height: 15px; }
 .agent-model-icon.provider-openai img,
-.agent-model-icon.provider-z-ai img { filter: invert(1) grayscale(1) opacity(.82); }
+.agent-model-icon.provider-z-ai img,
+.agent-model-icon.provider-grok img { filter: invert(1) grayscale(1) opacity(.82); }
+.agent-harness-icon.harness-pi img { filter: invert(1) grayscale(1) opacity(.82); }
 .agent-model-pill span:last-child { min-width: 0; }
 .agent-card-time {
   display: flex;
