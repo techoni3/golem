@@ -643,7 +643,7 @@ function ReviewInboxEntry({ item, lastVisitMs, onRefresh }) {
     setBusy('send');
     setError('');
     try {
-      await window.SubstrateAPI.addComment(ticketRef(ticket), { author: 'human:review-inbox', body: note.trim(), tag: 'fix' });
+      await window.SubstrateAPI.addComment(ticketRef(ticket), { author: 'human:review-inbox', body: note.trim() });
       await window.SubstrateAPI.updateTicket(ticketRef(ticket), { state: 'in_progress', actor: 'human:review-inbox' });
       if (owningSession) {
         const live = await window.SubstrateAPI.listDispatchable(ticket.project_id);

@@ -1,7 +1,7 @@
 // TKT-0648: comment-dispatch UI. Creates a scratch spec assigned to a live
 // session, drives the ticket drawer comment rail, and verifies:
 //   1. Save alone leaves the comment undispatched and creates no dispatch row.
-//   2. Save & dispatch enqueues/delivers one comment dispatch.
+//   2. Dispatch enqueues/delivers one comment dispatch.
 //   3. Save & batch-dispatch sends all undispatched comments with one batch_id.
 //   4. Badge count matches DB dispatch_state='undispatched'.
 //   5. A target-session reply flips the original comment chip to addressed via WS.
@@ -42,7 +42,7 @@ async function saveComment(page, text, { dispatch = false } = {}) {
   await page.fill('#anno-list .anno-composer textarea', text);
   await page.evaluate((wantDispatch) => {
     const buttons = Array.from(document.querySelectorAll('#anno-list .anno-composer button'));
-    const label = wantDispatch ? 'Save & dispatch' : 'Comment';
+    const label = wantDispatch ? 'Dispatch' : 'Comment';
     const btn = buttons.find((b) => b.textContent.trim() === label);
     if (!btn) throw new Error(`button not found: ${label}`);
     btn.click();
@@ -94,7 +94,7 @@ try {
   let afterSingle = dbRows(spec.id);
   const single = afterSingle.comments.find((c) => c.body.includes('save-and-dispatch'));
   assert.ok(single, 'single dispatched comment exists');
-  assert.notEqual(single.dispatch_state, 'undispatched', 'Save & dispatch moves this comment out of undispatched');
+  assert.notEqual(single.dispatch_state, 'undispatched', 'Dispatch moves this comment out of undispatched');
   assert.ok(afterSingle.dispatches.some((d) => d.comment_id === single.id && d.batch_id == null), 'single dispatch row has no batch_id');
 
   await saveComment(page, 'SMOKE-0648 batch comment A');

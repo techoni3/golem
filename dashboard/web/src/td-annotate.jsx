@@ -9,17 +9,6 @@ const TA_AUTHORS = {
   minimax_m3: { label: 'MiniMax M3',  color: '#2dd4a7' },
 };
 
-const TA_TAGS = {
-  confirmed: { label: 'Confirmed', icon: '✓', color: '#3ddc97' },
-  partial:   { label: 'Partial',   icon: '◐', color: '#f5a623' },
-  disputed:  { label: 'Disputed',  icon: '✗', color: '#fb6f92' },
-  fix:       { label: 'Fix',       icon: '✎', color: '#43c6f0' },
-  risk:      { label: 'Risk',      icon: '⚠', color: '#ff9e3d' },
-  question:  { label: 'Question',  icon: '?', color: '#c08bff' },
-  note:      { label: 'Note',      icon: '•', color: '#9aa4bb' },
-};
-const TA_TAG_ORDER = ['confirmed', 'partial', 'disputed', 'fix', 'risk', 'question', 'note'];
-
 // TKT-0172: the left-gutter "+" affordance that appears on block hover. Fully
 // inline-styled (the annotation CSS lives in extra.css but this element is new
 // and the CSS file is owned by TKT-0173), mirroring #anno-pill which is portaled
@@ -29,8 +18,6 @@ const BLOCK_PLUS_STYLE = {
   position: 'absolute', zIndex: 68, display: 'none',
   alignItems: 'center', height: 22, padding: '0 5px', gap: 3,
   cursor: 'pointer', userSelect: 'none',
-  background: '#1b2336', border: '1px solid #243049', borderRadius: '7px',
-  color: '#e6e9f0', boxShadow: '0 4px 14px rgba(0,0,0,.4)',
   fontFamily: '"JetBrains Mono", monospace',
   transform: 'translateY(-50%)',
 };
@@ -296,7 +283,6 @@ if (typeof window !== 'undefined') {
   window.__tdAttachMermaidFullscreen = attachMermaidFullscreen;
   window.__tdOpenMermaidFullscreen = openMermaidFullscreen;
 }
-function tagMeta(t) { return TA_TAGS[t] || TA_TAGS.note; }
 
 function bodyHtml(text) {
   if (window.SubstrateFmt?.htmlBody) return window.SubstrateFmt.htmlBody(text);
@@ -397,7 +383,6 @@ function wrapOffsets(root, start, end, ann) {
     if (seg.end <= start || seg.start >= end) continue;
     targets.push({ node: seg.node, ls: Math.max(0, start - seg.start), le: Math.min(seg.node.nodeValue.length, end - seg.start) });
   }
-  const tm = tagMeta(ann.tag);
   for (let t = targets.length - 1; t >= 0; t--) {
     let node = targets[t].node;
     const { ls, le } = targets[t];
@@ -407,19 +392,71 @@ function wrapOffsets(root, start, end, ann) {
     mk.className = 'anno';
     mk.dataset.id = ann.id;
     mk.dataset.author = ann.author;
-    mk.dataset.tag = ann.tag || 'note';
-    mk.title = `${tm.label} · ${authorMeta(ann.author).label}`;
+    mk.title = authorMeta(ann.author).label;
     if (ann.status === 'resolved') mk.classList.add('resolved');
     applyAuthorVars(mk, ann.author);
-    if (t === targets.length - 1) {
-      mk.classList.add('anno-tail');
-      mk.style.setProperty('--_tic', '"' + tm.icon + '"');
-      mk.style.setProperty('--_tcol', tm.color);
-    }
+    if (t === targets.length - 1) mk.classList.add('anno-tail');
     node.parentNode.insertBefore(mk, node);
     mk.appendChild(node);
   }
   return targets.length > 0;
+}
+function findBlockById(root, blockId) {
+  if (!root || !blockId) return null;
+  const wanted = String(blockId);
+  for (const block of root.querySelectorAll('[data-block-id]')) {
+    if (block.dataset.blockId === wanted) return block;
+  }
+  return null;
+}
+function annotationAnchorKind(ann) {
+  const explicit = String(ann?.anchor_kind || '').toLowerCase();
+  if (explicit === 'block' || explicit === 'text') return explicit;
+  if (!ann?.block_id) return 'text';
+  // Comments written before anchor_kind was persisted can still be read. The
+  // first block-hover implementation wrote an empty prefix/suffix; selected
+  // text normally carried surrounding context. Keep that distinction while
+  // old rows are upgraded lazily by the server.
+  return ann.prefix || ann.suffix ? 'text' : 'block';
+}
+function isBlockAnnotation(ann) { return annotationAnchorKind(ann) === 'block'; }
+function blockAnnotationIds(block) {
+  return String(block?.dataset.annoBlockIds || '').split(/\s+/).filter(Boolean);
+}
+function setBlockAnnotationState(block, anns) {
+  const ids = anns.map((ann) => ann.id).filter(Boolean);
+  const allResolved = anns.length > 0 && anns.every((ann) => ann.status === 'resolved');
+  block.classList.add('anno-block-comment');
+  block.classList.toggle('anno-block-multi', ids.length > 1);
+  block.classList.toggle('anno-block-resolved', allResolved);
+  block.dataset.annoBlockIds = ids.join(' ');
+  block.dataset.annoCommentCount = String(ids.length);
+  block.dataset.annoOpenCount = String(anns.filter((ann) => ann.status !== 'resolved').length);
+}
+function clearBlockAnnotationState(root) {
+  root.querySelectorAll('[data-anno-block-ids]').forEach((block) => {
+    block.classList.remove('anno-block-comment', 'anno-block-multi', 'anno-block-resolved', 'is-active');
+    block.removeAttribute('data-anno-block-ids');
+    block.removeAttribute('data-anno-comment-count');
+    block.removeAttribute('data-anno-open-count');
+  });
+}
+function setActiveAnnotationState(root, id) {
+  const wanted = id ? String(id) : '';
+  root.querySelectorAll('mark.anno').forEach((mark) => {
+    mark.classList.toggle('is-active', !!wanted && mark.dataset.id === wanted);
+  });
+  root.querySelectorAll('[data-anno-block-ids]').forEach((block) => {
+    block.classList.toggle('is-active', !!wanted && blockAnnotationIds(block).includes(wanted));
+  });
+}
+function findAnnotationAnchor(root, id) {
+  const wanted = String(id || '');
+  if (!wanted) return null;
+  const mark = [...root.querySelectorAll('mark.anno')].find((candidate) => candidate.dataset.id === wanted);
+  if (mark) return mark;
+  return [...root.querySelectorAll('[data-anno-block-ids]')]
+    .find((block) => blockAnnotationIds(block).includes(wanted)) || null;
 }
 function clearMarks(root, id) {
   root.querySelectorAll(`mark.anno[data-id="${id}"]`).forEach((mk) => {
@@ -440,21 +477,330 @@ function slugify(s) {
     .replace(/^-+|-+$/g, '');
 }
 
-// Walk the top-level block children of the rendered body and assign each a
-// data-block-id = "<nearest-preceding-heading-slug>#<index-within-section>".
-// A heading starts a new section (the heading itself is index 0 within it);
-// content blocks after it count up from 1. Blocks before the first heading
-// get an empty-slug section ("#0", "#1", …). Run on the live DOM post-inject
-// (after marked + DOMPurify) so attribute-sanitization concerns are moot.
+function tocText(s) { return String(s || '').replace(/\s+/g, ' ').trim(); }
+function tocComparable(s) {
+  return tocText(s).toLowerCase().replace(/^(spec|task|doc)\s*:\s*/, '').replace(/[^\da-z]+/g, '');
+}
+function sameDocumentHeading(headingText, documentTitle) {
+  const heading = tocComparable(headingText);
+  const title = tocComparable(documentTitle);
+  return !!heading && !!title && heading === title;
+}
+function assignTocHeadingIds(root, documentTitle = '') {
+  const headings = [...root.querySelectorAll('h1,h2,h3,h4,h5,h6')];
+  const used = new Set();
+  const doc = root.ownerDocument || document;
+  const items = headings.map((heading, index) => {
+    const text = tocText(heading.textContent);
+    const base = heading.id || slugify(text) || `section-${index + 1}`;
+    let id = base;
+    let suffix = 2;
+    while (used.has(id) || (doc.getElementById(id) && doc.getElementById(id) !== heading)) id = `${base}-${suffix++}`;
+    heading.id = id;
+    used.add(id);
+    return { id, level: Number(heading.tagName.slice(1)) || 6, text };
+  });
+  if (items.length > 1 && items[0].level === 1 && sameDocumentHeading(items[0].text, documentTitle)) items.shift();
+  return items;
+}
+function tocTree(items) {
+  const roots = [];
+  const stack = [];
+  for (const item of items) {
+    const node = { ...item, children: [] };
+    while (stack.length && stack[stack.length - 1].level >= node.level) stack.pop();
+    if (stack.length) stack[stack.length - 1].children.push(node);
+    else roots.push(node);
+    stack.push(node);
+  }
+  return roots;
+}
+function scrollParentFor(root) {
+  let el = root?.parentElement || null;
+  let overflowParent = null;
+  while (el && el !== document.body) {
+    const style = getComputedStyle(el);
+    if (/(auto|scroll|overlay)/.test(style.overflowY)) {
+      overflowParent ||= el;
+      if (el.scrollHeight > el.clientHeight + 1) return el;
+    }
+    el = el.parentElement;
+  }
+  return overflowParent || root?.ownerDocument?.scrollingElement || document.documentElement;
+}
+function readTocPrefs(storageKey) {
+  if (!storageKey) return { hidden: false, collapsed: {} };
+  try {
+    const value = JSON.parse(localStorage.getItem(storageKey) || '{}');
+    return {
+      hidden: value?.hidden === true,
+      collapsed: value?.collapsed && typeof value.collapsed === 'object' ? value.collapsed : {},
+    };
+  } catch { return { hidden: false, collapsed: {} }; }
+}
+function writeTocPrefs(storageKey, prefs) {
+  if (!storageKey) return;
+  try { localStorage.setItem(storageKey, JSON.stringify(prefs)); } catch {}
+}
+
+function TdTocNode({ node, activeId, collapsed, onToggle, onNavigate }) {
+  const hasChildren = node.children.length > 0;
+  const isCollapsed = !!collapsed[node.id];
+  return (
+    <li className={`td-toc-item level-${Math.min(node.level, 6)}`}>
+      <div className="td-toc-row">
+        {hasChildren ? (
+          <button
+            type="button"
+            className="td-toc-toggle"
+            aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${node.text}`}
+            aria-expanded={!isCollapsed}
+            onClick={() => onToggle(node.id)}
+          >{isCollapsed ? '›' : '⌄'}</button>
+        ) : <span className="td-toc-toggle-spacer" aria-hidden="true"/>}
+        <a
+          className={`td-toc-link${activeId === node.id ? ' active' : ''}`}
+          href={`#${node.id}`}
+          aria-current={activeId === node.id ? 'location' : undefined}
+          onClick={(event) => onNavigate(event, node.id)}
+        >{node.text}</a>
+      </div>
+      {hasChildren && !isCollapsed && (
+        <ul className="td-toc-sublist">
+          {node.children.map((child) => (
+            <TdTocNode
+              key={child.id}
+              node={child}
+              activeId={activeId}
+              collapsed={collapsed}
+              onToggle={onToggle}
+              onNavigate={onNavigate}
+            />
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+const TOC_RAIL_WIDTH = 210;
+
+function TdToc({ headings, rootRef, documentKey, containerSelector }) {
+  const storageKey = documentKey ? `golem.toc.${documentKey}` : 'golem.toc.anonymous';
+  const initialPrefs = React.useMemo(() => readTocPrefs(storageKey), [storageKey]);
+  const [hidden, setHidden] = React.useState(initialPrefs.hidden);
+  const [collapsed, setCollapsed] = React.useState(initialPrefs.collapsed);
+  const [activeId, setActiveId] = React.useState(headings[0]?.id || '');
+  const [metrics, setMetrics] = React.useState(null);
+  const tree = React.useMemo(() => tocTree(headings), [headings]);
+
+  React.useEffect(() => {
+    setActiveId((current) => headings.some((heading) => heading.id === current) ? current : (headings[0]?.id || ''));
+  }, [headings]);
+
+  React.useLayoutEffect(() => {
+    const root = rootRef.current;
+    const host = root?.closest(containerSelector) || document.querySelector(containerSelector);
+    const scrollRoot = scrollParentFor(root);
+    if (!root || !host || !scrollRoot) return undefined;
+    const update = () => {
+      const hostRect = host.getBoundingClientRect();
+      const scrollRect = scrollRoot.getBoundingClientRect();
+      const main = root.closest('.td-main');
+      const railRect = (main || host).getBoundingClientRect();
+      setMetrics({
+        left: Math.max(0, railRect.left - hostRect.left),
+        top: Math.max(0, scrollRect.top - hostRect.top),
+        maxHeight: Math.max(160, scrollRect.bottom - scrollRect.top),
+      });
+    };
+    update();
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(update) : null;
+    [root, host, scrollRoot, root.closest('.td-main')].filter(Boolean).forEach((node) => observer?.observe(node));
+    window.addEventListener('resize', update, { passive: true });
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, [headings, rootRef, containerSelector]);
+
+  React.useLayoutEffect(() => {
+    const main = rootRef.current?.closest('.td-main');
+    if (!main) return undefined;
+    main.classList.toggle('td-toc-rail-open', !hidden);
+    return () => main.classList.remove('td-toc-rail-open');
+  }, [hidden, rootRef]);
+
+  React.useEffect(() => {
+    const root = rootRef.current;
+    const scrollRoot = scrollParentFor(root);
+    if (!root || !scrollRoot) return undefined;
+    let frame = 0;
+    const update = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const scrollRect = scrollRoot.getBoundingClientRect();
+        const line = scrollRect.top + Math.min(160, scrollRect.height * 0.2);
+        let first = null;
+        let best = null;
+        for (const heading of headings) {
+          const element = root.querySelector(`#${CSS.escape(heading.id)}`);
+          if (!element) continue;
+          const top = element.getBoundingClientRect().top;
+          if (!first || top < first.top) first = { id: heading.id, top };
+          if (top <= line + 1 && (!best || top > best.top)) best = { id: heading.id, top };
+        }
+        setActiveId((best || first)?.id || headings[0]?.id || '');
+      });
+    };
+    update();
+    scrollRoot.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      scrollRoot.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+    };
+  }, [headings, rootRef]);
+
+  const persist = (nextHidden, nextCollapsed) => writeTocPrefs(storageKey, { hidden: nextHidden, collapsed: nextCollapsed });
+  const toggleHidden = () => {
+    setHidden((current) => {
+      const next = !current;
+      persist(next, collapsed);
+      return next;
+    });
+  };
+  const toggleCollapsed = (id) => {
+    setCollapsed((current) => {
+      const next = { ...current, [id]: !current[id] };
+      persist(hidden, next);
+      return next;
+    });
+  };
+  const navigate = (event, id) => {
+    event.preventDefault();
+    const root = rootRef.current;
+    const heading = root?.querySelector(`#${CSS.escape(id)}`);
+    if (heading) {
+      heading.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setActiveId(id);
+    }
+  };
+  if (!metrics) return null;
+  const panelStyle = {
+    left: `${metrics.left}px`,
+    top: `${metrics.top}px`,
+    width: `${TOC_RAIL_WIDTH}px`,
+    maxHeight: `${metrics.maxHeight}px`,
+  };
+  const handleStyle = {
+    left: `${metrics.left + (hidden ? 0 : TOC_RAIL_WIDTH)}px`,
+    top: `${metrics.top + Math.max(48, Math.min(metrics.maxHeight / 2, 220))}px`,
+  };
+  return (
+    <div className="td-toc-layer" aria-live="polite">
+      {!hidden && (
+        <nav className="td-toc-panel is-rail" style={panelStyle} aria-label="Contents">
+          <div className="td-toc-head">
+            <span>Contents</span>
+          </div>
+          <ul className="td-toc-list">
+            {tree.map((node) => (
+              <TdTocNode key={node.id} node={node} activeId={activeId} collapsed={collapsed} onToggle={toggleCollapsed} onNavigate={navigate}/>
+            ))}
+          </ul>
+        </nav>
+      )}
+      <button
+        type="button"
+        className={`td-toc-handle${hidden ? ' is-collapsed' : ''}`}
+        style={handleStyle}
+        onClick={toggleHidden}
+        aria-label={hidden ? 'Show contents' : 'Hide contents'}
+        title={hidden ? 'Show contents' : 'Hide contents'}
+      >{hidden ? '›' : '‹'}</button>
+    </div>
+  );
+}
+
+const NESTED_BLOCK_KINDS = Object.freeze({ UL: 'list', OL: 'list', LI: 'item', TABLE: 'table', TR: 'row' });
+function nestedBlockKind(element) { return NESTED_BLOCK_KINDS[element?.tagName] || ''; }
+function blockKind(element) { return nestedBlockKind(element) || String(element?.tagName || '').toLowerCase(); }
+
+// Walk the rendered body and assign stable-enough semantic anchors. Existing
+// top-level ids stay unchanged: "<nearest-heading-slug>#<index>". Structural
+// descendants add a path, for example "section#1/list#0/item#2". The path is
+// intentionally derived from the rendered tree, so a parent list/table owns
+// the spaces that are not inside one of its child items/rows.
 function assignBlockIds(root) {
   let slug = '';
   let idx = 0;
+  root.querySelectorAll('[data-block-id]').forEach((block) => {
+    block.removeAttribute('data-block-id');
+    block.removeAttribute('data-block-parent-id');
+    block.removeAttribute('data-block-kind');
+  });
+
+  const counters = new Map();
+  function assignNested(node, parentId) {
+    for (const child of node.children) {
+      const kind = nestedBlockKind(child);
+      let childParentId = parentId;
+      if (kind) {
+        const key = `${parentId}:${kind}`;
+        const childIndex = counters.get(key) || 0;
+        counters.set(key, childIndex + 1);
+        child.dataset.blockId = `${parentId}/${kind}#${childIndex}`;
+        child.dataset.blockParentId = parentId;
+        child.dataset.blockKind = kind;
+        childParentId = child.dataset.blockId;
+      }
+      assignNested(child, childParentId);
+    }
+  }
+
   for (const child of root.children) {
     const isHeading = /^H[1-6]$/.test(child.tagName);
     if (isHeading) { slug = slugify(child.textContent); idx = 0; }
     child.dataset.blockId = `${slug}#${idx}`;
+    child.dataset.blockKind = blockKind(child);
+    child.removeAttribute('data-block-parent-id');
+    assignNested(child, child.dataset.blockId);
     idx = isHeading ? 1 : idx + 1;
   }
+}
+
+function topLevelBlock(root, block) {
+  let el = block;
+  while (el && el.parentElement && el.parentElement !== root) el = el.parentElement;
+  return el && el.parentElement === root ? el : null;
+}
+
+function blockForRange(root, range) {
+  if (!root || !range) return null;
+  const start = range.startContainer;
+  const end = range.endContainer;
+  const candidates = [...root.querySelectorAll('[data-block-id]')]
+    .filter((candidate) => candidate.contains(start) && candidate.contains(end));
+  candidates.sort((a, b) => {
+    let depthA = 0, depthB = 0;
+    for (let el = a; el; el = el.parentElement) depthA += 1;
+    for (let el = b; el; el = el.parentElement) depthB += 1;
+    return depthB - depthA;
+  });
+  return candidates[0] || null;
+}
+
+function blockAtPoint(root, x, y) {
+  const doc = root?.ownerDocument || document;
+  const hits = doc.elementsFromPoint ? doc.elementsFromPoint(x, y) : [doc.elementFromPoint(x, y)];
+  for (const hit of hits) {
+    if (!hit || !root.contains(hit)) continue;
+    const block = hit.closest ? hit.closest('[data-block-id]') : null;
+    if (block && root.contains(block)) return block;
+  }
+  return null;
 }
 
 // Find the nearest preceding heading element (h1-h6) by walking the previous
@@ -462,7 +808,8 @@ function assignBlockIds(root) {
 // blocks (children of root), so the containing block is a child of root and
 // its previousElementSibling chain walks back through the section's earlier
 // blocks to the heading that opens it.
-function nearestPrecedingHeading(block) {
+function nearestPrecedingHeading(block, root = null) {
+  if (root) block = topLevelBlock(root, block);
   let el = block;
   while (el) {
     const sib = el.previousElementSibling;
@@ -485,14 +832,11 @@ function blockText(block) {
 }
 
 // Resolve an annotation to a {start,end} text range within root's index.
-// block_id is primary: recompute-matched block elements (query by
-// data-block-id) and span all text nodes inside that block. If there is no
-// block_id, or the block_id no longer matches, fall back to the quote-based
-// locate() — which the 44 legacy anchored comments rely on unchanged.
+// Whole-block anchors span their recomputed block. Text anchors always use the
+// quote/context locator, even when block_id is present as relocation context.
 function locateAnnotation(root, idx, ann) {
-  if (ann.block_id) {
-    const sel = '[data-block-id="' + String(ann.block_id).replace(/["\\]/g, '\\$&') + '"]';
-    const block = root.querySelector(sel);
+  if (isBlockAnnotation(ann) && ann.block_id) {
+    const block = findBlockById(root, ann.block_id);
     if (block) {
       let start = Infinity, end = -Infinity;
       for (const seg of idx.nodes) {
@@ -507,12 +851,12 @@ function locateAnnotation(root, idx, ann) {
   return locate(idx.text, ann);
 }
 
-function nearestSection(range) {
+function nearestSection(range, root = null) {
   let node = range.commonAncestorContainer;
   if (node.nodeType === 3) node = node.parentNode;
   const block = node && node.closest ? node.closest('[data-block-id]') : null;
   if (!block) return { id: '', title: '' };
-  const h = nearestPrecedingHeading(block);
+  const h = nearestPrecedingHeading(block, root);
   return h
     ? { id: slugify(h.textContent), title: h.textContent.trim().slice(0, 80) }
     : { id: '', title: '' };
@@ -523,12 +867,13 @@ function nearestSection(range) {
 // annotation pill portals into. The ticket drawer passes `.drawer-ticket`
 // (position:fixed); the standalone ticket page passes `.ticket-page`. Defaults
 // to `.drawer-ticket` for backward compatibility.
-function TdAnnotate({ body, comments, currentAuthor = 'you', onCreate, onCreateAndDispatch, onUpdate, onReply, canDispatchComments = false, containerSelector = '.drawer-ticket' }) {
+function TdAnnotate({ body, comments, currentAuthor = 'you', onCreate, onCreateAndDispatch, onUpdate, onReply, canDispatchComments = false, containerSelector = '.drawer-ticket', documentKey = '', documentTitle = '' }) {
   const rootRef = React.useRef(null);
   const railRef = React.useRef(null);
   const [annotations, setAnnotations] = React.useState(comments || []);
+  const [tocHeadings, setTocHeadings] = React.useState([]);
   const [activeId, setActiveId] = React.useState(null);
-  const [showResolved, setShowResolved] = React.useState(true);
+  const [showResolved, setShowResolved] = React.useState(false);
   const [railOpen, setRailOpen] = React.useState(false);
   const [saveState, setSaveState] = React.useState('');
   const [pendingComposer, setPendingComposer] = React.useState(null);
@@ -566,6 +911,11 @@ function TdAnnotate({ body, comments, currentAuthor = 'you', onCreate, onCreateA
 
   React.useEffect(() => { setAnnotations(comments || []); }, [comments]);
 
+  React.useLayoutEffect(() => {
+    const root = rootRef.current;
+    setTocHeadings(root ? assignTocHeadingIds(root, documentTitle) : []);
+  }, [html, documentTitle]);
+
   React.useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
@@ -575,15 +925,31 @@ function TdAnnotate({ body, comments, currentAuthor = 'you', onCreate, onCreateA
     // top level, so they don't disturb the block-id walk).
     assignBlockIds(root);
     root.querySelectorAll('mark.anno').forEach((m) => { const p = m.parentNode; while (m.firstChild) p.insertBefore(m.firstChild, m); p.removeChild(m); });
+    clearBlockAnnotationState(root);
     root.normalize();
     const idx0 = textNodes(root);
+    const blockAnnotations = new Map();
     for (const ann of annotations) {
       if (ann.status === 'deleted') continue;
+      const block = isBlockAnnotation(ann) ? findBlockById(root, ann.block_id) : null;
+      if (block) {
+        ann._orphan = false;
+        const list = blockAnnotations.get(block) || [];
+        list.push(ann);
+        blockAnnotations.set(block, list);
+        continue;
+      }
       const loc = locateAnnotation(root, idx0, ann);
       ann._orphan = !loc;
       if (loc) wrapOffsets(root, loc.start, loc.end, ann);
     }
+    for (const [block, anns] of blockAnnotations) setBlockAnnotationState(block, anns);
   }, [annotations, html]);
+
+  React.useEffect(() => {
+    const root = rootRef.current;
+    if (root) setActiveAnnotationState(root, activeId);
+  }, [activeId, annotations, html]);
 
   // TKT-0171: after the body is injected, lazy-load mermaid (only when one or
   // more .mermaid blocks are present) and render the diagrams in place. The
@@ -614,7 +980,7 @@ function TdAnnotate({ body, comments, currentAuthor = 'you', onCreate, onCreateA
     blockCountsRef.current = m;
   }, [annotations]);
 
-  // TKT-0172: block-hover UX. On entering a top-level block (data-block-id),
+  // TKT-0172: block-hover UX. On entering a commentable block (data-block-id),
   // portal the "+" to the positioned ancestor, place it at the block's left
   // gutter / vertical midline, and stash the block's anchor for the "+"
   // click handler. Showing is delayed 1s so the "+" doesn't trail the cursor
@@ -633,7 +999,6 @@ function TdAnnotate({ body, comments, currentAuthor = 'you', onCreate, onCreateA
 React.useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
-    const blocks = root.querySelectorAll('[data-block-id]');
     // Block-side hover flag — true while the cursor is inside some commentable block.
     let onBlock = false;
     // "+"-side hover is read at fire time via :hover (covers the case where
@@ -680,13 +1045,17 @@ React.useEffect(() => {
     function enter(block) {
       const t = blockText(block);
       if (!t) return; // textless block (hr, empty) — not commentable
+      if (onBlock && hoverBlockRef.current?.blockId === block.dataset.blockId) {
+        placePlus(block);
+        return;
+      }
       onBlock = true;
       clearTimeout(hidePlusTimerRef.current);
       clearTimeout(showPlusTimerRef.current);
       const plus = document.getElementById('anno-block-plus');
       if (!plus) return;
       const cnt = blockCountsRef.current.get(block.dataset.blockId) || 0;
-      const h = nearestPrecedingHeading(block);
+      const h = nearestPrecedingHeading(block, root);
       const hb = {
         blockId: block.dataset.blockId || '',
         blockText: t,
@@ -730,14 +1099,14 @@ React.useEffect(() => {
         clearHoverBlock();
       }, 1000);
     }
-    const ons = [];
-    blocks.forEach((b) => {
-      const e = () => enter(b);
-      const l = () => leave();
-      b.addEventListener('mouseenter', e);
-      b.addEventListener('mouseleave', l);
-      ons.push({ b, e, l });
-    });
+    function onMove(event) {
+      if (event.target?.closest?.('#anno-pill,#anno-block-plus,#anno-rail')) return;
+      const block = blockAtPoint(root, event.clientX, event.clientY);
+      if (block && blockText(block)) enter(block);
+      else leave();
+    }
+    root.addEventListener('mousemove', onMove);
+    root.addEventListener('mouseleave', leave);
     function onScroll() {
       // Cancel a pending show so the "+" never appears at a stale position
       // after the body scrolled under it; hide it and drop the highlight.
@@ -749,7 +1118,8 @@ React.useEffect(() => {
     }
     document.addEventListener('scroll', onScroll, { passive: true });
     return () => {
-      ons.forEach(({ b, e, l }) => { b.removeEventListener('mouseenter', e); b.removeEventListener('mouseleave', l); });
+      root.removeEventListener('mousemove', onMove);
+      root.removeEventListener('mouseleave', leave);
       document.removeEventListener('scroll', onScroll);
       clearTimeout(showPlusTimerRef.current);
       clearTimeout(hidePlusTimerRef.current);
@@ -763,7 +1133,12 @@ React.useEffect(() => {
   const docOrder = React.useCallback(() => {
     const root = rootRef.current;
     const order = new Map(); let i = 0;
-    if (root) root.querySelectorAll('mark.anno').forEach((m) => { if (!order.has(m.dataset.id)) order.set(m.dataset.id, i++); });
+    if (root) root.querySelectorAll('[data-anno-block-ids], mark.anno').forEach((anchor) => {
+      const ids = anchor.matches('[data-anno-block-ids]')
+        ? blockAnnotationIds(anchor)
+        : [anchor.dataset.id];
+      ids.forEach((id) => { if (id && !order.has(id)) order.set(id, i++); });
+    });
     return (annotations || []).filter((a) => a.status !== 'deleted').slice().sort((a, b) => (order.has(a.id) ? order.get(a.id) : 1e9) - (order.has(b.id) ? order.get(b.id) : 1e9));
   }, [annotations]);
 
@@ -825,13 +1200,13 @@ React.useEffect(() => {
     setActiveId(id);
     setRailOpen(true);
     const root = rootRef.current;
-    if (root) root.querySelectorAll('mark.anno').forEach((m) => m.classList.toggle('is-active', m.dataset.id === id));
+    if (root) setActiveAnnotationState(root, id);
     setTimeout(() => {
       const card = railRef.current?.querySelector(`.anno-card[data-id="${id}"]`);
       if (card) card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       if (!fromMark) {
-        const mk = root?.querySelector(`mark.anno[data-id="${id}"]`);
-        if (mk) mk.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const anchor = root && findAnnotationAnchor(root, id);
+        if (anchor) anchor.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
     }, 50);
   }, []);
@@ -849,23 +1224,20 @@ React.useEffect(() => {
     const quote = idx.text.slice(offs.start, offs.end);
     const prefix = idx.text.slice(Math.max(0, offs.start - CTX), offs.start);
     const suffix = idx.text.slice(offs.end, offs.end + CTX);
-    const section = nearestSection(range);
-    // TKT-0172: anchor the text-select comment to its containing block's
-    // block_id (primary anchor); quote/prefix/suffix stay as the fallback for
-    // locate() if the block_id ever fails to match.
+    const section = nearestSection(range, root);
+    // Text selections retain their exact quote anchor. The containing
+    // commentable block is context and a relocation fallback, not a block-level
+    // decoration target. A block-level comment is created only by the hover
+    // affordance.
     let blockId = '';
     let btext = quote;
-    {
-      let n = range.startContainer;
-      if (n.nodeType === 3) n = n.parentNode;
-      const blockEl = n && n.closest ? n.closest('[data-block-id]') : null;
-      if (blockEl) {
-        blockId = blockEl.dataset.blockId || '';
-        btext = blockText(blockEl);
-      }
+    const blockEl = blockForRange(root, range);
+    if (blockEl) {
+      blockId = blockEl.dataset.blockId || '';
+      btext = blockText(blockEl);
     }
     setRailOpen(true);
-    setPendingComposer({ quote, prefix, suffix, section, blockId, blockText: btext });
+    setPendingComposer({ quote, prefix, suffix, section, blockId, blockText: btext, anchorKind: 'text' });
   }, []);
 
   React.useEffect(() => {
@@ -970,6 +1342,15 @@ React.useEffect(() => {
     : null;
   const railAndFab = drawerHost ? ReactDOM.createPortal(
     <>
+      {tocHeadings.length >= 2 && (
+        <TdToc
+          key={documentKey || 'anonymous'}
+          headings={tocHeadings}
+          rootRef={rootRef}
+          documentKey={documentKey}
+          containerSelector={containerSelector}
+        />
+      )}
       <div id="anno-pill" onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); startNewComment(); }}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
         Comment
@@ -986,6 +1367,7 @@ React.useEffect(() => {
           quote fallback). */}
       <div
         id="anno-block-plus"
+        className="anno-block-plus"
         style={BLOCK_PLUS_STYLE}
         onMouseEnter={() => {
           // Cursor is on the "+". Cancel any pending hide from a block.
@@ -1018,11 +1400,12 @@ React.useEffect(() => {
             section: { id: hb.sectionId, title: hb.sectionTitle },
             blockId: hb.blockId,
             blockText: hb.blockText,
+            anchorKind: 'block',
           });
         }}
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 13, height: 13 }}><path d="M12 5v14M5 12h14"/></svg>
-        <span className="anno-block-count" style={{ display: 'none', fontSize: 10, fontWeight: 700, color: '#b394ff', marginLeft: 2 }}></span>
+        <span className="anno-block-count" style={{ display: 'none', fontSize: 10, fontWeight: 700, marginLeft: 2 }}></span>
       </div>
 
       <div id="anno-rail" ref={railRef} className={railOpen ? 'open' : ''}>
@@ -1033,24 +1416,24 @@ React.useEffect(() => {
           </div>
           <div className="rail-tools">
             <button className="rail-btn" onClick={() => { setRailOpen(true); setPlainComposer(true); }}>+ New</button>
-            <button className={`rail-btn ${showResolved ? 'on' : ''}`} onClick={() => setShowResolved((v) => !v)}>
-              {showResolved ? 'Hide resolved' : 'Show resolved'}
-            </button>
+            <label className="rail-check">
+              <input type="checkbox" checked={showResolved} onChange={(e) => setShowResolved(e.target.checked)} />
+              Show resolved
+            </label>
             <button className="rail-btn" onClick={() => setRailOpen(false)}>Close</button>
           </div>
         </div>
         <div id="anno-list">
           {plainComposer && (
             <AnnoComposer
-              currentAuthor={currentAuthor}
               canDispatch={canDispatchComments && !!onCreateAndDispatch}
-              onSend={(text, author, tag) => { createComment({ author, body: text, tag }); setPlainComposer(false); }}
-              onSendAndDispatch={(text, author, tag) => {
+              onSend={(text) => { createComment({ author: currentAuthor, body: text }); setPlainComposer(false); }}
+              onSendAndDispatch={(text) => {
                 // The composer closes immediately either way: on a delivery
                 // failure the comment is still saved, and on a save failure the
                 // rail withdraws its optimistic card. Both outcomes are
                 // reported on the drawer's comment-dispatch note (GOL-101).
-                const done = createCommentAndDispatch({ author, body: text, tag });
+                const done = createCommentAndDispatch({ author: currentAuthor, body: text });
                 setPlainComposer(false);
                 return done;
               }}
@@ -1060,31 +1443,30 @@ React.useEffect(() => {
           {pendingComposer && (
             <AnnoComposer
               quote={pendingComposer.quote}
-              currentAuthor={currentAuthor}
               canDispatch={canDispatchComments && !!onCreateAndDispatch}
-              onSend={(text, author, tag) => {
+              onSend={(text) => {
                 createComment({
-                  author, body: text,
+                  author: currentAuthor, body: text,
                   block_id: pendingComposer.blockId || null,
+                  anchor_kind: pendingComposer.anchorKind || 'text',
                   quote: pendingComposer.quote,
                   prefix: pendingComposer.prefix || '',
                   suffix: pendingComposer.suffix || '',
                   section: (pendingComposer.section && pendingComposer.section.title) || '',
                   section_id: (pendingComposer.section && pendingComposer.section.id) || '',
-                  tag,
                 });
                 setPendingComposer(null);
               }}
-              onSendAndDispatch={(text, author, tag) => {
+              onSendAndDispatch={(text) => {
                 const done = createCommentAndDispatch({
-                  author, body: text,
+                  author: currentAuthor, body: text,
                   block_id: pendingComposer.blockId || null,
+                  anchor_kind: pendingComposer.anchorKind || 'text',
                   quote: pendingComposer.quote,
                   prefix: pendingComposer.prefix || '',
                   suffix: pendingComposer.suffix || '',
                   section: (pendingComposer.section && pendingComposer.section.title) || '',
                   section_id: (pendingComposer.section && pendingComposer.section.id) || '',
-                  tag,
                 });
                 setPendingComposer(null);
                 return done;
@@ -1099,12 +1481,10 @@ React.useEffect(() => {
               key={ann.id}
               ann={ann}
               active={ann.id === activeId}
-              currentAuthor={currentAuthor}
               onFocus={() => focusAnnotation(ann.id)}
               onResolve={() => updateComment(ann.id, { status: ann.status === 'resolved' ? 'open' : 'resolved' })}
               onDelete={() => deleteComment(ann.id)}
-              onReply={(text, author) => addReply(ann.id, text, author)}
-              onTagChange={(tag) => updateComment(ann.id, { tag })}
+              onReply={(text) => addReply(ann.id, text, currentAuthor)}
               onEditBody={(text) => updateComment(ann.id, { body: text })}
             />
           ))}
@@ -1131,17 +1511,15 @@ React.useEffect(() => {
   );
 }
 
-function CommentCard({ ann, active, currentAuthor, onFocus, onResolve, onDelete, onReply, onTagChange, onEditBody }) {
+function CommentCard({ ann, active, onFocus, onResolve, onDelete, onReply, onEditBody }) {
   const [replying, setReplying] = React.useState(false);
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState('');
-  const [showTagPicker, setShowTagPicker] = React.useState(false);
   // TKT-0237: collapsed-by-default comment cards (~7-line preview).
   const [expanded, setExpanded] = React.useState(false);
   const [overflows, setOverflows] = React.useState(false);
   const contentRef = React.useRef(null);
   const c = authorMeta(ann.author);
-  const tm = tagMeta(ann.tag);
   const editRef = React.useRef(null);
   const replyCount = (ann.replies || []).length;
 
@@ -1181,7 +1559,7 @@ function CommentCard({ ann, active, currentAuthor, onFocus, onResolve, onDelete,
   // suspenders (the ticket fears the reply-click-collapses regression).
   const onCardClick = (e) => {
     onFocus();
-    if (e.target.closest('button, a, textarea, input, select, .acts, .anno-composer, .anno-tagrow, .anno-tag')) return;
+    if (e.target.closest('button, a, textarea, input, select, .acts, .anno-composer')) return;
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed) return;
     if (overflows) setExpanded((v) => !v);
@@ -1197,21 +1575,16 @@ function CommentCard({ ann, active, currentAuthor, onFocus, onResolve, onDelete,
       data-collapsible={overflows ? '1' : undefined}
     >
       <div className="ch">
-        <span className="anno-tag clickable" onClick={(e) => { e.stopPropagation(); setShowTagPicker((v) => !v); }} style={{ '--_tc': tm.color, '--_tc-soft': hexA(tm.color, 0.14), '--_tc-bd': hexA(tm.color, 0.5) }}>
-          <span className="ti">{tm.icon}</span>{tm.label}
-        </span>
-        <span className="anno-chip" style={{ '--_ac': c.color, '--_ac-soft': hexA(c.color, 0.1), '--_ac-bd': hexA(c.color, 0.5) }}>{esc(c.label)}</span>
         {ann.dispatch_state && ann.dispatch_state !== 'n/a' && (
           <span className={`anno-dispatch-chip ${ann.dispatch_state}`}>{ann.dispatch_state}</span>
         )}
         <span className="when">{shortTime(ann.created_at)}</span>
       </div>
-      {showTagPicker && <TagChipRow inline current={ann.tag} onPick={(tag) => { onTagChange(tag); setShowTagPicker(false); }}/>}
       <div ref={contentRef} className={`anno-card-content ${clamped ? 'clamped' : ''}`}>
         {ann.quote && <div className="quote">{esc(ann.quote)}</div>}
         {editing ? (
           <div className="anno-composer anno-edit">
-            <textarea ref={editRef} value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Edit comment…"
+            <textarea ref={editRef} rows={5} value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Edit comment…"
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); saveEdit(); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelEdit(); } }}/>
             <div className="row">
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
@@ -1227,7 +1600,6 @@ function CommentCard({ ann, active, currentAuthor, onFocus, onResolve, onDelete,
         {(ann.replies || []).map((rep, i) => (
           <div className="reply" key={i}>
             <div className="ch">
-              <span className="anno-chip" style={{ '--_ac': authorMeta(rep.author).color, '--_ac-soft': hexA(authorMeta(rep.author).color, 0.1), '--_ac-bd': hexA(authorMeta(rep.author).color, 0.5) }}>{esc(authorMeta(rep.author).label)}</span>
               <span className="when">{shortTime(rep.ts)}</span>
             </div>
             <div className="body" dangerouslySetInnerHTML={{ __html: bodyHtml(rep.text) }}/>
@@ -1237,7 +1609,7 @@ function CommentCard({ ann, active, currentAuthor, onFocus, onResolve, onDelete,
       {overflows && !editing && !replying && (
         <div className="anno-expand-hint">{expanded ? '⌃ less' : `⌄ more${replyCount ? ` · ${replyCount} ${replyCount === 1 ? 'reply' : 'replies'}` : ''}`}</div>
       )}
-      {replying && <AnnoComposer hideTag currentAuthor={currentAuthor} onSend={(text, author) => { onReply(text, author); setReplying(false); }} onCancel={() => setReplying(false)}/>}
+      {replying && <AnnoComposer onSend={(text) => { onReply(text); setReplying(false); }} onCancel={() => setReplying(false)}/>}
       <div className="acts">
         <button onClick={(e) => { e.stopPropagation(); setExpanded(true); setReplying(true); }}>Reply</button>
         <button onClick={(e) => { e.stopPropagation(); startEdit(e); }}>Edit</button>
@@ -1248,38 +1620,15 @@ function CommentCard({ ann, active, currentAuthor, onFocus, onResolve, onDelete,
   );
 }
 
-function TagChipRow({ inline, current, onPick }) {
-  const [sel, setSel] = React.useState(current || 'note');
-  return (
-    <div className={`anno-tagrow ${inline ? 'inline' : ''}`}>
-      {TA_TAG_ORDER.map((t) => {
-        const m = tagMeta(t);
-        return (
-          <button
-            key={t}
-            className={`anno-tagchip ${sel === t ? 'on' : ''}`}
-            style={{ '--_tc': m.color, '--_tc-soft': hexA(m.color, 0.14), '--_tc-bd': hexA(m.color, 0.5) }}
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSel(t); if (onPick) onPick(t); }}
-          >
-            <span className="ti">{m.icon}</span>{m.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function AnnoComposer({ quote, hideTag, currentAuthor, onSend, onSendAndDispatch, canDispatch = false, onCancel }) {
+function AnnoComposer({ quote, onSend, onSendAndDispatch, canDispatch = false, onCancel }) {
   const [text, setText] = React.useState('');
-  const [author, setAuthor] = React.useState(currentAuthor);
-  const [tag, setTag] = React.useState('note');
   const taRef = React.useRef(null);
   React.useEffect(() => { taRef.current?.focus(); }, []);
 
   const fire = () => {
     const t = text.trim();
     if (!t) return;
-    onSend(t, author, tag);
+    onSend(t);
   };
   // GOL-101: swallow nothing. A rejected dispatch is reported on the drawer's
   // comment-dispatch note; catching here only keeps it from surfacing as an
@@ -1287,7 +1636,7 @@ function AnnoComposer({ quote, hideTag, currentAuthor, onSend, onSendAndDispatch
   const fireDispatch = () => {
     const t = text.trim();
     if (!t || !onSendAndDispatch) return;
-    const result = onSendAndDispatch(t, author, tag);
+    const result = onSendAndDispatch(t);
     if (result && typeof result.catch === 'function') {
       result.catch((err) => console.error('comment dispatch failed', err));
     }
@@ -1299,13 +1648,9 @@ function AnnoComposer({ quote, hideTag, currentAuthor, onSend, onSendAndDispatch
       <textarea ref={taRef} rows={5} value={text} onChange={(e) => setText(e.target.value)} placeholder="Comment — Markdown (+ ```mermaid; > [!NOTE]/[!WARNING]/[!IMPORTANT])"
         onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); fire(); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onCancel && onCancel(); } }}/>
       <div className="row">
-        {!hideTag && <TagChipRow current={tag} onPick={setTag}/>}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
-          <select value={author} onChange={(e) => setAuthor(e.target.value)}>
-            {Object.entries(TA_AUTHORS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-          </select>
+        <div className="anno-composer-actions">
           <button className="cancel" onClick={onCancel}>esc</button>
-          {canDispatch && <button className="send ghost" onClick={fireDispatch} disabled={!text.trim()}>Save &amp; dispatch</button>}
+          {canDispatch && <button className="send secondary" onClick={fireDispatch} disabled={!text.trim()}>Dispatch</button>}
           <button className="send" onClick={fire} disabled={!text.trim()}>Comment</button>
         </div>
       </div>

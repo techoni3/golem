@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en" data-theme="loam">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>Comment block decoration — Golem design lab</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg-0: #0a0b0d;
+      --bg-1: #101216;
+      --bg-2: #15181d;
+      --bg-3: #1c2027;
+      --border-1: #1e222a;
+      --border-2: #2a2f3a;
+      --border-3: #363c4a;
+      --text-0: #f3f5f8;
+      --text-1: #c8ccd4;
+      --text-2: #8a909c;
+      --text-3: #5a606b;
+      --accent: #4ade80;
+      --accent-soft: rgba(74, 222, 128, .12);
+      --accent-border: rgba(74, 222, 128, .32);
+      --comment: #f5a623;
+      --comment-soft: rgba(245, 166, 35, .12);
+      --comment-border: rgba(245, 166, 35, .46);
+      --comment-2: #b394ff;
+      --font-sans: 'Avenir Next', Avenir, 'Segoe UI', system-ui, sans-serif;
+      --font-display: Charter, 'Iowan Old Style', Georgia, serif;
+      --font-mono: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace;
+      --radius-1: 5px;
+      --radius-2: 8px;
+      --radius-3: 12px;
+      --shadow-1: 0 1px 0 rgba(255,255,255,.02) inset, 0 1px 2px rgba(0,0,0,.4);
+      --shadow-2: 0 10px 28px rgba(0,0,0,.32), 0 1px 0 rgba(255,255,255,.03) inset;
+      --canvas-pattern: none;
+      --surface-pattern: none;
+    }
+
+    :root[data-theme="loam"] {
+      color-scheme: light;
+      --bg-0: #e8deca;
+      --bg-1: #ede5d5;
+      --bg-2: #e2d5bd;
+      --bg-3: #d8c8ad;
+      --border-1: #d6c9b3;
+      --border-2: #baaa91;
+      --border-3: #8f7d63;
+      --text-0: #29281f;
+      --text-1: #454238;
+      --text-2: #555246;
+      --text-3: #635d52;
+      --accent: #596b3b;
+      --accent-soft: rgba(89, 107, 59, .12);
+      --accent-border: rgba(89, 107, 59, .32);
+      --comment: #885a1e;
+      --comment-soft: rgba(136, 90, 30, .12);
+      --comment-border: rgba(136, 90, 30, .42);
+      --comment-2: #72517f;
+      --shadow-1: 0 1px 0 rgba(255,255,255,.42) inset, 0 1px 2px rgba(75,55,24,.07);
+      --shadow-2: 0 14px 32px rgba(69,51,25,.10), 0 1px 0 rgba(255,255,255,.45) inset;
+      --surface-pattern:
+        repeating-linear-gradient(0deg, transparent 0 3px, rgba(79,63,36,.018) 3px 4px),
+        repeating-linear-gradient(90deg, transparent 0 5px, rgba(255,255,255,.10) 5px 6px);
+      --canvas-pattern:
+        radial-gradient(circle at 18% 4%, rgba(139,112,66,.08), transparent 28%),
+        radial-gradient(circle at 84% 92%, rgba(85,105,58,.07), transparent 30%);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      background: var(--bg-0);
+      background-image: var(--canvas-pattern);
+      color: var(--text-0);
+      font: 14px/1.5 var(--font-sans);
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input { font: inherit; }
+    button { color: inherit; cursor: pointer; }
+    button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+    .shell { max-width: 1540px; margin: 0 auto; padding: 32px 30px 60px; }
+    .eyebrow, .mono { font-family: var(--font-mono); }
+    .eyebrow {
+      color: var(--accent); font-size: 10px; letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin: 7px 0 10px; font: 600 clamp(28px, 4vw, 44px)/1.05 var(--font-display); letter-spacing: -.025em; }
+    h2 { margin: 0; font-size: 18px; letter-spacing: -.01em; }
+    h3 { margin: 0; font-size: 15px; line-height: 1.3; }
+    .lede { max-width: 760px; color: var(--text-1); font-size: 15px; }
+    .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
+    .theme-switcher { display: inline-flex; gap: 4px; padding: 4px; border: 1px solid var(--border-2); border-radius: 999px; background: var(--bg-1); box-shadow: var(--shadow-1); }
+    .theme-switcher button {
+      border: 0; border-radius: 999px; padding: 6px 11px; background: transparent;
+      color: var(--text-2); font: 11px var(--font-mono);
+    }
+    .theme-switcher button[aria-pressed="true"] { background: var(--bg-3); color: var(--text-0); }
+
+    .decision-strip {
+      display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 20px; align-items: center;
+      margin: 26px 0 24px; padding: 16px 18px; border: 1px solid var(--border-2);
+      border-radius: var(--radius-3); background: var(--bg-1); background-image: var(--surface-pattern); box-shadow: var(--shadow-1);
+    }
+    .decision-strip strong { color: var(--text-0); }
+    .decision-strip p { margin: 4px 0 0; color: var(--text-2); font-size: 12px; }
+    .focus-toggle { display: inline-flex; align-items: center; gap: 8px; color: var(--text-1); font-size: 12px; white-space: nowrap; }
+    .focus-toggle input { accent-color: var(--accent); width: 15px; height: 15px; }
+
+    .section-head { display: flex; justify-content: space-between; align-items: end; gap: 20px; margin: 0 0 12px; }
+    .section-note { margin: 0; color: var(--text-3); font: 11px var(--font-mono); }
+    .option-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .option-card {
+      min-width: 0; overflow: hidden; border: 1px solid var(--border-2); border-radius: var(--radius-3);
+      background: var(--bg-1); background-image: var(--surface-pattern); box-shadow: var(--shadow-1);
+    }
+    .option-card:hover { border-color: var(--border-3); }
+    .option-head { padding: 16px 18px 13px; border-bottom: 1px solid var(--border-1); }
+    .option-title { display: flex; align-items: center; gap: 9px; }
+    .option-index {
+      display: grid; place-items: center; width: 22px; height: 22px; flex: 0 0 auto;
+      border: 1px solid var(--border-2); border-radius: 50%; color: var(--accent); font: 11px var(--font-mono);
+    }
+    .option-thesis { margin: 7px 0 0 31px; color: var(--text-2); font-size: 12px; line-height: 1.45; }
+    .option-meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 11px 0 0 31px; }
+    .chip { padding: 2px 7px; border: 1px solid var(--border-2); border-radius: 999px; color: var(--text-3); font: 9px var(--font-mono); text-transform: uppercase; letter-spacing: .04em; }
+    .specimen { padding: 15px 18px 17px; }
+    .specimen-label { margin-bottom: 11px; color: var(--text-3); font: 9px var(--font-mono); letter-spacing: .1em; text-transform: uppercase; }
+    .ticket-body { min-height: 226px; padding: 15px 16px 17px; border: 1px solid var(--border-1); border-radius: var(--radius-2); background: var(--bg-0); background-image: var(--surface-pattern); }
+    .ticket-body h4 { margin: 0 0 13px; color: var(--text-0); font: 600 17px/1.25 var(--font-display); }
+    .sample-block {
+      position: relative; display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 5px;
+      margin: 0 0 7px; padding: 5px 6px; border-radius: 4px; color: var(--text-1); font-size: 12px; line-height: 1.52;
+      transition: background .15s, border-color .15s, box-shadow .15s, outline .15s;
+    }
+    .sample-block:last-child { margin-bottom: 0; }
+    .sample-block .bullet { color: var(--text-3); }
+    .sample-block code { padding: 1px 4px; border: 1px solid var(--border-2); border-radius: 4px; background: var(--bg-2); color: var(--text-0); font: 11px var(--font-mono); }
+    .sample-block .comment-count { align-self: start; min-width: 18px; padding: 1px 5px; border-radius: 999px; background: var(--comment-soft); color: var(--comment); font: 9px var(--font-mono); text-align: center; }
+    .sample-block:not(.commented) .comment-count { visibility: hidden; }
+    .sample-block.focused { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 2px; }
+
+    /* Baseline: this is the current mark. The whole block is located, but the
+       text range is painted with the inline comment treatment. */
+    .baseline .sample-block.commented .copy { background: var(--comment-soft); border-bottom: 2px solid var(--comment); }
+    .baseline .sample-block.commented .copy::after { content: ' ·'; color: var(--comment); }
+
+    /* A — calm block wash: the block owns the comment signal; text stays plain. */
+    .wash .sample-block.commented { background: var(--comment-soft); box-shadow: inset 2px 0 var(--comment); }
+    .wash .sample-block.commented .phrase { background: none; border-bottom: 0; }
+    .wash .sample-block.commented .phrase::after { content: ''; }
+
+    /* B — framed block: a clear but restrained container around the anchored block. */
+    .frame .sample-block.commented { border: 1px solid var(--comment-border); background: color-mix(in srgb, var(--comment-soft) 58%, var(--bg-1)); box-shadow: var(--shadow-1); }
+    .frame .sample-block.commented .phrase { background: none; border-bottom: 0; }
+    .frame .sample-block.commented .phrase::after { content: ''; }
+
+    /* C — margin rail: the lowest-density direction. */
+    .rail .sample-block.commented { background: linear-gradient(90deg, var(--comment-soft), transparent 42%); box-shadow: inset 3px 0 var(--comment); }
+    .rail .sample-block.commented .phrase { background: none; border-bottom: 0; }
+    .rail .sample-block.commented .phrase::after { content: ''; }
+
+    .specimen-foot { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: start; margin-top: 12px; }
+    .tradeoff { margin: 0; color: var(--text-2); font-size: 11px; line-height: 1.45; }
+    .tradeoff strong { color: var(--text-1); }
+    .complexity { color: var(--text-3); font: 10px/1.4 var(--font-mono); text-align: right; white-space: nowrap; }
+    .complexity b { display: block; color: var(--accent); font-size: 11px; }
+
+    .rail-note {
+      display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, .8fr); gap: 16px; align-items: start;
+      margin-top: 24px; padding: 17px 18px; border: 1px solid var(--border-2); border-radius: var(--radius-3);
+      background: var(--bg-1); background-image: var(--surface-pattern);
+    }
+    .rail-note h2 { margin-bottom: 7px; }
+    .rail-note p { margin: 0; color: var(--text-2); font-size: 12px; }
+    .comment-rail {
+      display: grid; gap: 7px; padding-left: 14px; border-left: 1px solid var(--border-2);
+    }
+    .comment-card { padding: 8px 10px; border-left: 2px solid var(--comment); border-radius: 5px; background: var(--bg-2); }
+    .comment-card:nth-child(2) { border-left-color: var(--comment-2); }
+    .comment-card .card-meta { color: var(--text-3); font: 9px var(--font-mono); text-transform: uppercase; }
+    .comment-card p { margin: 4px 0 0; color: var(--text-1); font-size: 11px; }
+
+    details { margin-top: 24px; border-top: 1px solid var(--border-2); padding-top: 15px; }
+    summary { cursor: pointer; color: var(--text-1); font-weight: 600; }
+    .survey-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 13px; }
+    .survey-grid div { padding: 12px; border: 1px solid var(--border-1); border-radius: var(--radius-2); background: var(--bg-1); }
+    .survey-grid b { display: block; margin-bottom: 4px; color: var(--accent); font: 10px var(--font-mono); text-transform: uppercase; }
+    .survey-grid p { margin: 0; color: var(--text-2); font-size: 11px; }
+    .footer-note { margin-top: 20px; color: var(--text-3); font: 10px/1.5 var(--font-mono); }
+
+    @media (max-width: 900px) {
+      .top { display: block; }
+      .theme-switcher { margin-top: 16px; }
+      .option-grid { grid-template-columns: 1fr; }
+      .rail-note, .survey-grid { grid-template-columns: 1fr; }
+      .comment-rail { padding: 14px 0 0; border-left: 0; border-top: 1px solid var(--border-2); }
+    }
+    @media (max-width: 560px) {
+      .shell { padding: 22px 14px 42px; }
+      .decision-strip { grid-template-columns: 1fr; }
+      .specimen-foot { grid-template-columns: 1fr; }
+      .complexity { text-align: left; }
+      .ticket-body { padding: 12px 10px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="top">
+      <div>
+        <div class="eyebrow">Dashboard comments · decision lab</div>
+        <h1>Block-level comment decoration</h1>
+        <p class="lede">Choose how a comment anchored to a whole Markdown block should read. The copy, comment count, rail, and themes stay constant. Only the body decoration changes.</p>
+      </div>
+      <div class="theme-switcher" aria-label="Preview theme">
+        <button type="button" data-theme="loam" aria-pressed="true">Loam &amp; Linen</button>
+        <button type="button" data-theme="dark" aria-pressed="false">Dark</button>
+      </div>
+    </header>
+
+    <section class="decision-strip" aria-label="Decision scope">
+      <div>
+        <strong>Decision:</strong> should the block that owns a comment receive the visual signal instead of the selected text?
+        <p>Current behavior is included as the baseline. Hover or use the focus control to inspect the active-block state.</p>
+      </div>
+      <label class="focus-toggle"><input id="focus-toggle" type="checkbox"> Focus the middle commented block</label>
+    </section>
+
+    <section aria-labelledby="options-title">
+      <div class="section-head">
+        <div>
+          <h2 id="options-title">Four directions</h2>
+          <p class="section-note">Same block · same comments · same scale</p>
+        </div>
+      </div>
+
+      <div class="option-grid">
+        <article class="option-card baseline">
+          <div class="option-head">
+            <div class="option-title"><span class="option-index">0</span><h3>Inline mark · current</h3></div>
+            <p class="option-thesis">Precise text-level signal. This is the screenshot baseline: the located block is painted as an underlined text range.</p>
+            <div class="option-meta"><span class="chip">precise</span><span class="chip">highest noise</span></div>
+          </div>
+          <div class="specimen">
+            <div class="specimen-label">Ticket body</div>
+            <div class="ticket-body">
+              <h4>D4 — Inbound auth for wardrobe → gateway</h4>
+              <div class="sample-block commented"><span class="bullet">•</span><span class="copy">Context: Functions send a bare <code>X-API-Key</code> today. Gateway standard = <code>sk_</code> bearer keys + capability gates.</span><span class="comment-count">1</span></div>
+              <div class="sample-block commented"><span class="bullet">•</span><span class="copy phrase">Options: standard <code>sk_live_</code>/<code>sk_test_</code> key, capabilities <code>jobs:create</code>, <code>jobs:read</code>, and a wardrobe-facade capability.</span><span class="comment-count">2</span></div>
+              <div class="sample-block"><span class="bullet">•</span><span class="copy">Recommendation: (a) — streamlined, with no bespoke auth path.</span><span class="comment-count">0</span></div>
+            </div>
+            <div class="specimen-foot"><p class="tradeoff"><strong>Benefit:</strong> exact quote location. <strong>Cost:</strong> long blocks become a wall of underlines.</p><div class="complexity"><b>Existing</b>no rendering change</div></div>
+          </div>
+        </article>
+
+        <article class="option-card wash">
+          <div class="option-head">
+            <div class="option-title"><span class="option-index">A</span><h3>Quiet wash</h3></div>
+            <p class="option-thesis">The whole block gets a low-contrast tint and a small leading accent. Text remains plain and easy to scan.</p>
+            <div class="option-meta"><span class="chip">calm</span><span class="chip">scan-first</span></div>
+          </div>
+          <div class="specimen">
+            <div class="specimen-label">Ticket body</div>
+            <div class="ticket-body">
+              <h4>D4 — Inbound auth for wardrobe → gateway</h4>
+              <div class="sample-block commented"><span class="bullet">•</span><span class="copy">Context: Functions send a bare <code>X-API-Key</code> today. Gateway standard = <code>sk_</code> bearer keys + capability gates.</span><span class="comment-count">1</span></div>
+              <div class="sample-block commented"><span class="bullet">•</span><span class="copy phrase">Options: standard <code>sk_live_</code>/<code>sk_test_</code> key, capabilities <code>jobs:create</code>, <code>jobs:read</code>, and a wardrobe-facade capability.</span><span class="comment-count">2</span></div>
+              <div class="sample-block"><span class="bullet">•</span><span class="copy">Recommendation: (a) — streamlined, with no bespoke auth path.</span><span class="comment-count">0</span></div>
+            </div>
+            <div class="specimen-foot"><p class="tradeoff"><strong>Benefit:</strong> clear ownership without visual shouting. <strong>Cost:</strong> a very long block gets a large tint.</p><div class="complexity"><b>Low–medium</b>class + CSS</div></div>
+          </div>
+        </article>
+
+        <article class="option-card frame">
+          <div class="option-head">
+            <div class="option-title"><span class="option-index">B</span><h3>Framed block</h3></div>
+            <p class="option-thesis">A thin border and a raised surface make the commented block read as one contained review object.</p>
+            <div class="option-meta"><span class="chip">strong boundary</span><span class="chip">review object</span></div>
+          </div>
+          <div class="specimen">
+            <div class="specimen-label">Ticket body</div>
+            <div class="ticket-body">
+              <h4>D4 — Inbound auth for wardrobe → gateway</h4>
+              <div class="sample-block commented"><span class="bullet">•</span><span class="copy">Context: Functions send a bare <code>X-API-Key</code> today. Gateway standard = <code>sk_</code> bearer keys + capability gates.</span><span class="comment-count">1</span></div>
+              <div class="sample-block commented"><span class="bullet">•</span><span class="copy phrase">Options: standard <code>sk_live_</code>/<code>sk_test_</code> key, capabilities <code>jobs:create</code>, <code>jobs:read</code>, and a wardrobe-facade capability.</span><span class="comment-count">2</span></div>
+              <div class="sample-block"><span class="bullet">•</span><span class="copy">Recommendation: (a) — streamlined, with no bespoke auth path.</span><span class="comment-count">0</span></div>
+            </div>
+            <div class="specimen-foot"><p class="tradeoff"><strong>Benefit:</strong> strongest block grouping. <strong>Cost:</strong> can make a dense document feel card-heavy.</p><div class="complexity"><b>Medium</b>geometry + state</div></div>
+          </div>
+        </article>
+
+        <article class="option-card rail">
+          <div class="option-head">
+            <div class="option-title"><span class="option-index">C</span><h3>Margin rail</h3></div>
+            <p class="option-thesis">A quiet vertical rail and a faint edge wash identify the block while preserving the document’s open rhythm.</p>
+            <div class="option-meta"><span class="chip">lowest density</span><span class="chip">document-like</span></div>
+          </div>
+          <div class="specimen">
+            <div class="specimen-label">Ticket body</div>
+            <div class="ticket-body">
+              <h4>D4 — Inbound auth for wardrobe → gateway</h4>
+              <div class="sample-block commented"><span class="bullet">•</span><span class="copy">Context: Functions send a bare <code>X-API-Key</code> today. Gateway standard = <code>sk_</code> bearer keys + capability gates.</span><span class="comment-count">1</span></div>
+              <div class="sample-block commented"><span class="bullet">•</span><span class="copy phrase">Options: standard <code>sk_live_</code>/<code>sk_test_</code> key, capabilities <code>jobs:create</code>, <code>jobs:read</code>, and a wardrobe-facade capability.</span><span class="comment-count">2</span></div>
+              <div class="sample-block"><span class="bullet">•</span><span class="copy">Recommendation: (a) — streamlined, with no bespoke auth path.</span><span class="comment-count">0</span></div>
+            </div>
+            <div class="specimen-foot"><p class="tradeoff"><strong>Benefit:</strong> subtle in long specs and readable in both themes. <strong>Cost:</strong> block ownership is less immediate.</p><div class="complexity"><b>Low–medium</b>class + CSS</div></div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="rail-note" aria-labelledby="rail-title">
+      <div>
+        <h2 id="rail-title">The comments rail stays constant</h2>
+        <p>The right-hand cards remain the source of detail and actions. The body decoration only answers one question: which block owns this comment? The small count badge in each specimen stands in for the existing comment count affordance.</p>
+      </div>
+      <div class="comment-rail" aria-label="Comment rail specimen">
+        <div class="comment-card"><div class="card-meta">Note · You · 1 comment</div><p>Context: auth path and capability boundary.</p></div>
+        <div class="comment-card"><div class="card-meta">Note · You · 2 comments</div><p>Options need a decision before implementation.</p></div>
+      </div>
+    </section>
+
+    <details>
+      <summary>Survey notes: what production work would change?</summary>
+      <div class="survey-grid">
+        <div><b>Already exists</b><p><code>assignBlockIds()</code> gives each top-level Markdown block a stable <code>data-block-id</code>. New block comments already persist that id.</p></div>
+        <div><b>Main change</b><p>For comments with <code>block_id</code>, decorate the matching block element instead of wrapping its full text in <code>&lt;mark&gt;</code>. Keep text marks for legacy comments without a block id.</p></div>
+        <div><b>Important edge</b><p>Multiple comments can share a block. Active, resolved, author, and tag state must be represented without changing line wrapping or losing click-to-focus behavior.</p></div>
+      </div>
+    </details>
+
+    <p class="footer-note">Decision lab only · no production files or runtime behavior are changed by this page. Choose a base direction, or name a hybrid such as “A’s wash plus C’s rail.”</p>
+  </main>
+
+  <script>
+    const root = document.documentElement;
+    const themeButtons = [...document.querySelectorAll('button[data-theme]')];
+    themeButtons.forEach((button) => button.addEventListener('click', () => {
+      const theme = button.dataset.theme;
+      root.dataset.theme = theme;
+      themeButtons.forEach((b) => b.setAttribute('aria-pressed', String(b === button)));
+    }));
+
+    const focusToggle = document.querySelector('#focus-toggle');
+    focusToggle.addEventListener('change', () => {
+      document.querySelectorAll('.sample-block:nth-of-type(2)').forEach((block) => {
+        block.classList.toggle('focused', focusToggle.checked);
+      });
+    });
+  </script>
+</body>
+</html>

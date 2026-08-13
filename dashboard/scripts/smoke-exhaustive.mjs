@@ -51,29 +51,10 @@ if (resolveCount > 0) {
   await shot('05-after-reopen');
 }
 
-// Test 2: Tag picker
-const tagChip = firstCard.locator('.anno-tag.clickable').first();
-const tagCount = await tagChip.count();
-log('tag chip count:', tagCount);
-if (tagCount > 0) {
-  await tagChip.click();
-  await wait(300);
-  const tagPicker = await page.evaluate(() => {
-    const inline = document.querySelector('.anno-tagrow.inline');
-    return inline ? { visible: true, chips: Array.from(inline.querySelectorAll('.anno-tagchip')).map((c) => c.textContent.trim()) } : null;
-  });
-  log('tag picker:', JSON.stringify(tagPicker));
-  await shot('06-tag-picker');
-  // Pick a different tag (e.g., "Fix")
-  const fixBtn = page.locator('.anno-tagrow.inline .anno-tagchip', { hasText: 'Fix' });
-  if (await fixBtn.count() > 0) {
-    await fixBtn.first().click();
-    await wait(500);
-    const newTag = await firstCard.locator('.anno-tag.clickable').first().textContent();
-    log('new tag text:', newTag.trim());
-    await shot('07-after-tag-change');
-  }
-}
+// Test 2: comment types are gone — cards no longer expose a tag picker
+const tagChipCount = await firstCard.locator('.anno-tag.clickable').count();
+const tagRowCount = await page.locator('.anno-tagrow').count();
+log('tag chip count:', tagChipCount, 'tag row count:', tagRowCount);
 
 // Test 3: Reply flow
 const replyBtn = firstCard.locator('button', { hasText: 'Reply' });
@@ -103,21 +84,22 @@ const afterDeleteCount = await page.locator('#anno-list .anno-card').count();
 log('cards after delete:', afterDeleteCount);
 await shot('09-after-delete');
 
-// Test 5: Hide resolved toggle
-const hideBtn = page.locator('#anno-rail .rail-btn', { hasText: 'Hide resolved' });
-if (await hideBtn.count() > 0) {
-  await hideBtn.first().click();
-  await wait(400);
-  const visAfterHide = await page.evaluate(() => {
+// Test 5: Show resolved checkbox (off by default)
+const showResolved = page.locator('#anno-rail .rail-check input[type="checkbox"]');
+if (await showResolved.count() > 0) {
+  const visDefault = await page.evaluate(() => {
     const cards = Array.from(document.querySelectorAll('#anno-list .anno-card'));
     return cards.map((c) => ({ id: c.dataset.id, resolved: c.classList.contains('resolved') }));
   });
-  log('cards visible after hide-resolved:', JSON.stringify(visAfterHide));
-  await shot('10-hide-resolved');
-  // Toggle back
-  const showBtn = page.locator('#anno-rail .rail-btn', { hasText: 'Show resolved' });
-  if (await showBtn.count() > 0) await showBtn.first().click();
+  log('cards visible by default (resolved hidden):', JSON.stringify(visDefault));
+  await showResolved.first().check();
   await wait(400);
+  const visAfterShow = await page.evaluate(() => {
+    const cards = Array.from(document.querySelectorAll('#anno-list .anno-card'));
+    return cards.map((c) => ({ id: c.dataset.id, resolved: c.classList.contains('resolved') }));
+  });
+  log('cards visible after show-resolved:', JSON.stringify(visAfterShow));
+  await shot('10-show-resolved');
 }
 
 // Test 6: Body edit dialog

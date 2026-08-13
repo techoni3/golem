@@ -970,6 +970,8 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                     onReply={onReplyComment}
                     canDispatchComments={!!selectedCommentDispatchSession}
                     containerSelector={containerSelector}
+                    documentKey={ticket.id}
+                    documentTitle={ticket.title}
                   />
                 ) : (
                   <div className="td-body-empty">No description.</div>
