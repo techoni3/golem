@@ -185,6 +185,7 @@ function buildSpecBrief(ticket, note, workspace, messageId = null, senderSession
       `### Comment ${idx + 1}: ${c.id}`,
       `Author: ${c.author || 'unknown'} · state: ${c.dispatch_state}`,
       c.block_id ? `Block: ${c.block_id}` : null,
+      c.anchor_kind ? `Anchor: ${c.anchor_kind}` : null,
       c.quote ? `Quote: ${c.quote}` : null,
       '',
       c.body || '',
@@ -1291,7 +1292,7 @@ async function main() {
   // POST /api/tickets/:id/comments — add a comment. Broadcasts both the comment
   // delta AND a ticket-updated (addComment bumps the ticket's updated_at).
   // POST /api/tickets/:id/comments — add a comment (plain or inline anchored).
-  // Body: { author, body, quote?, prefix?, suffix?, section?, section_id?, tag?, status?, parent_id?, block_id? }
+  // Body: { author, body, quote?, prefix?, suffix?, section?, section_id?, tag?, status?, parent_id?, block_id?, anchor_kind? }
   fastify.post('/api/tickets/:id/comments', async (req, reply) => {
     const ticketRef = resolveTicketRef(req.params.id);
     if (!ticketRef) return reply.code(404).send({ error: 'not_found' });
@@ -1312,6 +1313,7 @@ async function main() {
         status: b.status,
         parent_id: b.parent_id,
         block_id: b.block_id,
+        anchor_kind: b.anchor_kind,
       });
       broadcastWS({ type: 'ticket-comment', ticket_id: id, comment });
       const ticket = tracker.getTicket(id);
@@ -1341,7 +1343,7 @@ async function main() {
       // the comment's text + de-anchor its block_id. An explicit {body:''} still
       // clears intentionally (it's present → included → toMarkdownBody('')='').
       const patch = Object.fromEntries(
-        ['body', 'tag', 'status', 'block_id'].filter((k) => k in b).map((k) => [k, b[k]])
+        ['body', 'tag', 'status', 'block_id', 'anchor_kind'].filter((k) => k in b).map((k) => [k, b[k]])
       );
       const before = tracker.getComment(cid);
       const comment = tracker.updateComment(id, cid, patch);
@@ -1415,6 +1417,7 @@ async function main() {
       ...list.flatMap((comment, idx) => [
         `## Comment ${idx + 1}: ${comment.id}`,
         comment.block_id ? `Block: ${comment.block_id}` : null,
+        comment.anchor_kind ? `Anchor: ${comment.anchor_kind}` : null,
         comment.quote ? `Quote: ${comment.quote}` : null,
         '',
         comment.body || '',

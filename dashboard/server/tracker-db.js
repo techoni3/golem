@@ -20,7 +20,7 @@ import { trackerDbPath } from '../../lib/golem-home.js';
 import { loadConfig } from '../../lib/golem-config.js';
 import { createCommentDispatchService, defaultDispatchStateForComment } from './comment-dispatch.js';
 
-const SCHEMA_VERSION = 18;
+const SCHEMA_VERSION = 19;
 
 // GOL-151: three doc types. `task` is the default unit of work, `spec` is the
 // living design doc, `doc` is any supporting page (research, survey,
@@ -245,6 +245,8 @@ export function openTrackerDb(dbPath = defaultDbPath()) {
         status      TEXT NOT NULL DEFAULT 'open',
         dispatch_state TEXT NOT NULL DEFAULT 'undispatched',
         parent_id   TEXT,
+        block_id    TEXT,
+        anchor_kind TEXT,
         created_at  TEXT NOT NULL,
         updated_at  TEXT NOT NULL
       );
@@ -509,6 +511,21 @@ WHERE state_changed_at IS NULL`).run();
       }
     }
 
+    // TKT-0193: distinguish a whole-block comment from a text selection that
+    // carries its containing block as context. Existing rows are inferred from
+    // the old writer: block-hover comments had no prefix/suffix; text comments
+    // normally had at least one surrounding-context field.
+    const commentCols19 = db.prepare("PRAGMA table_info(comments)").all().map((c) => c.name);
+    if (!commentCols19.includes('anchor_kind')) db.exec('ALTER TABLE comments ADD COLUMN anchor_kind TEXT');
+    db.prepare(`
+      UPDATE comments
+      SET anchor_kind = CASE
+        WHEN block_id IS NOT NULL AND COALESCE(prefix, '') = '' AND COALESCE(suffix, '') = '' THEN 'block'
+        ELSE 'text'
+      END
+      WHERE anchor_kind IS NULL
+    `).run();
+
     // Schema migration v5 -> v6 (TKT-0519): per-project display ids (pseq +
     // display_id) + a project_prefixes table. Historical smoke debris is
     // quarantined to smoketests-000000 BEFORE backfill so real projects number
@@ -733,10 +750,10 @@ WHERE state_changed_at IS NULL`).run();
       insertComment: db.prepare(`
         INSERT INTO comments
           (id, ticket_id, author, body, quote, prefix, suffix, section, section_id,
-           tag, status, dispatch_state, parent_id, block_id, created_at, updated_at)
+           tag, status, dispatch_state, parent_id, block_id, anchor_kind, created_at, updated_at)
         VALUES
           (@id, @ticket_id, @author, @body, @quote, @prefix, @suffix, @section, @section_id,
-            @tag, @status, @dispatch_state, @parent_id, @block_id, @created_at, @updated_at)
+            @tag, @status, @dispatch_state, @parent_id, @block_id, @anchor_kind, @created_at, @updated_at)
       `),
       touchTicket: db.prepare('UPDATE tickets SET updated_at = ? WHERE id = ?'),
       insertLink: db.prepare('INSERT OR IGNORE INTO links (from_ticket, to_ticket, type) VALUES (?, ?, ?)'),
@@ -2767,11 +2784,19 @@ WHERE state_changed_at IS NULL`).run();
       if (!existing) throw new Error(`addComment: ticket '${ticket_id}' not found`);
       const {
         author, body, quote, prefix, suffix, section, section_id,
-        tag = 'note', status = 'open', parent_id, block_id,
+        tag = 'note', status = 'open', parent_id, block_id, anchor_kind,
       } = input;
       if (!author) throw new Error('addComment: author is required');
       if (body == null) throw new Error('addComment: body is required');
       if (tag && !COMMENT_TAGS.has(tag)) throw new Error(`addComment: invalid tag '${tag}'`);
+      if (anchor_kind != null && !['block', 'text'].includes(anchor_kind)) throw new Error(`addComment: invalid anchor_kind '${anchor_kind}'`);
+      const parent = parent_id
+        ? db.prepare('SELECT block_id, anchor_kind FROM comments WHERE id = ? AND ticket_id = ?').get(parent_id, ticket_id)
+        : null;
+      const resolvedBlockId = block_id ?? parent?.block_id ?? null;
+      const resolvedAnchorKind = anchor_kind
+        ?? parent?.anchor_kind
+        ?? (resolvedBlockId && !prefix && !suffix ? 'block' : 'text');
       const ts = now();
       const row = {
         id: crypto.randomUUID(), ticket_id, author,
@@ -2785,9 +2810,8 @@ WHERE state_changed_at IS NULL`).run();
         status,
         dispatch_state: defaultDispatchStateForComment({ author, status }),
         parent_id: parent_id ?? null,
-        block_id: block_id ?? (parent_id
-          ? db.prepare('SELECT block_id FROM comments WHERE id = ? AND ticket_id = ?').get(parent_id, ticket_id)?.block_id ?? null
-          : null),
+        block_id: resolvedBlockId,
+        anchor_kind: resolvedAnchorKind,
         created_at: ts,
         updated_at: ts,
       };
@@ -2857,7 +2881,7 @@ WHERE state_changed_at IS NULL`).run();
       if (!existingTicket) throw new Error(`updateComment: ticket '${ticket_id}' not found`);
       const existing = db.prepare('SELECT * FROM comments WHERE id = ? AND ticket_id = ?').get(comment_id, ticket_id);
       if (!existing) throw new Error(`updateComment: comment '${comment_id}' not found`);
-      const ALLOWED = ['body', 'tag', 'status', 'block_id'];
+      const ALLOWED = ['body', 'tag', 'status', 'block_id', 'anchor_kind'];
       const updates = {};
       for (const key of ALLOWED) {
         if (Object.prototype.hasOwnProperty.call(patch, key)) updates[key] = patch[key];
@@ -2865,6 +2889,9 @@ WHERE state_changed_at IS NULL`).run();
       if ('body' in updates) updates.body = toMarkdownBody(updates.body);
       if ('tag' in updates && updates.tag && !COMMENT_TAGS.has(updates.tag)) {
         throw new Error(`updateComment: invalid tag '${updates.tag}'`);
+      }
+      if ('anchor_kind' in updates && updates.anchor_kind && !['block', 'text'].includes(updates.anchor_kind)) {
+        throw new Error(`updateComment: invalid anchor_kind '${updates.anchor_kind}'`);
       }
       if (!Object.keys(updates).length) return existing;
       const setClause = Object.keys(updates).map((k) => `${k} = @${k}`).join(', ');

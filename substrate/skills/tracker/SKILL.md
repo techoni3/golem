@@ -16,8 +16,8 @@ MCP tracker tools or dashboard REST, never direct writes.
 | `ticket_get({id})` | full read: body, comments, children, events |
 | `ticket_create({title, kind, body, parent_id?})` | new ticket; kind defaults to `task`; fill the kind's template |
 | `ticket_update({id, ...})` | metadata and state; `body` replaces the WHOLE body — read first, rewrite in full, preserve the sections you are not changing |
-| `ticket_comment({id, body, ...})` | progress and evidence; anchor with quote/prefix/suffix/section; tag: confirmed, partial, disputed, fix, risk, question, note |
-| `ticket_comment_update` | resolve/reopen, retag, or edit a comment |
+| `ticket_comment({id, body, ...})` | progress and evidence; anchor with quote/prefix/suffix/section |
+| `ticket_comment_update` | resolve/reopen or edit a comment |
 | `ticket_comment_reply` | thread a reply under a comment |
 | `ticket_dispatch({id, session_id})` | hand a ticket to a live session |
 | `sessions_dispatchable` | see live sessions, their roles and workload |
