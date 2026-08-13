@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
 import { golemHome } from './lib/golem-home.js';
 import { dashboardJsonPath } from './lib/golem-home.js';
 import { createGolemClient, resolveGolemDashboardBaseUrl } from './lib/golem-client.js';
@@ -12,6 +13,118 @@ import { readRoleCard, sessionsJsonPath, setSessionRole, validateSessionRole } f
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PI_ROLES = new Set(['builder', 'explorer', 'reviewer']);
+
+function formatTokens(count) {
+  if (count == null) return '?';
+  if (count < 1_000) return String(count);
+  if (count < 10_000) return `${(count / 1_000).toFixed(1)}k`;
+  if (count < 1_000_000) return `${Math.round(count / 1_000)}k`;
+  if (count < 10_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+  return `${Math.round(count / 1_000_000)}M`;
+}
+
+function compactCwd(cwd) {
+  const resolved = path.resolve(cwd);
+  const current = path.basename(resolved);
+  if (!current) return path.parse(resolved).root;
+  const parentPath = path.dirname(resolved);
+  const parent = path.basename(parentPath);
+  return parent ? `${parent}${path.sep}${current}` : current;
+}
+
+function usageTotals(sessionManager) {
+  const totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, cacheHit: null };
+  for (const entry of sessionManager.getEntries()) {
+    if (entry.type !== 'message' || entry.message?.role !== 'assistant') continue;
+    const usage = entry.message.usage || {};
+    totals.input += usage.input || 0;
+    totals.output += usage.output || 0;
+    totals.cacheRead += usage.cacheRead || 0;
+    totals.cacheWrite += usage.cacheWrite || 0;
+    totals.cost += usage.cost?.total || 0;
+    const prompt = (usage.input || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
+    totals.cacheHit = prompt > 0 ? ((usage.cacheRead || 0) / prompt) * 100 : totals.cacheHit;
+  }
+  return totals;
+}
+
+function contextMeter(ctx, theme) {
+  const usage = ctx.getContextUsage();
+  const contextWindow = usage?.contextWindow || ctx.model?.contextWindow || 0;
+  const percent = usage?.percent;
+  const bounded = percent == null ? 0 : Math.max(0, Math.min(100, percent));
+  const exactCells = bounded / 10;
+  let filled = Math.floor(exactCells);
+  let partialIndex = Math.round((exactCells - filled) * 8);
+  if (partialIndex === 8) {
+    filled += 1;
+    partialIndex = 0;
+  }
+  const partial = ['', '▏', '▎', '▍', '▌', '▋', '▊', '▉'][partialIndex];
+  const bar = `${'█'.repeat(filled)}${partial}${'░'.repeat(10 - filled - (partial ? 1 : 0))}`;
+  const color = bounded > 90 ? 'error' : bounded >= 70 ? 'warning' : 'accent';
+  const percentage = percent == null ? '?' : `${percent.toFixed(1)}%`;
+  return `${theme.fg(color, bar)} ${percentage} ${formatTokens(usage?.tokens)}/${formatTokens(contextWindow)}`;
+}
+
+function installFooter(pi) {
+  let activeTui;
+  pi.on('session_info_changed', () => activeTui?.requestRender());
+  pi.on('session_start', (_event, ctx) => {
+    if (ctx.mode !== 'tui' || !ctx.ui?.setFooter) return;
+    ctx.ui.setFooter((tui, theme, footerData) => {
+      activeTui = tui;
+      const unsubscribe = footerData.onBranchChange(() => tui.requestRender());
+      return {
+        dispose() {
+          unsubscribe();
+          if (activeTui === tui) activeTui = undefined;
+        },
+        invalidate() {},
+        render(width) {
+          const branch = footerData.getGitBranch();
+          const sessionName = ctx.sessionManager.getSessionName();
+          const cwd = theme.bold(theme.fg('accent', compactCwd(ctx.cwd)));
+          const branchText = branch ? theme.fg('muted', ` (${branch})`) : '';
+          const sessionText = sessionName ? ` ${theme.fg('dim', '•')} ${theme.bold(theme.fg('accent', sessionName))}` : '';
+          const identity = truncateToWidth(`${cwd}${branchText}${sessionText}`, width, '…');
+
+          const totals = usageTotals(ctx.sessionManager);
+          const stats = [];
+          if (totals.input) stats.push(`↑${formatTokens(totals.input)}`);
+          if (totals.output) stats.push(`↓${formatTokens(totals.output)}`);
+          if (totals.cacheRead) stats.push(`R${formatTokens(totals.cacheRead)}`);
+          if (totals.cacheWrite) stats.push(`W${formatTokens(totals.cacheWrite)}`);
+          if (totals.cacheHit != null && (totals.cacheRead || totals.cacheWrite)) stats.push(`CH${totals.cacheHit.toFixed(1)}%`);
+          if (totals.cost) stats.push(`$${totals.cost.toFixed(3)}`);
+          const left = `${theme.fg('muted', stats.join(' '))}${stats.length ? ' ' : ''}${contextMeter(ctx, theme)}`;
+
+          const model = ctx.model?.id || 'no-model';
+          const provider = footerData.getAvailableProviderCount() > 1 && ctx.model ? `(${ctx.model.provider}) ` : '';
+          const thinking = ctx.model?.reasoning ? ` • ${pi.getThinkingLevel()}` : '';
+          const fullRight = theme.fg('muted', `${provider}${model}${thinking}`);
+          const fallbackRight = theme.fg('muted', `${model}${thinking}`);
+          let right = fullRight;
+          if (visibleWidth(left) + 2 + visibleWidth(fullRight) > width) right = fallbackRight;
+          const rightBudget = width >= 40 ? Math.min(visibleWidth(right), Math.max(0, width - 22)) : 0;
+          const leftBudget = Math.max(0, width - rightBudget - (rightBudget ? 2 : 0));
+          const fittedLeft = truncateToWidth(left, leftBudget, '…');
+          const fittedRight = rightBudget ? truncateToWidth(right, rightBudget, '…') : '';
+          const gap = Math.max(0, width - visibleWidth(fittedLeft) - visibleWidth(fittedRight));
+          const metrics = `${fittedLeft}${' '.repeat(gap)}${fittedRight}`;
+
+          const lines = [identity, metrics];
+          const statuses = [...footerData.getExtensionStatuses().entries()]
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([, text]) => String(text).replace(/[\r\n\t]+/g, ' ').trim())
+            .filter(Boolean);
+          if (statuses.length) lines.push(truncateToWidth(statuses.join(' '), width, '…'));
+          return lines;
+        },
+      };
+    });
+  });
+}
 
 function sessionRole(sessionId) {
   try {
@@ -37,6 +150,7 @@ function toolText(value) {
 // Pi-specific primitive binding. Shared transport, lifecycle, replay, facts,
 // leases, and journaling live in the rendered runtime modules.
 export default function golem(pi) {
+  installFooter(pi);
   const adapter = new PiNativeAdapter(pi);
   adapter.bind();
 
