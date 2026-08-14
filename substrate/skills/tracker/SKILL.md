@@ -52,6 +52,19 @@ There are three doc types in the tracker:
 - Most often, the goal is to end up with a locked spec with full alignment.
 - Over-engineering is as bad as doing it incorrectly.
 
+#### Intermediate brainstorming
+
+- Some specs carry several decisions for the human — requirements and design alike — where he
+  needs grounded explanations: scope, solution options, and the impact of each choice. That
+  discussion would clutter the main spec.
+- Use a scratchpad instead: a supporting `doc` child of the spec (`templates/doc`, scratchpad
+  shape). Create it when the human asks, or when you see the need — ask first, never implicitly.
+- Work one decision at a time. Explain options, choices, and implications visually, with the
+  same form as the main spec, so the human can decide fully deliberately.
+- Expect a hybrid flow: the human comments on the spec, comments on the scratchpad, and speaks
+  in chat. Keep his explicit directives in mind.
+- Fold decided outcomes into the main spec at boundaries or on his explicit directive.
+
 ### Implementation tasks
 
 - After the spec is finalised, decompose it into manageable tasks — a single task for a small
