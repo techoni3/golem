@@ -225,13 +225,13 @@ export function updateTicket(id, patch) {
   return request('PATCH', `/api/tickets/${encodeURIComponent(id)}`, { body: patch });
 }
 
-/** POST /api/tickets/:id/comments {author,body,quote?,prefix?,suffix?,section?,section_id?,tag?,status?,parent_id?} */
+/** POST /api/tickets/:id/comments {author,body,quote?,prefix?,suffix?,section?,section_id?,status?,parent_id?} */
 export function addComment(id, input = {}) {
   if (!id) throw new GolemClientError('addComment: id is required', { code: 'GOLEM_INVALID_ARGUMENT' });
   return request('POST', `/api/tickets/${encodeURIComponent(id)}/comments`, { body: input });
 }
 
-/** PATCH /api/tickets/:id/comments/:cid {body?,tag?,status?} */
+/** PATCH /api/tickets/:id/comments/:cid {body?,status?} */
 export function updateComment(id, commentId, patch) {
   if (!id) throw new GolemClientError('updateComment: id is required', { code: 'GOLEM_INVALID_ARGUMENT' });
   if (!commentId) throw new GolemClientError('updateComment: commentId is required', { code: 'GOLEM_INVALID_ARGUMENT' });

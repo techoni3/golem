@@ -17,8 +17,8 @@ MCP tracker tools or dashboard REST, never direct writes.
 | `ticket_get({id})` | full read: body, comments, children, events |
 | `ticket_create({title, kind, body, parent_id?})` | new ticket; kind defaults to `task`; fill the kind's template |
 | `ticket_update({id, ...})` | metadata and state; `body` replaces the WHOLE body — read first, rewrite in full, preserve the sections you are not changing |
-| `ticket_comment({id, body, ...})` | progress and evidence; anchor with quote/prefix/suffix/section; tag: confirmed, partial, disputed, fix, risk, question, note |
-| `ticket_comment_update` | resolve/reopen, retag, or edit a comment |
+| `ticket_comment({id, body, ...})` | progress and evidence; anchor with quote/prefix/suffix/section |
+| `ticket_comment_update` | resolve/reopen or edit a comment |
 | `ticket_comment_reply` | thread a reply under a comment |
 | `ticket_dispatch({id, session_id})` | hand a ticket to a live session |
 | `sessions_dispatchable` | see live sessions, their roles and workload |
@@ -52,6 +52,19 @@ There are three doc types in the tracker:
 - In case of ambiguity, ask for clarification rather than making assumptions.
 - Most often, the goal is to end up with a locked spec with full alignment.
 - Over-engineering is as bad as doing it incorrectly.
+
+#### Intermediate brainstorming
+
+- Some specs carry several decisions for the human — requirements and design alike — where he
+  needs grounded explanations: scope, solution options, and the impact of each choice. That
+  discussion would clutter the main spec.
+- Use a scratchpad instead: a supporting `doc` child of the spec (`templates/doc`, scratchpad
+  shape). Create it when the human asks, or when you see the need — ask first, never implicitly.
+- Work one decision at a time. Explain options, choices, and implications visually, with the
+  same form as the main spec, so the human can decide fully deliberately.
+- Expect a hybrid flow: the human comments on the spec, comments on the scratchpad, and speaks
+  in chat. Keep his explicit directives in mind.
+- Fold decided outcomes into the main spec at boundaries or on his explicit directive.
 
 ### Implementation tasks
 

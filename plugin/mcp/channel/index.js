@@ -706,7 +706,6 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
           suffix: args.suffix,
           section: args.section,
           section_id: args.section_id,
-          tag: args.tag,
           status: args.status,
           parent_id: args.parent_id,
         };
@@ -717,7 +716,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         if (!args.id) throw new Error('ticket_comment_update: id is required');
         if (!args.comment_id) throw new Error('ticket_comment_update: comment_id is required');
         const patch = {};
-        for (const k of ['body', 'tag', 'status']) {
+        for (const k of ['body', 'status']) {
           if (args[k] !== undefined) patch[k] = args[k];
         }
         return await jsonResult(await tracker.updateComment(args.id, args.comment_id, patch));
