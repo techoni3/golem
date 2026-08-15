@@ -2565,6 +2565,14 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
   transition: outline-color 100ms ease-out;
 }
 
+/* Option/Alt+click-to-comment: while the modifier is held, hovering a
+   commentable block shows a comment-bubble cursor (with a +) instead of the
+   default arrow, signaling that clicking adds a comment. Interactive elements
+   inside the block (links, buttons, mermaid) keep their own cursor. */
+.anno-alt-comment [data-block-id]:hover:not(:has(a:hover, button:hover, input:hover, textarea:hover, select:hover, .mermaid:hover)) {
+  cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z' fill='white' stroke='%23333' stroke-width='1.5'/><path d='M12 8.5v7M8.5 12h7' stroke='%23333' stroke-width='1.8' stroke-linecap='round'/></svg>") 12 12, copy;
+}
+
 /* Block-level comment decoration — Option C (margin rail). A resolved block
    stays visible but quieter; the rail does not underline or recolor its text.
    The row-specific rules keep the signal visible inside the table's cell

@@ -26,7 +26,7 @@ const BLOCK_PLUS_STYLE = {
 // re-attaches to it. While the cursor crosses block boundaries (e.g. from a
 // table row up to the table), the button stays on the block it was shown for,
 // so it is never yanked away mid-click.
-const BLOCK_PLUS_SETTLE_MS = 800;
+const BLOCK_PLUS_SETTLE_MS = 500;
 
 const CTX = 42;
 
@@ -883,6 +883,51 @@ function TdAnnotate({ body, comments, currentAuthor = 'you', onCreate, onCreateA
   const [railOpen, setRailOpen] = React.useState(false);
   const [saveState, setSaveState] = React.useState('');
   const [pendingComposer, setPendingComposer] = React.useState(null);
+  // Option/Alt+click-to-comment: track the modifier so the cursor can signal
+  // "click adds a comment" only while it is held, and the click handler can
+  // open a composer for the block under the cursor. (Ctrl+click is the system
+  // right-click on macOS, so it is deliberately not used.)
+  const [altComment, setAltComment] = React.useState(false);
+  React.useEffect(() => {
+    const down = (e) => { if (e.altKey) setAltComment(true); };
+    const up = (e) => { if (!e.altKey) setAltComment(false); };
+    const blur = () => setAltComment(false);
+    document.addEventListener('keydown', down);
+    document.addEventListener('keyup', up);
+    window.addEventListener('blur', blur);
+    return () => {
+      document.removeEventListener('keydown', down);
+      document.removeEventListener('keyup', up);
+      window.removeEventListener('blur', blur);
+    };
+  }, []);
+
+  // Option/Alt+click anywhere in a commentable block opens the composer for
+  // that block — a reliable fallback when the "+" button is hard to reach.
+  // Explicit interactive elements (links, buttons, mermaid) keep their own
+  // behavior.
+  const onRootClick = (e) => {
+    if (!e.altKey) return;
+    const target = e.target;
+    if (target.closest('a, button, input, textarea, select, .mermaid-fs-btn, .mermaid')) return;
+    const block = target.closest('[data-block-id]');
+    if (!block) return;
+    const t = blockText(block);
+    if (!t) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const h = nearestPrecedingHeading(block, rootRef.current);
+    setRailOpen(true);
+    setPendingComposer({
+      quote: t,
+      prefix: '',
+      suffix: '',
+      section: { id: (block.dataset.blockId || '').split('#')[0], title: h ? h.textContent.trim().slice(0, 80) : '' },
+      blockId: block.dataset.blockId || '',
+      blockText: t,
+      anchorKind: 'block',
+    });
+  };
   const pendingRangeRef = React.useRef(null);
   // TKT-0172: block-hover state. attachedBlockRef holds the block the "+"
   // button is currently ATTACHED to — its { blockId, blockText, sectionId,
@@ -994,9 +1039,9 @@ function TdAnnotate({ body, comments, currentAuthor = 'you', onCreate, onCreateA
   // TKT-0172: block-hover UX. On entering a commentable block (data-block-id),
   // portal the "+" to the positioned ancestor, place it at the block's left
   // gutter / vertical midline, and stash the block's anchor for the "+"
-  // click handler. Showing is delayed 1s so the "+" doesn't trail the cursor
-  // during fast moves; hiding is delayed 1s so the cursor can travel from the
-  // block to the "+" without it vanishing.
+  // click handler. Showing is delayed 300ms so the "+" doesn't trail the
+  // cursor during fast moves; hiding is delayed 500ms so the cursor can
+  // travel from the block to the "+" without it vanishing.
 //
 // Event ordering caveat: when the cursor crosses from a block onto the "+",
   // the browser may fire `+mouseenter` BEFORE the block's `mouseleave` (the
@@ -1020,7 +1065,7 @@ React.useEffect(() => {
 
     // TKT-0192: paint the block-hover decoration on `block`, clearing it
     // from whichever block held it before. The class is removed by the
-    // leave timer (same 1s grace window as the "+" itself), so the
+    // leave timer (same 500ms grace window as the "+" itself), so the
     // highlight survives the cursor's trip from the block onto the "+".
     function setHoverBlock(block) {
       const prev = hoverBlockElRef.current;
@@ -1087,7 +1132,7 @@ React.useEffect(() => {
         // real width inside the show timeout below.
         placePlus(block);
         showPlusTimerRef.current = setTimeout(() => {
-          // Bail if the cursor moved off the block AND off the "+" within 500ms.
+          // Bail if the cursor moved off the block AND off the "+" within 300ms.
           if (!onBlock && !plusOn()) {
             attachedBlockRef.current = null;
             return;
@@ -1099,7 +1144,7 @@ React.useEffect(() => {
           placePlus(block);
           const badge = p.querySelector('.anno-block-count');
           if (badge) { badge.textContent = cnt ? String(cnt) : ''; badge.style.display = cnt ? 'inline-flex' : 'none'; }
-        }, 500);
+        }, 300);
       } else {
         // Cursor moved to a different block: keep the button on its current
         // block until the cursor settles here, so crossing a boundary doesn't
@@ -1132,7 +1177,7 @@ React.useEffect(() => {
         if (plus) plus.style.display = 'none';
         attachedBlockRef.current = null;
         clearHoverBlock();
-      }, 1000);
+      }, 500);
     }
     function onMove(event) {
       if (event.target?.closest?.('#anno-pill,#anno-block-plus,#anno-rail')) return;
@@ -1396,7 +1441,7 @@ React.useEffect(() => {
 
       {/* TKT-0172: block-hover "+" affordance. Portaled to the same positioned
           ancestor as the pill; shown + positioned by the block-hover effect on
-          mouseenter of a [data-block-id] block (with a 1s appear / 1s hide
+          mouseenter of a [data-block-id] block (with a 300ms appear / 500ms hide
           delay so the cursor can travel from block to "+"). Bridges: while on
           the "+", any pending block-hover hide is cancelled; leaving the "+"
           restarts it (only if the cursor is not also back on a block, see
@@ -1416,14 +1461,14 @@ React.useEffect(() => {
         onMouseLeave={() => {
           // Cursor left the "+". Re-arm a hide; the hide's fire-time check
           // (plusOn() / onBlock) means a quick bounce back onto a block in
-          // the 1s window cancels it naturally.
+          // the 500ms window cancels it naturally.
           hidePlusTimerRef.current = setTimeout(() => {
             const p = document.getElementById('anno-block-plus');
             const onPlus = !!p?.matches?.(':hover');
             if (onPlus) return;
             if (p) p.style.display = 'none';
             attachedBlockRef.current = null;
-          }, 1000);
+          }, 500);
         }}
         onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
         onClick={() => {
@@ -1563,7 +1608,7 @@ React.useEffect(() => {
 
   return (
     <div className={`td-annotate-wrap ${railOpen ? 'rail-open' : ''}`}>
-      <div ref={rootRef} className="td-md" dangerouslySetInnerHTML={{ __html: html || '' }}/>
+      <div ref={rootRef} className={`td-md${altComment ? ' anno-alt-comment' : ''}`} onClick={onRootClick} dangerouslySetInnerHTML={{ __html: html || '' }}/>
       {railAndFab}
     </div>
   );
