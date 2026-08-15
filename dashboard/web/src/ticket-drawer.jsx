@@ -212,17 +212,12 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
     [flatComments]
   );
   const undispatchedCount = undispatchedComments.length;
-  const needsCommentDispatchTarget = !defaultCommentDispatchSession;
-  const commentBatchDispatchBlocker = undispatchedCount === 0
-    ? 'Nothing queued — add a comment first.'
-    : !selectedCommentDispatchSession
-      ? (dispatchableLoaded
-        ? (dispatchable.length === 0
-          ? 'No live session in this project to dispatch to.'
-          : 'Pick a session above to enable dispatch.')
-        // Never assert "no live session" from a list we failed to load.
-        : 'Loading sessions…')
-      : null;
+  // The live assignee is the only comment-dispatch target now that the bulk
+  // panel moved to the comments drawer header (which shows only when the
+  // assignee is live). Label it for the header button.
+  const dispatchTargetLabel = defaultCommentDispatchSession
+    ? (labelBySession.get(defaultCommentDispatchSession) || null)
+    : null;
 
   React.useEffect(() => {
     if (defaultCommentDispatchSession) setCommentDispatchSession('');
@@ -539,6 +534,27 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
       setCommentDispatching(false);
     }
   }, [ticketId, commentDispatching, selectedCommentDispatchSession, labelBySession]);
+
+  // Dispatch a single existing comment (per-comment Dispatch button on the
+  // comment card, both in the read view and the edit composer). The comment
+  // stays undispatched on failure so it can be retried.
+  const onDispatchComment = React.useCallback(async (commentId) => {
+    if (!ticketId || !commentId) return;
+    const target = selectedCommentDispatchSession;
+    setCommentDispatchNote(null);
+    if (!target) {
+      setCommentDispatchNote('Pick a session before dispatching comments');
+      return;
+    }
+    try {
+      const res = await window.SubstrateAPI.dispatchComment(commentId, { session_id: target });
+      if (res?.ticket?.id) window.Store.upsertTrackerTicket(res.ticket);
+      if (res?.ticket?.comments) window.Store.seedTicketComments(res.ticket.id, res.ticket.comments);
+      setCommentDispatchNote(`dispatched to ${labelBySession.get(target) || target}`);
+    } catch (err) {
+      setCommentDispatchNote(err?.payload?.error || err?.message || 'Dispatch failed — the comment is still undispatched');
+    }
+  }, [ticketId, selectedCommentDispatchSession, labelBySession]);
 
   const onUpdateComment = React.useCallback((commentId, patch) => {
     if (!ticketId) return Promise.resolve();
@@ -866,49 +882,6 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                 </div>
 
                 {dispatchNote && !pendingDispatch && <div className="td-dispatch-note">{dispatchNote}</div>}
-                {/* GOL-101: every human comment is queued `undispatched`
-                    regardless of ticket kind, so the panel has to exist for
-                    every kind — spec-only left task feedback with no way
-                    out. */}
-                <div className="td-comment-dispatch-panel">
-                    <div className="td-comment-dispatch-line">
-                      <span className="td-comment-dispatch-label">Comment dispatch</span>
-                      <span className="td-comment-dispatch-count">{undispatchedCount} undispatched</span>
-                    </div>
-                    {undispatchedCount > 0 && (
-                      <div className="td-comment-dispatch-hint">
-                        Your move is with the target session once dispatched.
-                      </div>
-                    )}
-                    {needsCommentDispatchTarget && (
-                      <select
-                        className="td-select td-comment-dispatch-select"
-                        value={commentDispatchSession}
-                        onChange={(e) => setCommentDispatchSession(e.target.value)}
-                        disabled={commentDispatching || dispatchable.length === 0}
-                        title="Pick a session for comment dispatch"
-                      >
-                        <option value="">{dispatchable.length ? 'Dispatch comments to…' : 'No live session'}</option>
-                        {dispatchable.map((s) => (
-                          <option key={s.session_id} value={s.session_id}>{s.label}</option>
-                        ))}
-                      </select>
-                    )}
-                    <button
-                      className="orch-btn small ghost td-comment-batch-dispatch"
-                      onClick={onBatchDispatchComments}
-                      disabled={commentDispatching || undispatchedCount === 0 || !selectedCommentDispatchSession}
-                      title={commentBatchDispatchBlocker || 'Dispatch all undispatched comments in one brief'}
-                    >
-                      {commentDispatching ? 'Dispatching…' : 'Save & batch-dispatch'}
-                    </button>
-                    {/* A disabled button with no stated reason reads as broken —
-                        say which precondition is missing. */}
-                    {commentBatchDispatchBlocker && (
-                      <div className="td-comment-dispatch-hint">{commentBatchDispatchBlocker}</div>
-                    )}
-                    {commentDispatchNote && <div className="td-dispatch-note">{commentDispatchNote}</div>}
-                </div>
               </div>
               </aside>
 
@@ -968,7 +941,13 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                     onCreateAndDispatch={onAddCommentAndDispatch}
                     onUpdate={onUpdateComment}
                     onReply={onReplyComment}
+                    onDispatchComment={onDispatchComment}
                     canDispatchComments={!!selectedCommentDispatchSession}
+                    undispatchedCount={undispatchedCount}
+                    dispatchTargetLabel={dispatchTargetLabel}
+                    onBatchDispatch={onBatchDispatchComments}
+                    commentDispatching={commentDispatching}
+                    commentDispatchNote={commentDispatchNote}
                     containerSelector={containerSelector}
                     documentKey={ticket.id}
                     documentTitle={ticket.title}

@@ -867,7 +867,7 @@ function nearestSection(range, root = null) {
 // annotation pill portals into. The ticket drawer passes `.drawer-ticket`
 // (position:fixed); the standalone ticket page passes `.ticket-page`. Defaults
 // to `.drawer-ticket` for backward compatibility.
-function TdAnnotate({ body, comments, currentAuthor = 'you', onCreate, onCreateAndDispatch, onUpdate, onReply, canDispatchComments = false, containerSelector = '.drawer-ticket', documentKey = '', documentTitle = '' }) {
+function TdAnnotate({ body, comments, currentAuthor = 'you', onCreate, onCreateAndDispatch, onUpdate, onReply, onDispatchComment, canDispatchComments = false, undispatchedCount = 0, dispatchTargetLabel = null, onBatchDispatch, commentDispatching = false, commentDispatchNote = null, containerSelector = '.drawer-ticket', documentKey = '', documentTitle = '' }) {
   const rootRef = React.useRef(null);
   const railRef = React.useRef(null);
   const [annotations, setAnnotations] = React.useState(comments || []);
@@ -1410,18 +1410,35 @@ React.useEffect(() => {
 
       <div id="anno-rail" ref={railRef} className={railOpen ? 'open' : ''}>
         <div className="rail-head">
-          <div>
-            <div className="t">Comments</div>
-            <div className="meta">{openCount} open · {resolvedCount} resolved</div>
+          <div className="rail-head-row">
+            <div>
+              <div className="t">Comments</div>
+              <div className="meta">{openCount} open · {resolvedCount} resolved</div>
+            </div>
+            <div className="rail-tools">
+              <button className="rail-btn" onClick={() => { setRailOpen(true); setPlainComposer(true); }}>+ New</button>
+              <label className="rail-check">
+                <input type="checkbox" checked={showResolved} onChange={(e) => setShowResolved(e.target.checked)} />
+                Show resolved
+              </label>
+              <button className="rail-btn" onClick={() => setRailOpen(false)}>Close</button>
+            </div>
           </div>
-          <div className="rail-tools">
-            <button className="rail-btn" onClick={() => { setRailOpen(true); setPlainComposer(true); }}>+ New</button>
-            <label className="rail-check">
-              <input type="checkbox" checked={showResolved} onChange={(e) => setShowResolved(e.target.checked)} />
-              Show resolved
-            </label>
-            <button className="rail-btn" onClick={() => setRailOpen(false)}>Close</button>
-          </div>
+          {undispatchedCount >= 1 && dispatchTargetLabel && (
+            <div className="rail-head-dispatch">
+              <button
+                className="rail-btn rail-dispatch-btn"
+                onClick={onBatchDispatch}
+                disabled={commentDispatching}
+                title={`Dispatch ${undispatchedCount} undispatched comment${undispatchedCount === 1 ? '' : 's'} to ${dispatchTargetLabel}`}
+              >
+                {commentDispatching
+                  ? 'Dispatching…'
+                  : `Dispatch ${undispatchedCount} comment${undispatchedCount === 1 ? '' : 's'} to @${dispatchTargetLabel}`}
+              </button>
+              {commentDispatchNote && <span className="rail-dispatch-note">{commentDispatchNote}</span>}
+            </div>
+          )}
         </div>
         <div id="anno-list">
           {plainComposer && (
@@ -1486,6 +1503,8 @@ React.useEffect(() => {
               onDelete={() => deleteComment(ann.id)}
               onReply={(text) => addReply(ann.id, text, currentAuthor)}
               onEditBody={(text) => updateComment(ann.id, { body: text })}
+              onDispatch={onDispatchComment}
+              canDispatch={canDispatchComments}
             />
           ))}
         </div>
@@ -1511,7 +1530,7 @@ React.useEffect(() => {
   );
 }
 
-function CommentCard({ ann, active, onFocus, onResolve, onDelete, onReply, onEditBody }) {
+function CommentCard({ ann, active, onFocus, onResolve, onDelete, onReply, onEditBody, onDispatch, canDispatch = false }) {
   const [replying, setReplying] = React.useState(false);
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState('');
@@ -1538,6 +1557,19 @@ function CommentCard({ ann, active, onFocus, onResolve, onDelete, onReply, onEdi
     setEditing(false);
   };
   const cancelEdit = () => { setEditing(false); setDraft(''); };
+  const dispatchComment = (e) => {
+    e.stopPropagation();
+    if (onDispatch) onDispatch(ann.id);
+  };
+  // Editing-phase dispatch: persist the edited body first, then dispatch the
+  // comment so the target receives the latest text.
+  const saveEditAndDispatch = async () => {
+    const t = draft.trim();
+    if (!t) return;
+    setEditing(false);
+    await onEditBody(t);
+    if (onDispatch) onDispatch(ann.id);
+  };
 
   // TKT-0237: auto-expand when the card becomes active (user clicked its mark).
   React.useEffect(() => { if (active) setExpanded(true); }, [active]);
@@ -1589,6 +1621,9 @@ function CommentCard({ ann, active, onFocus, onResolve, onDelete, onReply, onEdi
             <div className="row">
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
                 <button className="cancel" onClick={cancelEdit}>esc</button>
+                {ann.dispatch_state === 'undispatched' && canDispatch && (
+                  <button className="send secondary" onClick={saveEditAndDispatch} disabled={!draft.trim()}>Dispatch</button>
+                )}
                 <button className="send" onClick={saveEdit} disabled={!draft.trim()}>Save</button>
               </div>
             </div>
@@ -1613,6 +1648,9 @@ function CommentCard({ ann, active, onFocus, onResolve, onDelete, onReply, onEdi
       <div className="acts">
         <button onClick={(e) => { e.stopPropagation(); setExpanded(true); setReplying(true); }}>Reply</button>
         <button onClick={(e) => { e.stopPropagation(); startEdit(e); }}>Edit</button>
+        {ann.dispatch_state === 'undispatched' && canDispatch && (
+          <button onClick={dispatchComment}>Dispatch</button>
+        )}
         <button onClick={(e) => { e.stopPropagation(); onResolve(); }}>{ann.status === 'resolved' ? 'Reopen' : 'Resolve'}</button>
         <button className="danger" onClick={(e) => { e.stopPropagation(); onDelete(); }}>Delete</button>
       </div>
