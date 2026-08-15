@@ -227,6 +227,11 @@ function normalizeGolemRegistry(row) {
     session_id: sessionId,
     pid: Number(row.hook_ppid) || null,
     cwd: row.project_path ?? null,
+    // The project the session was REGISTERED under at session start. This is
+    // the stable identity; the live cwd may drift as the agent cd's around, but
+    // the session must stay under its registered project (see readNativeSessions).
+    registered_project_path: row.project_path ?? null,
+    registered_project_id: row.project_id ?? null,
     name: row.name ?? null,
     status: row.status ?? null,
     waiting_for: null,
@@ -367,6 +372,10 @@ export function mergeSources(cliRows, registryRows, golemRows = []) {
           role: r.role ?? prev.role, // only the golem source sets role metadata
           role_updated_at: r.role_updated_at ?? prev.role_updated_at,
           role_updated_by: r.role_updated_by ?? prev.role_updated_by,
+          // Preserve the registered project across higher-priority overlays
+          // (CLI/registry carry the LIVE cwd, which must not clobber it).
+          registered_project_path: r.registered_project_path ?? prev.registered_project_path,
+          registered_project_id: r.registered_project_id ?? prev.registered_project_id,
         });
       } else {
         byKey.set(k, r);
@@ -570,8 +579,15 @@ export async function readNativeSessions(registeredIdLookup, verifiedChannels = 
 
     let project_id = null;
     let project_root = null;
-    if (s.cwd) {
-      const d = await deriveProjectId(s.cwd);
+    // Prefer the REGISTERED project (pinned at session start) over the live
+    // cwd, so a session that changes its working directory stays under the
+    // project it was registered under. Fall back to the live cwd only when
+    // there is no registered project (e.g. a raw `claude` session not launched
+    // through golem). The live cwd is still surfaced separately for display.
+    const registeredPath = s.registered_project_path ?? s._fact?.project_path ?? null;
+    const deriveFrom = registeredPath || s.cwd;
+    if (deriveFrom) {
+      const d = await deriveProjectId(deriveFrom);
       if (d) {
         project_id = d.project_id;
         project_root = d.project_root;
