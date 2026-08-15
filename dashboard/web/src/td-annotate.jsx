@@ -22,6 +22,12 @@ const BLOCK_PLUS_STYLE = {
   transform: 'translateY(-50%)',
 };
 
+// How long the cursor must stay on a NEW block before the "+" button
+// re-attaches to it. While the cursor crosses block boundaries (e.g. from a
+// table row up to the table), the button stays on the block it was shown for,
+// so it is never yanked away mid-click.
+const BLOCK_PLUS_SETTLE_MS = 800;
+
 const CTX = 42;
 
 function authorMeta(a) { return TA_AUTHORS[a] || { label: a, color: '#9aa4bb' }; }
@@ -878,24 +884,29 @@ function TdAnnotate({ body, comments, currentAuthor = 'you', onCreate, onCreateA
   const [saveState, setSaveState] = React.useState('');
   const [pendingComposer, setPendingComposer] = React.useState(null);
   const pendingRangeRef = React.useRef(null);
-  // TKT-0172: block-hover state. hoverBlockRef holds the currently-hovered
-  // block's { blockId, blockText, sectionId, sectionTitle } so the portaled
-  // "+" button's onClick can open a composer anchored to it. showPlusTimerRef
-  // delays show-on-hover (so the "+" doesn't flash during fast cursor moves);
+  // TKT-0172: block-hover state. attachedBlockRef holds the block the "+"
+  // button is currently ATTACHED to — its { blockId, blockText, sectionId,
+  // sectionTitle } — so the portaled "+" button's onClick can open a composer
+  // anchored to it. The button stays on its attached block while the cursor
+  // crosses block boundaries; it only re-attaches after the cursor settles on
+  // a new block (BLOCK_PLUS_SETTLE_MS), so it is never yanked away mid-click.
+  // showPlusTimerRef delays show-on-hover (so the "+" doesn't flash during
+  // fast cursor moves); settlePlusTimerRef delays re-attach on block change;
   // hidePlusTimerRef delays hide (so the cursor can travel from block to "+"
   // without it vanishing underneath). The "+" itself has its own
-  // mouseenter/mouseleave that bridge both timers. blockCountsRef is a
+  // mouseenter/mouseleave that bridge the timers. blockCountsRef is a
   // Map<block_id, open-count> kept fresh via an effect so the hover effect
   // (which only re-binds on html change) always reads current counts.
-  const hoverBlockRef = React.useRef(null);
+  const attachedBlockRef = React.useRef(null);
   // TKT-0192: the block element currently carrying the .block-hover highlight.
-  // Tracked separately from hoverBlockRef (which is the anchor metadata) so
+  // Tracked separately from attachedBlockRef (which is the anchor metadata) so
   // we can swap/clear the decoration as the cursor moves between blocks.
   // The class is styled in extra.css (`.td-md [data-block-id].block-hover`)
   // with an accent-color outline at 50% opacity and 3px offset — the same
   // in both the drawer variant and the standalone /tickets/<id> page.
   const hoverBlockElRef = React.useRef(null);
   const showPlusTimerRef = React.useRef(null);
+  const settlePlusTimerRef = React.useRef(null);
   const hidePlusTimerRef = React.useRef(null);
   const blockCountsRef = React.useRef(new Map());
 
@@ -1045,13 +1056,16 @@ React.useEffect(() => {
     function enter(block) {
       const t = blockText(block);
       if (!t) return; // textless block (hr, empty) — not commentable
-      if (onBlock && hoverBlockRef.current?.blockId === block.dataset.blockId) {
+      const attached = attachedBlockRef.current;
+      if (attached && attached.blockId === block.dataset.blockId) {
+        // Cursor is on the attached block: cancel any pending re-attach to a
+        // different block and keep the button where it is.
+        clearTimeout(settlePlusTimerRef.current);
         placePlus(block);
         return;
       }
       onBlock = true;
       clearTimeout(hidePlusTimerRef.current);
-      clearTimeout(showPlusTimerRef.current);
       const plus = document.getElementById('anno-block-plus');
       if (!plus) return;
       const cnt = blockCountsRef.current.get(block.dataset.blockId) || 0;
@@ -1062,31 +1076,52 @@ React.useEffect(() => {
         sectionId: (block.dataset.blockId || '').split('#')[0],
         sectionTitle: h ? h.textContent.trim().slice(0, 80) : '',
       };
-      hoverBlockRef.current = hb;
-      setHoverBlock(block);
-      // Position immediately so the "+" lands on the right block when it
-      // eventually appears; only the visibility is delayed. Width is an
-      // estimate here (display:none → offsetWidth 0); re-placed with the
-      // real width inside the show timeout below.
-      placePlus(block);
-      showPlusTimerRef.current = setTimeout(() => {
-        // Bail if the cursor moved off the block AND off the "+" within 500ms.
-        if (!onBlock && !plusOn()) {
-          hoverBlockRef.current = null;
-          return;
-        }
-        const p = document.getElementById('anno-block-plus');
-        if (!p) return;
-        p.style.display = 'flex';
-        // Re-place now that offsetWidth is real, so the gap is exact.
+      if (!attached) {
+        // First hover on a block: attach immediately (highlight + button
+        // target), show the button after the appear delay.
+        attachedBlockRef.current = hb;
+        setHoverBlock(block);
+        // Position immediately so the "+" lands on the right block when it
+        // eventually appears; only the visibility is delayed. Width is an
+        // estimate here (display:none → offsetWidth 0); re-placed with the
+        // real width inside the show timeout below.
         placePlus(block);
-        const badge = p.querySelector('.anno-block-count');
-        if (badge) { badge.textContent = cnt ? String(cnt) : ''; badge.style.display = cnt ? 'inline-flex' : 'none'; }
-      }, 500);
+        showPlusTimerRef.current = setTimeout(() => {
+          // Bail if the cursor moved off the block AND off the "+" within 500ms.
+          if (!onBlock && !plusOn()) {
+            attachedBlockRef.current = null;
+            return;
+          }
+          const p = document.getElementById('anno-block-plus');
+          if (!p) return;
+          p.style.display = 'flex';
+          // Re-place now that offsetWidth is real, so the gap is exact.
+          placePlus(block);
+          const badge = p.querySelector('.anno-block-count');
+          if (badge) { badge.textContent = cnt ? String(cnt) : ''; badge.style.display = cnt ? 'inline-flex' : 'none'; }
+        }, 500);
+      } else {
+        // Cursor moved to a different block: keep the button on its current
+        // block until the cursor settles here, so crossing a boundary doesn't
+        // yank the button away mid-click.
+        clearTimeout(settlePlusTimerRef.current);
+        settlePlusTimerRef.current = setTimeout(() => {
+          if (!onBlock && !plusOn()) return;
+          const p = document.getElementById('anno-block-plus');
+          if (!p) return;
+          attachedBlockRef.current = hb;
+          setHoverBlock(block);
+          p.style.display = 'flex';
+          placePlus(block);
+          const badge = p.querySelector('.anno-block-count');
+          if (badge) { badge.textContent = cnt ? String(cnt) : ''; badge.style.display = cnt ? 'inline-flex' : 'none'; }
+        }, BLOCK_PLUS_SETTLE_MS);
+      }
     }
     function leave() {
       onBlock = false;
       clearTimeout(showPlusTimerRef.current);
+      clearTimeout(settlePlusTimerRef.current);
       // Always arm a hide; the hide's fire-time check (onBlock / plusOn)
       // cancels it if the cursor bounced back to the block or onto the "+".
       const plus = document.getElementById('anno-block-plus');
@@ -1095,7 +1130,7 @@ React.useEffect(() => {
         // left the affordance.
         if (onBlock || plusOn()) return;
         if (plus) plus.style.display = 'none';
-        hoverBlockRef.current = null;
+        attachedBlockRef.current = null;
         clearHoverBlock();
       }, 1000);
     }
@@ -1111,10 +1146,11 @@ React.useEffect(() => {
       // Cancel a pending show so the "+" never appears at a stale position
       // after the body scrolled under it; hide it and drop the highlight.
       clearTimeout(showPlusTimerRef.current);
+      clearTimeout(settlePlusTimerRef.current);
       const p = document.getElementById('anno-block-plus');
       if (p && p.style.display === 'flex') p.style.display = 'none';
       clearHoverBlock();
-      hoverBlockRef.current = null;
+      attachedBlockRef.current = null;
     }
     document.addEventListener('scroll', onScroll, { passive: true });
     return () => {
@@ -1122,11 +1158,13 @@ React.useEffect(() => {
       root.removeEventListener('mouseleave', leave);
       document.removeEventListener('scroll', onScroll);
       clearTimeout(showPlusTimerRef.current);
+      clearTimeout(settlePlusTimerRef.current);
       clearTimeout(hidePlusTimerRef.current);
       // Detach the decoration from whatever block held it so a re-render
       // (new block elements) never leaves a stale .block-hover on a node
       // that's about to be replaced.
       clearHoverBlock();
+      attachedBlockRef.current = null;
     };
   }, [html, containerSelector]);
 
@@ -1373,6 +1411,7 @@ React.useEffect(() => {
           // Cursor is on the "+". Cancel any pending hide from a block.
           clearTimeout(hidePlusTimerRef.current);
           clearTimeout(showPlusTimerRef.current);
+          clearTimeout(settlePlusTimerRef.current);
         }}
         onMouseLeave={() => {
           // Cursor left the "+". Re-arm a hide; the hide's fire-time check
@@ -1383,12 +1422,12 @@ React.useEffect(() => {
             const onPlus = !!p?.matches?.(':hover');
             if (onPlus) return;
             if (p) p.style.display = 'none';
-            hoverBlockRef.current = null;
+            attachedBlockRef.current = null;
           }, 1000);
         }}
         onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
         onClick={() => {
-          const hb = hoverBlockRef.current;
+          const hb = attachedBlockRef.current;
           const plus = document.getElementById('anno-block-plus');
           if (plus) plus.style.display = 'none';
           if (!hb || !hb.blockId) return;
