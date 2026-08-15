@@ -2701,7 +2701,7 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
 .td-md .mermaid {
   display: flex; justify-content: center; margin: 12px 0; position: relative;
   border: 1px solid var(--border-2); border-radius: var(--radius-2);
-  background: var(--bg-1); padding: 14px; overflow-x: auto;
+  background: #ececec; padding: 14px; overflow-x: auto;
 }
 .td-md .mermaid svg { max-width: 100%; height: auto; border: none; background: transparent; }
 
@@ -2725,7 +2725,7 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
 
 .mermaid-fs-overlay {
   position: fixed; inset: 0; z-index: 10000;
-  background: rgba(8, 10, 16, 0.92);
+  background: rgba(70, 70, 70, 0.92);
   display: grid; overflow: hidden; isolation: isolate;
   opacity: 0; transition: opacity .2s ease;
 }
