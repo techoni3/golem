@@ -16,7 +16,7 @@ const TA_AUTHORS = {
 // centers it on the block's vertical midline; `top` is set to that midline.
 const BLOCK_PLUS_STYLE = {
   position: 'absolute', zIndex: 68, display: 'none',
-  alignItems: 'center', height: 22, padding: '0 5px', gap: 3,
+  alignItems: 'center', height: 33, padding: '0 8px', gap: 3,
   cursor: 'pointer', userSelect: 'none',
   fontFamily: '"JetBrains Mono", monospace',
   transform: 'translateY(-50%)',
@@ -1037,7 +1037,7 @@ React.useEffect(() => {
       const drawerEl = document.querySelector(containerSelector);
       const drawerRect = drawerEl ? drawerEl.getBoundingClientRect() : { left: 0, top: 0 };
       plus.style.top = `${rect.top - drawerRect.top + rect.height / 2}px`;
-      const w = plus.offsetWidth || 26;
+      const w = plus.offsetWidth || 38;
       plus.style.left = `${Math.max(2, rect.left - drawerRect.left - BLOCK_PLUS_GAP - w)}px`;
       plus.style.right = 'auto';
     }
@@ -1070,7 +1070,7 @@ React.useEffect(() => {
       // real width inside the show timeout below.
       placePlus(block);
       showPlusTimerRef.current = setTimeout(() => {
-        // Bail if the cursor moved off the block AND off the "+" within 1s.
+        // Bail if the cursor moved off the block AND off the "+" within 500ms.
         if (!onBlock && !plusOn()) {
           hoverBlockRef.current = null;
           return;
@@ -1082,7 +1082,7 @@ React.useEffect(() => {
         placePlus(block);
         const badge = p.querySelector('.anno-block-count');
         if (badge) { badge.textContent = cnt ? String(cnt) : ''; badge.style.display = cnt ? 'inline-flex' : 'none'; }
-      }, 1000);
+      }, 500);
     }
     function leave() {
       onBlock = false;
@@ -1404,8 +1404,8 @@ React.useEffect(() => {
           });
         }}
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 13, height: 13 }}><path d="M12 5v14M5 12h14"/></svg>
-        <span className="anno-block-count" style={{ display: 'none', fontSize: 10, fontWeight: 700, marginLeft: 2 }}></span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 20, height: 20 }}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span className="anno-block-count" style={{ display: 'none', fontSize: 14, fontWeight: 700, marginLeft: 2 }}></span>
       </div>
 
       <div id="anno-rail" ref={railRef} className={railOpen ? 'open' : ''}>
