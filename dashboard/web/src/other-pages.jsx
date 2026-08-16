@@ -207,24 +207,142 @@ function AgentsPage({ setRoute }) {
   );
 }
 
+const ROLE_THINKING_LEVELS = Object.freeze([
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+]);
+
+const ROLE_EXEC_FORM_DEFAULTS = Object.freeze({
+  harness: 'pi',
+  provider: 'ollama-cloud',
+  model: '',
+  thinking: 'medium',
+  name: '',
+});
+
+function roleExecFormValue(exec) {
+  const source = exec && typeof exec === 'object' && !Array.isArray(exec) ? exec : {};
+  return {
+    harness: source.harness ?? ROLE_EXEC_FORM_DEFAULTS.harness,
+    provider: source.provider ?? ROLE_EXEC_FORM_DEFAULTS.provider,
+    model: source.model ?? ROLE_EXEC_FORM_DEFAULTS.model,
+    thinking: source.thinking ?? ROLE_EXEC_FORM_DEFAULTS.thinking,
+    name: source.name == null ? ROLE_EXEC_FORM_DEFAULTS.name : String(source.name),
+  };
+}
+
+function roleExecPayload(exec) {
+  return {
+    harness: String(exec.harness ?? '').trim(),
+    provider: String(exec.provider ?? '').trim(),
+    model: String(exec.model ?? '').trim(),
+    thinking: exec.thinking,
+    name: String(exec.name ?? '').trim() || null,
+  };
+}
+
+function roleErrorMessage(error, fallback) {
+  return error?.payload?.error || error?.payload?.message || error?.message || fallback;
+}
+
+function newRoleDraft() {
+  return {
+    name: '',
+    color: '#8a909c',
+    glyph: '',
+    body: '',
+    exec: { ...ROLE_EXEC_FORM_DEFAULTS },
+  };
+}
+
+function sortRoleCards(items) {
+  return items.slice().sort((a, b) => Number(Boolean(b.builtin)) - Number(Boolean(a.builtin)) || a.name.localeCompare(b.name));
+}
+
+function RoleExecFields({ value, onChange, idPrefix, disabled = false }) {
+  const setField = (field) => (event) => onChange({ ...value, [field]: event.target.value });
+  const thinkingKnown = ROLE_THINKING_LEVELS.includes(value.thinking);
+  return (
+    <div className="role-exec-fields" role="group" aria-label="Execution preset">
+      <div className="role-exec-heading">Execution preset</div>
+      <div className="role-exec-grid">
+        <div className="role-exec-field">
+          <label htmlFor={`${idPrefix}-harness`}>Harness</label>
+          <input id={`${idPrefix}-harness`} className="mono" type="text" value={value.harness} onChange={setField('harness')} disabled={disabled} spellCheck="false"/>
+        </div>
+        <div className="role-exec-field">
+          <label htmlFor={`${idPrefix}-provider`}>Provider</label>
+          <input id={`${idPrefix}-provider`} className="mono" type="text" value={value.provider} onChange={setField('provider')} disabled={disabled} spellCheck="false"/>
+        </div>
+        <div className="role-exec-field role-exec-field-wide">
+          <label htmlFor={`${idPrefix}-model`}>Model</label>
+          <input id={`${idPrefix}-model`} className="mono" type="text" value={value.model} onChange={setField('model')} disabled={disabled} spellCheck="false"/>
+        </div>
+        <div className="role-exec-field">
+          <label htmlFor={`${idPrefix}-thinking`}>Thinking</label>
+          <select id={`${idPrefix}-thinking`} className="mono" value={value.thinking} onChange={setField('thinking')} disabled={disabled}>
+            {!thinkingKnown && value.thinking && <option value={value.thinking}>{value.thinking} (invalid)</option>}
+            {ROLE_THINKING_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}
+          </select>
+        </div>
+        <div className="role-exec-field role-exec-field-wide">
+          <label htmlFor={`${idPrefix}-name`}>Name <span className="role-field-optional">optional</span></label>
+          <input id={`${idPrefix}-name`} className="mono" type="text" value={value.name} onChange={setField('name')} disabled={disabled} placeholder="auto" spellCheck="false"/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RolesPanel({ rev }) {
   const [roles, setRoles] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState(null);
-  const [draft, setDraft] = React.useState({ name: '', color: '#8a909c', glyph: '', body: '' });
+  const [listError, setListError] = React.useState(null);
+  const [createError, setCreateError] = React.useState(null);
+  const [creating, setCreating] = React.useState(false);
+  const [draft, setDraft] = React.useState(() => newRoleDraft());
+
+  const upsertRole = React.useCallback((role) => {
+    if (!role?.name) return;
+    setRoles((prev) => sortRoleCards([...prev.filter((item) => item.name !== role.name), role]));
+  }, []);
+  const removeRole = React.useCallback((name) => {
+    setRoles((prev) => prev.filter((role) => role.name !== name));
+  }, []);
+
   React.useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setListError(null);
     window.SubstrateAPI.listRoles()
       .then((list) => {
         if (cancelled) return;
-        setRoles(Array.isArray(list) ? list : []);
-        setError(null);
+        setRoles(Array.isArray(list) ? sortRoleCards(list) : []);
       })
-      .catch((err) => { if (!cancelled) setError(err.message || String(err)); })
+      .catch((err) => { if (!cancelled) setListError(roleErrorMessage(err, 'roles could not be loaded')); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [rev]);
+
+  const create = async (event) => {
+    event.preventDefault();
+    setCreateError(null);
+    setCreating(true);
+    try {
+      const role = await window.SubstrateAPI.createRole({ ...draft, exec: roleExecPayload(draft.exec) });
+      upsertRole(role);
+      setDraft(newRoleDraft());
+    } catch (error) {
+      setCreateError(roleErrorMessage(error, 'role could not be created'));
+    } finally {
+      setCreating(false);
+    }
+  };
 
   return (
     <div className="agents-section roles-panel">
@@ -233,69 +351,117 @@ function RolesPanel({ rev }) {
         <span className="agents-section-title">Roles</span>
         <span className="agents-section-count">{roles.length}</span>
         {loading && <span className="roles-save-state">loading…</span>}
-        {error && <span className="roles-save-state error">{error}</span>}
+        {listError && <span className="roles-save-state error">{listError}</span>}
       </div>
       <div className="roles-grid">
-        {roles.map((role) => <RoleEditor key={role.name} role={role}/>)}
+        {roles.map((role) => <RoleEditor key={role.name} role={role} onSaved={upsertRole} onDeleted={removeRole}/>)}
       </div>
-      <form className="role-editor-card" onSubmit={(e) => {
-        e.preventDefault();
-        setError(null);
-        window.SubstrateAPI.createRole(draft)
-          .then((role) => {
-            setRoles((prev) => [...prev.filter((r) => r.name !== role.name), role].sort((a, b) => a.name.localeCompare(b.name)));
-            setDraft({ name: '', color: '#8a909c', glyph: '', body: '' });
-          })
-          .catch((err) => setError(err?.payload?.error || err.message || String(err)));
-      }}>
+      {!loading && !listError && roles.length === 0 && <div className="roles-empty">No roles are registered.</div>}
+      <form className="role-editor-card role-create-card" onSubmit={create}>
         <div className="role-editor-head">
           <div>
             <div className="role-editor-name">Create role</div>
             <div className="roles-save-state">writes to ~/.golem/roles/index.json</div>
           </div>
-          <button className="orch-btn" type="submit" disabled={!draft.name.trim()}>Create</button>
+          <button className="orch-btn" type="submit" disabled={creating || !draft.name.trim()}>{creating ? 'Creating…' : 'Create'}</button>
         </div>
-        <div className="role-meta-row">
+        <div className="role-meta-row role-identity-row">
           <input className="mono" placeholder="name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })}/>
           <input className="mono" placeholder="glyph" value={draft.glyph} maxLength={4} onChange={(e) => setDraft({ ...draft, glyph: e.target.value })}/>
           <input className="mono" type="color" value={draft.color} onChange={(e) => setDraft({ ...draft, color: e.target.value })}/>
         </div>
+        <RoleExecFields value={draft.exec} onChange={(exec) => setDraft({ ...draft, exec })} idPrefix="create-role"/>
+        {createError && <div className="roles-inline-error" role="alert">{createError}</div>}
         <textarea className="role-editor-body mono" value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} placeholder="Optional role card body" spellCheck="false"/>
       </form>
     </div>
   );
 }
 
-function RoleEditor({ role }) {
+function RoleEditor({ role, onSaved, onDeleted }) {
   const [body, setBody] = React.useState(role.body || '');
   const [meta, setMeta] = React.useState({ color: role.color || '#8a909c', glyph: role.glyph || '' });
+  const [exec, setExec] = React.useState(() => roleExecFormValue(role.exec));
   const [state, setState] = React.useState('saved');
+  const [execState, setExecState] = React.useState('saved');
+  const [execError, setExecError] = React.useState(null);
+  const [deleteError, setDeleteError] = React.useState(null);
   const [pushResult, setPushResult] = React.useState(null);
+
   React.useEffect(() => {
     setBody(role.body || '');
     setMeta({ color: role.color || '#8a909c', glyph: role.glyph || '' });
+    setExec(roleExecFormValue(role.exec));
     setState('saved');
+    setExecState('saved');
+    setExecError(null);
+    setDeleteError(null);
     setPushResult(null);
-  }, [role.name, role.body, role.color, role.glyph]);
+  }, [role.name, role.body, role.color, role.glyph, role.exec?.harness, role.exec?.provider, role.exec?.model, role.exec?.thinking, role.exec?.name]);
 
   React.useEffect(() => {
     if (body === (role.body || '') && meta.color === (role.color || '#8a909c') && meta.glyph === (role.glyph || '')) return;
     setState('saving');
     const timer = setTimeout(() => {
       window.SubstrateAPI.saveRole(role.name, { body, color: meta.color, glyph: meta.glyph })
-        .then(() => setState('saved'))
-        .catch((err) => setState(err?.payload?.error || err.message || 'save failed'));
+        .then((saved) => {
+          setState('saved');
+          if (saved?.name) onSaved?.(saved);
+        })
+        .catch((error) => setState(roleErrorMessage(error, 'save failed')));
     }, 650);
     return () => clearTimeout(timer);
-  }, [body, meta.color, meta.glyph, role.name, role.body, role.color, role.glyph]);
+  }, [body, meta.color, meta.glyph, role.name, role.body, role.color, role.glyph, onSaved]);
+
+  const updateExec = (next) => {
+    setExec(next);
+    if (execError) setExecError(null);
+  };
+
+  const saveExec = async (event) => {
+    event.preventDefault();
+    setExecState('saving');
+    setExecError(null);
+    try {
+      const saved = await window.SubstrateAPI.saveRole(role.name, { exec: roleExecPayload(exec) });
+      setExecState('saved');
+      setState('saved');
+      if (saved?.name) onSaved?.(saved);
+    } catch (error) {
+      setExecState('error');
+      setExecError(roleErrorMessage(error, 'preset save failed'));
+    }
+  };
 
   const push = () => {
     setPushResult({ state: 'pushing' });
     window.SubstrateAPI.pushRole(role.name)
       .then((result) => setPushResult({ state: 'done', result }))
-      .catch((err) => setPushResult({ state: 'error', error: err?.payload?.error || err.message || String(err) }));
+      .catch((error) => setPushResult({ state: 'error', error: roleErrorMessage(error, 'role update failed') }));
   };
-  const status = state === 'saved' ? (role.overridden ? `saved override${role.updated_at ? ` · ${window.SubstrateFmt?.fmtTimeAgo?.(role.updated_at) || role.updated_at}` : ''}` : 'using default') : state;
+
+  const remove = async () => {
+    setDeleteError(null);
+    setState('deleting');
+    try {
+      await window.SubstrateAPI.deleteRole(role.name);
+      onDeleted?.(role.name);
+    } catch (error) {
+      setState('delete failed');
+      setDeleteError(roleErrorMessage(error, 'delete failed'));
+    }
+  };
+
+  const status = state === 'saved'
+    ? (role.overridden ? `saved override${role.updated_at ? ` · ${window.SubstrateFmt?.fmtTimeAgo?.(role.updated_at) || role.updated_at}` : ''}` : 'using default')
+    : state;
+  const execStatus = execState === 'saving'
+    ? 'saving preset…'
+    : execState === 'error'
+      ? 'preset save failed'
+      : role.exec
+        ? 'preset saved'
+        : 'no execution preset';
   const pushed = pushResult?.result;
   const okCount = pushed?.results?.filter((r) => r.ok).length ?? 0;
   return (
@@ -306,18 +472,23 @@ function RoleEditor({ role }) {
           <div className={`roles-save-state ${String(state).includes('failed') || String(state).includes('error') ? 'error' : ''}`}>{status}</div>
         </div>
         <div className="role-editor-actions">
-          <button className="orch-btn" onClick={push} disabled={state === 'saving' || pushResult?.state === 'pushing'}>Update running agents</button>
-          {!role.builtin && <button className="orch-btn danger" onClick={() => {
-            window.SubstrateAPI.deleteRole(role.name)
-              .then(() => setState('deleted'))
-              .catch((err) => setState(err?.payload?.error || err.message || 'delete failed'));
-          }}>Delete</button>}
+          <button className="orch-btn" type="button" onClick={push} disabled={state === 'saving' || execState === 'saving' || pushResult?.state === 'pushing'}>Update running agents</button>
+          {!role.builtin && <button className="orch-btn danger" type="button" onClick={remove} disabled={state === 'deleting'}>{state === 'deleting' ? 'Deleting…' : 'Delete'}</button>}
         </div>
       </div>
-      <div className="role-meta-row">
-        <input className="mono" value={meta.glyph} maxLength={4} onChange={(e) => setMeta({ ...meta, glyph: e.target.value })} aria-label={`${role.name} glyph`}/>
-        <input className="mono" type="color" value={meta.color} onChange={(e) => setMeta({ ...meta, color: e.target.value })} aria-label={`${role.name} color`}/>
+      <div className="role-meta-row role-identity-row">
+        <input className="mono" value={meta.glyph} maxLength={4} onChange={(e) => setMeta({ ...meta, glyph: e.target.value })} aria-label={`${role.name} glyph`} disabled={role.builtin} title={role.builtin ? 'Builtin identity is fixed' : undefined}/>
+        <input className="mono" type="color" value={meta.color} onChange={(e) => setMeta({ ...meta, color: e.target.value })} aria-label={`${role.name} color`} disabled={role.builtin} title={role.builtin ? 'Builtin identity is fixed' : undefined}/>
       </div>
+      <form className="role-exec-form" onSubmit={saveExec}>
+        <RoleExecFields value={exec} onChange={updateExec} idPrefix={`role-${role.name}`} />
+        <div className="role-exec-actions">
+          <span className={`roles-save-state ${execState === 'error' ? 'error' : ''}`}>{execStatus}</span>
+          <button className="orch-btn" type="submit" disabled={execState === 'saving'}>{execState === 'saving' ? 'Saving…' : 'Save preset'}</button>
+        </div>
+        {execError && <div className="roles-inline-error" role="alert">{execError}</div>}
+      </form>
+      {deleteError && <div className="roles-inline-error" role="alert">{deleteError}</div>}
       <textarea
         className="role-editor-body mono"
         value={body}

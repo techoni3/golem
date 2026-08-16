@@ -2143,12 +2143,24 @@ async function main() {
     const existing = getRole(name);
     if (!existing) return reply.code(404).send({ error: 'role_not_found' });
     try {
-      const hasBody = typeof req.body?.body === 'string';
-      updateRoleMeta(name, req.body ?? {});
-      const role = hasBody ? writeRoleCard(existing.name, req.body.body) : listRoleCards().find((r) => r.name === existing.name);
+      const incoming = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+      const hasBody = typeof incoming.body === 'string';
+      // Builtin identity is fixed. Execution fields remain editable, while
+      // color/glyph/builtin in a stale or hand-written request cannot rewrite
+      // the role's identity. The model layer owns exec validation.
+      const patch = existing.builtin
+        ? { ...incoming, color: existing.color, glyph: existing.glyph, builtin: existing.builtin }
+        : incoming;
+      updateRoleMeta(name, patch);
+      if (hasBody) writeRoleCard(existing.name, incoming.body);
+      // Always return the complete card. writeRoleCard() only returns card
+      // metadata, which would otherwise drop exec from a body-only round-trip.
+      const role = listRoleCards().find((r) => r.name === existing.name);
       broadcastWS({ type: 'roles-updated', roles: listRoleCards(), meta: roleMetaMap() });
       return role;
     } catch (err) {
+      // validateRolePreset() throws a readable model-layer message. Keep it
+      // as a client error so the editor can show it inline instead of a 500.
       return reply.code(400).send({ error: String(err?.message ?? err) });
     }
   });

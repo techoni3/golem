@@ -1215,6 +1215,98 @@
   min-height: 30px;
   padding: 2px;
 }
+.role-identity-row input:disabled {
+  opacity: .62;
+  cursor: not-allowed;
+}
+.role-exec-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.role-exec-fields {
+  border-top: 1px solid var(--border-1);
+  padding-top: 10px;
+}
+.role-exec-heading {
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.role-exec-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.role-exec-field {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.role-exec-field-wide {
+  grid-column: span 2;
+}
+.role-exec-field label {
+  color: var(--text-3);
+  font-size: 10.5px;
+}
+.role-exec-field input,
+.role-exec-field select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-1);
+  background: var(--bg-1);
+  color: var(--text-1);
+  padding: 6px 8px;
+  font-size: 11px;
+}
+.role-exec-field select {
+  min-height: 30px;
+}
+.role-exec-field input:focus,
+.role-exec-field select:focus {
+  border-color: var(--accent-border);
+  outline: 2px solid color-mix(in oklab, var(--accent) 20%, transparent);
+  outline-offset: 1px;
+}
+.role-exec-field input:disabled,
+.role-exec-field select:disabled {
+  opacity: .62;
+  cursor: not-allowed;
+}
+.role-exec-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.role-field-optional {
+  color: var(--text-4);
+  font-weight: 400;
+}
+.roles-inline-error {
+  color: var(--status-blocked);
+  background: color-mix(in oklab, var(--status-blocked) 9%, var(--bg-1));
+  border: 1px solid color-mix(in oklab, var(--status-blocked) 35%, var(--border-1));
+  border-radius: var(--radius-1);
+  padding: 7px 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+.roles-empty {
+  color: var(--text-3);
+  font-size: 12px;
+  padding: 8px 2px;
+}
 .orch-btn.danger:hover:not(:disabled) {
   color: var(--status-blocked);
   border-color: rgba(248,113,113,.35);
