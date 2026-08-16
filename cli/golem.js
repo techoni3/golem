@@ -13,6 +13,8 @@
 //   codex        Open one managed interactive Codex TUI.
 //   claude / cc  Open Claude Code as a Golem channel consumer, optionally via Ollama.
 //   pi           Open native Pi with Golem's rendered bridge extension.
+//   spawn/list/attach/peek/kill
+//                Manage detached Pi workers in the Golem tmux namespace.
 //   doctor       Sanity-check the environment.
 //   status       Dashboard health + canonical URL.
 //   help         Show this message.
@@ -37,6 +39,14 @@ import { isHarnessEnabled, loadConfig, saveConfig } from '../lib/golem-config.js
 import { CodexSupervisor, readCodexSupervisor } from '../lib/codex-supervisor.js';
 import { MIN_PI_NODE, SUPPORTED_PI_VERSION, piNodeSupported } from '../lib/pi-compatibility.js';
 import { resolveRolePreset } from '../lib/role-preset.js';
+import {
+  attachWorker,
+  killWorker,
+  listWorkerViews,
+  peekWorker,
+  resolveWorkerProject,
+  spawnWorker,
+} from '../lib/worker-manager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -1036,6 +1046,167 @@ async function cmdRole(args) {
   }, null, 2));
 }
 
+function workerProjectHelp() {
+  return '[--project <path-or-project-id>]';
+}
+
+async function cmdSpawn(args) {
+  if (!args.length || args[0] === '-h' || args[0] === '--help') {
+    log(`Usage: golem spawn <role> [--name <name>] ${workerProjectHelp()}
+
+Create one Pi worker in a detached tmux pty. The worker is registered and
+role-assigned before this command returns. A failed readiness wait leaves the
+worker's tmux session available for peek/inspection.`);
+    return;
+  }
+  const role = args[0];
+  let name = null;
+  let project = null;
+  for (let index = 1; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === '--name') {
+      name = args[++index] ?? null;
+      if (!name || name.startsWith('-')) fatal(2, 'golem spawn --name requires a value');
+    } else if (arg.startsWith('--name=')) {
+      name = arg.slice('--name='.length);
+    } else if (arg === '--project') {
+      project = args[++index] ?? null;
+      if (!project || project.startsWith('-')) fatal(2, 'golem spawn --project requires a value');
+    } else if (arg.startsWith('--project=')) {
+      project = arg.slice('--project='.length);
+    } else {
+      fatal(2, `unknown spawn option: ${arg}`);
+    }
+  }
+  try {
+    const worker = await spawnWorker({ role, name, project });
+    log(JSON.stringify(worker, null, 2));
+  } catch (error) {
+    fatal(1, `golem spawn: ${error.message}`);
+  }
+}
+
+async function cmdListWorkers(args) {
+  if (args.includes('-h') || args.includes('--help')) {
+    log(`Usage: golem list ${workerProjectHelp()}
+
+List Golem worker records, reconciled against process groups and the live
+session-facts-backed dispatchable roster.`);
+    return;
+  }
+  let project = null;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === '--project') {
+      project = args[++index] ?? null;
+      if (!project || project.startsWith('-')) fatal(2, 'golem list --project requires a value');
+    } else if (arg.startsWith('--project=')) {
+      project = arg.slice('--project='.length);
+    } else {
+      fatal(2, `unknown list option: ${arg}`);
+    }
+  }
+  try {
+    log(JSON.stringify(await listWorkerViews({ project }), null, 2));
+  } catch (error) {
+    fatal(1, `golem list: ${error.message}`);
+  }
+}
+
+async function cmdAttachWorker(args) {
+  if (!args.length || args[0] === '-h' || args[0] === '--help') {
+    log(`Usage: golem attach <name> ${workerProjectHelp()}
+
+Attach the current terminal to a worker's real tmux TUI.`);
+    return;
+  }
+  const name = args[0];
+  let project = null;
+  for (let index = 1; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === '--project') {
+      project = args[++index] ?? null;
+      if (!project || project.startsWith('-')) fatal(2, 'golem attach --project requires a value');
+    } else if (arg.startsWith('--project=')) {
+      project = arg.slice('--project='.length);
+    } else {
+      fatal(2, `unknown attach option: ${arg}`);
+    }
+  }
+  try {
+    const { projectId } = project == null ? { projectId: null } : await resolveWorkerProject(project);
+    const status = attachWorker(name, { projectId });
+    if (status) process.exitCode = status;
+  } catch (error) {
+    fatal(1, `golem attach: ${error.message}`);
+  }
+}
+
+async function cmdPeekWorker(args) {
+  if (!args.length || args[0] === '-h' || args[0] === '--help') {
+    log(`Usage: golem peek <name> [--lines <N>] ${workerProjectHelp()}
+
+Capture worker scrollback without attaching or sending input.`);
+    return;
+  }
+  const name = args[0];
+  let lines = null;
+  let project = null;
+  for (let index = 1; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === '--lines') {
+      lines = Number(args[++index]);
+      if (!Number.isInteger(lines) || lines < 1) fatal(2, 'golem peek --lines requires a positive integer');
+    } else if (arg.startsWith('--lines=')) {
+      lines = Number(arg.slice('--lines='.length));
+      if (!Number.isInteger(lines) || lines < 1) fatal(2, 'golem peek --lines requires a positive integer');
+    } else if (arg === '--project') {
+      project = args[++index] ?? null;
+      if (!project || project.startsWith('-')) fatal(2, 'golem peek --project requires a value');
+    } else if (arg.startsWith('--project=')) {
+      project = arg.slice('--project='.length);
+    } else {
+      fatal(2, `unknown peek option: ${arg}`);
+    }
+  }
+  try {
+    const { projectId } = project == null ? { projectId: null } : await resolveWorkerProject(project);
+    process.stdout.write(await peekWorker(name, { projectId, lines }));
+  } catch (error) {
+    fatal(1, `golem peek: ${error.message}`);
+  }
+}
+
+async function cmdKillWorker(args) {
+  if (!args.length || args[0] === '-h' || args[0] === '--help') {
+    log(`Usage: golem kill <name> ${workerProjectHelp()}
+
+Kill one worker: tmux kill-session, TERM the recorded process group, KILL
+survivors, verify the group is empty, then mark the worker dead.`);
+    return;
+  }
+  const name = args[0];
+  let project = null;
+  for (let index = 1; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === '--project') {
+      project = args[++index] ?? null;
+      if (!project || project.startsWith('-')) fatal(2, 'golem kill --project requires a value');
+    } else if (arg.startsWith('--project=')) {
+      project = arg.slice('--project='.length);
+    } else {
+      fatal(2, `unknown kill option: ${arg}`);
+    }
+  }
+  try {
+    const { projectId } = project == null ? { projectId: null } : await resolveWorkerProject(project);
+    log(JSON.stringify(await killWorker(name, { projectId }), null, 2));
+  } catch (error) {
+    const code = /refusing to kill|ambiguous|not found/i.test(error.message) ? 2 : 1;
+    fatal(code, `golem kill: ${error.message}`);
+  }
+}
+
 async function cmdDashboard(args) {
   const serverEntry = resolve(DASHBOARD_DIR, 'server', 'index.js');
   if (!existsSync(serverEntry)) {
@@ -1948,6 +2119,13 @@ Run:
                        Open native Pi with the canonical Golem bridge extension;
                        --role applies a validated role preset; Pi keeps its own
                        profile, providers, and sessions.
+  spawn <role> [--name X] [--project P]
+                       Spawn one named Pi worker in detached tmux.
+  list [--project P]  List worker records and live dispatchable status.
+  attach <name>       Attach to a worker's real tmux TUI.
+  peek <name> [--lines N]
+                       Read worker scrollback without attaching.
+  kill <name>         Kill one worker and verify its process group is empty.
   role <role|clear> [--session <id-or-name>]
                          Set or clear a session role (${SESSION_ROLES.join(', ')}).
   sessions dedup [--apply]
@@ -2040,6 +2218,21 @@ async function main() {
       break;
     case 'pi':
       await cmdPi(rest);
+      break;
+    case 'spawn':
+      await cmdSpawn(rest);
+      break;
+    case 'list':
+      await cmdListWorkers(rest);
+      break;
+    case 'attach':
+      await cmdAttachWorker(rest);
+      break;
+    case 'peek':
+      await cmdPeekWorker(rest);
+      break;
+    case 'kill':
+      await cmdKillWorker(rest);
       break;
     case 'role':
       await cmdRole(rest);
