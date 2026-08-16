@@ -77,6 +77,11 @@ try {
   assert.equal(listed.status, 200);
   const explorer = listed.payload.find((role) => role.name === 'explorer');
   assert.deepEqual(Object.keys(explorer.exec).sort(), ['harness', 'model', 'name', 'provider', 'thinking']);
+  const lead = listed.payload.find((role) => role.name === 'lead');
+  assert.equal(lead?.exec, undefined);
+  const editorSource = fs.readFileSync(path.join(repoRoot, 'dashboard/web/src/other-pages.jsx'), 'utf8');
+  assert.match(editorSource, /const hasExecPreset = role\.exec && typeof role\.exec === 'object'/);
+  assert.match(editorSource, /No execution preset configured\./);
 
   const invalid = await request(base, 'PUT', '/api/roles/explorer', { exec: { thinking: 'invalid' } });
   assert.equal(invalid.status, 400);
@@ -119,6 +124,7 @@ try {
     ok: true,
     checks: [
       'GET lists complete execution presets',
+      'no-exec lead is guarded by an explanatory UI state',
       'invalid preset is readable, rejected, and not persisted',
       'valid preset round-trips through PUT and GET',
       'builtin identity remains fixed and builtin delete returns 409',

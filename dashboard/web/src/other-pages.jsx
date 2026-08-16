@@ -455,13 +455,12 @@ function RoleEditor({ role, onSaved, onDeleted }) {
   const status = state === 'saved'
     ? (role.overridden ? `saved override${role.updated_at ? ` · ${window.SubstrateFmt?.fmtTimeAgo?.(role.updated_at) || role.updated_at}` : ''}` : 'using default')
     : state;
+  const hasExecPreset = role.exec && typeof role.exec === 'object' && !Array.isArray(role.exec);
   const execStatus = execState === 'saving'
     ? 'saving preset…'
     : execState === 'error'
       ? 'preset save failed'
-      : role.exec
-        ? 'preset saved'
-        : 'no execution preset';
+      : 'preset saved';
   const pushed = pushResult?.result;
   const okCount = pushed?.results?.filter((r) => r.ok).length ?? 0;
   return (
@@ -480,14 +479,21 @@ function RoleEditor({ role, onSaved, onDeleted }) {
         <input className="mono" value={meta.glyph} maxLength={4} onChange={(e) => setMeta({ ...meta, glyph: e.target.value })} aria-label={`${role.name} glyph`} disabled={role.builtin} title={role.builtin ? 'Builtin identity is fixed' : undefined}/>
         <input className="mono" type="color" value={meta.color} onChange={(e) => setMeta({ ...meta, color: e.target.value })} aria-label={`${role.name} color`} disabled={role.builtin} title={role.builtin ? 'Builtin identity is fixed' : undefined}/>
       </div>
-      <form className="role-exec-form" onSubmit={saveExec}>
-        <RoleExecFields value={exec} onChange={updateExec} idPrefix={`role-${role.name}`} />
-        <div className="role-exec-actions">
-          <span className={`roles-save-state ${execState === 'error' ? 'error' : ''}`}>{execStatus}</span>
-          <button className="orch-btn" type="submit" disabled={execState === 'saving'}>{execState === 'saving' ? 'Saving…' : 'Save preset'}</button>
+      {hasExecPreset ? (
+        <form className="role-exec-form" onSubmit={saveExec}>
+          <RoleExecFields value={exec} onChange={updateExec} idPrefix={`role-${role.name}`} />
+          <div className="role-exec-actions">
+            <span className={`roles-save-state ${execState === 'error' ? 'error' : ''}`}>{execStatus}</span>
+            <button className="orch-btn" type="submit" disabled={execState === 'saving'}>{execState === 'saving' ? 'Saving…' : 'Save preset'}</button>
+          </div>
+          {execError && <div className="roles-inline-error" role="alert">{execError}</div>}
+        </form>
+      ) : (
+        <div className="roles-preset-unavailable" role="note">
+          <strong>No execution preset configured.</strong>
+          {role.name === 'lead' ? ' Lead is orchestration-only and is not launched as a Pi worker.' : ' This role has no Pi execution preset to edit.'}
         </div>
-        {execError && <div className="roles-inline-error" role="alert">{execError}</div>}
-      </form>
+      )}
       {deleteError && <div className="roles-inline-error" role="alert">{deleteError}</div>}
       <textarea
         className="role-editor-body mono"

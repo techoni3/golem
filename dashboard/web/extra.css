@@ -1307,6 +1307,18 @@
   font-size: 12px;
   padding: 8px 2px;
 }
+.roles-preset-unavailable {
+  color: var(--text-3);
+  background: color-mix(in oklab, var(--bg-1) 70%, transparent);
+  border: 1px dashed var(--border-1);
+  border-radius: var(--radius-1);
+  padding: 8px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.roles-preset-unavailable strong {
+  color: var(--text-2);
+}
 .orch-btn.danger:hover:not(:disabled) {
   color: var(--status-blocked);
   border-color: rgba(248,113,113,.35);
