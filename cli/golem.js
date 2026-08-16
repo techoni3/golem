@@ -36,6 +36,7 @@ import * as piAdapter from '../lib/compiler/adapters/pi.js';
 import { isHarnessEnabled, loadConfig, saveConfig } from '../lib/golem-config.js';
 import { CodexSupervisor, readCodexSupervisor } from '../lib/codex-supervisor.js';
 import { MIN_PI_NODE, SUPPORTED_PI_VERSION, piNodeSupported } from '../lib/pi-compatibility.js';
+import { resolveRolePreset } from '../lib/role-preset.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -578,7 +579,7 @@ async function cmdClaude(args) {
 }
 
 function piLauncherHelp() {
-  log(`Usage: golem pi [--provider <id> --model <id>] [--resume <session-id>] [-- <pi args...>]
+  log(`Usage: golem pi [--role <role>] [--provider <id> --model <id>] [--resume <session-id>] [-- <pi args...>]
 
 Open native Pi with Golem's canonical rendered bridge extension. Pi retains its
 own profile, authentication, models, providers, extensions, and sessions. The
@@ -586,15 +587,31 @@ supported bridge baseline is Pi ${SUPPORTED_PI_VERSION} on Node.js
 >=${MIN_PI_NODE.major}.${MIN_PI_NODE.minor}.
 
 Wrapper options:
-  --provider <id>       Explicit native Pi provider. Supply with --model.
-  --model <id>          Explicit provider-local model id. Supply with --provider.
+  --role <role>         Apply the role's validated Pi execution preset.
+  --provider <id>       Explicit native Pi provider. With --role, overrides its preset.
+  --model <id>          Explicit provider-local model id. With --role, overrides its preset.
+  --thinking <level>    With --role, overrides its preset thinking level.
+  --name <name>         With --role, overrides its preset session name.
   --resume <session-id> Resume a native Pi session id through --session.
 
 Arguments after -- are passed to Pi unchanged. Pi's own extension discovery and
 configuration remain active; the shipped Golem extension is appended explicitly.
 
-  golem pi --provider ollama --model laguna-xs-2.1:q4_K_M
+  golem pi --role explorer
+  golem pi --role explorer --thinking max
   golem pi --resume <pi-session-id> -- --thinking high`);
+}
+
+function hasPiRoleOption(args) {
+  let separatorSeen = false;
+  for (const arg of args) {
+    if (arg === '--') {
+      separatorSeen = true;
+      continue;
+    }
+    if (!separatorSeen && (arg === '--role' || arg.startsWith('--role='))) return true;
+  }
+  return false;
 }
 
 async function cmdPi(args) {
@@ -606,31 +623,63 @@ async function cmdPi(args) {
     fatal(1, `golem pi requires Node.js >=${MIN_PI_NODE.major}.${MIN_PI_NODE.minor}; running ${process.versions.node}`);
   }
 
+  let role = null;
   let provider = null;
   let model = null;
+  let thinking;
+  let name;
   let resume = null;
   let separatorSeen = false;
+  const roleMode = hasPiRoleOption(args);
   const passthrough = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (!separatorSeen && arg === '--') { separatorSeen = true; continue; }
-    if (!separatorSeen && ['--provider', '--model', '--resume'].includes(arg)) {
+    if (!separatorSeen && ['--role', '--provider', '--model', '--resume'].includes(arg)) {
       const value = args[++index];
       if (!value || value.startsWith('-')) fatal(2, `golem pi requires a value for ${arg}`);
-      if (arg === '--provider') provider = value;
+      if (arg === '--role') role = value;
+      else if (arg === '--provider') provider = value;
       else if (arg === '--model') model = value;
       else resume = value;
       continue;
     }
-    if (!separatorSeen && arg.startsWith('--provider=')) provider = arg.slice('--provider='.length);
+    if (roleMode && !separatorSeen && ['--thinking', '--name', '-n'].includes(arg)) {
+      const value = args[++index];
+      if (!value || value.startsWith('-')) fatal(2, `golem pi requires a value for ${arg}`);
+      if (arg === '--thinking') thinking = value;
+      else name = value;
+      continue;
+    }
+    if (!separatorSeen && arg.startsWith('--role=')) role = arg.slice('--role='.length);
+    else if (!separatorSeen && arg.startsWith('--provider=')) provider = arg.slice('--provider='.length);
     else if (!separatorSeen && arg.startsWith('--model=')) model = arg.slice('--model='.length);
     else if (!separatorSeen && arg.startsWith('--resume=')) resume = arg.slice('--resume='.length);
+    else if (roleMode && !separatorSeen && arg.startsWith('--thinking=')) thinking = arg.slice('--thinking='.length);
+    else if (roleMode && !separatorSeen && arg.startsWith('--name=')) name = arg.slice('--name='.length);
     else passthrough.push(arg);
   }
-  if ((provider == null) !== (model == null)) fatal(2, 'golem pi requires --provider and --model together');
+  if (roleMode && !role) fatal(2, 'golem pi requires a non-empty --role');
+  if (!roleMode && (provider == null) !== (model == null)) fatal(2, 'golem pi requires --provider and --model together');
   if (provider != null && !provider.trim()) fatal(2, 'golem pi requires a non-empty --provider');
   if (model != null && !model.trim()) fatal(2, 'golem pi requires a non-empty --model');
+  if (thinking != null && !thinking.trim()) fatal(2, 'golem pi requires a non-empty --thinking');
+  if (name != null && !name.trim()) fatal(2, 'golem pi requires a non-empty --name');
   if (resume != null && !resume.trim()) fatal(2, 'golem pi requires a non-empty --resume');
+
+  let presetArgs = [];
+  if (roleMode) {
+    const overrides = {};
+    if (provider != null) overrides.provider = provider;
+    if (model != null) overrides.model = model;
+    if (thinking != null) overrides.thinking = thinking;
+    if (name != null) overrides.name = name;
+    try {
+      presetArgs = resolveRolePreset(role, overrides);
+    } catch (error) {
+      fatal(2, `golem pi: ${error.message}`);
+    }
+  }
 
   const childEnv = { ...process.env };
   const versionProbe = spawnSync('pi', ['--version'], { env: childEnv, encoding: 'utf8' });
@@ -654,7 +703,7 @@ async function cmdPi(args) {
   });
   const launchArgs = [
     '--extension', extension,
-    ...(provider ? ['--provider', provider.trim(), '--model', model.trim()] : []),
+    ...(roleMode ? presetArgs : (provider ? ['--provider', provider.trim(), '--model', model.trim()] : [])),
     ...(resume ? ['--session', resume.trim()] : []),
     ...passthrough,
   ];
@@ -1895,9 +1944,10 @@ Run:
   claude|cc [--backend native|ollama] [--model <id>] [-- <claude args...>]
                        Open Claude Code with Golem's development channel loaded;
                        optionally launch through Ollama with an explicit model.
-  pi [--provider <id> --model <id>] [--resume <session-id>] [-- <pi args...>]
+  pi [--role <role>] [--provider <id> --model <id>] [--resume <session-id>] [-- <pi args...>]
                        Open native Pi with the canonical Golem bridge extension;
-                       Pi keeps its own profile, providers, and sessions.
+                       --role applies a validated role preset; Pi keeps its own
+                       profile, providers, and sessions.
   role <role|clear> [--session <id-or-name>]
                          Set or clear a session role (${SESSION_ROLES.join(', ')}).
   sessions dedup [--apply]
