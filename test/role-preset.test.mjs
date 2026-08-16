@@ -63,6 +63,7 @@ try {
     createRole,
     readRoleRegistry,
     updateRoleExec,
+    updateRoleMeta,
   } = await import('../lib/session-role.js');
   const {
     GLOBAL_ROLE_EXEC_DEFAULTS,
@@ -122,6 +123,14 @@ try {
   });
   updateRoleExec('preset', { thinking: 'high' });
   assert.equal(resolveRoleExecution('preset').thinking, 'high');
+  assert.equal(readRoleRegistry().find((row) => row.name === 'preset').exec.thinking, 'high');
+  assert.throws(() => updateRoleExec('preset', { thinking: 'invalid' }), /thinking must be one of/);
+  assert.equal(resolveRoleExecution('preset').thinking, 'high', 'invalid writes do not reach the registry');
+  assert.throws(() => updateRoleMeta('preset', { exec: { harness: 'claude' } }), /harness must be "pi"/);
+  assert.throws(() => createRole({
+    name: 'bad-preset',
+    exec: { provider: 'p', model: 'm', thinking: 'invalid' },
+  }), /thinking must be one of/);
 
   assert.deepEqual(validateRolePreset({ model: 'model-only', thinking: 'medium' }), {
     harness: 'pi',
@@ -179,16 +188,11 @@ try {
   assert.match(unknown.stderr, /unknown role/);
   assert.doesNotMatch(unknown.stderr, /at file:/);
 
-  updateRoleExec('preset', { thinking: 'invalid' });
-  const badThinking = run(['pi', '--role', 'preset']);
-  assert.equal(badThinking.status, 2);
-  assert.match(badThinking.stderr, /thinking must be one of/);
-  assert.doesNotMatch(badThinking.stderr, /at file:/);
-
-  updateRoleExec('preset', { thinking: 'medium', harness: 'claude' });
-  const badHarness = run(['pi', '--role', 'preset']);
-  assert.equal(badHarness.status, 2);
-  assert.match(badHarness.stderr, /harness must be "pi"/);
+  const noPreset = run(['pi', '--role', 'lead']);
+  assert.equal(noPreset.status, 2);
+  assert.match(noPreset.stderr, /no execution preset/);
+  assert.match(noPreset.stderr, /builder, explorer, reviewer/);
+  assert.doesNotMatch(noPreset.stderr, /model is required/);
 
   const modelWithoutProvider = run(['pi', '--model', 'model-only']);
   assert.equal(modelWithoutProvider.status, 2);
