@@ -46,6 +46,20 @@ Object.assign(process.env, {
   GOLEM_DASHBOARD_URL: 'http://127.0.0.1:1',
 });
 
+// A version-1 registry without exec is a legitimate pre-preset installation.
+// The current reader must migrate it once, then record provenance for later
+// loss detection.
+fs.mkdirSync(path.join(state, 'roles'), { recursive: true });
+fs.writeFileSync(path.join(state, 'roles', 'index.json'), JSON.stringify({
+  version: 1,
+  roles: [
+    { name: 'lead', color: '#a78bfa', glyph: 'LD', builtin: true },
+    { name: 'builder', color: '#4ade80', glyph: 'BU', builtin: true },
+    { name: 'explorer', color: '#38bdf8', glyph: 'EX', builtin: true },
+    { name: 'reviewer', color: '#f472b6', glyph: 'RV', builtin: true },
+  ],
+}, null, 2) + '\n');
+
 function run(args) {
   return spawnSync(process.execPath, [cli, ...args], {
     cwd: project,
@@ -82,8 +96,11 @@ try {
       name: null,
     });
   }
-  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(state, 'roles', 'index.json'), 'utf8')).roles
-    .find((row) => row.name === 'explorer').exec, seeded.find((row) => row.name === 'explorer').exec);
+  const migratedIndex = JSON.parse(fs.readFileSync(path.join(state, 'roles', 'index.json'), 'utf8'));
+  assert.equal(migratedIndex.version, 2);
+  assert.deepEqual(migratedIndex.roles.find((row) => row.name === 'explorer').exec, seeded.find((row) => row.name === 'explorer').exec);
+  const provenance = JSON.parse(fs.readFileSync(path.join(state, 'roles', 'registry-state.json'), 'utf8'));
+  assert.deepEqual(Object.keys(provenance.known_exec).sort(), ['builder', 'explorer', 'reviewer']);
   assert.deepEqual(GLOBAL_ROLE_EXEC_DEFAULTS, { harness: 'pi', provider: 'ollama-cloud' });
 
   assert.deepEqual(resolveRolePreset('explorer'), [
@@ -124,6 +141,9 @@ try {
   updateRoleExec('preset', { thinking: 'high' });
   assert.equal(resolveRoleExecution('preset').thinking, 'high');
   assert.equal(readRoleRegistry().find((row) => row.name === 'preset').exec.thinking, 'high');
+  assert.throws(() => updateRoleMeta('preset', { exec: null }), /cannot remove execution preset/);
+  updateRoleMeta('preset', { glyph: 'PR' });
+  assert.equal(readRoleRegistry().find((row) => row.name === 'preset').exec.thinking, 'high');
   assert.throws(() => updateRoleExec('preset', { thinking: 'invalid' }), /thinking must be one of/);
   assert.equal(resolveRoleExecution('preset').thinking, 'high', 'invalid writes do not reach the registry');
   assert.throws(() => updateRoleMeta('preset', { exec: { harness: 'claude' } }), /harness must be "pi"/);
@@ -131,6 +151,22 @@ try {
     name: 'bad-preset',
     exec: { provider: 'p', model: 'm', thinking: 'invalid' },
   }), /thinking must be one of/);
+
+  // Simulate a stale pre-exec writer rewriting the current index. The
+  // provenance sidecar must make the next read fail instead of re-seeding the
+  // lost builder preset with the builtin default.
+  updateRoleExec('builder', { provider: 'openai-codex', model: 'gpt-5.6-luna', thinking: 'max' });
+  const roleIndexPath = path.join(state, 'roles', 'index.json');
+  const knownGoodIndex = JSON.parse(fs.readFileSync(roleIndexPath, 'utf8'));
+  const wipedIndex = { version: 1, roles: knownGoodIndex.roles.map((row) => {
+    const next = { ...row };
+    delete next.exec;
+    return next;
+  }) };
+  fs.writeFileSync(roleIndexPath, JSON.stringify(wipedIndex, null, 2) + '\n');
+  assert.throws(() => readRoleRegistry(), /role registry lost execution preset.*builder/);
+  fs.writeFileSync(roleIndexPath, JSON.stringify(knownGoodIndex, null, 2) + '\n');
+  assert.equal(readRoleRegistry().find((row) => row.name === 'builder').exec.model, 'gpt-5.6-luna');
 
   assert.deepEqual(validateRolePreset({ model: 'model-only', thinking: 'medium' }), {
     harness: 'pi',
