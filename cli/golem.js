@@ -1050,9 +1050,69 @@ function workerProjectHelp() {
   return '[--project <path-or-project-id>]';
 }
 
+const WORKER_TABLE_COLUMNS = [
+  { key: 'name', label: 'NAME', max: 24 },
+  { key: 'role', label: 'ROLE', max: 18 },
+  { key: 'state', label: 'STATE', max: 10 },
+  { key: 'model', label: 'MODEL', max: 30 },
+  { key: 'status', label: 'STATUS', max: 12 },
+  { key: 'idle', label: 'IDLE', max: 10 },
+  { key: 'attach_hint', label: 'ATTACH HINT', max: 32 },
+];
+
+function formatIdle(value) {
+  if (value == null || value === '' || !Number.isFinite(Number(value))) return '-';
+  let seconds = Math.max(0, Math.floor(Number(value)));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  seconds %= 60;
+  if (minutes < 60) return `${minutes}m ${seconds}s`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours < 24) return `${hours}h ${remainingMinutes}m`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ${hours % 24}h`;
+}
+
+function workerTableValue(worker, key) {
+  if (key === 'idle') return formatIdle(worker?.idle_seconds);
+  const value = worker?.[key];
+  if (value == null || value === '') return '-';
+  return String(value).replace(/\s+/g, ' ');
+}
+
+function fitTableCell(value, width) {
+  const text = String(value);
+  if (text.length <= width) return text.padEnd(width);
+  return `${text.slice(0, Math.max(1, width - 1))}…`;
+}
+
+function formatWorkerTable(workers) {
+  const rows = Array.isArray(workers) ? workers : [workers];
+  if (!rows.length) return 'No workers.';
+  const values = rows.map((worker) => WORKER_TABLE_COLUMNS.map((column) => workerTableValue(worker, column.key)));
+  const widths = WORKER_TABLE_COLUMNS.map((column, index) => Math.min(
+    column.max,
+    Math.max(column.label.length, ...values.map((row) => row[index].length)),
+  ));
+  const header = WORKER_TABLE_COLUMNS.map((column, index) => fitTableCell(column.label, widths[index])).join('  ');
+  const divider = widths.map((width) => '-'.repeat(width)).join('  ');
+  const body = values.map((row) => row.map((value, index) => fitTableCell(value, widths[index])).join('  '));
+  return [header, divider, ...body].join('\n');
+}
+
+function emitWorkerOutput(value, { json = false } = {}) {
+  if (json) {
+    // Keep the pre-table JSON representation byte-compatible for machine users.
+    log(JSON.stringify(value, null, 2));
+    return;
+  }
+  log(formatWorkerTable(value));
+}
+
 async function cmdSpawn(args) {
   if (!args.length || args[0] === '-h' || args[0] === '--help') {
-    log(`Usage: golem spawn <role> [--name <name>] ${workerProjectHelp()}
+    log(`Usage: golem spawn <role> [--name <name>] ${workerProjectHelp()} [--json]
 
 Create one Pi worker in a detached tmux pty. The worker is registered and
 role-assigned before this command returns. A failed readiness wait leaves the
@@ -1060,10 +1120,14 @@ worker's tmux session available for peek/inspection.`);
     return;
   }
   const role = args[0];
+  const wantJson = args.includes('--json');
   let name = null;
   let project = null;
   for (let index = 1; index < args.length; index += 1) {
     const arg = args[index];
+    if (arg === '--json') {
+      continue;
+    }
     if (arg === '--name') {
       name = args[++index] ?? null;
       if (!name || name.startsWith('-')) fatal(2, 'golem spawn --name requires a value');
@@ -1080,7 +1144,7 @@ worker's tmux session available for peek/inspection.`);
   }
   try {
     const worker = await spawnWorker({ role, name, project });
-    log(JSON.stringify(worker, null, 2));
+    emitWorkerOutput(worker, { json: wantJson });
   } catch (error) {
     fatal(1, `golem spawn: ${error.message}`);
   }
@@ -1088,15 +1152,21 @@ worker's tmux session available for peek/inspection.`);
 
 async function cmdListWorkers(args) {
   if (args.includes('-h') || args.includes('--help')) {
-    log(`Usage: golem list ${workerProjectHelp()}
+    log(`Usage: golem list ${workerProjectHelp()} [--all] [--json]
 
-List Golem worker records, reconciled against process groups and the live
-session-facts-backed dispatchable roster.`);
+List live, spawning, and failed Golem workers as a table. Dead rows are
+hidden by default; --all includes retained dead rows. Use --json for the
+machine-readable worker-record shape.`);
     return;
   }
+  const wantJson = args.includes('--json');
+  const includeDead = args.includes('--all');
   let project = null;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
+    if (arg === '--json' || arg === '--all') {
+      continue;
+    }
     if (arg === '--project') {
       project = args[++index] ?? null;
       if (!project || project.startsWith('-')) fatal(2, 'golem list --project requires a value');
@@ -1107,7 +1177,7 @@ session-facts-backed dispatchable roster.`);
     }
   }
   try {
-    log(JSON.stringify(await listWorkerViews({ project }), null, 2));
+    emitWorkerOutput(await listWorkerViews({ project, includeDead }), { json: wantJson });
   } catch (error) {
     fatal(1, `golem list: ${error.message}`);
   }
@@ -1179,16 +1249,20 @@ Capture worker scrollback without attaching or sending input.`);
 
 async function cmdKillWorker(args) {
   if (!args.length || args[0] === '-h' || args[0] === '--help') {
-    log(`Usage: golem kill <name> ${workerProjectHelp()}
+    log(`Usage: golem kill <name> ${workerProjectHelp()} [--json]
 
 Kill one worker: tmux kill-session, TERM the recorded process group, KILL
 survivors, verify the group is empty, then mark the worker dead.`);
     return;
   }
   const name = args[0];
+  const wantJson = args.includes('--json');
   let project = null;
   for (let index = 1; index < args.length; index += 1) {
     const arg = args[index];
+    if (arg === '--json') {
+      continue;
+    }
     if (arg === '--project') {
       project = args[++index] ?? null;
       if (!project || project.startsWith('-')) fatal(2, 'golem kill --project requires a value');
@@ -1200,7 +1274,7 @@ survivors, verify the group is empty, then mark the worker dead.`);
   }
   try {
     const { projectId } = project == null ? { projectId: null } : await resolveWorkerProject(project);
-    log(JSON.stringify(await killWorker(name, { projectId }), null, 2));
+    emitWorkerOutput(await killWorker(name, { projectId }), { json: wantJson });
   } catch (error) {
     const code = /refusing to kill|ambiguous|not found/i.test(error.message) ? 2 : 1;
     fatal(code, `golem kill: ${error.message}`);
@@ -2119,13 +2193,15 @@ Run:
                        Open native Pi with the canonical Golem bridge extension;
                        --role applies a validated role preset; Pi keeps its own
                        profile, providers, and sessions.
-  spawn <role> [--name X] [--project P]
+  spawn <role> [--name X] [--project P] [--json]
                        Spawn one named Pi worker in detached tmux.
-  list [--project P]  List worker records and live dispatchable status.
+  list [--project P] [--all] [--json]
+                       List worker records as a table; --all includes dead rows.
   attach <name>       Attach to a worker's real tmux TUI.
   peek <name> [--lines N]
                        Read worker scrollback without attaching.
-  kill <name>         Kill one worker and verify its process group is empty.
+  kill <name> [--json] Kill one worker and verify its process group is empty.
+                       --json preserves the machine-readable worker records.
   role <role|clear> [--session <id-or-name>]
                          Set or clear a session role (${SESSION_ROLES.join(', ')}).
   sessions dedup [--apply]
