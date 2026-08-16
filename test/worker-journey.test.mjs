@@ -24,7 +24,7 @@ const envKeys = [
   'GOLEM_HOME', 'HOME', 'PATH', 'GOLEM_DASHBOARD_URL', 'GOLEM_TMUX_SOCKET',
   'GOLEM_TEST_REGISTRATION_DIR', 'GOLEM_TEST_PROJECT_ID', 'GOLEM_WORKER_READY_TIMEOUT_MS',
   'GOLEM_WORKER_POLL_MS', 'GOLEM_WORKER_REQUEST_TIMEOUT_MS', 'GOLEM_TMUX_BIN',
-  'GOLEM_TMUX_CAPTURE', 'GOLEM_FAKE_NO_REGISTER',
+  'GOLEM_TMUX_CAPTURE', 'GOLEM_FAKE_NO_REGISTER', 'GOLEM_TEST_SELF_KILL_TRIGGER', 'GOLEM_TEST_CLI',
   'XDG_CONFIG_HOME',
 ];
 for (const key of envKeys) originalEnv[key] = process.env[key];
@@ -40,6 +40,7 @@ const fakePi = path.join(bin, 'pi');
 fs.writeFileSync(fakePi, `#!${process.execPath}
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 if (process.argv.length === 3 && process.argv[2] === '--version') {
   process.stdout.write('0.80.10\\n');
   process.exit(0);
@@ -59,8 +60,22 @@ if (process.env.GOLEM_FAKE_NO_REGISTER !== '1') {
     status: 'idle',
   }));
 }
+const selfKillTrigger = process.env.GOLEM_TEST_SELF_KILL_TRIGGER;
+const selfKillResult = selfKillTrigger ? selfKillTrigger + '.result' : null;
+let selfKillStarted = false;
+function runSelfKill() {
+  if (!selfKillTrigger || selfKillStarted || fs.existsSync(selfKillResult) || !fs.existsSync(selfKillTrigger)) return;
+  selfKillStarted = true;
+  const env = { ...process.env };
+  for (const key of ['GOLEM_CALLER_SESSION_ID', 'GOLEM_CEO_SESSION_ID', 'GOLEM_SESSION_ID', 'CLAUDE_CODE_SESSION_ID', 'PI_SESSION_ID']) delete env[key];
+  const result = spawnSync(process.execPath, [process.env.GOLEM_TEST_CLI, 'kill', name], {
+    cwd: process.cwd(), env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  fs.writeFileSync(selfKillResult, JSON.stringify({ status: result.status, signal: result.signal, stdout: result.stdout, stderr: result.stderr }));
+}
 process.stdout.write('[golemtest-t2 worker ' + name + '] ready\\n');
 for (const signal of ['SIGTERM', 'SIGHUP']) process.once(signal, () => process.exit(0));
+setInterval(runSelfKill, 25);
 setInterval(() => {}, 1000);
 `, { mode: 0o700 });
 
@@ -71,6 +86,7 @@ Object.assign(process.env, {
   GOLEM_TMUX_SOCKET: socket,
   GOLEM_TEST_REGISTRATION_DIR: registrationDir,
   GOLEM_TEST_PROJECT_ID: projectId,
+  GOLEM_TEST_CLI: cli,
   GOLEM_WORKER_READY_TIMEOUT_MS: '1200',
   GOLEM_WORKER_POLL_MS: '50',
   GOLEM_WORKER_REQUEST_TIMEOUT_MS: '500',
@@ -86,6 +102,7 @@ function readBody(request) {
 }
 
 let server;
+let recycled;
 
 function dashboardRows() {
   const assignments = dashboardRows.assignments ?? new Map();
@@ -143,6 +160,15 @@ function runCli(args) {
   });
 }
 
+async function waitForFile(file, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(file)) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`timed out waiting for ${file}`);
+}
+
 function claimChild() {
   const moduleUrl = pathToFileURL(path.join(repo, 'lib', 'worker-registry.js')).href;
   const code = `import { claimWorker } from ${JSON.stringify(moduleUrl)};
@@ -165,7 +191,7 @@ console.log(row.name);`;
 try {
   await startDashboard();
   const { createRole, readRoleRegistry } = await import('../lib/session-role.js');
-  const { readWorkers } = await import('../lib/worker-registry.js');
+  const { claimWorker, readWorkers, updateWorker } = await import('../lib/worker-registry.js');
   const {
     killWorker,
     listWorkerViews,
@@ -174,6 +200,7 @@ try {
   } = await import('../lib/worker-manager.js');
   const {
     hasSession,
+    killSession,
     processIdsInGroup,
   } = await import('../lib/tmux-driver.js');
 
@@ -253,6 +280,75 @@ try {
   assert.equal(hasSession(cliSpawned.name), false);
   console.log(JSON.stringify({ teardown: 'all six worker process groups empty', survivors: [] }));
 
+  const recycledDead = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+    cwd: project,
+    detached: true,
+    stdio: 'ignore',
+  });
+  recycled = recycledDead;
+  await new Promise((resolve, reject) => {
+    recycledDead.once('spawn', resolve);
+    recycledDead.once('error', reject);
+  });
+  assert.ok(recycledDead.pid > 0);
+  assert.ok(processIdsInGroup(recycledDead.pid).includes(recycledDead.pid));
+  const deadClaim = claimWorker({
+    role: 'golemtest-t2',
+    projectId,
+    projectRoot: project,
+    cwd: project,
+    name: 'golemtest-t2-dead',
+    preset: { harness: 'pi', provider: 'ollama-cloud', model: 'deepseek-v4-flash:0731', thinking: 'medium', name: null },
+  });
+  updateWorker(deadClaim.worker_id, {
+    state: 'dead',
+    pid: recycledDead.pid,
+    session_id: 'golemtest-t2-session-dead',
+  });
+  const deadKillProbe = path.join(temp, 'golemtest-t2-dead-kill-called');
+  const deadTmux = path.join(bin, 'golemtest-t2-dead-tmux');
+  fs.writeFileSync(deadTmux, `#!/bin/sh
+printf 'called\\n' > ${JSON.stringify(deadKillProbe)}
+exit 0
+`, { mode: 0o700 });
+  process.env.GOLEM_TMUX_BIN = deadTmux;
+  const deadResult = await killWorker(deadClaim.name, { projectId });
+  assert.equal(deadResult.state, 'dead');
+  assert.equal(fs.existsSync(deadKillProbe), false, 'dead rows must not invoke tmux or process teardown');
+  assert.ok(processIdsInGroup(recycledDead.pid).includes(recycledDead.pid));
+  delete process.env.GOLEM_TMUX_BIN;
+
+  const staleClaim = claimWorker({
+    role: 'golemtest-t2',
+    projectId,
+    projectRoot: project,
+    cwd: project,
+    name: 'golemtest-t2-stale',
+    preset: { harness: 'pi', provider: 'ollama-cloud', model: 'deepseek-v4-flash:0731', thinking: 'medium', name: null },
+  });
+  updateWorker(staleClaim.worker_id, {
+    state: 'failed',
+    pid: recycledDead.pid,
+    session_id: 'golemtest-t2-session-stale',
+  });
+  const staleResult = await killWorker(staleClaim.name, { projectId });
+  assert.equal(staleResult.state, 'dead');
+  assert.ok(processIdsInGroup(recycledDead.pid).includes(recycledDead.pid), 'recycled unrelated pgid must not be signalled');
+  console.log(JSON.stringify({ stale_pgid: recycledDead.pid, stale_kill: 'no signal', unrelated_group_alive: true }));
+  recycledDead.kill('SIGTERM');
+  await new Promise((resolve) => recycledDead.once('exit', resolve));
+  recycled = null;
+
+  const missingSocketTmux = path.join(bin, 'golemtest-t2-missing-socket-tmux');
+  fs.writeFileSync(missingSocketTmux, `#!/bin/sh
+echo 'error connecting to golem socket (No such file or directory)' >&2
+exit 1
+`, { mode: 0o700 });
+  process.env.GOLEM_TMUX_BIN = missingSocketTmux;
+  assert.equal(killSession('golemtest-t2-missing-socket'), false);
+  delete process.env.GOLEM_TMUX_BIN;
+  console.log(JSON.stringify({ missing_socket: 'treated as already stopped' }));
+
   const fakeTmux = path.join(bin, 'golemtest-t2-tmux');
   const attachCapture = path.join(temp, 'golemtest-t2-attach-argv.txt');
   fs.writeFileSync(fakeTmux, `#!/bin/sh
@@ -288,8 +384,34 @@ exit 0
   assert.deepEqual(processIdsInGroup(failed.pid), []);
   assert.equal(hasSession(failedName), false);
 
-  console.log('Worker journey passed: locked naming, detached tmux workers, dispatchable readiness, list/peek/kill, attach argv, self-kill guard, failed inspection, and zero-survivor teardown');
+  delete process.env.GOLEM_FAKE_NO_REGISTER;
+  process.env.GOLEM_WORKER_READY_TIMEOUT_MS = '1200';
+  const selfKillTrigger = path.join(temp, 'golemtest-t2-self-kill-trigger');
+  process.env.GOLEM_TEST_SELF_KILL_TRIGGER = selfKillTrigger;
+  const selfWorker = await spawnWorker({ role: 'golemtest-t2', name: 'golemtest-t2-self', project });
+  const selfKillResult = selfKillTrigger + '.result';
+  fs.writeFileSync(selfKillTrigger, 'run\n');
+  await waitForFile(selfKillResult);
+  const selfAttempt = JSON.parse(fs.readFileSync(selfKillResult, 'utf8'));
+  assert.notEqual(selfAttempt.status, 0, JSON.stringify(selfAttempt));
+  assert.match(`${selfAttempt.stdout || ''}${selfAttempt.stderr || ''}`, /refusing to kill the caller's own session/, JSON.stringify(selfAttempt));
+  assert.equal(hasSession(selfWorker.name), true);
+  assert.ok(processIdsInGroup(selfWorker.pid).length > 0);
+  console.log(JSON.stringify({ self_kill_without_env: 'refused', target_preserved: true }));
+  await killWorker(selfWorker.name, { projectId, callerId: null });
+  assert.deepEqual(processIdsInGroup(selfWorker.pid), []);
+  assert.equal(hasSession(selfWorker.name), false);
+  delete process.env.GOLEM_TEST_SELF_KILL_TRIGGER;
+
+  console.log('Worker journey passed: locked naming, detached tmux workers, dispatchable readiness, list/peek/kill, attach argv, stale-pgid guard, no-env self-kill guard, missing-socket handling, failed inspection, and zero-survivor teardown');
 } finally {
+  if (recycled && recycled.exitCode === null) {
+    try {
+      recycled.kill('SIGKILL');
+      await new Promise((resolve) => recycled.once('exit', resolve));
+    } catch {}
+  }
+  recycled = null;
   delete process.env.GOLEM_TMUX_BIN;
   delete process.env.GOLEM_TMUX_CAPTURE;
   const { killWorker: cleanupKill } = await import('../lib/worker-manager.js').catch(() => ({ killWorker: null }));
