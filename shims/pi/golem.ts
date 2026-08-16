@@ -9,7 +9,6 @@ import { createGolemClient, resolveGolemDashboardBaseUrl } from './lib/golem-cli
 import { GOLEM_TOOL_CONTRACTS } from './lib/golem-tool-contracts.js';
 import { createGolemToolRuntime } from './lib/golem-tool-runtime.js';
 import { PiNativeAdapter } from './lib/pi-native-adapter.js';
-import { killWorker, listWorkerViews, spawnWorker } from './lib/worker-manager.js';
 import { readRoleCard, sessionsJsonPath, setSessionRole, validateSessionRole } from './lib/session-role.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -183,11 +182,6 @@ export default function golem(pi) {
               return setSessionRole(sessionId, role, { by: 'self:mcp' });
             },
             projectContext: () => projectContext(sessionId, ctx.cwd),
-            workerManager: {
-              spawnWorker: ({ role, project, name }) => spawnWorker({ role, project: project ?? ctx.cwd, name }),
-              killWorker,
-              listWorkerViews,
-            },
           });
           const result = await runtime.invoke(contract.name, params || {});
           return { content: [{ type: 'text', text: toolText(result) }], details: { ok: true, result } };

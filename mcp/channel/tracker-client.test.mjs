@@ -851,6 +851,14 @@ async function main() {
     JSON.stringify(tools.tools) === JSON.stringify(GOLEM_TOOL_CONTRACTS),
     `mcp=${tools.tools.length} shared=${GOLEM_TOOL_CONTRACTS.length}`);
   check('MCP omits retired subscription and consult wrapper tools', !tools.tools.some((tool) => ['subscribe', 'unsubscribe', 'subscriptions_list', 'consult_request', 'consult_reply', 'consult_status'].includes(tool.name)), tools.tools.map((tool) => tool.name).join(', '));
+  check('MCP retires worker lifecycle tools', !tools.tools.some((tool) => ['session_spawn', 'session_kill'].includes(tool.name)), tools.tools.map((tool) => tool.name).join(', '));
+  const spoofedCallerRead = await callTool('ticket_get', {
+    id: 'GOL-199',
+    __golem_session_id: 'spoofed-model-session',
+  });
+  check('CC rejects conflicting injected identity before tool dispatch',
+    spoofedCallerRead.result.isError && /conflicts with the launcher binding/.test(spoofedCallerRead.text),
+    spoofedCallerRead.text);
   const respondTool = tools.tools.find((tool) => tool.name === 'respond');
   check('respond is user-facing only; no correlated envelope reply input', !!respondTool && !respondTool.inputSchema?.properties?.envelope_id && /not a correlated peer-handoff reply/.test(respondTool.description || ''), JSON.stringify(respondTool));
   // GOL-150: the phase machine is gone. ticket_update({state}) is the only

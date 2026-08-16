@@ -29,10 +29,7 @@ import {
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import * as tracker from './tracker-client.js';
-import { createGolemClient } from '../../lib/golem-client.js';
 import { GOLEM_TOOL_CONTRACTS } from '../../lib/golem-tool-contracts.js';
-import { createGolemToolRuntime } from '../../lib/golem-tool-runtime.js';
-import { killWorker, listWorkerViews, spawnWorker } from '../../lib/worker-manager.js';
 import { bridgeEndpointForParent, managedCodexBinding, resolveCallerSessionId, resolveProjectCwd, sessionsForParent } from './identity.js';
 import { SESSION_ROLES, pushRoleBriefDirect, setSessionRole } from '../../lib/session-role.js';
 import { releaseEndpointLeases, renewEndpointLease, upsertSessionFact } from '../../lib/session-facts.js';
@@ -450,31 +447,6 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: GOLEM_TOOL_CONTRACTS,
 }));
 
-function workerToolRuntime(caller) {
-  const projectId = tracker.currentProjectId(caller.sessionId);
-  const projectRoot = resolveProjectCwd({ sessionId: caller.sessionId, home: tracker.golemHome(), cwd: process.cwd() });
-  const client = createGolemClient({
-    baseUrl: tracker.dashboardBaseUrl(),
-    callerSessionId: caller.sessionId,
-  });
-  return createGolemToolRuntime({
-    client,
-    callerSessionId: caller.sessionId,
-    projectId,
-    workerManager: {
-      spawnWorker: ({ role, project, name }) => spawnWorker({ role, project: project ?? projectRoot ?? projectId, name }),
-      killWorker,
-      listWorkerViews,
-    },
-  });
-}
-
-function structuredToolError(error) {
-  return typeof error?.toJSON === 'function'
-    ? error.toJSON()
-    : { name: error?.name || 'Error', message: error?.message || String(error) };
-}
-
 function resolveToolCaller(injectedSessionId) {
   const managed = managedCodexBinding();
   if (managed.enabled) {
@@ -604,19 +576,6 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       return { content: [{ type: 'text', text: ctx.trim() || '(no project context available)' }] };
     } catch (err) {
       return { isError: true, content: [{ type: 'text', text: `project_context: ${String(err?.message ?? err)}` }] };
-    }
-  }
-
-  // --- Worker lifecycle tools ------------------------------------------------
-  // The manager is the only implementation of spawn/kill/list semantics. This
-  // MCP branch only binds authenticated identity and serializes the shared
-  // runtime result for the channel protocol.
-  if (name === 'session_spawn' || name === 'session_kill') {
-    try {
-      const result = await workerToolRuntime(caller).invoke(name, args);
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
-    } catch (error) {
-      return { isError: true, content: [{ type: 'text', text: JSON.stringify(structuredToolError(error), null, 2) }] };
     }
   }
 
