@@ -14,7 +14,7 @@ import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import { managedCodexBinding, resolveCallerSessionId } from './identity.js';
+import { managedCodexBinding, resolveCallerSessionId, sessionsForParent } from './identity.js';
 import { createGolemClient, GolemClientError } from '../../lib/golem-client.js';
 
 export { GolemClientError };
@@ -82,13 +82,7 @@ export function currentSessionId(injectedId) {
   // helper remains null-safe for callers outside the handler.
   const managed = managedCodexBinding();
   if (managed.enabled) return managed.sessionId || null;
-  // The shim is the only component that knows which sibling made this tool
-  // call. Its injected id is authoritative for this invocation.
-  if (typeof injectedId === 'string' && injectedId.trim()) return injectedId.trim();
-  // Explicit launcher override wins; otherwise the LOGICAL id from the parent
-  // claude process's session file (~/.claude/sessions/<ppid>.json) — this MCP
-  // child is a direct child of it. CLAUDE_CODE_SESSION_ID is a per-run id that
-  // diverges from the logical id on resume, so it's only a last resort. Keep in
+  // A launcher override or parent session file is process-owned. Keep this in
   // lockstep with index.js deriveSessionId() so ticket actor ids match the
   // channel registry and the dashboard.
   if (process.env.GOLEM_CEO_SESSION_ID) return process.env.GOLEM_CEO_SESSION_ID;
@@ -97,9 +91,17 @@ export function currentSessionId(injectedId) {
     const j = JSON.parse(fs.readFileSync(f, 'utf8'));
     if (j && typeof j.sessionId === 'string' && j.sessionId) return j.sessionId;
   } catch { /* missing / unreadable — fall through */ }
+  if (process.env.CLAUDE_CODE_SESSION_ID) return process.env.CLAUDE_CODE_SESSION_ID;
+  // Only the OpenCode shim has a trusted per-call boundary. Require a live
+  // bridge row before accepting its injected id; an arbitrary tool argument is
+  // not an actor identity.
+  if (typeof injectedId === 'string' && injectedId.trim()) {
+    const injected = injectedId.trim();
+    if (sessionsForParent({ home: golemHome() }).some((bridge) => bridge.session_id === injected)) return injected;
+  }
   const opencode = resolveCallerSessionId({ home: golemHome() });
   if (opencode.sessionId) return opencode.sessionId;
-  return process.env.CLAUDE_CODE_SESSION_ID || null;
+  return null;
 }
 
 /**

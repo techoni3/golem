@@ -99,6 +99,19 @@ function deriveSessionName() {
   const bridge = bridgeEndpointForParent({ home: tracker.golemHome() });
   return bridge && typeof bridge.name === 'string' && bridge.name ? bridge.name : null;
 }
+
+function launcherBoundSessionId() {
+  const envId = typeof process.env.GOLEM_CEO_SESSION_ID === 'string'
+    ? process.env.GOLEM_CEO_SESSION_ID.trim()
+    : '';
+  if (envId) return envId;
+  const parent = readParentSessionFile();
+  if (typeof parent?.sessionId === 'string' && parent.sessionId.trim()) return parent.sessionId.trim();
+  const runId = typeof process.env.CLAUDE_CODE_SESSION_ID === 'string'
+    ? process.env.CLAUDE_CODE_SESSION_ID.trim()
+    : '';
+  return runId || null;
+}
 // golem-home resolution (TKT-0573, ADR-4) lives in tracker-client.js's
 // golemHome() — reused here so this file doesn't carry a second hand-rolled
 // mirror of lib/golem-home.js within the same package.
@@ -434,36 +447,48 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: GOLEM_TOOL_CONTRACTS,
 }));
 
+function resolveToolCaller(injectedSessionId) {
+  const managed = managedCodexBinding();
+  if (managed.enabled) {
+    if (!managed.sessionId) return { sessionId: null, error: managed.error, reject: true };
+    if (typeof injectedSessionId === 'string' && injectedSessionId.trim() && injectedSessionId.trim() !== managed.sessionId) {
+      return { sessionId: null, error: 'golem: managed Codex caller identity conflicts with the supervisor binding; refusing the tool call.', reject: true };
+    }
+    return { sessionId: managed.sessionId, source: 'managed_codex_supervisor' };
+  }
+
+  const bound = launcherBoundSessionId();
+  if (bound) {
+    if (typeof injectedSessionId === 'string' && injectedSessionId.trim() && injectedSessionId.trim() !== bound) {
+      return { sessionId: null, error: 'golem: injected caller identity conflicts with the launcher binding; refusing the tool call.', reject: true };
+    }
+    return { sessionId: bound, source: 'launcher_binding' };
+  }
+
+  // Without a CC launcher/parent binding, only a live OpenCode bridge can
+  // authorize the per-call id written by its local shim. A model-supplied id
+  // with no matching bridge is never accepted as an actor.
+  const bridges = sessionsForParent({ home: tracker.golemHome() });
+  if (typeof injectedSessionId === 'string' && injectedSessionId.trim()) {
+    const injected = injectedSessionId.trim();
+    if (bridges.some((bridge) => bridge.session_id === injected)) {
+      return { sessionId: injected, source: 'opencode_shim' };
+    }
+    return { sessionId: null, error: 'golem: injected caller identity is not backed by a live OpenCode bridge; refusing the tool call.', reject: true };
+  }
+  const resolved = resolveCallerSessionId({ home: tracker.golemHome() });
+  return { ...resolved, sessionId: resolved.sessionId || null };
+}
+
 mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const name = req.params.name;
   const rawArgs = req.params.arguments || {};
   const injectedSessionId = rawArgs.__golem_session_id;
   const args = Object.fromEntries(Object.entries(rawArgs).filter(([key]) => !key.startsWith('__golem_')));
-  const managed = managedCodexBinding();
-  // In managed Codex mode __golem_session_id is model-controlled request data,
-  // not a trusted harness shim field. A conflicting value is an attempted actor
-  // spoof and is rejected before any read or write. A matching value is ignored;
-  // the only actor source remains the supervisor-owned process binding.
-  const caller = managed.enabled
-    ? (!managed.sessionId
-      ? { sessionId: null, error: managed.error }
-      : (typeof injectedSessionId === 'string' && injectedSessionId.trim() && injectedSessionId.trim() !== managed.sessionId
-        ? { sessionId: null, error: 'golem: managed Codex caller identity conflicts with the supervisor binding; refusing the tool call.' }
-        : { sessionId: managed.sessionId, source: 'managed_codex_supervisor' }))
-    : (() => {
-      // Preserve CC's launcher-bound actor and OpenCode's shim-bound actor.
-      // resolveCallerSessionId supplies the precise ambiguity diagnostic, while
-      // tracker.currentSessionId retains the existing GOLEM_CEO_SESSION_ID /
-      // Claude parent-session fallback used by ordinary channel children.
-      const resolved = resolveCallerSessionId({ injectedId: injectedSessionId, home: tracker.golemHome() });
-      return {
-        ...resolved,
-        sessionId: tracker.currentSessionId(injectedSessionId),
-      };
-    })();
+  const caller = resolveToolCaller(injectedSessionId);
 
-  if (managed.enabled && !caller.sessionId) {
-    return { isError: true, content: [{ type: 'text', text: caller.error || 'golem: managed Codex caller identity is unavailable.' }] };
+  if (caller.reject) {
+    return { isError: true, content: [{ type: 'text', text: caller.error || 'golem: caller identity is invalid; refusing the tool call.' }] };
   }
 
   if (name === 'ack') {

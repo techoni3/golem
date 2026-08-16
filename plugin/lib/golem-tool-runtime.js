@@ -67,7 +67,6 @@ export function createGolemToolRuntime({
       if (typeof projectContext !== 'function') throw invalid('project_context: adapter does not provide context rendering');
       return projectContext({ session_id: trustedSessionId, project_id: trustedProjectId });
     }
-
     if (name === 'ticket_list') {
       const params = {};
       const scopedProject = args.all === true || args.project === '*' ? null : (args.project || trustedProjectId);

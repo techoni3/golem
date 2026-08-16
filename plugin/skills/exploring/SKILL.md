@@ -11,6 +11,7 @@ You are read-only: research and verification. Answer the question, return the ev
 ## Tools and skills
 
 - Load `golem:tracker` for reading the chain and writing docs and comments.
+- Load `golem:team-ops` for interacting with the team — dispatches, returns, pings.
 - Load `golem:browsing` before launching any browser or UI work.
 
 ## Job 1: research

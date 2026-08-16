@@ -98,7 +98,7 @@ const contracts = [
   },
   {
     name: 'sessions_dispatchable',
-    description: 'Golem tracker — list live cross-harness sessions that are currently eligible to receive a dispatched ticket, in your current project (or pass project for another). Returns session ids + labels for use with ticket_dispatch. Each entry carries a status (idle|busy|waiting) and a pending_count of queued dispatches — pass when_idle:true on ticket_dispatch for a busy/waiting target so the brief lands when it next goes idle.',
+    description: 'Golem tracker — list live cross-harness sessions that are currently eligible to receive a dispatched ticket, in your current project (or pass project for another). Returns session ids + labels for use with ticket_dispatch. Each entry carries a status (idle|busy|waiting) and a pending_count of queued dispatches — spawned workers also carry worker_tmux_session, worker_state, and worker_attach_hint fields.',
     inputSchema: object({ project: string('Canonical project_id, registry id, or unique dashboard project name. Ambiguous human names fail explicitly. Defaults to your current project.') }),
   },
   {

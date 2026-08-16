@@ -1,0 +1,72 @@
+---
+name: team-ops
+description: The team surface for every role — check teammates, message them, dispatch work, and spawn, peek, or retire managed workers via the golem CLI. Load alongside any role skill before interacting with the team.
+---
+<!-- GENERATED: skills/team-ops/SKILL.md — rendered by `golem sync` from substrate/ — edit the source, not this file. -->
+
+# team-ops
+
+How to check teammates, delegate to them, and create or retire them. Two kinds of teammates:
+
+| Kind | Created by | Runs as | Lifecycle |
+|---|---|---|---|
+| Human-managed | the human | attached TUI session; the human interacts with it directly | agents never create or destroy these |
+| Agent-managed | human or agent | detached (no TUI) by default | both can create and destroy these |
+
+A spawned worker is a real session: it appears in `sessions_dispatchable`, takes
+`ticket_dispatch`, and reports back like any teammate the human started by hand. It is named
+`<role><n>` automatically and is roled before it does any work.
+
+## Tools
+
+| Command | Purpose |
+|---|---|
+| `sessions_dispatchable` | see the whole team — roles, status, workload — before any interaction or (re)delegation |
+| `session_notify` | direct message to a teammate: delegation briefs, pings, comm-checks, returns |
+| `ticket_dispatch({id, session_id})` | hand a ticket to a teammate |
+| `golem list` | see the managed teammates — the ops view for spawning, retiring, peeking |
+| `golem spawn <builder\|explorer\|reviewer>` | add a managed teammate with that role |
+| `golem peek <name>` | quick look at a managed teammate's terminal without disturbing it |
+| `golem kill <name>` | retire a managed teammate |
+
+The `golem` CLI runs via Bash; the rest are MCP tools.
+
+## Spawning
+
+- Spawn per human directive. Without one, spawn only in special circumstances — for example, no
+  live appropriate-roled teammate for work that must be delegated.
+- Never spawn implicitly while one or more live idle teammates can accept that type of work — a
+  spawn costs ~250–310 MB and a model seat; idle teammates are free.
+- Multiple teammates (say 2 builders, 1 reviewer, 4 explorers) are created one by one; no
+  parallel creation mechanism exists yet.
+- You cannot spawn a lead. Only builder, explorer, and reviewer have presets.
+
+## Reusing
+
+- For every delegation — continued work above all — prefer a teammate you have already worked
+  with when it can take the work. It keeps the context it has built, and reuse limits both
+  unnecessary teammates and unnecessary context loss.
+
+## Retiring
+
+- Retire per human directive. You are not the owner of a teammate, even if you spawned it
+  originally.
+- Nothing reaps idle managed teammates — they outlive your session and consume memory until
+  killed. Surface retire candidates to the human instead of killing on your own.
+- Killing a teammate mid-turn abandons its dispatch — check `golem list` or
+  `sessions_dispatchable` first, and prefer killing idle ones.
+
+> [!IMPORTANT]
+> Never try to kill yourself; the attempt is refused.
+
+## When a spawn fails
+
+- `GOLEM_UNKNOWN_ROLE` — non-retryable. Pick a valid role.
+- `GOLEM_WORKER_TIMEOUT` — retryable, but peek first: the failed worker's terminal is
+  deliberately left alive so you can see why.
+- Never chain retries. A second failing spawn tells you nothing the first didn't.
+
+## For the human
+
+Tell the human the worker's name when you spawn one, so he can `golem attach <name>` to watch
+it. The tmux prefix is `C-g`, not `C-b`.

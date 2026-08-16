@@ -5,11 +5,82 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { readEndpointLeases, readSessionFacts } from './session-facts.js';
 
+export const THINKING_LEVELS = Object.freeze([
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+]);
+
+// These defaults are deliberately global. Per-project execution overrides are
+// out of scope for the Pi worker launch contract.
+export const ROLE_EXEC_DEFAULTS = Object.freeze({
+  harness: 'pi',
+  provider: 'ollama-cloud',
+});
+
+function isRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function presetPrefix(role) {
+  return role ? `invalid role preset for "${role}"` : 'invalid role preset';
+}
+
+function fail(role, message) {
+  throw new Error(`${presetPrefix(role)}: ${message}`);
+}
+
+/** Validate and normalize one resolved execution preset. */
+export function validateRolePreset(preset, { role = null, applyDefaults = true } = {}) {
+  if (!isRecord(preset)) fail(role, 'exec must be an object');
+  const candidate = applyDefaults ? { ...ROLE_EXEC_DEFAULTS, ...preset } : { ...preset };
+
+  if (candidate.harness !== 'pi') {
+    fail(role, `harness must be "pi" (got ${JSON.stringify(candidate.harness)})`);
+  }
+  if (typeof candidate.provider !== 'string' || !candidate.provider.trim()) {
+    fail(role, 'provider is required when a model is configured');
+  }
+  if (typeof candidate.model !== 'string' || !candidate.model.trim()) {
+    fail(role, 'model is required');
+  }
+  if (!THINKING_LEVELS.includes(candidate.thinking)) {
+    fail(role, `thinking must be one of ${THINKING_LEVELS.join(', ')} (got ${JSON.stringify(candidate.thinking)})`);
+  }
+
+  let name = null;
+  if (candidate.name != null) {
+    if (typeof candidate.name !== 'string' || !candidate.name.trim()) {
+      fail(role, 'name must be a non-empty string when supplied');
+    }
+    name = candidate.name.trim();
+  }
+
+  return {
+    harness: candidate.harness,
+    provider: candidate.provider.trim(),
+    model: candidate.model.trim(),
+    thinking: candidate.thinking,
+    name,
+  };
+}
+
+const BUILTIN_PI_EXEC = Object.freeze({
+  ...ROLE_EXEC_DEFAULTS,
+  model: 'deepseek-v4-flash:0731',
+  thinking: 'medium',
+  name: null,
+});
+
 export const BUILTIN_ROLES = Object.freeze([
   { name: 'lead', color: '#a78bfa', glyph: 'LD', builtin: true },
-  { name: 'builder', color: '#4ade80', glyph: 'BU', builtin: true },
-  { name: 'explorer', color: '#38bdf8', glyph: 'EX', builtin: true },
-  { name: 'reviewer', color: '#f472b6', glyph: 'RV', builtin: true },
+  { name: 'builder', color: '#4ade80', glyph: 'BU', builtin: true, exec: BUILTIN_PI_EXEC },
+  { name: 'explorer', color: '#38bdf8', glyph: 'EX', builtin: true, exec: BUILTIN_PI_EXEC },
+  { name: 'reviewer', color: '#f472b6', glyph: 'RV', builtin: true, exec: BUILTIN_PI_EXEC },
 ]);
 // `manager` and `planner` merged into `lead` (GOL-103). `general` previously
 // pointed at `manager`, so it has to follow the merge or it would migrate to a
@@ -34,6 +105,22 @@ export const SESSION_ROLE_UPDATED_BY = Object.freeze(['human:dashboard', 'human:
 const PI_WORKER_ROLES = new Set(['builder', 'explorer', 'reviewer']);
 
 let roleRegistryCache = null;
+let roleRegistryCacheStamp = null;
+
+function registryFileStamp(file) {
+  try {
+    const stat = fs.statSync(file);
+    return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return 'missing';
+    return `error:${error?.code || 'unknown'}`;
+  }
+}
+
+function roleRegistryStamp() {
+  const directory = rolesOverlayDir();
+  return `${directory}|${registryFileStamp(rolesIndexPath())}|${registryFileStamp(roleRegistryStatePath())}`;
+}
 
 function isRealDir(p) {
   try { return fs.statSync(p).isDirectory(); } catch { return false; }
@@ -59,8 +146,15 @@ function rolesOverlayDir() {
   return path.join(golemHome(), 'roles');
 }
 
+const ROLE_REGISTRY_VERSION = 2;
+const ROLE_REGISTRY_STATE_VERSION = 1;
+
 function rolesIndexPath() {
   return path.join(rolesOverlayDir(), 'index.json');
+}
+
+function roleRegistryStatePath() {
+  return path.join(rolesOverlayDir(), 'registry-state.json');
 }
 
 function roleOverlayPath(role) {
@@ -113,28 +207,100 @@ function normalizeRoleName(name) {
   return value;
 }
 
+function cloneRoleExec(exec) {
+  if (exec == null || typeof exec !== 'object' || Array.isArray(exec)) return exec;
+  return { ...exec };
+}
+
 function normalizeRoleMeta(role, fallback = {}) {
   const name = normalizeRoleName(role?.name ?? fallback.name);
   const color = String(role?.color ?? fallback.color ?? '#8a909c').trim() || '#8a909c';
   const glyph = String(role?.glyph ?? fallback.glyph ?? name.slice(0, 2).toUpperCase()).trim().slice(0, 4) || name.slice(0, 2).toUpperCase();
-  return { name, color, glyph, builtin: role?.builtin === true || fallback.builtin === true };
+  const meta = { name, color, glyph, builtin: role?.builtin === true || fallback.builtin === true };
+  const roleHasExec = role != null && typeof role === 'object' && Object.hasOwn(role, 'exec');
+  const fallbackHasExec = fallback != null && typeof fallback === 'object' && Object.hasOwn(fallback, 'exec');
+  if (roleHasExec || fallbackHasExec) meta.exec = cloneRoleExec(roleHasExec ? role.exec : fallback.exec);
+  return meta;
+}
+
+function atomicWriteJson(target, value) {
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  const tmp = `${target}.tmp.${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(value, null, 2) + '\n', 'utf8');
+  fs.renameSync(tmp, target);
 }
 
 function readRolesIndexRaw() {
+  const target = rolesIndexPath();
   try {
-    const parsed = JSON.parse(fs.readFileSync(rolesIndexPath(), 'utf8'));
-    if (Array.isArray(parsed?.roles)) return parsed.roles;
-  } catch { /* seed below */ }
-  return null;
+    const parsed = JSON.parse(fs.readFileSync(target, 'utf8'));
+    if (!isRecord(parsed) || !Array.isArray(parsed.roles)) throw new Error('roles must be an array');
+    return {
+      version: Number.isInteger(parsed.version) ? parsed.version : 1,
+      roles: parsed.roles,
+    };
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw new Error(`cannot read role registry at ${target}: ${error.message}`, { cause: error });
+  }
+}
+
+function readRoleRegistryState() {
+  const target = roleRegistryStatePath();
+  try {
+    const parsed = JSON.parse(fs.readFileSync(target, 'utf8'));
+    if (parsed?.version !== ROLE_REGISTRY_STATE_VERSION || !isRecord(parsed.known_exec)) {
+      throw new Error('invalid registry provenance schema');
+    }
+    return parsed;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw new Error(`cannot read role registry provenance at ${target}: ${error.message}`, { cause: error });
+  }
+}
+
+function roleRegistryStateFor(roles) {
+  const known_exec = {};
+  for (const role of roles) {
+    if (!isRecord(role)) continue;
+    let name;
+    try { name = normalizeRoleName(role.name); } catch { continue; }
+    if (Object.hasOwn(role, 'exec')) known_exec[name] = cloneRoleExec(role.exec);
+  }
+  return {
+    version: ROLE_REGISTRY_STATE_VERSION,
+    registry_version: ROLE_REGISTRY_VERSION,
+    updated_at: new Date().toISOString(),
+    known_exec,
+  };
+}
+
+function rebuildRoleRegistryState(raw, reason) {
+  const target = roleRegistryStatePath();
+  try {
+    atomicWriteJson(target, roleRegistryStateFor(raw.roles));
+  } catch (error) {
+    throw new Error(
+      `cannot rebuild role registry provenance at ${target} from ${rolesIndexPath()}: ${error.message}. `
+      + `Recovery: restore a writable roles directory or restore ${target} manually, then retry.`,
+      { cause: error },
+    );
+  }
+  console.warn(
+    `[golem] role registry provenance at ${target} is ${reason}; `
+    + `rebuilt from the intact version-${ROLE_REGISTRY_VERSION} index at ${rolesIndexPath()}.`,
+  );
+  return readRoleRegistryState();
 }
 
 function writeRolesIndex(roles) {
-  fs.mkdirSync(rolesOverlayDir(), { recursive: true });
-  const target = rolesIndexPath();
-  const tmp = `${target}.tmp.${process.pid}`;
-  fs.writeFileSync(tmp, JSON.stringify({ version: 1, roles }, null, 2) + '\n', 'utf8');
-  fs.renameSync(tmp, target);
+  atomicWriteJson(rolesIndexPath(), { version: ROLE_REGISTRY_VERSION, roles });
+  // This sidecar is intentionally separate from index.json. Older dashboard
+  // processes rewrite only { version, roles }, so provenance must survive their
+  // stale write in a file they do not know about.
+  atomicWriteJson(roleRegistryStatePath(), roleRegistryStateFor(roles));
   roleRegistryCache = null;
+  roleRegistryCacheStamp = null;
 }
 
 export function migrateSessionRoles({ actor = 'system:role-migration' } = {}) {
@@ -172,13 +338,92 @@ export function migrateSessionRoles({ actor = 'system:role-migration' } = {}) {
   return { changed, migrated };
 }
 
+function rawRoleMap(rawRoles) {
+  const byName = new Map();
+  for (const item of rawRoles) {
+    if (!isRecord(item)) continue;
+    try {
+      byName.set(normalizeRoleName(item.name), item);
+    } catch { /* skip invalid old rows */ }
+  }
+  return byName;
+}
+
+function roleRegistryLossError(names) {
+  const roles = names.length ? names.map((name) => `"${name}"`).join(', ') : 'the registry';
+  return new Error(
+    `role registry lost execution preset for ${roles}; refusing to re-seed builtin defaults. `
+    + `Recovery: restore ${rolesIndexPath()} with the missing exec block(s) from a known-good copy, then retry. `
+    + `Last-known presets are recorded in ${roleRegistryStatePath()}.`,
+  );
+}
+
+function assertRoleRegistryExecIntact(raw, state) {
+  if (!state) {
+    if (raw?.version >= ROLE_REGISTRY_VERSION) {
+      throw new Error(
+        `role registry provenance is missing at ${roleRegistryStatePath()}; refusing to trust execution presets. `
+        + `Recovery: rebuild it from the intact ${rolesIndexPath()} or restore a known-good copy, then retry`,
+      );
+    }
+    return;
+  }
+  if (!raw) throw roleRegistryLossError(Object.keys(state.known_exec));
+  const rawByName = rawRoleMap(raw.roles);
+  const lost = Object.keys(state.known_exec).filter((name) => {
+    const role = rawByName.get(name);
+    return !role || !Object.hasOwn(role, 'exec');
+  });
+  if (lost.length) throw roleRegistryLossError(lost);
+}
+
+function legacyRegistryNeedsSeed(raw) {
+  if (!raw || raw.version >= ROLE_REGISTRY_VERSION) return false;
+  const rawByName = rawRoleMap(raw.roles);
+  return BUILTIN_ROLES.some((builtin) => Object.hasOwn(builtin, 'exec')
+    && (!rawByName.has(builtin.name) || !Object.hasOwn(rawByName.get(builtin.name), 'exec')));
+}
+
+function cloneRoleRegistry(roles) {
+  return roles.map((r) => ({ ...r, ...(Object.hasOwn(r, 'exec') ? { exec: cloneRoleExec(r.exec) } : {}) }));
+}
+
 export function readRoleRegistry() {
-  if (roleRegistryCache) return roleRegistryCache.map((r) => ({ ...r }));
-  const byName = new Map(BUILTIN_ROLES.map((r) => [r.name, normalizeRoleMeta(r)]));
+  const stamp = roleRegistryStamp();
+  if (roleRegistryCache && roleRegistryCacheStamp === stamp) return cloneRoleRegistry(roleRegistryCache);
+  roleRegistryCache = null;
+  roleRegistryCacheStamp = null;
+
   const raw = readRolesIndexRaw();
+  let state = null;
+  let stateError = null;
+  try {
+    state = readRoleRegistryState();
+  } catch (error) {
+    stateError = error;
+  }
+  if (raw?.version >= ROLE_REGISTRY_VERSION) {
+    if (stateError) state = rebuildRoleRegistryState(raw, `corrupt (${stateError.message})`);
+    else if (!state) state = rebuildRoleRegistryState(raw, 'missing');
+  } else if (stateError) {
+    if (!raw) throw stateError;
+    console.warn(
+      `[golem] ignoring invalid role registry provenance at ${roleRegistryStatePath()} while migrating a legacy index: `
+      + `${stateError.message}`,
+    );
+  }
+  assertRoleRegistryExecIntact(raw, state);
+  if (legacyRegistryNeedsSeed(raw)) {
+    console.warn(
+      `[golem] role registry at ${rolesIndexPath()} has no execution provenance; `
+      + 'seeding builtin presets as a legacy pre-exec registry. Future preset loss will fail loudly.',
+    );
+  }
+
+  const byName = new Map(BUILTIN_ROLES.map((r) => [r.name, normalizeRoleMeta(r)]));
   if (raw) {
     byName.clear();
-    for (const item of raw) {
+    for (const item of raw.roles) {
       try {
         const role = normalizeRoleMeta(item);
         // hasOwn, not truthy: a role named `constructor` or `valueof` passes
@@ -187,13 +432,30 @@ export function readRoleRegistry() {
         if (!Object.hasOwn(ROLE_MIGRATIONS, role.name)) byName.set(role.name, role);
       } catch { /* skip invalid old rows */ }
     }
-    for (const builtin of BUILTIN_ROLES) if (!byName.has(builtin.name)) byName.set(builtin.name, normalizeRoleMeta(builtin));
+    for (const builtin of BUILTIN_ROLES) {
+      const existing = byName.get(builtin.name);
+      if (!existing) {
+        byName.set(builtin.name, normalizeRoleMeta(builtin));
+      } else {
+        // A version-1 index written before execution presets existed is still
+        // valid. Add the builtin seed only when provenance says this is the
+        // first migration, never after a known preset has gone missing.
+        byName.set(builtin.name, {
+          ...existing,
+          builtin: existing.builtin || builtin.builtin,
+          ...(!Object.hasOwn(existing, 'exec') && Object.hasOwn(builtin, 'exec')
+            ? { exec: cloneRoleExec(builtin.exec) }
+            : {}),
+        });
+      }
+    }
   }
   const roles = [...byName.values()].sort((a, b) => Number(b.builtin) - Number(a.builtin) || a.name.localeCompare(b.name));
   writeRolesIndex(roles);
   migrateSessionRoles();
   roleRegistryCache = roles;
-  return roles.map((r) => ({ ...r }));
+  roleRegistryCacheStamp = roleRegistryStamp();
+  return cloneRoleRegistry(roles);
 }
 
 export function roleNames() {
@@ -210,8 +472,13 @@ export function getRole(name) {
   return readRoleRegistry().find((r) => r.name === normalized) || null;
 }
 
-export function createRole({ name, color, glyph, body } = {}) {
-  const meta = normalizeRoleMeta({ name, color, glyph, builtin: false });
+export function createRole({ name, color, glyph, body, exec } = {}) {
+  const input = { name, color, glyph, builtin: false };
+  if (exec !== undefined) input.exec = exec;
+  const meta = normalizeRoleMeta(input);
+  if (Object.hasOwn(meta, 'exec')) {
+    meta.exec = validateRolePreset(meta.exec, { role: meta.name });
+  }
   const roles = readRoleRegistry();
   if (roles.some((r) => r.name === meta.name)) throw new Error(`role already exists: ${meta.name}`);
   writeRolesIndex([...roles, meta].sort((a, b) => Number(b.builtin) - Number(a.builtin) || a.name.localeCompare(b.name)));
@@ -250,9 +517,36 @@ export function updateRoleMeta(name, patch = {}) {
   const roles = readRoleRegistry();
   const idx = roles.findIndex((r) => r.name === normalized);
   if (idx < 0) throw new Error(`role not found: ${normalized}`);
-  roles[idx] = normalizeRoleMeta({ ...roles[idx], color: patch.color ?? roles[idx].color, glyph: patch.glyph ?? roles[idx].glyph, builtin: roles[idx].builtin });
+  const current = roles[idx];
+  const next = {
+    ...current,
+    color: patch.color ?? current.color,
+    glyph: patch.glyph ?? current.glyph,
+    builtin: current.builtin,
+  };
+  if (Object.hasOwn(patch, 'exec')) {
+    if (patch.exec == null) {
+      if (current.builtin && Object.hasOwn(current, 'exec')) {
+        throw new Error(`cannot remove execution preset for builtin role "${normalized}"; provide a valid preset instead`);
+      }
+      delete next.exec;
+    } else {
+      next.exec = patch.exec && typeof patch.exec === 'object' && !Array.isArray(patch.exec)
+        ? { ...(current.exec && typeof current.exec === 'object' ? current.exec : {}), ...patch.exec }
+        : patch.exec;
+    }
+  }
+  const normalizedNext = normalizeRoleMeta(next);
+  if (Object.hasOwn(normalizedNext, 'exec')) {
+    normalizedNext.exec = validateRolePreset(normalizedNext.exec, { role: normalized });
+  }
+  roles[idx] = normalizedNext;
   writeRolesIndex(roles);
   return roles[idx];
+}
+
+export function updateRoleExec(name, exec) {
+  return updateRoleMeta(name, { exec });
 }
 
 export function listRoleCards() {
