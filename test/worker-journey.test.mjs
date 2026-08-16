@@ -24,7 +24,7 @@ const envKeys = [
   'GOLEM_HOME', 'HOME', 'PATH', 'GOLEM_DASHBOARD_URL', 'GOLEM_TMUX_SOCKET',
   'GOLEM_TEST_REGISTRATION_DIR', 'GOLEM_TEST_PROJECT_ID', 'GOLEM_WORKER_READY_TIMEOUT_MS',
   'GOLEM_WORKER_POLL_MS', 'GOLEM_WORKER_REQUEST_TIMEOUT_MS', 'GOLEM_TMUX_BIN',
-  'GOLEM_TMUX_CAPTURE', 'GOLEM_FAKE_NO_REGISTER', 'GOLEM_TEST_SELF_KILL_TRIGGER', 'GOLEM_TEST_CLI',
+  'GOLEM_TMUX_CAPTURE', 'GOLEM_FAKE_NO_REGISTER', 'GOLEM_WORKER_CLI', 'GOLEM_BIN', 'GOLEM_TEST_SELF_KILL_TRIGGER', 'GOLEM_TEST_CLI',
   'XDG_CONFIG_HOME',
 ];
 for (const key of envKeys) originalEnv[key] = process.env[key];
@@ -92,6 +92,8 @@ Object.assign(process.env, {
   GOLEM_WORKER_REQUEST_TIMEOUT_MS: '500',
   XDG_CONFIG_HOME: path.join(temp, 'xdg'),
 });
+delete process.env.GOLEM_WORKER_CLI;
+delete process.env.GOLEM_BIN;
 
 function readBody(request) {
   return new Promise((resolve) => {
@@ -279,6 +281,28 @@ try {
   assert.deepEqual(processIdsInGroup(cliSpawned.pid), []);
   assert.equal(hasSession(cliSpawned.name), false);
   console.log(JSON.stringify({ teardown: 'all six worker process groups empty', survivors: [] }));
+
+  const missingLauncher = path.join(temp, 'golemtest-t2-missing-launcher');
+  process.env.GOLEM_WORKER_CLI = missingLauncher;
+  await assert.rejects(
+    () => spawnWorker({ role: 'golemtest-t2', name: 'golemtest-t2-missing-launcher', project }),
+    /does not point to an existing executable path/,
+  );
+  const missingLauncherRow = readWorkers().find((worker) => worker.name === 'golemtest-t2-missing-launcher');
+  assert.equal(missingLauncherRow.state, 'failed');
+  assert.equal(hasSession(missingLauncherRow.name), false);
+  delete process.env.GOLEM_WORKER_CLI;
+
+  process.env.GOLEM_BIN = 'golemtest-t2-pathless';
+  await assert.rejects(
+    () => spawnWorker({ role: 'golemtest-t2', name: 'golemtest-t2-pathless', project }),
+    /does not point to an existing executable path/,
+  );
+  const pathlessLauncherRow = readWorkers().find((worker) => worker.name === 'golemtest-t2-pathless');
+  assert.equal(pathlessLauncherRow.state, 'failed');
+  assert.equal(hasSession(pathlessLauncherRow.name), false);
+  delete process.env.GOLEM_BIN;
+  console.log(JSON.stringify({ launcher_path: 'missing override and bare PATH fallback rejected', tmux_session_created: false }));
 
   const recycledDead = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
     cwd: project,

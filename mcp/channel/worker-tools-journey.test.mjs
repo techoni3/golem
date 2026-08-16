@@ -269,7 +269,8 @@ try {
 
   const unknownRole = await callTool('session_spawn', { role: 'golemtest-t3-unknown' });
   assert.equal(unknownRole.result.isError, true, unknownRole.text);
-  assert.equal(unknownRole.json.code, 'GOLEM_WORKER_ERROR');
+  assert.equal(unknownRole.json.code, 'GOLEM_UNKNOWN_ROLE');
+  assert.equal(unknownRole.json.retryable, false);
   assert.match(unknownRole.json.message, /unknown role/);
 
   const timeoutSpawn = await callTool('session_spawn', {
@@ -321,6 +322,14 @@ try {
     name: 'golemtest-t3-self', preset: resolveRoleExecution('explorer'),
   });
   updateWorker(selfClaim.worker_id, { session_id: callerId, state: 'live' });
+  const spoofedSelfKill = await callTool('session_kill', {
+    name: 'golemtest-t3-self',
+    __golem_session_id: 'golemtest-t3-spoofed-caller',
+  });
+  assert.equal(spoofedSelfKill.result.isError, true, spoofedSelfKill.text);
+  assert.match(spoofedSelfKill.text, /injected caller identity conflicts with the launcher binding/);
+  assert.equal(readWorkers().find((row) => row.name === 'golemtest-t3-self')?.state, 'live');
+
   const selfKill = await callTool('session_kill', { name: 'golemtest-t3-self' });
   assert.equal(selfKill.result.isError, true, selfKill.text);
   assert.equal(selfKill.json.code, 'GOLEM_WORKER_SELF_KILL');
