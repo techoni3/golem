@@ -10,6 +10,13 @@ import { projectIdFor } from '../lib/project-id.js';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'golem-pi-native-'));
+const handProjectRootPath = path.join(temp, 'fresh-pi-project');
+const handProjectCwdPath = path.join(handProjectRootPath, 'nested');
+fs.mkdirSync(path.join(handProjectRootPath, '.git'), { recursive: true });
+fs.mkdirSync(handProjectCwdPath, { recursive: true });
+const handProjectRoot = fs.realpathSync(handProjectRootPath);
+const handProjectCwd = fs.realpathSync(handProjectCwdPath);
+const handProjectId = projectIdFor(handProjectRoot);
 const env = {
   ...process.env,
   HOME: path.join(temp, 'home'),
@@ -45,7 +52,7 @@ function linkPiTui(render) {
   fs.symlinkSync(source, path.join(scope, 'pi-tui'), 'dir');
 }
 
-function createHarness(extension, sessionId, { reason = 'startup', previousSessionFile } = {}) {
+function createHarness(extension, sessionId, { reason = 'startup', previousSessionFile, cwd = repo } = {}) {
   const handlers = new Map();
   const tools = new Map();
   const sent = [];
@@ -93,7 +100,7 @@ function createHarness(extension, sessionId, { reason = 'startup', previousSessi
   };
   extension(pi);
   const ctx = {
-    cwd: repo,
+    cwd,
     mode: 'tui',
     model: { provider: 'ollama', id: 'deepseek-v4-flash:0731-cloud', contextWindow: 1_000_000, reasoning: true },
     isIdle: () => idle,
@@ -188,7 +195,7 @@ async function main() {
   assert.equal(fs.existsSync(path.join(env.HOME, '.pi')), false, 'sync does not mutate Pi profile');
   assert.equal(execFileSync('pi', ['--version'], { env, encoding: 'utf8' }).trim(), '0.80.10', 'native proof is pinned to the surveyed Pi version');
   assert.equal(JSON.parse(fs.readFileSync(path.join(repo, 'package.json'), 'utf8')).engines.node, '>=22.19', 'root runtime supports stable node:sqlite');
-  for (const required of ['pi-native-adapter.js', 'typed-worker-endpoint.js', 'typed-delivery-tombstones.js', 'project-id.js']) {
+  for (const required of ['pi-native-adapter.js', 'typed-worker-endpoint.js', 'typed-delivery-tombstones.js', 'project-id.js', 'session-registry.js']) {
     assert.ok(fs.existsSync(path.join(render, 'lib', required)), `Pi render ships ${required}`);
   }
 
@@ -653,7 +660,7 @@ async function main() {
   const native = spawn(process.execPath, [path.join(repo, 'cli/golem.js'),
     'pi', '--provider', 'golem-test', '--model', 'test-model', '--',
     '--mode', 'rpc', '--no-approve', '-e', providerExtension,
-  ], { cwd: repo, env: nativeEnv, stdio: ['pipe', 'pipe', 'pipe'] });
+  ], { cwd: handProjectCwd, env: nativeEnv, stdio: ['pipe', 'pipe', 'pipe'] });
   let nativeErr = '';
   let nativeOut = '';
   let nativeId = null;
@@ -668,6 +675,24 @@ async function main() {
     assert.ok(nativeFact.locator.session_file.startsWith(path.join(env.HOME, '.pi')), 'native Pi stores the bridged session in its canonical profile');
     assert.equal(nativeFact.observations.pi_version, '0.80.10');
     assert.equal(nativeFact.observations.extension_version, JSON.parse(fs.readFileSync(path.join(repo, 'package.json'), 'utf8')).version);
+    assert.equal(nativeFact.project_path, handProjectRoot);
+    assert.equal(projectIdFor(nativeFact.project_path), handProjectId);
+    const handProject = await waitFor(() => readJson(path.join(env.GOLEM_HOME, 'projects.json'))?.projects?.find((row) => row.id === handProjectId), 'hand-started Pi did not register its fresh project');
+    assert.deepEqual({
+      id: handProject.id,
+      name: handProject.name,
+      path: handProject.path,
+      kind: handProject.kind,
+      registered_by: handProject.registered_by,
+    }, {
+      id: handProjectId,
+      name: path.basename(handProjectRoot),
+      path: handProjectRoot,
+      kind: 'auto',
+      registered_by: 'hook',
+    });
+    assert.ok(handProject.first_seen);
+    assert.ok(handProject.last_seen);
     const nativeLease = await waitFor(() => readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json'))?.leases?.find((row) => row.canonical_id === nativeId), `native Pi did not register typed lease: ${nativeErr}`, 20_000);
     const nativeStart = await postLease(nativeLease, typedEnvelope(nativeId, 'native-first', 'hold this real Pi turn open', 'brief', 'native-attempt-a'));
     const nativeStartBody = await nativeStart.json();
@@ -681,7 +706,7 @@ async function main() {
     assert.equal((await nativeInterrupt.json()).accepted, true, `native interrupt did not observe settlement: ${nativeErr}`);
     const nativeRecord = readJson(path.join(env.GOLEM_HOME, 'pi-workers', nativeId, 'delivery.json'));
     assert.equal(nativeRecord.inbox.deliveries.find((row) => row.envelope_id === 'native-first').lifecycle_state, 'interrupted');
-    const nativeJournal = fs.readFileSync(path.join(env.GOLEM_HOME, 'journals', projectIdFor(repo), 'hook.jsonl'), 'utf8');
+    const nativeJournal = fs.readFileSync(path.join(env.GOLEM_HOME, 'journals', handProjectId, 'hook.jsonl'), 'utf8');
     assert.match(nativeJournal, new RegExp(`"event":"agent_start","session_id":"${nativeId}"`));
     assert.match(nativeJournal, new RegExp(`"event":"agent_settled","session_id":"${nativeId}"`));
   } finally {
@@ -698,7 +723,19 @@ async function main() {
   await waitFor(() => !readJson(path.join(env.GOLEM_HOME, 'endpoint-leases.json'))?.leases?.some((row) => row.canonical_id === nativeId), 'native Pi did not release endpoint lease');
   assert.ok(fs.existsSync(path.join(env.HOME, '.pi', 'agent')), 'native Pi used its canonical profile');
 
-  console.log('Pi native typed-worker journey passed: quiet lease renewal, terminal cleanup, FIFO reservation, correlated acceptance, settlement, controls, crash recovery, reload/fork identity, facts/journal, and real Pi typed delivery');
+  const beforeRepeat = readJson(path.join(env.GOLEM_HOME, 'projects.json')).projects.find((row) => row.id === handProjectId);
+  const repeated = createHarness(extension, 'pi-fresh-repeat', { cwd: handProjectCwd });
+  await repeated.start();
+  await repeated.emit('session_shutdown', { reason: 'quit' });
+  const afterRepeat = readJson(path.join(env.GOLEM_HOME, 'projects.json')).projects.filter((row) => row.id === handProjectId);
+  assert.equal(afterRepeat.length, 1, 'a second Pi session does not duplicate an existing project');
+  const stableBefore = { ...beforeRepeat };
+  const stableAfter = { ...afterRepeat[0] };
+  delete stableBefore.last_seen;
+  delete stableAfter.last_seen;
+  assert.deepEqual(stableAfter, stableBefore, 'an existing project keeps its metadata on repeat registration');
+
+  console.log('Pi native typed-worker journey passed: hand-started fresh-project registration, repeat registration, quiet lease renewal, terminal cleanup, FIFO reservation, correlated acceptance, settlement, controls, crash recovery, reload/fork identity, facts/journal, and real Pi typed delivery');
 }
 
 try {
