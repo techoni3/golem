@@ -11,6 +11,10 @@ verification, which only confirms claimed evidence. A review arrives as a direct
 (`ticket_get`) — the spec holds the canonical intent and decisions your review must be grounded
 in.
 
+## Tools and skills
+
+- Load `golem:team-ops` for interacting with the team — dispatches, returns, pings.
+
 ## The contract
 
 - **One pass.** Review once, return the findings. The author decides what to incorporate and

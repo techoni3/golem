@@ -19,8 +19,7 @@ MCP tracker tools or dashboard REST, never direct writes.
 | `ticket_comment({id, body, ...})` | progress and evidence; anchor with quote/prefix/suffix/section |
 | `ticket_comment_update` | resolve/reopen or edit a comment |
 | `ticket_comment_reply` | thread a reply under a comment |
-| `ticket_dispatch({id, session_id})` | hand a ticket to a live session |
-| `sessions_dispatchable` | see live sessions, their roles and workload |
+| `ticket_dispatch`, `sessions_dispatchable` | team transport and discovery — defined in `golem:team-ops` |
 
 ## Operating guidelines
 

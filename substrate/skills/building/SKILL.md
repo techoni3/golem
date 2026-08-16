@@ -12,6 +12,7 @@ build.
 ## Tools and skills
 
 - Load `golem:tracker` for ticket reads, comments, and states.
+- Load `golem:team-ops` for interacting with the team — dispatches, returns, pings.
 - Load `golem:code-survey` when the dispatch is a survey, not a build.
 - Load `golem:git-conventions` at git actions.
 

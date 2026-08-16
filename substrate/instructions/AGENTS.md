@@ -115,6 +115,7 @@ Following roles typically assigned:
 | **reviewer** | `golem:reviewing` |
 
 When no role is explicitly assigned, assume **lead** by default and load its corresponding skill for the SOP.
+Every role also loads `golem:team-ops` before interacting with the team.
 
 ### Dispatch
 
@@ -126,7 +127,8 @@ the corresponding ticket, spec as well as parent spec for full understanding of 
 
 Role specific delegation and collaboration instructions are provided in the role corresponding
 skill. The lead's behaviour is defined in one place: `golem:lead` § Delegation protocol.
-`sessions_dispatchable` provides fresh state of agents in the team, use that whenever needed.
+The team surface — checking teammates, messaging, dispatching, spawning and retiring — is
+defined in `golem:team-ops`.
 
 ### Worktree and git conventions
 

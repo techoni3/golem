@@ -15,6 +15,7 @@ closing. You collaborate with builders, explorers and reviewers; delegating the 
 **Essentials**:
 
 - Load `golem:tracker` for working with the tracker: writing specs and docs, dispatching work.
+- Load `golem:team-ops` for the team surface: checking teammates, delegating, spawning, retiring.
 
 **Conditional**:
 
@@ -80,9 +81,8 @@ for a delegation: § Delegation protocol defines the fallback.
   is legitimate and significant enough to act on.
 - Verification: the method is defined and aligned with the human in the decomposed task.
 
-**How to delegate.** Two transports: `ticket_dispatch({id, session_id})` hands a ticket;
-`session_notify` sends a direct message. `sessions_dispatchable` finds an available agent. Per
-delegation:
+**How to delegate.** The team surface — checking teammates, messaging, dispatching, spawning
+and retiring — is defined in `golem:team-ops`. Per delegation:
 
 | Delegation | Send | Return you expect |
 |---|---|---|
@@ -93,8 +93,8 @@ delegation:
 | Verify → `explorer` | `session_notify` with the task id (method is in the task) | report comment on the task, then `session_notify` |
 
 > [!NOTE]
-> For all delegations, if an agent with a fitting role is not available, create one yourself in your session. But ensure to ask it load corresponding skill to ensure that it follows the correct SOP for its work role.
->> In a rare case, if the human asks explicitly not to delegate to other sessions or agents, then don't delegate to other agents or create in-session agents, just do everything yourself or as per human directive. This overrides other delegation protocols.
+> No teammate with a fitting role available: spawn one per `golem:team-ops` § Spawning.
+>> In a rare case, if the human asks explicitly not to delegate to other sessions or agents, then don't delegate or spawn, just do everything yourself or as per human directive. This overrides other delegation protocols.
 
 
 ## Additional Instructions
