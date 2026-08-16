@@ -141,7 +141,13 @@ try {
   updateRoleExec('preset', { thinking: 'high' });
   assert.equal(resolveRoleExecution('preset').thinking, 'high');
   assert.equal(readRoleRegistry().find((row) => row.name === 'preset').exec.thinking, 'high');
-  assert.throws(() => updateRoleMeta('preset', { exec: null }), /cannot remove execution preset/);
+  assert.throws(() => updateRoleMeta('builder', { exec: null }), /cannot remove execution preset for builtin role/);
+  updateRoleMeta('preset', { exec: null });
+  const identityOnlyPreset = readRoleRegistry().find((row) => row.name === 'preset');
+  assert.equal(Object.hasOwn(identityOnlyPreset, 'exec'), false, 'non-builtin preset can become identity-only');
+  const identityOnlyState = JSON.parse(fs.readFileSync(path.join(state, 'roles', 'registry-state.json'), 'utf8'));
+  assert.equal(Object.hasOwn(identityOnlyState.known_exec, 'preset'), false, 'cleared preset is removed from provenance');
+  updateRoleExec('preset', { provider: 'role-provider', model: 'role-model', thinking: 'high', name: 'role-session' });
   updateRoleMeta('preset', { glyph: 'PR' });
   assert.equal(readRoleRegistry().find((row) => row.name === 'preset').exec.thinking, 'high');
   assert.throws(() => updateRoleExec('preset', { thinking: 'invalid' }), /thinking must be one of/);
@@ -157,14 +163,37 @@ try {
   // lost builder preset with the builtin default.
   updateRoleExec('builder', { provider: 'openai-codex', model: 'gpt-5.6-luna', thinking: 'max' });
   const roleIndexPath = path.join(state, 'roles', 'index.json');
+  const roleStatePath = path.join(state, 'roles', 'registry-state.json');
   const knownGoodIndex = JSON.parse(fs.readFileSync(roleIndexPath, 'utf8'));
+  const captureWarnings = (fn) => {
+    const warnings = [];
+    const originalWarn = console.warn;
+    console.warn = (...args) => warnings.push(args.join(' '));
+    try {
+      return { value: fn(), warnings };
+    } finally {
+      console.warn = originalWarn;
+    }
+  };
+  fs.rmSync(roleStatePath);
+  const missingStateRecovery = captureWarnings(() => readRoleRegistry());
+  assert.equal(missingStateRecovery.value.find((row) => row.name === 'builder').exec.model, 'gpt-5.6-luna');
+  assert.ok(missingStateRecovery.warnings.some((line) => /provenance.*missing.*rebuilt from the intact version-2 index/i.test(line)));
+  assert.equal(JSON.parse(fs.readFileSync(roleStatePath, 'utf8')).known_exec.builder.model, 'gpt-5.6-luna');
+
+  fs.writeFileSync(roleStatePath, JSON.stringify({ version: 1, broken: true }) + '\n');
+  const corruptStateRecovery = captureWarnings(() => readRoleRegistry());
+  assert.equal(corruptStateRecovery.value.find((row) => row.name === 'builder').exec.model, 'gpt-5.6-luna');
+  assert.ok(corruptStateRecovery.warnings.some((line) => /provenance.*corrupt.*rebuilt from the intact version-2 index/i.test(line)));
+  assert.equal(JSON.parse(fs.readFileSync(roleStatePath, 'utf8')).known_exec.builder.model, 'gpt-5.6-luna');
+
   const wipedIndex = { version: 1, roles: knownGoodIndex.roles.map((row) => {
     const next = { ...row };
     delete next.exec;
     return next;
   }) };
   fs.writeFileSync(roleIndexPath, JSON.stringify(wipedIndex, null, 2) + '\n');
-  assert.throws(() => readRoleRegistry(), /role registry lost execution preset.*builder/);
+  assert.throws(() => readRoleRegistry(), /role registry lost execution preset.*Recovery: restore/);
   fs.writeFileSync(roleIndexPath, JSON.stringify(knownGoodIndex, null, 2) + '\n');
   assert.equal(readRoleRegistry().find((row) => row.name === 'builder').exec.model, 'gpt-5.6-luna');
 
