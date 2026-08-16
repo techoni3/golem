@@ -309,7 +309,11 @@ try {
   const allDeadRows = JSON.parse(allDead.stdout);
   assert.ok(allDeadRows.some((worker) => worker.name === youngTombstone));
   assert.equal(allDeadRows.some((worker) => worker.name === oldTombstone), false);
-  console.log(JSON.stringify({ list_filter: 'dead hidden; --all includes retained dead', prune: 'older-than-24h removed; exact boundary retained' }));
+  const allDeadTable = await runCli(['list', '--project', project, '--all']);
+  assert.equal(allDeadTable.status, 0, allDeadTable.stderr);
+  assert.match(allDeadTable.stdout, /unavailable \(dead\)/);
+  assert.doesNotMatch(allDeadTable.stdout, /golem attach/);
+  console.log(JSON.stringify({ list_filter: 'dead hidden; --all includes retained dead', prune: 'older-than-24h removed; exact boundary retained', dead_attach_hint: 'marked unavailable' }));
 
   const missingLauncher = path.join(temp, 'golemtest-t2-missing-launcher');
   process.env.GOLEM_WORKER_CLI = missingLauncher;

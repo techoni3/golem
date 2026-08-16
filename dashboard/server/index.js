@@ -55,16 +55,6 @@ const TRACKER_COLUMNS = ['triage', 'open', 'in-progress', 'review', 'blocked', '
 // this contract id. We tolerate a registry-`id` being passed by resolving it to
 // the contract id via the projects list before querying (resolveProjectId).
 
-/** Read the pid previously recorded by a dashboard instance, if any. */
-function readPreviousDashboardPid() {
-  const target = dashboardJsonPath();
-  try {
-    const doc = JSON.parse(fs.readFileSync(target, 'utf8'));
-    if (doc && typeof doc.pid === 'number') return doc.pid;
-  } catch {}
-  return null;
-}
-
 /** Spawn lsof to find the pid listening on a TCP port. Falls back to fuser. */
 function findListenerPid(port) {
   const lsof = spawnSync('lsof', ['-nP', '-iTCP:' + port, '-sTCP:LISTEN', '-FpcL'], { encoding: 'utf8' });
@@ -83,20 +73,6 @@ function findListenerPid(port) {
     }
   }
   return { pid: null, error: `lsof found no LISTEN process on port ${port}` };
-}
-
-/** Return true if a process with this pid is still alive. */
-function isProcessAlive(pid) {
-  try {
-    return process.kill(pid, 0);
-  } catch {
-    return false;
-  }
-}
-
-/** Short sleep helper for polling during graceful shutdown waits. */
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /** Look up the command name of a process for clearer error messages. */
@@ -2454,67 +2430,21 @@ async function main() {
   });
 
   // Pin to the canonical dashboard URL http://dashboard.golem.localhost:7420.
-  // If 7420 is busy, check whether the occupying process is the previous
-  // dashboard recorded in ~/.golem/dashboard.json. If so, terminate it
-  // gracefully and retry once. If it is any other process, refuse to kill it
-  // and exit with a clear error. We never walk to higher ports.
+  // A second start must fail. Never replace a process or walk to a random port;
+  // use an explicit --port value when a second isolated dashboard is intended.
   const tryListen = async (port) => {
-    const previousPid = readPreviousDashboardPid();
-
-    let bound = false;
     try {
       await fastify.listen({ host: CONFIG.host, port });
-      bound = true;
     } catch (err) {
       if (err.code !== 'EADDRINUSE') throw err;
+      const holder = findListenerPid(port);
+      const detail = holder.pid
+        ? ` held by pid ${holder.pid} (${getProcessComm(holder.pid)})`
+        : ` (${holder.error || 'the listener could not be identified'})`;
+      throw new Error(`port ${port} is already in use${detail}; refusing to start another dashboard. Pass --port <other-port> to use an explicit alternate port`);
     }
-
-    if (bound) {
-      fastify.log.info(`dashboard listening on http://${CONFIG.host}:${port}`);
-      return port;
-    }
-
-    const holder = findListenerPid(port);
-    if (!holder.pid) {
-      throw new Error(holder.error || `port ${port} is in use but no listener was found`);
-    }
-
-    const { pid } = holder;
-    if (previousPid && pid === previousPid && isProcessAlive(previousPid)) {
-      fastify.log.info(`replacing previous dashboard pid=${previousPid}`);
-      try {
-        process.kill(previousPid, 'SIGTERM');
-      } catch (err) {
-        fastify.log.warn({ err }, `SIGTERM to previous dashboard pid=${previousPid} failed`);
-      }
-      const deadline = Date.now() + 3000;
-      while (Date.now() < deadline) {
-        if (!isProcessAlive(previousPid)) break;
-        await sleep(200);
-      }
-      if (isProcessAlive(previousPid)) {
-        fastify.log.warn(`previous dashboard pid=${previousPid} did not exit after 3s; sending SIGKILL`);
-        try {
-          process.kill(previousPid, 'SIGKILL');
-        } catch (err) {
-          fastify.log.warn({ err }, `SIGKILL to previous dashboard pid=${previousPid} failed`);
-        }
-        await sleep(1000);
-      }
-      try {
-        await fastify.listen({ host: CONFIG.host, port });
-        fastify.log.info(`dashboard listening on http://${CONFIG.host}:${port}`);
-        return port;
-      } catch (err) {
-        throw new Error(`port ${port} still in use after replacing previous dashboard: ${err.message}`);
-      }
-    }
-
-    const comm = getProcessComm(pid);
-    console.error(
-      `port ${port} is held by pid ${pid} (${comm}) — not the previous dashboard; refusing to kill it. Stop that process and retry.`,
-    );
-    process.exit(1);
+    fastify.log.info(`dashboard listening on http://${CONFIG.host}:${port}`);
+    return port;
   };
 
   // Canonical URL is http://dashboard.golem.localhost:7420 (RFC 6761 *.localhost

@@ -61,6 +61,23 @@ function dashboardUrl() {
     : `http://127.0.0.1:${port}`;
 }
 
+function dashboardPortFromArgs(args) {
+  const index = args.findIndex((arg) => arg === '--port' || arg.startsWith('--port='));
+  if (index < 0) return null;
+  const raw = args[index] === '--port' ? args[index + 1] : args[index].slice('--port='.length);
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error(`--port requires an integer from 1 to 65535 (received ${raw ?? '(missing)'})`);
+  }
+  return port;
+}
+
+function applyDashboardPort(args, env) {
+  const port = dashboardPortFromArgs(args);
+  if (port != null) env.PORT = String(port);
+  return port;
+}
+
 function healthUrl() {
   return `${dashboardUrl()}/api/health`;
 }
@@ -1076,6 +1093,7 @@ function formatIdle(value) {
 
 function workerTableValue(worker, key) {
   if (key === 'idle') return formatIdle(worker?.idle_seconds);
+  if (key === 'attach_hint' && String(worker?.state || '').toLowerCase() === 'dead') return 'unavailable (dead)';
   const value = worker?.[key];
   if (value == null || value === '') return '-';
   return String(value).replace(/\s+/g, ' ');
@@ -1292,6 +1310,11 @@ async function cmdDashboard(args) {
 
   const publicFlag = args.includes('--public');
   const env = { ...process.env };
+  try {
+    applyDashboardPort(args, env);
+  } catch (error) {
+    fatal(2, `golem dashboard: ${error.message}`);
+  }
   if (publicFlag) {
     env.HOST = '0.0.0.0';
     err('WARNING --public: dashboard binding 0.0.0.0 — reachable on your LAN with NO auth.');
@@ -1345,17 +1368,81 @@ async function readDashboardPid() {
   }
 }
 
-/** Stop the running dashboard (SIGTERM, then SIGKILL after 3s) if one is up. Returns true if it stopped a process. */
-async function stopDashboard() {
-  const probe = await probeDashboard();
-  if (!probe.ok) return false;
-  const pid = await readDashboardPid();
-  if (!pid || !isProcessAlive(pid)) {
-    err('WARNING dashboard is responding but its recorded pid is stale/unreadable — leave it running and stop it manually if this migration fails.');
-    return false;
+function processCommandTokens(command) {
+  return String(command).trim().match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)?.map((token) => token.replace(/^['"]|['"]$/g, '')) ?? [];
+}
+
+function processWorkingDirectory(pid) {
+  if (process.platform === 'linux') {
+    try { return resolve(readlinkSync(`/proc/${pid}/cwd`)); } catch {}
   }
+  const result = spawnSync('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], { encoding: 'utf8' });
+  if (result.error || result.status !== 0) return null;
+  const line = String(result.stdout).split('\n').find((entry) => entry.startsWith('n'));
+  return line ? resolve(line.slice(1)) : null;
+}
+
+function isDashboardServerCommand(pid, command) {
+  const tokens = processCommandTokens(command);
+  const serverEntry = resolve(DASHBOARD_DIR, 'server', 'index.js');
+  const relativeEntry = relative(GOLEM_ROOT, serverEntry).split(pathSep()).join('/');
+  const scriptIndex = tokens.findIndex((token) => {
+    if (token === serverEntry) return true;
+    return token === relativeEntry && processWorkingDirectory(pid) === GOLEM_ROOT;
+  });
+  if (scriptIndex < 0) return false;
+  return tokens.slice(0, scriptIndex).some((token) => ['node', 'nodejs'].includes(basename(token)));
+}
+
+function processEnvironment(pid) {
+  const result = spawnSync(process.env.GOLEM_PS_BIN || 'ps', ['eww', '-p', String(pid), '-o', 'command='], { encoding: 'utf8' });
+  if (result.error || result.status !== 0) return '';
+  return String(result.stdout);
+}
+
+function processEnvironmentValue(pid, key) {
+  const match = processEnvironment(pid).match(new RegExp(`(?:^|\\s)${key}=([^\\s]*)`));
+  return match?.[1] ?? null;
+}
+
+function belongsToCurrentDashboardHome(pid) {
+  const configuredHome = processEnvironmentValue(pid, 'GOLEM_HOME');
+  const processHome = configuredHome || (() => {
+    const home = processEnvironmentValue(pid, 'HOME');
+    return home ? join(home, '.golem') : null;
+  })();
+  return processHome != null && resolve(processHome) === resolve(golemHome());
+}
+
+function pathSep() {
+  return process.platform === 'win32' ? '\\' : '/';
+}
+
+function dashboardServerProcesses() {
+  const ps = spawnSync(process.env.GOLEM_PS_BIN || 'ps', ['-axo', 'pid=,command='], { encoding: 'utf8' });
+  if (ps.error || ps.status !== 0) {
+    throw new Error(`cannot inspect dashboard processes: ${ps.error?.message || String(ps.stderr || '').trim() || `ps exited ${ps.status}`}`);
+  }
+  const rows = [];
+  for (const line of String(ps.stdout).split('\n')) {
+    const match = line.match(/^\s*(\d+)\s+(.+)$/);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    if (!pid || pid === process.pid || !isDashboardServerCommand(pid, match[2]) || !belongsToCurrentDashboardHome(pid)) continue;
+    rows.push({ pid, command: match[2].trim() });
+  }
+  return rows;
+}
+
+async function stopDashboardProcess(pid) {
+  if (!isProcessAlive(pid)) return false;
   log(`  stopping dashboard pid=${pid}...`);
-  process.kill(pid, 'SIGTERM');
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch (error) {
+    if (error?.code === 'ESRCH') return false;
+    throw error;
+  }
   const deadline = Date.now() + 3000;
   while (Date.now() < deadline && isProcessAlive(pid)) await sleep(200);
   if (isProcessAlive(pid)) {
@@ -1363,7 +1450,19 @@ async function stopDashboard() {
     process.kill(pid, 'SIGKILL');
     await sleep(500);
   }
-  return true;
+  return !isProcessAlive(pid);
+}
+
+/** Stop every exact dashboard server process, with the recorded pid first when present. */
+async function stopDashboard() {
+  const recordedPid = await readDashboardPid();
+  const processes = dashboardServerProcesses();
+  processes.sort((left, right) => Number(right.pid === recordedPid) - Number(left.pid === recordedPid));
+  const stopped = [];
+  for (const processInfo of processes) {
+    if (await stopDashboardProcess(processInfo.pid)) stopped.push(processInfo);
+  }
+  return stopped;
 }
 
 /** Start the dashboard detached (survives this CLI process exiting) and wait for it to answer /api/health. */
@@ -1372,6 +1471,11 @@ async function startDashboardDetached(args = []) {
   const publicFlag = args.includes('--public');
   const passthru = args.filter((a) => a !== '--public');
   const env = { ...process.env };
+  try {
+    applyDashboardPort(args, env);
+  } catch (error) {
+    fatal(2, `golem dashboard:restart: ${error.message}`);
+  }
   if (publicFlag) env.HOST = '0.0.0.0';
   const logFile = dashboardLogPath();
   const outFd = openSync(logFile, 'a');
@@ -1410,9 +1514,14 @@ async function cmdDashboardRestart(args) {
     fatal(1, 'root deps missing — npm install (from the repo root)');
   }
 
+  try {
+    applyDashboardPort(args, process.env);
+  } catch (error) {
+    fatal(2, `golem dashboard:restart: ${error.message}`);
+  }
   log('Restarting dashboard...');
   const stopped = await stopDashboard();
-  log(stopped ? '  OK dashboard stopped' : '  dashboard was not running');
+  log(stopped.length ? `  OK dashboard stopped (${stopped.map(({ pid }) => `pid=${pid}`).join(', ')})` : '  dashboard was not running');
   log('  starting dashboard detached...');
   const started = await startDashboardDetached(args);
   log(`  log: ${started.logFile}`);
@@ -1468,7 +1577,7 @@ async function cmdMigrateHome(args) {
 
   // 2. Stop the dashboard (open SQLite handle on tracker.db inside src).
   const stopped = await stopDashboard();
-  log(stopped ? '  OK dashboard stopped' : '  dashboard was not running');
+  log(stopped.length ? `  OK dashboard stopped (${stopped.map(({ pid }) => `pid=${pid}`).join(', ')})` : '  dashboard was not running');
 
   // 3 + 4. Move, then symlink the old path to the new one.
   try {
@@ -2173,11 +2282,12 @@ Usage:
   node cli/golem.js <command> [args]
 
 Run:
-  dashboard [--public] [npm-start-args…]
+  dashboard [--public] [--port P] [npm-start-args…]
                        Start the admin dashboard on ${dashboardUrl()}.
-                       --public binds 0.0.0.0 (LAN-reachable, no auth).
-  dashboard:restart [--public] [npm-start-args…]
-                       Stop the running dashboard and restart it detached.
+                       --port is an explicit alternate port; --public binds
+                       0.0.0.0 (LAN-reachable, no auth).
+  dashboard:restart [--public] [--port P] [npm-start-args…]
+                       Stop every matching dashboard process and restart detached.
   codex-supervisor run --session <canonical-id> [--cwd <dir>]
                        Run a version-gated, headless Codex App Server lifecycle
                        supervisor with typed delivery while idle and MCP-bound.

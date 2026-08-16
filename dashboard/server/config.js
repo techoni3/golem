@@ -4,10 +4,23 @@ import { ticketAssetsDir } from '../../lib/golem-home.js';
 
 const HOME = os.homedir();
 
+function explicitPortArg() {
+  const index = process.argv.findIndex((arg) => arg === '--port' || arg.startsWith('--port='));
+  if (index < 0) return null;
+  const raw = process.argv[index] === '--port' ? process.argv[index + 1] : process.argv[index].slice('--port='.length);
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error(`--port requires an integer from 1 to 65535 (received ${raw ?? '(missing)'})`);
+  }
+  return port;
+}
+
+const PORT_ARG = explicitPortArg();
+
 export const CONFIG = {
   // 7420 — deliberately off Vite's default (4173) so a project's dev server
   // can never shadow the dashboard on a shared port. Channel server is 7421.
-  port: parseInt(process.env.PORT ?? '7420', 10),
+  port: PORT_ARG ?? parseInt(process.env.PORT ?? '7420', 10),
   host: process.env.HOST ?? '127.0.0.1',
   projectsRoot:
     process.env.GOLEM_PROJECTS_ROOT ??
