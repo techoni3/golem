@@ -21,6 +21,7 @@ import { registerSubstrateRoutes } from './substrate.js';
 import { teamAssists } from './team-assist.js';
 import { golemHome, dashboardJsonPath, journalDirFor, sessionsJsonPath } from '../../lib/golem-home.js';
 import { createRole, deleteRole, getRole, listRoleCards, roleChangeBrief, roleMission, setSessionRole, updateRoleMeta, writeRoleCard } from '../../lib/session-role.js';
+import { enrichDispatchableRows } from '../../lib/worker-manager.js';
 import { acceptedDelivery, publishDurableEnvelope, settleDurableEnvelope } from './envelope-delivery.js';
 import { recordTypedEnvelopeOutcome } from './typed-delivery.js';
 import { sameEndpointSecret } from '../../lib/typed-worker-endpoint.js';
@@ -2083,8 +2084,9 @@ async function main() {
         },
       });
     }
-    const assists = teamAssists(out);
-    return out.map((row) => ({ ...row, suggested: row.session_id === assists.suggested_manager?.session_id ? 'lead' : null }));
+    const enriched = enrichDispatchableRows(out, { projectId: wanted });
+    const assists = teamAssists(enriched);
+    return enriched.map((row) => ({ ...row, suggested: row.session_id === assists.suggested_manager?.session_id ? 'lead' : null }));
   });
 
   fastify.get('/api/roles', async () => listRoleCards());
