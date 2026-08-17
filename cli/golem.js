@@ -727,6 +727,11 @@ async function cmdPi(args) {
     GOLEM_PI_LAUNCH_NONCE: randomUUID(),
     GOLEM_PI_VERSION: piVersion,
     GOLEM_PI_EXTENSION_VERSION: readPackageVersion(),
+    // Skip Pi's boot-time pi.dev catalog refresh: it hangs ~15s when pi.dev is
+    // unreachable (the refresh aborts only at its 15s timeout). Catalogs come
+    // from the stored models-store.json; refresh on demand by running
+    // `pi --list-models` outside golem when pi.dev is reachable.
+    PI_OFFLINE: '1',
   });
   const launchArgs = [
     '--extension', extension,
@@ -1069,6 +1074,7 @@ function workerProjectHelp() {
 
 const WORKER_TABLE_COLUMNS = [
   { key: 'name', label: 'NAME', max: 24 },
+  { key: 'project_id', label: 'PROJECT', max: 20 },
   { key: 'role', label: 'ROLE', max: 18 },
   { key: 'state', label: 'STATE', max: 10 },
   { key: 'model', label: 'MODEL', max: 30 },
@@ -1174,7 +1180,11 @@ async function cmdListWorkers(args) {
 
 List live, spawning, and failed Golem workers as a table. Dead rows are
 hidden by default; --all includes retained dead rows. Use --json for the
-machine-readable worker-record shape.`);
+machine-readable worker-record shape.
+
+Without --project this lists workers from EVERY project, so pass
+--project . (or a path / project id) whenever you mean the current one.
+The PROJECT column shows which project each worker belongs to.`);
     return;
   }
   const wantJson = args.includes('--json');

@@ -23,12 +23,19 @@ A spawned worker is a real session: it appears in `sessions_dispatchable`, takes
 | `sessions_dispatchable` | see the whole team — roles, status, workload — before any interaction or (re)delegation |
 | `session_notify` | direct message to a teammate: delegation briefs, pings, comm-checks, returns |
 | `ticket_dispatch({id, session_id})` | hand a ticket to a teammate |
-| `golem list` | see the managed teammates — the ops view for spawning, retiring, peeking |
+| `golem list --project .` | see the managed teammates — the ops view for spawning, retiring, peeking |
 | `golem spawn <builder\|explorer\|reviewer>` | add a managed teammate with that role |
 | `golem peek <name>` | quick look at a managed teammate's terminal without disturbing it |
 | `golem kill <name>` | retire a managed teammate |
 
 The `golem` CLI runs via Bash; the rest are MCP tools.
+
+> [!IMPORTANT]
+> Every `golem` worker command spans ALL projects by default, and worker names repeat across
+> them (each project has its own `builder1`). Always pass `--project .` — for `list`, and for
+> `spawn`, `peek`, `attach`, and `kill` too. Without it, `list` shows other projects' workers,
+> and a name that exists in two projects is rejected as ambiguous. The `PROJECT` column in
+> `golem list` tells you which project a worker belongs to.
 
 ## Spawning
 
@@ -52,7 +59,7 @@ The `golem` CLI runs via Bash; the rest are MCP tools.
   originally.
 - Nothing reaps idle managed teammates — they outlive your session and consume memory until
   killed. Surface retire candidates to the human instead of killing on your own.
-- Killing a teammate mid-turn abandons its dispatch — check `golem list` or
+- Killing a teammate mid-turn abandons its dispatch — check `golem list --project .` or
   `sessions_dispatchable` first, and prefer killing idle ones.
 
 > [!IMPORTANT]
