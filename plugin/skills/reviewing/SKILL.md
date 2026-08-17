@@ -8,9 +8,9 @@ description: Load upon `reviewer` role assignment, or when dispatched a review. 
 
 Review asks *is this right, including what the checklist never covered?* — distinct from
 verification, which only confirms claimed evidence. A review arrives as a direct
-`session_notify` message carrying the task and spec reference ids; read that chain first
-(`ticket_get`) — the spec holds the canonical intent and decisions your review must be grounded
-in.
+`session_notify` message — a locked spec id for a design review, or task + spec reference ids
+for an implementation review; read that chain first (`ticket_get`) — the spec holds the
+canonical intent and decisions your review must be grounded in.
 
 ## Tools and skills
 

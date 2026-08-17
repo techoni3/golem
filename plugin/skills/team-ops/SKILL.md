@@ -49,8 +49,16 @@ The `golem` CLI runs via Bash; the rest are MCP tools.
 
 - Spawn per human directive. Without one, spawn only in special circumstances — for example, no
   live appropriate-roled teammate for work that must be delegated.
-- Never spawn implicitly while one or more live idle teammates can accept that type of work — a
-  spawn costs ~250–310 MB and a model seat; idle teammates are free.
+- Reuse first — never spawn while one or more live idle teammates can accept that type of work.
+  A spawn costs ~250–310 MB and a model seat; idle teammates are free.
+- Choose counts deliberately — spawn for parallelism you will actually use. Three explorers on
+  three disjoint research threads is right; three explorers waiting is waste.
+- Builders are neither very cheap nor very expensive: 1 for a single connected workstream, 2 for
+  two independent ones, more only for genuinely disjoint workstreams. The count is speculation
+  until grounding lands — revising it later is normal. More than 1: justify and confirm with the
+  human.
+- Explorers are relatively cheap: large exploration and research parallelise well across
+  several. More than 3 in parallel: justify and confirm with the human.
 - Multiple teammates (say 2 builders, 1 reviewer, 4 explorers) are created one by one; no
   parallel creation mechanism exists yet.
 - You cannot spawn a lead. Only builder, explorer, and reviewer have presets.
