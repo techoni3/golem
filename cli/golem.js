@@ -40,6 +40,7 @@ import { CodexSupervisor, readCodexSupervisor } from '../lib/codex-supervisor.js
 import { MIN_PI_NODE, SUPPORTED_PI_VERSION, piNodeSupported } from '../lib/pi-compatibility.js';
 import { resolveRolePreset } from '../lib/role-preset.js';
 import {
+  attachSwarm,
   attachWorker,
   killWorker,
   listWorkerViews,
@@ -1213,25 +1214,35 @@ The PROJECT column shows which project each worker belongs to.`);
 
 async function cmdAttachWorker(args) {
   if (!args.length || args[0] === '-h' || args[0] === '--help') {
-    log(`Usage: golem attach <name> ${workerProjectHelp()}
+    log(`Usage: golem attach [<name>] ${workerProjectHelp()}
 
-Attach the current terminal to a worker's real tmux TUI.`);
+Attach the current terminal to a worker's real tmux TUI. Without a name,
+attach the project's whole swarm — its dedicated tmux server tree.`);
     return;
   }
-  const name = args[0];
+  let name = null;
   let project = null;
-  for (let index = 1; index < args.length; index += 1) {
+  for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === '--project') {
       project = args[++index] ?? null;
       if (!project || project.startsWith('-')) fatal(2, 'golem attach --project requires a value');
     } else if (arg.startsWith('--project=')) {
       project = arg.slice('--project='.length);
+    } else if (name == null && !arg.startsWith('-')) {
+      name = arg;
     } else {
       fatal(2, `unknown attach option: ${arg}`);
     }
   }
   try {
+    if (name == null) {
+      // No worker named: attach the project's whole swarm (its tmux server).
+      const { projectId } = await resolveWorkerProject(project);
+      const status = attachSwarm(projectId);
+      if (status) process.exitCode = status;
+      return;
+    }
     const { projectId } = project == null ? { projectId: null } : await resolveWorkerProject(project);
     const status = attachWorker(name, { projectId });
     if (status) process.exitCode = status;

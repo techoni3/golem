@@ -209,7 +209,7 @@ try {
 
   const cliSpawnTable = await runCli(['spawn', 'golemtest-t2', '--name', 'golemtest-t2-cli-table', '--project', project]);
   assert.equal(cliSpawnTable.status, 0, cliSpawnTable.stderr);
-  assert.match(cliSpawnTable.stdout, /^NAME\s+ROLE\s+STATE\s+MODEL\s+STATUS\s+IDLE\s+ATTACH HINT/m);
+  assert.match(cliSpawnTable.stdout, /^NAME\s+PROJECT\s+ROLE\s+STATE\s+MODEL\s+STATUS\s+IDLE\s+ATTACH HINT/m);
   assert.match(cliSpawnTable.stdout, /golemtest-t2-cli-table/);
   const cliSpawnedTable = readWorkers().find((worker) => worker.name === 'golemtest-t2-cli-table');
   assert.equal(cliSpawnedTable.state, 'live');
@@ -236,7 +236,7 @@ try {
   assert.ok(directListed.every((worker) => worker.dispatchable));
   const cliList = await runCli(['list', '--project', project]);
   assert.equal(cliList.status, 0, cliList.stderr);
-  assert.match(cliList.stdout, /^NAME\s+ROLE\s+STATE\s+MODEL\s+STATUS\s+IDLE\s+ATTACH HINT/m);
+  assert.match(cliList.stdout, /^NAME\s+PROJECT\s+ROLE\s+STATE\s+MODEL\s+STATUS\s+IDLE\s+ATTACH HINT/m);
   assert.match(cliList.stdout, /golemtest-t2-cli-table/);
   assert.doesNotMatch(cliList.stdout, /^\[/, 'table output is the default');
   const cliListJson = await runCli(['list', '--project', project, '--json']);
@@ -255,7 +255,7 @@ try {
 
   const cliKillTable = await runCli(['kill', cliSpawnedTable.name, '--project', project]);
   assert.equal(cliKillTable.status, 0, cliKillTable.stderr);
-  assert.match(cliKillTable.stdout, /^NAME\s+ROLE\s+STATE\s+MODEL\s+STATUS\s+IDLE\s+ATTACH HINT/m);
+  assert.match(cliKillTable.stdout, /^NAME\s+PROJECT\s+ROLE\s+STATE\s+MODEL\s+STATUS\s+IDLE\s+ATTACH HINT/m);
   assert.match(cliKillTable.stdout, /golemtest-t2-cli-table/);
   const killedTable = readWorkers().find((worker) => worker.name === cliSpawnedTable.name);
   assert.equal(killedTable.state, 'dead');
@@ -425,6 +425,102 @@ exit 0
   delete process.env.GOLEM_TMUX_CAPTURE;
   console.log(JSON.stringify({ cli_attach: cliSpawned.name, attached_without_mutation: true }));
 
+  // --- per-project sockets: claim-time derivation and per-socket naming ---
+  const socketRegistryFile = path.join(temp, 'socket-claims-workers.json');
+  const savedTmuxSocket = process.env.GOLEM_TMUX_SOCKET;
+  delete process.env.GOLEM_TMUX_SOCKET;
+  const derivedClaim = claimWorker({
+    role: 'builder',
+    projectId: 'golem-38ab8a',
+    projectRoot: project,
+    cwd: project,
+    preset: { harness: 'pi' },
+    file: socketRegistryFile,
+  });
+  assert.equal(derivedClaim.tmux_socket, 'golem-golem-38ab8a');
+  const sameNameClaim = claimWorker({
+    role: 'builder',
+    projectId: 'swarm-123456',
+    preset: { harness: 'pi' },
+    file: socketRegistryFile,
+  });
+  assert.equal(derivedClaim.name, 'builder1');
+  assert.equal(sameNameClaim.name, 'builder1');
+  assert.equal(sameNameClaim.tmux_socket, 'golem-swarm-123456');
+  // A legacy row (no stored socket) lives on the shared 'golem' server, so it
+  // must not block the same name on the project's own socket.
+  updateWorker(sameNameClaim.worker_id, { tmux_socket: null }, { file: socketRegistryFile });
+  const afterLegacyClaim = claimWorker({
+    role: 'builder',
+    projectId: 'swarm-123456',
+    preset: { harness: 'pi' },
+    file: socketRegistryFile,
+  });
+  assert.equal(afterLegacyClaim.name, 'builder1');
+  assert.equal(afterLegacyClaim.tmux_socket, 'golem-swarm-123456');
+  process.env.GOLEM_TMUX_SOCKET = 'golem';
+  const forcedCollisionClaim = claimWorker({
+    role: 'builder',
+    projectId: 'swarm-123456',
+    preset: { harness: 'pi' },
+    file: socketRegistryFile,
+  });
+  assert.equal(forcedCollisionClaim.name, 'builder2');
+  assert.equal(forcedCollisionClaim.tmux_socket, 'golem');
+  process.env.GOLEM_TMUX_SOCKET = savedTmuxSocket;
+  console.log(JSON.stringify({
+    socket_derivation: 'tmux_socket=golem-<project_id> recorded at claim',
+    per_socket_naming: 'builder1 held by two projects, and twice in one project (legacy row no longer blocks)',
+    forced_socket_collision: 'builder2 when GOLEM_TMUX_SOCKET pins every row to one socket',
+  }));
+
+  // --- legacy rows without tmux_socket fall back to the shared 'golem' socket ---
+  const legacyClaimRow = claimWorker({
+    role: 'builder',
+    projectId: 'golem-38ab8a',
+    projectRoot: project,
+    cwd: project,
+    name: 'golemtest-t2-legacy-socket',
+    preset: { harness: 'pi' },
+  });
+  updateWorker(legacyClaimRow.worker_id, { tmux_socket: null, state: 'live' });
+  const legacyTmuxCapture = path.join(temp, 'golemtest-t2-legacy-argv.txt');
+  const legacyTmux = path.join(bin, 'golemtest-t2-legacy-tmux');
+  fs.writeFileSync(legacyTmux, `#!/bin/sh
+printf '%s\n' "$@" > ${JSON.stringify(legacyTmuxCapture)}
+exit 0
+`, { mode: 0o700 });
+  process.env.GOLEM_TMUX_BIN = legacyTmux;
+  const savedForLegacy = process.env.GOLEM_TMUX_SOCKET;
+  delete process.env.GOLEM_TMUX_SOCKET;
+  await peekWorker('golemtest-t2-legacy-socket', { projectId: 'golem-38ab8a', lines: 3 });
+  process.env.GOLEM_TMUX_SOCKET = savedForLegacy;
+  delete process.env.GOLEM_TMUX_BIN;
+  const legacyArgs = fs.readFileSync(legacyTmuxCapture, 'utf8').trim().split('\n');
+  assert.deepEqual(legacyArgs.slice(0, 2), ['-L', 'golem']);
+  assert.ok(legacyArgs.includes('golemtest-t2-legacy-socket'));
+  console.log(JSON.stringify({ legacy_row_fallback: 'peek on a row without tmux_socket ran tmux -L golem' }));
+
+  // --- golem attach --project . with no name attaches the project's swarm server ---
+  const swarmCapture = path.join(temp, 'golemtest-t2-swarm-argv.txt');
+  const swarmTmux = path.join(bin, 'golemtest-t2-swarm-tmux');
+  fs.writeFileSync(swarmTmux, `#!/bin/sh
+printf '%s\n' "$@" > ${JSON.stringify(swarmCapture)}
+exit 0
+`, { mode: 0o700 });
+  process.env.GOLEM_TMUX_BIN = swarmTmux;
+  const savedForSwarm = process.env.GOLEM_TMUX_SOCKET;
+  delete process.env.GOLEM_TMUX_SOCKET;
+  const cliSwarmAttach = await runCli(['attach', '--project', project]);
+  process.env.GOLEM_TMUX_SOCKET = savedForSwarm;
+  delete process.env.GOLEM_TMUX_BIN;
+  assert.equal(cliSwarmAttach.status, 0, cliSwarmAttach.stderr);
+  const swarmArgs = fs.readFileSync(swarmCapture, 'utf8').trim().split('\n');
+  assert.deepEqual(swarmArgs.slice(0, 2), ['-L', `golem-${projectId}`]);
+  assert.deepEqual(swarmArgs.slice(-1), ['attach-session']);
+  assert.ok(!swarmArgs.includes('-t'), 'swarm attach must not target a single session');
+  console.log(JSON.stringify({ swarm_attach: `attach with no name targeted golem-${projectId} with no -t` }));
+
   process.env.GOLEM_FAKE_NO_REGISTER = '1';
   process.env.GOLEM_WORKER_READY_TIMEOUT_MS = '250';
   const failedName = 'golemtest-t2-failed';
@@ -444,7 +540,7 @@ exit 0
   assert.deepEqual(processIdsInGroup(failed.pid), []);
   assert.equal(hasSession(failedName), false);
 
-  console.log('Worker journey passed: locked naming, detached tmux workers, dispatchable readiness, table/JSON list-spawn-kill output, dead-row filtering and 24h prune, peek, attach argv, stale-pgid guard, missing-socket handling, failed inspection, and zero-survivor teardown');
+  console.log('Worker journey passed: locked naming, detached tmux workers, dispatchable readiness, table/JSON list-spawn-kill output, dead-row filtering and 24h prune, peek, attach argv, per-project sockets with legacy golem fallback, swarm attach, stale-pgid guard, missing-socket handling, failed inspection, and zero-survivor teardown');
 } finally {
   if (recycled && recycled.exitCode === null) {
     try {
