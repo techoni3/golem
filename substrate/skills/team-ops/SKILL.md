@@ -24,9 +24,10 @@ A spawned worker is a real session: it appears in `sessions_dispatchable`, takes
 | `session_notify` | direct message to a teammate: delegation briefs, pings, comm-checks, returns |
 | `ticket_dispatch({id, session_id})` | hand a ticket to a teammate |
 | `golem list --project .` | see the managed teammates — the ops view for spawning, retiring, peeking |
-| `golem spawn <builder\|explorer\|reviewer>` | add a managed teammate with that role |
-| `golem peek <name>` | quick look at a managed teammate's terminal without disturbing it |
-| `golem kill <name>` | retire a managed teammate |
+| `golem spawn <builder\|explorer\|reviewer> --project .` | add a managed teammate with that role |
+| `golem peek <name> --project .` | quick look at a managed teammate's terminal without disturbing it |
+| `golem attach <name> --project .` | attach to a managed teammate's live TUI; with no name, the project's whole swarm |
+| `golem kill <name> --project .` | retire a managed teammate |
 
 The `golem` CLI runs via Bash; the rest are MCP tools.
 
@@ -61,16 +62,28 @@ The `golem` CLI runs via Bash; the rest are MCP tools.
   killed. Surface retire candidates to the human instead of killing on your own.
 - Killing a teammate mid-turn abandons its dispatch — check `golem list --project .` or
   `sessions_dispatchable` first, and prefer killing idle ones.
+- Retire only with `golem kill` — it also tears down the worker's process group. Raw
+  `tmux kill-session` leaves orphan processes behind; never use raw tmux for lifecycle.
 
 > [!IMPORTANT]
-> Never try to kill yourself; the attempt is refused.
+> Never kill yourself. Nothing in the code refuses the attempt — this rule is the only guard.
 
-## When a spawn fails
+## When a command fails
 
-- `GOLEM_UNKNOWN_ROLE` — non-retryable. Pick a valid role.
-- `GOLEM_WORKER_TIMEOUT` — retryable, but peek first: the failed worker's terminal is
-  deliberately left alive so you can see why.
-- Never chain retries. A second failing spawn tells you nothing the first didn't.
+- Read the message text — it names the problem and usually the recovery. Do not key off exit
+  codes; they are not consistent across verbs.
+- `unknown role: …` — non-retryable. Only builder, explorer, and reviewer exist.
+- `worker name already exists: …` — non-retryable with that name: inside a project an occupied
+  name is a collision regardless of socket. Pick another name, or omit `--name` and let
+  auto-naming choose.
+- `worker name is ambiguous: …; pass --project` — the same name lives in more than one project;
+  the recovery is in the message.
+- A spawn that times out waiting for readiness is retryable, but peek first — the failed
+  worker's terminal is deliberately left alive so you can see why.
+- Swarm attach refused: when a project's live workers span more than one tmux socket,
+  `golem attach --project .` refuses and prints which socket holds which workers; attach one
+  socket directly with `tmux -L <socket> attach`.
+- Never chain retries. A second failing command tells you nothing the first didn't.
 
 ## For the human
 
