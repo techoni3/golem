@@ -46,6 +46,9 @@ sequenceDiagram
     A->>L: insights via session_notify (builder keeps the context for the build)
     Note over L: fold decisions into the spec at boundaries
     H->>L: LOCK — full alignment
+    L->>A: spec review → reviewer (single thorough pass)
+    A->>L: findings, once
+    Note over L: fold accepted findings into the spec — no re-review
     Note over L: decompose into task children — one is normal,<br/>more only for parallel or staged delivery
     end
 
@@ -77,8 +80,13 @@ for a delegation: § Delegation protocol defines the fallback.
 - Everything in the Lead lane of the diagram is yours — never delegated: brainstorming with the
   human, maintaining and finalising the spec, folding in insights, decomposing, orchestrating
   the stages.
-- Review findings are input, not obligations — the canonical spec dictates whether a suggestion
-  is legitimate and significant enough to act on.
+- Team composition is a deliberate call — the count heuristics, reuse-first rule, and
+  confirmation thresholds live in `golem:team-ops` § Spawning.
+- A locked spec gets a single thorough reviewer pass before decomposition; every built task gets
+  one before verification. Findings return once — you decide what to incorporate; there is no
+  re-review loop, for specs or for code.
+- Review findings are input, not obligations — the canonical spec and intent dictates whether a
+  suggestion is legitimate and significant enough to act on.
 - Verification: the method is defined and aligned with the human in the decomposed task.
 
 **How to delegate.** The team surface — checking teammates, messaging, dispatching, spawning
@@ -89,7 +97,8 @@ and retiring — is defined in `golem:team-ops`. Per delegation:
 | Code survey → `builder` (loads `golem:code-survey`) | `session_notify` with the full request and context — no ticket, no doc | insights directly via `session_notify` — no ticket, no doc |
 | External research → `explorer` (loads `golem:exploring`) | `session_notify` with the full request, context, and the spec id | a `doc` created under that spec; `session_notify` back with its ticket id |
 | Build → `builder` | `ticket_dispatch` of the task — its body carries the plan | closing comment on the task, then `session_notify` |
-| Review → `reviewer` | `session_notify` with the task + spec reference ids | findings directly via `session_notify` — no doc, one pass |
+| Spec review → `reviewer` (loads `golem:reviewing`) | `session_notify` with the locked spec id | findings directly via `session_notify` — no doc, single thorough pass |
+| Task review → `reviewer` | `session_notify` with the task + spec reference ids | findings directly via `session_notify` — no doc, single thorough pass |
 | Verify → `explorer` | `session_notify` with the task id (method is in the task) | report comment on the task, then `session_notify` |
 
 > [!NOTE]

@@ -79,6 +79,8 @@ There are three doc types in the tracker:
   * boundaries don't overlap and the tasks can run in parallel;
   * the features are relatively independent and can land sequentially, each stage producing a
     working, verifiable state.
+- Decomposition drives builder count: parallel tasks need parallel builders — the count call
+  and its confirmation thresholds live in `golem:team-ops` § Spawning.
 
 ## Lifecycle of docs
 
