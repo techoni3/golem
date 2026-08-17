@@ -208,7 +208,10 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay', reader = f
   const defaultCommentDispatchSession = assigneeIsLive ? ticket.assignee : '';
   const selectedCommentDispatchSession = commentDispatchSession || defaultCommentDispatchSession;
   const undispatchedComments = React.useMemo(
-    () => flatComments.filter((c) => c.dispatch_state === 'undispatched'),
+    // Only open comments are dispatchable — resolved conversations and
+    // soft-deleted (status='deleted') comments must not keep the bulk
+    // button alive. Mirrors the server's listUndispatchedForTicket filter.
+    () => flatComments.filter((c) => c.dispatch_state === 'undispatched' && c.status === 'open'),
     [flatComments]
   );
   const undispatchedCount = undispatchedComments.length;

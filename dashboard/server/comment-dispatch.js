@@ -82,7 +82,7 @@ export function createCommentDispatchService({ db, now, recordEvent, actorFormsF
     if (!ticketId) throw new Error('listUndispatchedForTicket: ticket_id is required');
     return db.prepare(`
       SELECT * FROM comments
-      WHERE ticket_id = ? AND dispatch_state = 'undispatched'
+      WHERE ticket_id = ? AND dispatch_state = 'undispatched' AND status = 'open'
       ORDER BY created_at ASC, id ASC
     `).all(ticketId);
   }
