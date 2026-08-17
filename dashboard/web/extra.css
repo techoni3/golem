@@ -2382,6 +2382,23 @@ select.ct-input { appearance: none; cursor: pointer; padding-right: 26px;
   border-radius: var(--radius-1);
 }
 .td-open-page:hover { background: var(--bg-3); color: var(--text-0); }
+.td-reader-open { font-size: 12px; letter-spacing: 0.04em; }
+
+/* ===== Reader view (/read/<id>) ===== */
+/* The ticket document alone: no sidebar/topbar (App skips the shell), and the
+   in-page chrome — header bar + props sidebar — hidden here. The contents rail
+   (td-annotate) rides with .td-main and stays. */
+.reader-shell {
+  height: 100vh;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-0);
+}
+.reader-shell .ticket-page { flex: 1 1 auto; }
+.td-reader .td-header { display: none; }
+.td-reader .td-side { display: none; }
+.td-reader .td-main { margin: 0 auto; }
 
 /* Scrollable field region between the header and the sticky action bar. */
 .ct-scroll {

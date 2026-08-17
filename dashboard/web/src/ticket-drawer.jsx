@@ -50,7 +50,7 @@ const TD_STATE_PILL = {
 };
 
 
-function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
+function TicketDrawer({ open, ticketId, onClose, variant = 'overlay', reader = false }) {
   useStore();
   const [loading, setLoading] = React.useState(false);
   const [loadError, setLoadError] = React.useState(null);
@@ -591,7 +591,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
     : null;
   const Shell = isPage ? 'div' : DrawerPanel;
   const shellClass = isPage
-    ? `ticket-page${editBuf ? ' td-editing' : ''}`
+    ? `ticket-page${reader ? ' td-reader' : ''}${editBuf ? ' td-editing' : ''}`
     : `drawer-ticket${editBuf ? ' td-editing' : ''}`;
   const shellStyle = isPage ? undefined : { width: `${widthPct}vw` };
 
@@ -659,6 +659,12 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay' }) {
                 {isPage ? null : (
                   <a className="td-open-page" href={window.Router.buildHref({ kind: 'ticket', id: ticket.id })}
                     target="_blank" rel="noopener" title="Open as standalone page (new tab)">↗</a>
+                )}
+                {reader ? null : (
+                  <a className="td-open-page td-reader-open"
+                    href={window.Router.buildHref({ kind: 'ticket', id: ticket.id, reader: true })}
+                    {...(isPage ? {} : { target: '_blank', rel: 'noopener' })}
+                    title="Reader view — the document alone, no app chrome">reader</a>
                 )}
                 {isPage ? null : <button className="drawer-close" onClick={close}><Icon.Close/></button>}
               </div>

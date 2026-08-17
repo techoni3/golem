@@ -30,6 +30,18 @@ function App() {
   // directly with {replace:true}.
   const navigate = (r) => window.Router.go(r);
 
+  // Reader view (/read/<id>): the ticket document alone — body + contents
+  // rail, no sidebar/topbar/props chrome. The drawer handles its own loading;
+  // TicketDrawer's td-reader class hides the in-page chrome via CSS.
+  if (route.kind === 'ticket' && route.reader) {
+    return (
+      <div className="reader-shell">
+        <TicketDrawer variant="page" reader open={true} ticketId={route.id}
+          onClose={() => window.history.back()}/>
+      </div>
+    );
+  }
+
   let page;
   if (!state.ready) {
     page = (
