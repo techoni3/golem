@@ -75,6 +75,8 @@ The `golem` CLI runs via Bash; the rest are MCP tools.
 ## For the human
 
 Tell the human the worker's name when you spawn one, so he can `golem attach <name>` to watch
-it. The tmux prefix is `C-g`, not `C-b`. Every project's workers run on their own tmux server:
-`golem attach --project .` (no name) opens the project's whole swarm, and raw tmux reaches the
-same place with `tmux -L golem-<project_id> attach`.
+it. The tmux prefix is `C-g`, not `C-b`. Every project's workers run on their own tmux server,
+named `golem-` plus the project id — for project `golem-38ab8a` that socket is
+`golem-golem-38ab8a` (the doubled `golem-golem-` is correct, not a typo). `golem attach
+--project .` with no name opens the project's whole swarm; raw tmux reaches the same server,
+e.g. `tmux -L golem-golem-38ab8a attach`.
