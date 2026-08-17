@@ -39,6 +39,12 @@ The `golem` CLI runs via Bash; the rest are MCP tools.
 > and a name that exists in two projects is rejected as ambiguous. The `PROJECT` column in
 > `golem list` tells you which project a worker belongs to.
 
+> [!IMPORTANT]
+> Returns bind to the envelope: reply to the authenticated sender `session_id` of the exact
+> dispatch you are answering — never from memory, never by label, never rediscovered via
+> `sessions_dispatchable`. A reused teammate serves several leads; only the envelope says which
+> one asked.
+
 ## Spawning
 
 - Spawn per human directive. Without one, spawn only in special circumstances — for example, no

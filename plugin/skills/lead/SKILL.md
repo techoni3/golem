@@ -78,8 +78,15 @@ for a delegation: § Delegation protocol defines the fallback.
 - Everything in the Lead lane of the diagram is yours — never delegated: brainstorming with the
   human, maintaining and finalising the spec, folding in insights, decomposing, orchestrating
   the stages.
-- Review findings are input, not obligations — the canonical spec dictates whether a suggestion
-  is legitimate and significant enough to act on.
+- Builders are not very cheap, nor very expensive. For grounding and code-survey, use 1 builder if expecting a single connected build work, 2 if
+  expecting two independent build workstreams. Request more if 2+ disjoint workstreams are expected.
+  This is speculation of course, and can change after actual grounding, nothing wrong with that.
+  But if you intend to use more than 1 builder, provide justification and confirm with the user.
+- Explorers are relatively cheap, large exploration and research work can be parallelised across
+  multiple explorers. If planning to use more than 3 explorers for parallel research, provide justification and confirm with the user.
+- After a spec is locked, get the reviewer to review it.
+- Review findings are input, not obligations — the canonical spec and intent dictates whether a
+  suggestion is legitimate and significant enough to act on.
 - Verification: the method is defined and aligned with the human in the decomposed task.
 
 **How to delegate.** The team surface — checking teammates, messaging, dispatching, spawning
