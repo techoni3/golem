@@ -11,13 +11,17 @@ No inline HTML color/style spans.
 Diagram palette — same as templates/spec, pick by relevance, ONE concern per diagram, one-line
 caption under each: flowchart · sequenceDiagram · classDiagram · erDiagram · stateDiagram-v2 ·
 journey · timeline · eventmodeling (command → event → read-model loops ONLY) · quadrantChart.
+Prefer tall over wide — a wide, shallow diagram reads poorly; re-orient (flowchart TD) or
+split rather than widen.
+Color keys meaning: one meaning per hue per diagram, muted mid-tone fills (classDef) legible
+on light and dark themes; never decorative.
 Mermaid gotchas: no ";" inside sequenceDiagram message text; escape "|" as "\|" inside table
 cells; blank line after </summary> before markdown; the body must never START with an HTML tag.
 Validate every block before saving: mermaid-cli exits 0 even on broken langium-based types —
 render to SVG and check it for an error marker, not just the exit code.
 One template, two shapes — keep the sections the job needs, delete the rest:
   research/exploration → Question · Summary · Findings · Implications · Method
-  brainstorm scratchpad → Question · Summary · one ❓ section per decision
+  brainstorm scratchpad → Question · Summary · one section per exploration thread
 -->
 
 ## Question
@@ -28,8 +32,8 @@ and for which spec or decision (name the parent). -->
 ## Summary
 
 <!-- form: the standing answer up front, ≤7 STE bullets — most readers read only this; keep it
-current as the page evolves. Scratchpad shape: which decisions are 🔒 decided, which stay ❓
-open, what ▶ awaits whom. -->
+current as the page evolves. Scratchpad shape: the standing insights, and which spec decision
+(D#) each thread feeds. -->
 
 - <bullet>
 
@@ -59,29 +63,26 @@ flowchart LR
 
 </details>
 
-## ❓ <decision title>
+## <exploration thread>
 
-<!-- form: scratchpad shape — one section per decision, worked one decision at a time. Give the
-human what he needs to decide fully deliberately: context, options with concrete impact, a
-comparison diagram where it helps. This is his comment surface — expect replies on the spec, on
-this scratchpad, and in chat.
-On decide: retitle the section 🔒, record the call + why as bullets, wrap the worked material in
-<details>. The call folds into the parent spec at a boundary or on the human's directive. -->
-
-- Context: <what forces this decision>
-
-| Option | What it entails | Impact / trade-off |
-|---|---|---|
-| <a> | <what choosing it means, concretely> | <consequence, cost, risk> |
+<!-- form: scratchpad shape — one section per exploration thread: topology and ontology
+explainers, tangents, wild options not yet attached to a decision. Decisions themselves live
+ONLY in the parent spec's canonical blocks (templates/spec § Decisions) — never duplicate them
+here; this page builds the understanding that feeds them. This is the human's comment surface —
+expect replies on the spec, on this scratchpad, and in chat.
+When a thread has served its purpose: note which D# it fed (the spec's locked block links back
+via Trail:), then wrap the worked material in <details> — archived for reference, out of the
+way. -->
 
 ```mermaid
-flowchart LR
-  O[option a] --> C[its consequence]
+flowchart TD
+  A[the thing explored] --> B[what it reveals]
 ```
 
-*Caption: <one line — what choosing this looks like>.*
+*Caption: <one line — what this shows>.*
 
-- Recommendation: <yours, with the reason>
+- 📌 <insight the diagram cannot carry>
+- ▶ feeds: <D# in the parent spec>
 
 ## Implications
 

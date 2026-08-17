@@ -52,18 +52,23 @@ There are three doc types in the tracker:
 - Most often, the goal is to end up with a locked spec with full alignment.
 - Over-engineering is as bad as doing it incorrectly.
 
-#### Intermediate brainstorming
+#### Intermediate brainstorming with scratchpad
 
-- Some specs carry several decisions for the human — requirements and design alike — where he
-  needs grounded explanations: scope, solution options, and the impact of each choice. That
-  discussion would clutter the main spec.
-- Use a scratchpad instead: a supporting `doc` child of the spec (`templates/doc`, scratchpad
-  shape). Create it when the human asks, or when you see the need — ask first, never implicitly.
-- Work one decision at a time. Explain options, choices, and implications visually, with the
-  same form as the main spec, so the human can decide fully deliberately.
+- Decisions live in the spec and only there — the canonical open/locked blocks of
+  `templates/spec` § Decisions. An open block may carry one comparison diagram; the master
+  table keeps the human reminded of what is closed and what awaits his attention.
+- The scratchpad is for understanding, not decisions: ambient exploration, topology and
+  ontology explainers, tangents and wild curiosities that exceed a single decision's frame. It
+  exists so transient, intermediate, visual explanation never clutters the main spec.
+- Scratchpad: a supporting `doc` child of the spec (`templates/doc`, scratchpad shape). Create
+  it when the human asks, or when you see the need — ask first, never implicitly.
+- One section per exploration thread. Explain visually, so the human can understand and decide
+  deliberately. Insights feed the spec's decision blocks — context, options, rejected reasons —
+  and a locked block links its exploration back via its Trail line.
 - Expect a hybrid flow: the human comments on the spec, comments on the scratchpad, and speaks
   in chat. Keep his explicit directives in mind.
-- Fold decided outcomes into the main spec at boundaries or on his explicit directive.
+- Served threads stay in the scratchpad under collapsed sections, for reference. The transient
+  material itself never moves into the spec — only the insights do.
 
 ### Implementation tasks
 

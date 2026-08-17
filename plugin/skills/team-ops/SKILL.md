@@ -24,7 +24,7 @@ A spawned worker is a real session: it appears in `sessions_dispatchable`, takes
 | `sessions_dispatchable` | see the whole team — roles, status, workload — before any interaction or (re)delegation |
 | `session_notify` | direct message to a teammate: delegation briefs, pings, comm-checks, returns |
 | `ticket_dispatch({id, session_id})` | hand a ticket to a teammate |
-| `golem list --project .` | see the managed teammates — the ops view for spawning, retiring, peeking |
+| `golem list --project .` or `golem list --project <project-name>` | see the managed teammates — the ops view for spawning, retiring, peeking |
 | `golem spawn <builder\|explorer\|reviewer> --project .` | add a managed teammate with that role |
 | `golem peek <name> --project .` | quick look at a managed teammate's terminal without disturbing it |
 | `golem attach <name> --project .` | attach to a managed teammate's live TUI; with no name, the project's whole swarm |
