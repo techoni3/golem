@@ -7,15 +7,14 @@
   <title>Golem · Dashboard</title>
   <script>
     // Apply the saved appearance before CSS is requested so reloads never
-    // Apply a saved non-default theme before CSS is requested. Dark remains
-    // the default when the preference is missing or not recognized.
+    // flash. Nocturne & Inkstone is the default when the preference is
+    // missing or not recognized; an explicit 'dark' choice is honored.
     (() => {
       try {
         const theme = localStorage.getItem('golem.tweaks.theme');
-        if (['loam', 'graphite', 'nocturne'].includes(theme)) {
-          document.documentElement.dataset.theme = theme;
-        }
-      } catch {}
+        const applied = ['dark', 'loam', 'graphite', 'nocturne'].includes(theme) ? theme : 'nocturne';
+        if (applied !== 'dark') document.documentElement.dataset.theme = applied;
+      } catch { document.documentElement.dataset.theme = 'nocturne'; }
     })();
   </script>
   <link rel="stylesheet" href="/styles.css"/>

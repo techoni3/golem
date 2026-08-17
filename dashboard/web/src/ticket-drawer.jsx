@@ -976,6 +976,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay', reader = f
                     projectContractId={ticket.project_id}
                     seedChildren={ticket.children || []}
                     resolveAssignee={resolveActor}
+                    reader={reader}
                   />
                 </div>
               )}
@@ -1015,7 +1016,7 @@ function tdAgo(iso) {
 // spec (Router.openComposer presets).
 // GOL-151: the list is flat and creation-ordered. Dependency waves are gone —
 // sequencing lives in the spec body as prose, not in ticket metadata.
-function SpecChildrenPanel({ specId, projectContractId, seedChildren = [], resolveAssignee }) {
+function SpecChildrenPanel({ specId, projectContractId, seedChildren = [], resolveAssignee, reader = false }) {
   useStore();
   // No memo: the store Map mutates in place on upsert (applyTicketCreated /
   // applyTicketUpdated do .set on the same Map ref), so a useMemo keyed on the
@@ -1049,8 +1050,14 @@ function SpecChildrenPanel({ specId, projectContractId, seedChildren = [], resol
           {children.map((c) => (
             <a key={c.id}
               className="td-child-row"
-              href={window.Router.buildHref({ kind: 'ticket', id: c.id })}
-              onClick={(e) => { e.preventDefault(); window.Router.openTicket(c.id); }}
+              href={window.Router.buildHref({ kind: 'ticket', id: c.id, reader })}
+              onClick={(e) => {
+                e.preventDefault();
+                // Reader view stays in reader view; everywhere else keeps the
+                // drawer-overlay behaviour.
+                if (reader) window.Router.go({ kind: 'ticket', id: c.id, reader: true });
+                else window.Router.openTicket(c.id);
+              }}
               title={c.title}
             >
               <span className="td-child-id mono">{c.display_id || c.id}</span>

@@ -2930,8 +2930,8 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
 .drawer-ticket,
 .ticket-page {
   container-type: inline-size;
-  --td-toc-column-w: 210px;
-  --anno-rail-w: min(max(30cqw, 500px), 100cqw);
+  --td-toc-column-w: 250px;
+  --anno-rail-w: min(max(25cqw, 400px), 100cqw);
   --anno-rail-gutter: 30px;
   --anno-fab-w: 52px;
 }
@@ -3254,7 +3254,7 @@ mark.anno.anno-tail::after {
   flex: 0 0 auto;
   padding: 14px 14px 8px;
   color: var(--text-3);
-  font: 600 10px/1 var(--font-mono);
+  font: 600 12px/1 var(--font-mono);
   letter-spacing: .08em;
   text-transform: uppercase;
 }
@@ -3310,7 +3310,7 @@ mark.anno.anno-tail::after {
   border-left: 2px solid transparent;
   border-radius: 0 var(--radius-1) var(--radius-1) 0;
   color: var(--text-3);
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.35;
   text-decoration: none;
   text-overflow: ellipsis;

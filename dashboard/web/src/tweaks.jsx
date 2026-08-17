@@ -1,6 +1,7 @@
 // Sidebar appearance control — theme + accent, persisted in localStorage.
-// Dark remains the default. Existing golem.tweaks.accent hex values are kept
-// as stable palette ids and translated to AA-safe variants at render time.
+// Nocturne & Inkstone is the default; an explicit 'dark' choice is honored.
+// Existing golem.tweaks.accent hex values are kept as stable palette ids and
+// translated to AA-safe variants at render time.
 
 const THEME_KEY = 'golem.tweaks.theme';
 const ACCENT_KEY = 'golem.tweaks.accent';
@@ -24,9 +25,9 @@ const ACCENT_OPTIONS = [
 function savedTheme() {
   try {
     const value = localStorage.getItem(THEME_KEY);
-    return THEME_OPTIONS.some((option) => option.id === value) ? value : 'dark';
+    return THEME_OPTIONS.some((option) => option.id === value) ? value : 'nocturne';
   }
-  catch { return 'dark'; }
+  catch { return 'nocturne'; }
 }
 
 function savedAccent() {

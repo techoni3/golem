@@ -589,7 +589,8 @@ function TdTocNode({ node, activeId, collapsed, onToggle, onNavigate }) {
   );
 }
 
-const TOC_RAIL_WIDTH = 210;
+// Must agree with --td-toc-column-w in extra.css (.td-main column reserve).
+const TOC_RAIL_WIDTH = 250;
 
 function TdToc({ headings, rootRef, documentKey, containerSelector }) {
   const storageKey = documentKey ? `golem.toc.${documentKey}` : 'golem.toc.anonymous';
