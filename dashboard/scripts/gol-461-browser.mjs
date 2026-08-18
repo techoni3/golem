@@ -213,8 +213,8 @@ try {
   ok(projectSessionNames.join('|') === 'Fixture Builder|Healthy Working Codex|Waiting Reviewer|Idle Newer|Legacy Status|Idle Older', 'project sessions include healthy busy, missing-channel, waiting, idle, and legacy rows in last-seen order');
   const busyCard = projectSessions.filter({ hasText: 'Fixture Builder' });
   const waitingCard = projectSessions.filter({ hasText: 'Waiting Reviewer' });
-  ok(await busyCard.locator('.agent-status-badge').count() === 0 && await busyCard.locator('.agent-card-orb').count() === 1, 'busy project card uses the H1 orb instead of an obsolete Working badge');
-  ok(await waitingCard.locator('.agent-status-badge').count() === 0 && await waitingCard.locator('.agent-card-orb').count() === 1, 'waiting project card also keeps lifecycle state in its H1 orb');
+  ok(await busyCard.locator('.agent-status-badge').count() === 0 && await busyCard.locator('.agent-card-orb').count() === 2, 'busy project card uses twin H1 orbs (model + harness) instead of an obsolete Working badge');
+  ok(await waitingCard.locator('.agent-status-badge').count() === 0 && await waitingCard.locator('.agent-card-orb').count() === 2, 'waiting project card also keeps lifecycle state in its twin H1 orbs');
   ok(await projectSessions.filter({ hasText: 'Healthy Working Codex' }).locator('.native-session-nochannel').count() === 0, 'healthy working card never renders a no-channel warning');
   ok((await projectSessions.filter({ hasText: 'Legacy Status' }).locator('.agent-card-communication').innerText()).includes('Channel offline'), 'genuine missing-channel card retains visible offline communication');
   ok(!projectSessionNames.includes('Stale Ghost') && !projectSessionNames.includes('Beta Builder'), 'project sessions exclude dead and cross-project rows');
@@ -234,7 +234,7 @@ try {
   const projectIconImages = projectSessions.locator('.agent-harness-icon img, .agent-model-icon img');
   const projectHarnessImages = projectSessions.locator('.agent-harness-icon img');
   const projectModelImages = projectSessions.locator('.agent-model-icon img');
-  ok(await projectHarnessImages.count() === 6 && await projectModelImages.count() === 6 && await projectIconImages.evaluateAll((images) => images.every((image) => image.complete && image.naturalWidth > 0 && (image.src.startsWith('data:image/svg+xml') || new URL(image.src).origin === location.origin))), 'six project cards render bundled harness and model SVG icons');
+  ok(await projectHarnessImages.count() === 6 && await projectModelImages.count() === 12 && await projectIconImages.evaluateAll((images) => images.every((image) => image.complete && image.naturalWidth > 0 && (image.src.startsWith('data:image/svg+xml') || new URL(image.src).origin === location.origin))), 'six project cards render bundled harness (one) and model (orb + chip) SVG icons');
   const harnessIcons = projectSessions.locator('.agent-harness-icon[role="img"]');
   ok(await harnessIcons.count() === 6 && await harnessIcons.evaluateAll((icons) => icons.every((icon) => icon.getAttribute('aria-label')?.startsWith('Harness: ') && !icon.querySelector(':scope > span'))), 'six harness SVG icons retain accessible names without text-initial fallbacks');
   await page.goto(`${base}/agents`, { waitUntil: 'networkidle' });

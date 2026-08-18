@@ -1048,13 +1048,6 @@
   display: block;
   object-fit: contain;
 }
-.agent-harness-icon.opencode img,
-.agent-harness-icon.harness-pi img,
-.agent-model-icon.provider-openai img,
-.agent-model-icon.provider-z-ai img,
-.agent-model-icon.provider-grok img {
-  filter: invert(1) grayscale(1) opacity(.82);
-}
 .agent-harness-icon.claudecode { color: var(--status-review); }
 .agent-harness-icon.opencode { color: var(--status-active); }
 .agent-card-chips {
@@ -4409,6 +4402,12 @@ mark.anno.anno-tail::after {
     radial-gradient(circle at 50% 29%, var(--agent-card-signal-soft), transparent 47%),
     color-mix(in oklab, var(--bg-2) 58%, var(--bg-1));
 }
+.agent-card-orbs {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
 .agent-card-orb {
   position: relative;
   z-index: 0;
@@ -4439,9 +4438,13 @@ mark.anno.anno-tail::after {
 .agent-card-orb::after { inset: -13px; }
 .agent-card-harness-icon { pointer-events: none; }
 .agent-harness-icon {
-  width: 31px;
-  height: 31px;
   color: var(--text-1);
+}
+/* Both portrait orbs (model + harness) size their icon uniformly. */
+.agent-card-orb .agent-harness-icon,
+.agent-card-orb .agent-model-icon {
+  width: 40px;
+  height: 40px;
 }
 .agent-harness-icon.harness-claudecode { color: var(--status-review); }
 .agent-harness-icon.harness-opencode { color: var(--status-active); }
@@ -4527,10 +4530,6 @@ mark.anno.anno-tail::after {
   font-size: 10px;
 }
 .agent-model-icon { width: 15px; height: 15px; }
-.agent-model-icon.provider-openai img,
-.agent-model-icon.provider-z-ai img,
-.agent-model-icon.provider-grok img { filter: invert(1) grayscale(1) opacity(.82); }
-.agent-harness-icon.harness-pi img { filter: invert(1) grayscale(1) opacity(.82); }
 .agent-model-pill span:last-child { min-width: 0; }
 .agent-card-time {
   display: flex;

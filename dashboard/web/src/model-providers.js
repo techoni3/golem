@@ -1,18 +1,35 @@
-import anthropicIcon from '@lobehub/icons-static-svg/icons/claude-color.svg?url';
-import claudeCodeIcon from '@lobehub/icons-static-svg/icons/claudecode-color.svg?url';
-import codexIcon from '@lobehub/icons-static-svg/icons/codex-color.svg?url';
-import deepSeekIcon from '@lobehub/icons-static-svg/icons/deepseek-color.svg?url';
-import geminiIcon from '@lobehub/icons-static-svg/icons/gemini-color.svg?url';
-import gemmaIcon from '@lobehub/icons-static-svg/icons/gemma-color.svg?url';
-import grokIcon from '@lobehub/icons-static-svg/icons/grok.svg?url';
-import minimaxIcon from '@lobehub/icons-static-svg/icons/minimax-color.svg?url';
-import openAiIcon from '@lobehub/icons-static-svg/icons/openai.svg?url';
-import openCodeIcon from '@lobehub/icons-static-svg/icons/opencode.svg?url';
-import ollamaIcon from '@lobehub/icons-static-svg/icons/ollama.svg?url';
-import piIcon from '@lobehub/icons-static-svg/icons/pi.svg?url';
-import qwenIcon from '@lobehub/icons-static-svg/icons/qwen-color.svg?url';
+// Local animated agent icons (idle at rest, active while working). Copied from the
+// icon studio into assets/agent-icons/. tencent has no animated variant yet, so it
+// keeps the static lobehub icon as the lone exception.
+import anthropicIdle from './assets/agent-icons/providers/anthropic-idle.svg?url';
+import anthropicActive from './assets/agent-icons/providers/anthropic-active.svg?url';
+import deepSeekIdle from './assets/agent-icons/providers/deepseek-idle.svg?url';
+import deepSeekActive from './assets/agent-icons/providers/deepseek-active.svg?url';
+import geminiIdle from './assets/agent-icons/providers/gemini-idle.svg?url';
+import geminiActive from './assets/agent-icons/providers/gemini-active.svg?url';
+import gemmaIdle from './assets/agent-icons/providers/gemma-idle.svg?url';
+import gemmaActive from './assets/agent-icons/providers/gemma-active.svg?url';
+import grokIdle from './assets/agent-icons/providers/grok-idle.svg?url';
+import grokActive from './assets/agent-icons/providers/grok-active.svg?url';
+import minimaxIdle from './assets/agent-icons/providers/minimax-idle.svg?url';
+import minimaxActive from './assets/agent-icons/providers/minimax-active.svg?url';
+import ollamaIdle from './assets/agent-icons/providers/ollama-idle.svg?url';
+import ollamaActive from './assets/agent-icons/providers/ollama-active.svg?url';
+import openAiIdle from './assets/agent-icons/providers/openai-idle.svg?url';
+import openAiActive from './assets/agent-icons/providers/openai-active.svg?url';
+import qwenIdle from './assets/agent-icons/providers/qwen-idle.svg?url';
+import qwenActive from './assets/agent-icons/providers/qwen-active.svg?url';
+import zaiIdle from './assets/agent-icons/providers/zai-idle.svg?url';
+import zaiActive from './assets/agent-icons/providers/zai-active.svg?url';
+import claudeCodeIdle from './assets/agent-icons/harnesses/claudecode-idle.svg?url';
+import claudeCodeActive from './assets/agent-icons/harnesses/claudecode-active.svg?url';
+import openCodeIdle from './assets/agent-icons/harnesses/opencode-idle.svg?url';
+import openCodeActive from './assets/agent-icons/harnesses/opencode-active.svg?url';
+import codexIdle from './assets/agent-icons/harnesses/codex-idle.svg?url';
+import codexActive from './assets/agent-icons/harnesses/codex-active.svg?url';
+import piIdle from './assets/agent-icons/harnesses/pi-idle.svg?url';
+import piActive from './assets/agent-icons/harnesses/pi-active.svg?url';
 import tencentIcon from '@lobehub/icons-static-svg/icons/tencent-color.svg?url';
-import zaiIcon from '@lobehub/icons-static-svg/icons/zai.svg?url';
 import {
   FALLBACK,
   PROVIDER_MATCHERS,
@@ -22,35 +39,59 @@ import {
 } from './model-provider-match.mjs';
 
 (function () {
-  const icons = {
-    ollama: ollamaIcon,
-    openai: openAiIcon,
-    anthropic: anthropicIcon,
-    minimax: minimaxIcon,
-    'z-ai': zaiIcon,
-    deepseek: deepSeekIcon,
-    gemma: gemmaIcon,
-    google: geminiIcon,
+  // Each provider/harness carries an idle icon (at rest) and an active icon
+  // (animated while the agent works). tencent has only the static lobehub icon,
+  // so both states point at it.
+  const idleIcons = {
+    ollama: ollamaIdle,
+    openai: openAiIdle,
+    anthropic: anthropicIdle,
+    minimax: minimaxIdle,
+    'z-ai': zaiIdle,
+    deepseek: deepSeekIdle,
+    gemma: gemmaIdle,
+    google: geminiIdle,
     tencent: tencentIcon,
-    grok: grokIcon,
-    qwen: qwenIcon,
+    grok: grokIdle,
+    qwen: qwenIdle,
   };
+  const activeIcons = {
+    ollama: ollamaActive,
+    openai: openAiActive,
+    anthropic: anthropicActive,
+    minimax: minimaxActive,
+    'z-ai': zaiActive,
+    deepseek: deepSeekActive,
+    gemma: gemmaActive,
+    google: geminiActive,
+    tencent: tencentIcon,
+    grok: grokActive,
+    qwen: qwenActive,
+  };
+
+  function iconsFor(id) {
+    const idleSrc = idleIcons[id] || null;
+    const activeSrc = activeIcons[id] || null;
+    // iconSrc stays as the idle URL for back-compat with any older consumer.
+    return { iconSrc: idleSrc, iconIdleSrc: idleSrc, iconActiveSrc: activeSrc };
+  }
+
   const providers = PROVIDER_MATCHERS.map((entry) => ({
     ...entry,
-    iconSrc: icons[entry.id] || null,
+    ...iconsFor(entry.id),
   }));
-  const fallback = { ...FALLBACK, iconSrc: null };
+  const fallback = { ...FALLBACK, iconSrc: null, iconIdleSrc: null, iconActiveSrc: null };
   const harnesses = {
-    claudecode: { id: 'claudecode', label: 'Claude Code', iconSrc: claudeCodeIcon },
-    opencode: { id: 'opencode', label: 'OpenCode', iconSrc: openCodeIcon },
-    codex: { id: 'codex', label: 'Codex', iconSrc: codexIcon },
-    pi: { id: 'pi', label: 'Pi', iconSrc: piIcon },
+    claudecode: { id: 'claudecode', label: 'Claude Code', iconIdleSrc: claudeCodeIdle, iconActiveSrc: claudeCodeActive, iconSrc: claudeCodeIdle },
+    opencode: { id: 'opencode', label: 'OpenCode', iconIdleSrc: openCodeIdle, iconActiveSrc: openCodeActive, iconSrc: openCodeIdle },
+    codex: { id: 'codex', label: 'Codex', iconIdleSrc: codexIdle, iconActiveSrc: codexActive, iconSrc: codexIdle },
+    pi: { id: 'pi', label: 'Pi', iconIdleSrc: piIdle, iconActiveSrc: piActive, iconSrc: piIdle },
   };
 
   function withIcon(entry) {
     if (!entry) return entry;
     if (entry.id === 'fallback') return fallback;
-    return { ...entry, iconSrc: icons[entry.id] || null };
+    return { ...entry, ...iconsFor(entry.id) };
   }
 
   function providerForId(provider) {

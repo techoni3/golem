@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="100%" height="100%">
+<defs>
+  <mask id="coffeeMaskIdle">
+    <path fill="#fff" clip-rule="evenodd" fill-rule="evenodd" d="M1 1h16.5v11H12v5.5H6.5V23H1V1zm5.5 5.5V12H12V6.5H6.5z"/>
+    <path fill="#fff" d="M17.5 12H23v11h-5.5V12z"/>
+  </mask>
+</defs>
+<path fill="#2E2E38" clip-rule="evenodd" fill-rule="evenodd" d="M1 1h16.5v11H12v5.5H6.5V23H1V1zm5.5 5.5V12H12V6.5H6.5z"/>
+<path fill="#2E2E38" d="M17.5 12H23v11h-5.5V12z"/>
+<g mask="url(#coffeeMaskIdle)"><rect fill="#D97757" x="0" y="0" width="24" height="24" /></g>
+</svg>

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="100%" height="100%">
+<defs>
+  <style>
+    .coffee-level { animation: c-fill 2.4s ease-in-out infinite alternate; fill: #D97757; }
+    .steam-1 { animation: steam-rise 1.4s ease-out infinite; stroke: #FFAA8C; }
+    .steam-2 { animation: steam-rise 1.4s ease-out infinite 0.7s; stroke: #FFAA8C; }
+    @keyframes c-fill { 0%{transform:translateY(16px)} 100%{transform:translateY(0px)} }
+    @keyframes steam-rise { 0%{transform:translateY(4px);opacity:0} 50%{opacity:0.8} 100%{transform:translateY(-6px);opacity:0} }
+  </style>
+  <mask id="coffeeMask">
+    <path fill="#fff" clip-rule="evenodd" fill-rule="evenodd" d="M1 1h16.5v11H12v5.5H6.5V23H1V1zm5.5 5.5V12H12V6.5H6.5z"/>
+    <path fill="#fff" d="M17.5 12H23v11h-5.5V12z"/>
+  </mask>
+</defs>
+<path fill="#2E2E38" clip-rule="evenodd" fill-rule="evenodd" d="M1 1h16.5v11H12v5.5H6.5V23H1V1zm5.5 5.5V12H12V6.5H6.5z"/>
+<path fill="#2E2E38" d="M17.5 12H23v11h-5.5V12z"/>
+<g mask="url(#coffeeMask)"><rect class="coffee-level" x="0" y="0" width="24" height="24" /></g>
+<path class="steam-1" d="M5 2 Q6 0 5 -2" fill="none" stroke-width="1" stroke-linecap="round" />
+<path class="steam-2" d="M14 2 Q13 0 14 -2" fill="none" stroke-width="1" stroke-linecap="round" />
+</svg>

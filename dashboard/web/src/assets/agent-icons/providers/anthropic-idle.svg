@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100%" height="100%">
+<circle fill="#D97757" cx="50" cy="50" r="14" />
+<g stroke="#D97757" stroke-linecap="round">
+  <g transform="rotate(0 50 50)"><line x1="50" y1="50" x2="50" y2="12" stroke-width="11"/></g>
+  <g transform="rotate(33 50 50)"><line x1="50" y1="50" x2="50" y2="12" stroke-width="12"/></g>
+  <g transform="rotate(65 50 50)"><line x1="50" y1="50" x2="50" y2="16" stroke-width="9.5"/></g>
+  <g transform="rotate(98 50 50)"><line x1="50" y1="50" x2="50" y2="12" stroke-width="11"/></g>
+  <g transform="rotate(130 50 50)"><line x1="50" y1="50" x2="50" y2="12" stroke-width="12"/></g>
+  <g transform="rotate(160 50 50)"><line x1="50" y1="50" x2="50" y2="16" stroke-width="9.5"/></g>
+  <g transform="rotate(195 50 50)"><line x1="50" y1="50" x2="50" y2="13" stroke-width="11"/></g>
+  <g transform="rotate(228 50 50)"><line x1="50" y1="50" x2="50" y2="12" stroke-width="12"/></g>
+  <g transform="rotate(260 50 50)"><line x1="50" y1="50" x2="50" y2="15" stroke-width="10"/></g>
+  <g transform="rotate(295 50 50)"><line x1="50" y1="50" x2="50" y2="13" stroke-width="11"/></g>
+  <g transform="rotate(328 50 50)"><line x1="50" y1="50" x2="50" y2="12" stroke-width="12"/></g>
+</g>
+</svg>

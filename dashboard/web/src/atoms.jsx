@@ -214,31 +214,56 @@ function sessionStatusKind(s) {
   return 'unknown';
 }
 
-function HarnessIcon({ harness }) {
+function HarnessIcon({ harness, working = false }) {
   const h = harness || 'claudecode';
   const icon = window.ModelProviders?.harnessForId?.(h);
+  const iconSrc = icon && (working ? (icon.iconActiveSrc || icon.iconSrc) : (icon.iconIdleSrc || icon.iconSrc));
   return (
-    <span className={`agent-harness-icon ${icon ? `harness-${icon.id}` : 'harness-unknown'}`} role="img" title={`Harness: ${icon?.label || h}`} aria-label={`Harness: ${icon?.label || h}`}>
-      {icon?.iconSrc ? <img src={icon.iconSrc} alt=""/> : (
+    <span className={`agent-harness-icon ${icon ? `harness-${icon.id}` : 'harness-unknown'} ${working ? 'is-working' : 'is-idle'}`} role="img" title={`Harness: ${icon?.label || h}`} aria-label={`Harness: ${icon?.label || h}`}>
+      {iconSrc ? <img src={iconSrc} alt=""/> : (
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.8"/><path d="M8 12h8M12 8v8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
       )}
     </span>
   );
 }
 
-function ModelPill({ model, provider: providerId }) {
-  const modelLabel = typeof model === 'string' && model.trim() ? model.trim() : 'model unavailable';
+// Provider/model resolution shared by the chip and the portrait orb.
+function resolveProviderView(providerId, model) {
   const provider = window.ModelProviders?.resolveProvider?.(providerId, model)
     || window.ModelProviders?.fallback || { id: 'fallback', label: 'Unknown' };
-  const providerLabel = provider.id === 'fallback' ? 'Unknown provider' : provider.label;
+  return {
+    provider,
+    providerLabel: provider.id === 'fallback' ? 'Unknown provider' : provider.label,
+    modelLabel: typeof model === 'string' && model.trim() ? model.trim() : 'model unavailable',
+  };
+}
+
+// The chip pairs the provider mark with the model name. Its icon stays at rest
+// (idle) always — the animated model mark lives in the portrait orb.
+function ModelPill({ model, provider: providerId }) {
+  const { provider, providerLabel, modelLabel } = resolveProviderView(providerId, model);
+  const iconSrc = provider.iconIdleSrc || provider.iconSrc;
   return (
     <span className="agent-model-pill" title={`${providerLabel}: ${modelLabel}`}>
       <span className={`agent-model-icon provider-${provider.id || 'fallback'}`} aria-hidden="true">
-        {provider.iconSrc ? <img src={provider.iconSrc} alt=""/> : (
+        {iconSrc ? <img src={iconSrc} alt=""/> : (
           <svg viewBox="0 0 24 24"><path d="M12 3.5 20 8v8l-8 4.5L4 16V8l8-4.5Z" fill="none" stroke="currentColor" strokeWidth="1.8"/><path d="M8.5 12h7M12 8.5v7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
         )}
       </span>
       <span>{modelLabel}</span>
+    </span>
+  );
+}
+
+// The primary portrait orb: the provider/model mark, animated while the agent works.
+function ProviderOrbIcon({ model, provider: providerId, working = false }) {
+  const { provider, providerLabel, modelLabel } = resolveProviderView(providerId, model);
+  const iconSrc = working ? (provider.iconActiveSrc || provider.iconSrc) : (provider.iconIdleSrc || provider.iconSrc);
+  return (
+    <span className={`agent-model-icon provider-${provider.id || 'fallback'} ${working ? 'is-working' : 'is-idle'}`} role="img" title={`Model: ${providerLabel} — ${modelLabel}`} aria-label={`Model: ${providerLabel} — ${modelLabel}`}>
+      {iconSrc ? <img src={iconSrc} alt=""/> : (
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 20 8v8l-8 4.5L4 16V8l8-4.5Z" fill="none" stroke="currentColor" strokeWidth="1.8"/><path d="M8.5 12h7M12 8.5v7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
+      )}
     </span>
   );
 }
@@ -341,10 +366,15 @@ function AgentCard({ session, name, queueCount = 0, setRoute, showControls = fal
 
       <div className="agent-card-passport">
         <div className="agent-card-portrait">
-          <div className="agent-card-orb">
-            <HarnessIcon harness={s.harness}/>
-            <span className="agent-card-sr-only">{stateLabel(statusKind)}</span>
+          <div className="agent-card-orbs">
+            <div className="agent-card-orb agent-card-orb--model">
+              <ProviderOrbIcon model={s.model} provider={s.provider} working={statusKind === 'busy'}/>
+            </div>
+            <div className="agent-card-orb agent-card-orb--harness">
+              <HarnessIcon harness={s.harness} working={statusKind === 'busy'}/>
+            </div>
           </div>
+          <span className="agent-card-sr-only">{stateLabel(statusKind)}</span>
           <div className="agent-card-transient-bay" aria-live="polite" aria-atomic="true" title={bayMessage || undefined}>
             {bayMessage && <span>{bayMessage}</span>}
           </div>
