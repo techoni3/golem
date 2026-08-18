@@ -370,7 +370,7 @@ function AgentCard({ session, name, queueCount = 0, setRoute, showControls = fal
             <div className="agent-card-orb agent-card-orb--model">
               <ProviderOrbIcon model={s.model} provider={s.provider} working={statusKind === 'busy'}/>
             </div>
-            <div className="agent-card-orb agent-card-orb--harness">
+            <div className="agent-card-harness-mark">
               <HarnessIcon harness={s.harness} working={statusKind === 'busy'}/>
             </div>
           </div>

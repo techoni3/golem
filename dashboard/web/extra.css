@@ -4440,11 +4440,17 @@ mark.anno.anno-tail::after {
 .agent-harness-icon {
   color: var(--text-1);
 }
-/* Both portrait orbs (model + harness) size their icon uniformly. */
-.agent-card-orb .agent-harness-icon,
-.agent-card-orb .agent-model-icon {
+/* The model orb and the raw harness mark size their icon uniformly. */
+.agent-card-orb .agent-model-icon,
+.agent-card-harness-mark .agent-harness-icon {
   width: 40px;
   height: 40px;
+}
+/* Harness sits below the model orb as a raw animated mark — no orb ring or ripple. */
+.agent-card-harness-mark {
+  display: grid;
+  place-items: center;
+  pointer-events: none;
 }
 .agent-harness-icon.harness-claudecode { color: var(--status-review); }
 .agent-harness-icon.harness-opencode { color: var(--status-active); }

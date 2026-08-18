@@ -213,8 +213,8 @@ try {
   ok(projectSessionNames.join('|') === 'Fixture Builder|Healthy Working Codex|Waiting Reviewer|Idle Newer|Legacy Status|Idle Older', 'project sessions include healthy busy, missing-channel, waiting, idle, and legacy rows in last-seen order');
   const busyCard = projectSessions.filter({ hasText: 'Fixture Builder' });
   const waitingCard = projectSessions.filter({ hasText: 'Waiting Reviewer' });
-  ok(await busyCard.locator('.agent-status-badge').count() === 0 && await busyCard.locator('.agent-card-orb').count() === 2, 'busy project card uses twin H1 orbs (model + harness) instead of an obsolete Working badge');
-  ok(await waitingCard.locator('.agent-status-badge').count() === 0 && await waitingCard.locator('.agent-card-orb').count() === 2, 'waiting project card also keeps lifecycle state in its twin H1 orbs');
+  ok(await busyCard.locator('.agent-status-badge').count() === 0 && await busyCard.locator('.agent-card-orb').count() === 1 && await busyCard.locator('.agent-card-harness-mark .agent-harness-icon').count() === 1, 'busy project card uses the H1 model orb plus a raw harness mark instead of an obsolete Working badge');
+  ok(await waitingCard.locator('.agent-status-badge').count() === 0 && await waitingCard.locator('.agent-card-orb').count() === 1 && await waitingCard.locator('.agent-card-harness-mark .agent-harness-icon').count() === 1, 'waiting project card also keeps lifecycle state in its model orb and raw harness mark');
   ok(await projectSessions.filter({ hasText: 'Healthy Working Codex' }).locator('.native-session-nochannel').count() === 0, 'healthy working card never renders a no-channel warning');
   ok((await projectSessions.filter({ hasText: 'Legacy Status' }).locator('.agent-card-communication').innerText()).includes('Channel offline'), 'genuine missing-channel card retains visible offline communication');
   ok(!projectSessionNames.includes('Stale Ghost') && !projectSessionNames.includes('Beta Builder'), 'project sessions exclude dead and cross-project rows');
