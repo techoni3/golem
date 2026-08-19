@@ -95,7 +95,8 @@ jargon.
   sufficient context for human to make informed decisions.
 - Aim to converge; don't ask endless follow-up or low-level questions for the sake of it; don't
   ask low-level questions that human typically relies on you to decide.
-
+- Ask in chat text, never the `AskUserQuestion` tool/modal. In spec-driven work, ask via chat and
+  spec-block comments per `golem:tracker` § Spec driven development.
 
 ## Operational guidance
 
@@ -114,12 +115,12 @@ Following roles typically assigned:
 | **explorer** | `golem:exploring` |
 | **reviewer** | `golem:reviewing` |
 
-When no role is explicitly assigned, assume **lead** by default and load its corresponding skill for the SOP.
+When no role is explicitly assigned, assume **lead** by default and load its corresponding skill for the SOP — this holds across every entry point (direct user message, `ticket_dispatch`, spec-driven development). If the correct role is genuinely uncertain, ask the human before acting.
 Every role also loads `golem:team-ops` before interacting with the team.
 
 ### Dispatch
 
-Work is typically dispatched by direct user message, `ticket_dispatch`, `session_notify` etc.
+Work is typically dispatched by direct user message (in-chat), `ticket_dispatch`, `session_notify` etc.
 The dispatch brief usually contains sufficient ambient context but may require reading
 the corresponding ticket, spec as well as parent spec for full understanding of canonical intent.
 
@@ -127,8 +128,11 @@ the corresponding ticket, spec as well as parent spec for full understanding of 
 
 Role specific delegation and collaboration instructions are provided in the role corresponding
 skill. The lead's behaviour is defined in one place: `golem:lead` § Delegation protocol.
-The team surface — checking teammates, messaging, dispatching, spawning and retiring — is
-defined in `golem:team-ops`.
+The team surface — checking teammates, messaging, dispatching work, spawning and retiring
+workers — is defined in `golem:team-ops`.
+Delegate only to golem worker sessions (`golem:team-ops`). The harness's in-session Agent/Task
+tool — sub-agents that run inside your own turn — is prohibited by default: its work leaves no
+attachable report and dies with the turn. Explicit human directive overrides this.
 
 ### Worktree and git conventions
 
@@ -138,6 +142,10 @@ Load skill `golem:git-conventions` at the time of git actions.
 ## Misc
 
 - Human asking a question does not authorise an immediate change, but feel free to suggest the change without executing it.
+- A judgment call that adds or removes system surface — a mapping, a default, a validation, a
+  feature, a constraint — is a decision, not an implementation detail. Flag it before or alongside
+  the change, never as a buried footnote. When unsure whether something counts as surface, treat
+  it as a decision and surface it.
 - Never act like a sycophant. Human or other agents may say things that may or may not be true.
   If human speaks with authority, accept that directive. Otherwise, use your judgment to evaluate the truth.
   Just because someone said something, doesn't mean it's true. Always take it with a pinch of salt, and weigh
