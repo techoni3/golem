@@ -24,7 +24,7 @@ A spawned worker is a real session: it appears in `sessions_dispatchable`, takes
 | `session_notify` | direct message to a teammate: delegation briefs, pings, comm-checks, returns |
 | `ticket_dispatch({id, session_id})` | hand a ticket to a teammate |
 | `golem list --project .` or `golem list --project <project-name>` | see the managed teammates — the ops view for spawning, retiring, peeking |
-| `golem spawn <builder\|explorer\|reviewer> --project .` | add a managed teammate with that role |
+| `golem spawn <builder\|explorer\|reviewer> --project . [--profile <name>]` | add a managed teammate with that role; `--profile <name>` overrides its default model for this one spawn |
 | `golem peek <name> --project .` | quick look at a managed teammate's terminal without disturbing it |
 | `golem attach <name> --project .` | attach to a managed teammate's live TUI; with no name, the project's whole swarm |
 | `golem kill <name> --project .` | retire a managed teammate |
@@ -61,6 +61,21 @@ The `golem` CLI runs via Bash; the rest are MCP tools.
 - Multiple teammates (say 2 builders, 1 reviewer, 4 explorers) are created one by one; no
   parallel creation mechanism exists yet.
 - A lead can be spawned when it has a Pi execution preset (default model profile or exec) configured — same as any other role.
+
+## Model profiles
+
+Every role carries a default **model profile** — the provider/model/thinking a spawn uses when
+you give no override. `golem spawn <role> --project .` launches on that default.
+
+- Override one spawn with `--profile <name>`: `golem spawn reviewer --profile <name> --project .`
+  launches that single worker on the named profile instead of the role default. The role's
+  default is untouched — the next plain spawn uses it again.
+- Same override for a foreground session: `golem pi --role <role> --profile <name>`. On `golem
+  pi` a raw `--provider`/`--model` still wins over `--profile` — the escape hatch for a one-off
+  model you have not made a profile for.
+- Profiles are created and named in the dashboard **Model Profiles** section (above Roles); a
+  role's default profile is set from the same page. `golem list --project .` shows the model each
+  worker actually resolved to, so an override is visible there.
 
 ## Reusing
 
