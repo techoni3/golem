@@ -12,7 +12,7 @@ import { PiNativeAdapter } from './lib/pi-native-adapter.js';
 import { readRoleCard, sessionsJsonPath, setSessionRole, validateSessionRole } from './lib/session-role.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
-const PI_ROLES = new Set(['builder', 'explorer', 'reviewer']);
+const PI_ROLES = new Set(['builder', 'explorer', 'reviewer', 'lead']);
 
 function formatTokens(count) {
   if (count == null) return '?';
@@ -69,57 +69,83 @@ function contextMeter(ctx, theme) {
 
 function installFooter(pi) {
   let activeTui;
+  let currentCtx = null;
+  let disposeFooter = null;
+
   pi.on('session_info_changed', () => activeTui?.requestRender());
+
+  // Session replacement (new/fork/switch/reload) invalidates the captured ctx.
+  // Drop it and dispose the footer so no render touches the stale ctx.
+  pi.on('session_shutdown', () => {
+    currentCtx = null;
+    disposeFooter?.();
+    disposeFooter = null;
+    activeTui = undefined;
+  });
+
   pi.on('session_start', (_event, ctx) => {
+    currentCtx = ctx;
     if (ctx.mode !== 'tui' || !ctx.ui?.setFooter) return;
     ctx.ui.setFooter((tui, theme, footerData) => {
       activeTui = tui;
       const unsubscribe = footerData.onBranchChange(() => tui.requestRender());
+      disposeFooter = () => {
+        unsubscribe();
+        if (activeTui === tui) activeTui = undefined;
+      };
       return {
         dispose() {
-          unsubscribe();
-          if (activeTui === tui) activeTui = undefined;
+          disposeFooter?.();
+          disposeFooter = null;
         },
         invalidate() {},
         render(width) {
-          const branch = footerData.getGitBranch();
-          const sessionName = ctx.sessionManager.getSessionName();
-          const cwd = theme.bold(theme.fg('accent', compactCwd(ctx.cwd)));
-          const branchText = branch ? theme.fg('muted', ` (${branch})`) : '';
-          const sessionText = sessionName ? ` ${theme.fg('dim', '•')} ${theme.bold(theme.fg('accent', sessionName))}` : '';
-          const identity = truncateToWidth(`${cwd}${branchText}${sessionText}`, width, '…');
+          const c = currentCtx;
+          if (!c) return [];
+          try {
+            const branch = footerData.getGitBranch();
+            const sessionName = c.sessionManager.getSessionName();
+            const cwd = theme.bold(theme.fg('accent', compactCwd(c.cwd)));
+            const branchText = branch ? theme.fg('muted', ` (${branch})`) : '';
+            const sessionText = sessionName ? ` ${theme.fg('dim', '•')} ${theme.bold(theme.fg('accent', sessionName))}` : '';
+            const identity = truncateToWidth(`${cwd}${branchText}${sessionText}`, width, '…');
 
-          const totals = usageTotals(ctx.sessionManager);
-          const stats = [];
-          if (totals.input) stats.push(`↑${formatTokens(totals.input)}`);
-          if (totals.output) stats.push(`↓${formatTokens(totals.output)}`);
-          if (totals.cacheRead) stats.push(`R${formatTokens(totals.cacheRead)}`);
-          if (totals.cacheWrite) stats.push(`W${formatTokens(totals.cacheWrite)}`);
-          if (totals.cacheHit != null && (totals.cacheRead || totals.cacheWrite)) stats.push(`CH${totals.cacheHit.toFixed(1)}%`);
-          if (totals.cost) stats.push(`$${totals.cost.toFixed(3)}`);
-          const left = `${theme.fg('muted', stats.join(' '))}${stats.length ? ' ' : ''}${contextMeter(ctx, theme)}`;
+            const totals = usageTotals(c.sessionManager);
+            const stats = [];
+            if (totals.input) stats.push(`↑${formatTokens(totals.input)}`);
+            if (totals.output) stats.push(`↓${formatTokens(totals.output)}`);
+            if (totals.cacheRead) stats.push(`R${formatTokens(totals.cacheRead)}`);
+            if (totals.cacheWrite) stats.push(`W${formatTokens(totals.cacheWrite)}`);
+            if (totals.cacheHit != null && (totals.cacheRead || totals.cacheWrite)) stats.push(`CH${totals.cacheHit.toFixed(1)}%`);
+            if (totals.cost) stats.push(`$${totals.cost.toFixed(3)}`);
+            const left = `${theme.fg('muted', stats.join(' '))}${stats.length ? ' ' : ''}${contextMeter(c, theme)}`;
 
-          const model = ctx.model?.id || 'no-model';
-          const provider = footerData.getAvailableProviderCount() > 1 && ctx.model ? `(${ctx.model.provider}) ` : '';
-          const thinking = ctx.model?.reasoning ? ` • ${pi.getThinkingLevel()}` : '';
-          const fullRight = theme.fg('muted', `${provider}${model}${thinking}`);
-          const fallbackRight = theme.fg('muted', `${model}${thinking}`);
-          let right = fullRight;
-          if (visibleWidth(left) + 2 + visibleWidth(fullRight) > width) right = fallbackRight;
-          const rightBudget = width >= 40 ? Math.min(visibleWidth(right), Math.max(0, width - 22)) : 0;
-          const leftBudget = Math.max(0, width - rightBudget - (rightBudget ? 2 : 0));
-          const fittedLeft = truncateToWidth(left, leftBudget, '…');
-          const fittedRight = rightBudget ? truncateToWidth(right, rightBudget, '…') : '';
-          const gap = Math.max(0, width - visibleWidth(fittedLeft) - visibleWidth(fittedRight));
-          const metrics = `${fittedLeft}${' '.repeat(gap)}${fittedRight}`;
+            const model = c.model?.id || 'no-model';
+            const provider = footerData.getAvailableProviderCount() > 1 && c.model ? `(${c.model.provider}) ` : '';
+            const thinking = c.model?.reasoning ? ` • ${pi.getThinkingLevel()}` : '';
+            const fullRight = theme.fg('muted', `${provider}${model}${thinking}`);
+            const fallbackRight = theme.fg('muted', `${model}${thinking}`);
+            let right = fullRight;
+            if (visibleWidth(left) + 2 + visibleWidth(fullRight) > width) right = fallbackRight;
+            const rightBudget = width >= 40 ? Math.min(visibleWidth(right), Math.max(0, width - 22)) : 0;
+            const leftBudget = Math.max(0, width - rightBudget - (rightBudget ? 2 : 0));
+            const fittedLeft = truncateToWidth(left, leftBudget, '…');
+            const fittedRight = rightBudget ? truncateToWidth(right, rightBudget, '…') : '';
+            const gap = Math.max(0, width - visibleWidth(fittedLeft) - visibleWidth(fittedRight));
+            const metrics = `${fittedLeft}${' '.repeat(gap)}${fittedRight}`;
 
-          const lines = [identity, metrics];
-          const statuses = [...footerData.getExtensionStatuses().entries()]
-            .sort(([a], [b]) => a.localeCompare(b))
-            .map(([, text]) => String(text).replace(/[\r\n\t]+/g, ' ').trim())
-            .filter(Boolean);
-          if (statuses.length) lines.push(truncateToWidth(statuses.join(' '), width, '…'));
-          return lines;
+            const lines = [identity, metrics];
+            const statuses = [...footerData.getExtensionStatuses().entries()]
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([, text]) => String(text).replace(/[\r\n\t]+/g, ' ').trim())
+              .filter(Boolean);
+            if (statuses.length) lines.push(truncateToWidth(statuses.join(' '), width, '…'));
+            return lines;
+          } catch {
+            // Stale ctx guard after session replacement: degrade to an empty
+            // footer instead of crashing the session.
+            return [];
+          }
         },
       };
     });
@@ -177,7 +203,6 @@ export default function golem(pi) {
             },
             respond: (body) => client.respond(body),
             setRole: ({ role }) => {
-              if (role != null && !PI_ROLES.has(role)) throw new Error(`Pi first-class worker role must be builder, explorer, reviewer, or clear (got ${role})`);
               validateSessionRole(role);
               return setSessionRole(sessionId, role, { by: 'self:mcp' });
             },
@@ -201,7 +226,7 @@ export default function golem(pi) {
     const roleCard = PI_ROLES.has(role) ? readRoleCard(role) : null;
     let ambient = '';
     try { ambient = projectContext(sessionId, ctx.cwd); } catch {}
-    const boundary = 'Pi worker scope: this process may act only as builder, explorer, or reviewer. Lead/standalone orchestration and Pi subagent delegation are not available in this release.';
+    const boundary = 'Pi worker scope: this process may act as builder, explorer, reviewer, or lead. Pi-native subagent delegation is not available in this release.';
     return { systemPrompt: [event.systemPrompt, instructions, boundary, roleCard, ambient].filter(Boolean).join('\n\n') };
   });
 
