@@ -39,6 +39,7 @@ import { isHarnessEnabled, loadConfig, saveConfig } from '../lib/golem-config.js
 import { CodexSupervisor, readCodexSupervisor } from '../lib/codex-supervisor.js';
 import { MIN_PI_NODE, SUPPORTED_PI_VERSION, piNodeSupported } from '../lib/pi-compatibility.js';
 import { resolveRolePreset } from '../lib/role-preset.js';
+import { getProfile, listProfileNames } from '../lib/model-profiles.js';
 import {
   attachSwarm,
   attachWorker,
@@ -607,7 +608,7 @@ async function cmdClaude(args) {
 }
 
 function piLauncherHelp() {
-  log(`Usage: golem pi [--role <role>] [--provider <id> --model <id>] [--resume <session-id>] [-- <pi args...>]
+  log(`Usage: golem pi [--role <role>] [--profile <name>] [--provider <id> --model <id>] [--resume <session-id>] [-- <pi args...>]
 
 Open native Pi with Golem's canonical rendered bridge extension. Pi retains its
 own profile, authentication, models, providers, extensions, and sessions. The
@@ -616,6 +617,9 @@ supported bridge baseline is Pi ${SUPPORTED_PI_VERSION} on Node.js
 
 Wrapper options:
   --role <role>         Apply the role's validated Pi execution preset.
+  --profile <name>      Model profile override: its provider/model/thinking are
+                        applied (role defaults come from profiles.json). Raw
+                        --provider/--model still win over the profile.
   --provider <id>       Explicit native Pi provider. With --role, overrides its preset.
   --model <id>          Explicit provider-local model id. With --role, overrides its preset.
   --thinking <level>    With --role, overrides its preset thinking level.
@@ -627,6 +631,7 @@ configuration remain active; the shipped Golem extension is appended explicitly.
 
   golem pi --role explorer
   golem pi --role explorer --thinking max
+  golem pi --role reviewer --profile grok-4.6-high
   golem pi --resume <pi-session-id> -- --thinking high`);
 }
 
@@ -656,6 +661,7 @@ async function cmdPi(args) {
   let model = null;
   let thinking;
   let name;
+  let profile = null;
   let resume = null;
   let separatorSeen = false;
   const roleMode = hasPiRoleOption(args);
@@ -663,12 +669,13 @@ async function cmdPi(args) {
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (!separatorSeen && arg === '--') { separatorSeen = true; continue; }
-    if (!separatorSeen && ['--role', '--provider', '--model', '--resume'].includes(arg)) {
+    if (!separatorSeen && ['--role', '--provider', '--model', '--profile', '--resume'].includes(arg)) {
       const value = args[++index];
       if (!value || value.startsWith('-')) fatal(2, `golem pi requires a value for ${arg}`);
       if (arg === '--role') role = value;
       else if (arg === '--provider') provider = value;
       else if (arg === '--model') model = value;
+      else if (arg === '--profile') profile = value;
       else resume = value;
       continue;
     }
@@ -682,13 +689,24 @@ async function cmdPi(args) {
     if (!separatorSeen && arg.startsWith('--role=')) role = arg.slice('--role='.length);
     else if (!separatorSeen && arg.startsWith('--provider=')) provider = arg.slice('--provider='.length);
     else if (!separatorSeen && arg.startsWith('--model=')) model = arg.slice('--model='.length);
+    else if (!separatorSeen && arg.startsWith('--profile=')) profile = arg.slice('--profile='.length);
     else if (!separatorSeen && arg.startsWith('--resume=')) resume = arg.slice('--resume='.length);
     else if (roleMode && !separatorSeen && arg.startsWith('--thinking=')) thinking = arg.slice('--thinking='.length);
     else if (roleMode && !separatorSeen && arg.startsWith('--name=')) name = arg.slice('--name='.length);
     else passthrough.push(arg);
   }
   if (roleMode && !role) fatal(2, 'golem pi requires a non-empty --role');
-  if (!roleMode && (provider == null) !== (model == null)) fatal(2, 'golem pi requires --provider and --model together');
+  if (profile != null && !profile.trim()) fatal(2, 'golem pi requires a non-empty --profile');
+  let profileExec = null;
+  if (profile != null) {
+    profileExec = getProfile(profile);
+    if (!profileExec) {
+      fatal(2, `golem pi: unknown model profile "${profile}"; expected one of: ${listProfileNames().join(', ') || '(none)'}`);
+    }
+  }
+  const effectiveProvider = provider ?? profileExec?.provider ?? null;
+  const effectiveModel = model ?? profileExec?.model ?? null;
+  if (!roleMode && (effectiveProvider == null) !== (effectiveModel == null)) fatal(2, 'golem pi requires --provider and --model together');
   if (provider != null && !provider.trim()) fatal(2, 'golem pi requires a non-empty --provider');
   if (model != null && !model.trim()) fatal(2, 'golem pi requires a non-empty --model');
   if (thinking != null && !thinking.trim()) fatal(2, 'golem pi requires a non-empty --thinking');
@@ -698,6 +716,7 @@ async function cmdPi(args) {
   let presetArgs = [];
   if (roleMode) {
     const overrides = {};
+    if (profile != null) overrides.profile = profile;
     if (provider != null) overrides.provider = provider;
     if (model != null) overrides.model = model;
     if (thinking != null) overrides.thinking = thinking;
@@ -707,6 +726,15 @@ async function cmdPi(args) {
     } catch (error) {
       fatal(2, `golem pi: ${error.message}`);
     }
+  } else if (effectiveProvider != null) {
+    // Bare mode with a resolved profile: decompose the profile into the
+    // provider/model/thinking flags Pi consumes. Raw --provider/--model already
+    // won per-field above (D3); the profile's thinking remains in force unless
+    // the caller passes a native override after `--`.
+    presetArgs = [
+      '--provider', effectiveProvider.trim(), '--model', effectiveModel.trim(),
+      ...(profileExec?.thinking ? ['--thinking', profileExec.thinking] : []),
+    ];
   }
 
   const childEnv = { ...process.env };
@@ -736,7 +764,7 @@ async function cmdPi(args) {
   });
   const launchArgs = [
     '--extension', extension,
-    ...(roleMode ? presetArgs : (provider ? ['--provider', provider.trim(), '--model', model.trim()] : [])),
+    ...presetArgs,
     ...(resume ? ['--session', resume.trim()] : []),
     ...passthrough,
   ];
@@ -1137,17 +1165,20 @@ function emitWorkerOutput(value, { json = false } = {}) {
 
 async function cmdSpawn(args) {
   if (!args.length || args[0] === '-h' || args[0] === '--help') {
-    log(`Usage: golem spawn <role> [--name <name>] ${workerProjectHelp()} [--json]
+    log(`Usage: golem spawn <role> [--name <name>] [--profile <name>] ${workerProjectHelp()} [--json]
 
 Create one Pi worker in a detached tmux pty. The worker is registered and
 role-assigned before this command returns. A failed readiness wait leaves the
-worker's tmux session available for peek/inspection.`);
+worker's tmux session available for peek/inspection. With --profile, the named
+model profile overrides the role's default (resolution: --profile > role
+default > role exec).`);
     return;
   }
   const role = args[0];
   const wantJson = args.includes('--json');
   let name = null;
   let project = null;
+  let profile = null;
   for (let index = 1; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === '--json') {
@@ -1158,6 +1189,12 @@ worker's tmux session available for peek/inspection.`);
       if (!name || name.startsWith('-')) fatal(2, 'golem spawn --name requires a value');
     } else if (arg.startsWith('--name=')) {
       name = arg.slice('--name='.length);
+    } else if (arg === '--profile') {
+      profile = args[++index] ?? null;
+      if (!profile || profile.startsWith('-')) fatal(2, 'golem spawn --profile requires a value');
+    } else if (arg.startsWith('--profile=')) {
+      profile = arg.slice('--profile='.length);
+      if (!profile) fatal(2, 'golem spawn --profile requires a value');
     } else if (arg === '--project') {
       project = args[++index] ?? null;
       if (!project || project.startsWith('-')) fatal(2, 'golem spawn --project requires a value');
@@ -1168,7 +1205,7 @@ worker's tmux session available for peek/inspection.`);
     }
   }
   try {
-    const worker = await spawnWorker({ role, name, project });
+    const worker = await spawnWorker({ role, name, project, profile });
     emitWorkerOutput(worker, { json: wantJson });
   } catch (error) {
     fatal(1, `golem spawn: ${error.message}`);
@@ -2320,11 +2357,12 @@ Run:
   claude|cc [--backend native|ollama] [--model <id>] [-- <claude args...>]
                        Open Claude Code with Golem's development channel loaded;
                        optionally launch through Ollama with an explicit model.
-  pi [--role <role>] [--provider <id> --model <id>] [--resume <session-id>] [-- <pi args...>]
+  pi [--role <role>] [--profile <name>] [--provider <id> --model <id>] [--resume <session-id>] [-- <pi args...>]
                        Open native Pi with the canonical Golem bridge extension;
-                       --role applies a validated role preset; Pi keeps its own
+                       --role applies a validated role preset and --profile
+                       selects a reusable model config; Pi keeps its own
                        profile, providers, and sessions.
-  spawn <role> [--name X] [--project P] [--json]
+  spawn <role> [--name X] [--profile <name>] [--project P] [--json]
                        Spawn one named Pi worker in detached tmux.
   list [--project P] [--all] [--json]
                        List worker records as a table; --all includes dead rows.

@@ -107,7 +107,8 @@ async function proveForwardedSignal(signal) {
 try {
   const help = run(['pi', '--help']);
   assert.equal(help.status, 0, help.stderr);
-  assert.match(help.stdout, /golem pi \[--role <role>\] \[--provider <id> --model <id>\]/);
+  assert.match(help.stdout, /golem pi \[--role <role>\] \[--profile <name>\] \[--provider <id> --model <id>\]/);
+  assert.match(help.stdout, /--profile <name>\s+Model profile override/);
   assert.match(help.stdout, /--role <role>\s+Apply the role's validated Pi execution preset/);
   assert.match(help.stdout, /retains its\s+own profile, authentication, models, providers, extensions, and sessions/);
   assert.match(help.stdout, /Pi 0\.80\.10/);
