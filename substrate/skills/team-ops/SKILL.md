@@ -60,7 +60,7 @@ The `golem` CLI runs via Bash; the rest are MCP tools.
   several. More than 3 in parallel: justify and confirm with the human.
 - Multiple teammates (say 2 builders, 1 reviewer, 4 explorers) are created one by one; no
   parallel creation mechanism exists yet.
-- You cannot spawn a lead. Only builder, explorer, and reviewer have presets.
+- A lead can be spawned when it has a Pi execution preset (default model profile or exec) configured — same as any other role.
 
 ## Reusing
 
@@ -86,7 +86,7 @@ The `golem` CLI runs via Bash; the rest are MCP tools.
 
 - Read the message text — it names the problem and usually the recovery. Do not key off exit
   codes; they are not consistent across verbs.
-- `unknown role: …` — non-retryable. Only builder, explorer, and reviewer exist.
+- `unknown role: …` — non-retryable. The role does not exist in the registry.
 - `worker name already exists: …` — non-retryable with that name: inside a project an occupied
   name is a collision regardless of socket. Pick another name, or omit `--name` and let
   auto-naming choose.
