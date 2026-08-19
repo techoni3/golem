@@ -3893,7 +3893,8 @@ mark.anno.anno-tail::after {
 .pv-tracker .kanban {
   max-height: 70vh;
   grid-template-rows: minmax(0, 1fr);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 /* Column needs a definite height for the list's flex:1 + overflow to take. */
 .kanban-col {
