@@ -32,7 +32,7 @@ sequenceDiagram
     participant A as Agents (per § Delegation protocol)
 
     H->>L: raw intent / partial spec (chat or dispatch)
-    Note over L: create or claim the spec — state: todo → in_progress
+    Note over L: create or claim the spec — state: todo → in_progress<br/>assign it (and any scratchpad doc) to yourself
 
     rect rgb(235, 242, 250)
     Note over H,A: BRAINSTORM · GROUND · DECIDE — the living spec doc
@@ -81,6 +81,11 @@ for a delegation: § Delegation protocol defines the fallback.
 - Everything in the Lead lane of the diagram is yours — never delegated: brainstorming with the
   human, maintaining and finalising the spec, folding in insights, decomposing, orchestrating
   the stages.
+- Own the spec as its assignee. When you create or claim a spec — and any supporting scratchpad
+  `doc` you keep — set yourself as its assignee and hold that through the workstream. This is
+  what lets the human drop and dispatch comments to you from the dashboard: a comment dispatch
+  has nowhere to go when nothing is assigned. The exception is delegated tasks and docs — those
+  are assigned to the agent you dispatch them to, never to you.
 - Team composition is a deliberate call — the count heuristics, reuse-first rule, and
   confirmation thresholds live in `golem:team-ops` § Spawning.
 - A locked spec gets a single thorough reviewer pass before decomposition; every built task gets
