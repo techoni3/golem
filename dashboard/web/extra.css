@@ -1170,6 +1170,321 @@
 }
 
 .roles-panel { margin-bottom: 18px; }
+
+/* ---- Model profiles (GOL-253) ------------------------------------------ */
+.model-profiles-panel {
+  position: relative;
+  margin-bottom: 18px;
+}
+.model-profiles-head {
+  flex-wrap: wrap;
+}
+.model-profiles-head-spacer {
+  flex: 1 1 12px;
+}
+.model-catalog-status {
+  color: var(--status-active);
+  font-size: 10px;
+  letter-spacing: .03em;
+  white-space: nowrap;
+}
+.model-catalog-status.is-stale {
+  color: var(--status-blocked);
+}
+.model-profiles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(235px, 1fr));
+  gap: 10px;
+}
+.model-profile-card {
+  min-width: 0;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-2);
+  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  transition: border-color 120ms ease, transform 120ms ease, background 120ms ease;
+}
+.model-profile-card:hover {
+  border-color: var(--border-2);
+  background: color-mix(in oklab, var(--bg-3) 54%, var(--bg-2));
+  transform: translateY(-1px);
+}
+.model-profile-card-head,
+.model-profile-card-meta,
+.model-profile-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.model-profile-card-head {
+  justify-content: space-between;
+}
+.model-profile-card-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-1);
+  font-weight: 700;
+}
+.model-profile-harness-chip,
+.model-profile-thinking-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border-1);
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.model-profile-harness-chip { color: var(--text-2); }
+.model-profile-card-model {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 10px;
+  border-radius: var(--radius-1);
+  background: color-mix(in oklab, var(--bg-1) 72%, transparent);
+}
+.model-profile-card-model-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.model-profile-card-model-text strong,
+.model-profile-card-model-text span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-profile-card-model-text strong { color: var(--text-1); font-size: 12px; }
+.model-profile-card-model-text span { color: var(--text-3); font-size: 10px; }
+.model-profile-card-meta {
+  justify-content: space-between;
+  color: var(--text-3);
+  font-size: 10px;
+  min-width: 0;
+}
+.model-profile-card-meta > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-profile-card-actions {
+  justify-content: flex-end;
+  border-top: 1px solid var(--border-1);
+  padding-top: 9px;
+}
+.model-profile-mark {
+  width: 21px;
+  height: 21px;
+  flex: 0 0 21px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+}
+.model-profile-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.model-profile-mark-fallback {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-2);
+  border-radius: 50%;
+  color: var(--text-3);
+  font-size: 11px;
+}
+.model-profile-harness-chip .model-profile-mark {
+  width: 14px;
+  height: 14px;
+  flex-basis: 14px;
+}
+.model-profiles-empty {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  border: 1px dashed var(--border-2);
+  border-radius: var(--radius-2);
+  color: var(--text-3);
+  font-size: 11px;
+}
+.model-profiles-empty strong { color: var(--text-2); }
+.model-profiles-empty span { flex: 1 1 220px; }
+.model-profile-choice {
+  position: relative;
+  min-width: 0;
+}
+.model-profile-choice-trigger {
+  width: 100%;
+  min-height: 31px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-1);
+  background: var(--bg-1);
+  color: var(--text-1);
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.model-profile-choice-trigger:hover:not(:disabled),
+.model-profile-choice.is-open .model-profile-choice-trigger {
+  border-color: var(--accent-border);
+}
+.model-profile-choice-trigger:disabled { opacity: .55; cursor: not-allowed; }
+.model-profile-choice-trigger > span:nth-child(2) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-profile-choice-trigger .is-placeholder { color: var(--text-3); }
+.model-profile-choice-caret {
+  margin-left: auto;
+  color: var(--text-3);
+  flex: 0 0 auto;
+}
+.model-profile-choice-menu {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 230px;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-1);
+  background: var(--bg-3);
+  box-shadow: var(--shadow-2);
+}
+.model-profile-choice-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-radius: var(--radius-1);
+  background: transparent;
+  color: var(--text-1);
+  padding: 7px 8px;
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.model-profile-choice-option:hover,
+.model-profile-choice-option.is-selected { background: color-mix(in oklab, var(--accent) 14%, transparent); }
+.model-profile-choice-empty { color: var(--text-3); padding: 8px; font-size: 11px; }
+.model-profile-modal-backdrop {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 22px;
+  background: rgba(4, 7, 12, .68);
+}
+.model-profile-modal {
+  width: min(560px, 100%);
+  max-height: min(720px, calc(100vh - 44px));
+  overflow: auto;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-2);
+  background: var(--bg-2);
+  box-shadow: var(--shadow-2);
+  padding: 16px;
+}
+.model-profile-modal-head,
+.model-profile-modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.model-profile-modal-head { margin-bottom: 15px; }
+.model-profile-modal-title { color: var(--text-1); font-size: 15px; font-weight: 700; }
+.model-profile-form { display: flex; flex-direction: column; gap: 12px; }
+.model-profile-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 11px;
+}
+.model-profile-field {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.model-profile-field-wide { grid-column: span 2; }
+.model-profile-field > span {
+  color: var(--text-3);
+  font-size: 10.5px;
+}
+.model-profile-field input,
+.model-profile-field select {
+  width: 100%;
+  min-width: 0;
+  min-height: 31px;
+  box-sizing: border-box;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-1);
+  background: var(--bg-1);
+  color: var(--text-1);
+  padding: 6px 8px;
+  font-size: 11px;
+}
+.model-profile-field input:focus,
+.model-profile-field select:focus,
+.model-profile-choice-trigger:focus-visible,
+.model-profile-choice-option:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--accent) 28%, transparent);
+  outline-offset: 1px;
+}
+.model-profile-field input:disabled { opacity: .58; }
+.model-profile-catalog-note {
+  color: var(--text-3);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+.model-profile-modal-actions { justify-content: flex-end; }
+.role-profile-form { display: flex; flex-direction: column; gap: 10px; }
+.role-profile-field {
+  border-top: 1px solid var(--border-1);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.role-profile-heading {
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.role-profile-hint { color: var(--text-4); font-size: 10px; line-height: 1.35; }
+
 .roles-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));

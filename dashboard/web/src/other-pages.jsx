@@ -85,6 +85,8 @@ function AgentsPage({ setRoute }) {
   useStore();
   const all = window.Store.getNativeSessions();
   const rolesRev = window.Store.getRolesRev ? window.Store.getRolesRev() : 0;
+  const [profilesRev, setProfilesRev] = React.useState(0);
+  const bumpProfiles = React.useCallback(() => setProfilesRev((value) => value + 1), []);
   // The server broadcasts a payload-free fact-change signal. Fetching once per
   // signal keeps this compact summary live without a dashboard polling loop.
   const communicationHealthRev = window.Store.getState().communicationHealthRev || 0;
@@ -159,7 +161,8 @@ function AgentsPage({ setRoute }) {
         />
       </div>
 
-      <RolesPanel rev={rolesRev}/>
+      <ModelProfilesPanel rev={profilesRev + rolesRev} onChanged={bumpProfiles}/>
+      <RolesPanel rev={rolesRev} profilesRev={profilesRev}/>
 
       {alive.length === 0 && orphans.length === 0 ? (
         <EmptyCard
@@ -217,35 +220,6 @@ const ROLE_THINKING_LEVELS = Object.freeze([
   'max',
 ]);
 
-const ROLE_EXEC_FORM_DEFAULTS = Object.freeze({
-  harness: 'pi',
-  provider: 'ollama-cloud',
-  model: '',
-  thinking: 'medium',
-  name: '',
-});
-
-function roleExecFormValue(exec) {
-  const source = exec && typeof exec === 'object' && !Array.isArray(exec) ? exec : {};
-  return {
-    harness: source.harness ?? ROLE_EXEC_FORM_DEFAULTS.harness,
-    provider: source.provider ?? ROLE_EXEC_FORM_DEFAULTS.provider,
-    model: source.model ?? ROLE_EXEC_FORM_DEFAULTS.model,
-    thinking: source.thinking ?? ROLE_EXEC_FORM_DEFAULTS.thinking,
-    name: source.name == null ? ROLE_EXEC_FORM_DEFAULTS.name : String(source.name),
-  };
-}
-
-function roleExecPayload(exec) {
-  return {
-    harness: String(exec.harness ?? '').trim(),
-    provider: String(exec.provider ?? '').trim(),
-    model: String(exec.model ?? '').trim(),
-    thinking: exec.thinking,
-    name: String(exec.name ?? '').trim() || null,
-  };
-}
-
 function roleErrorMessage(error, fallback) {
   return error?.payload?.error || error?.payload?.message || error?.message || fallback;
 }
@@ -256,7 +230,7 @@ function newRoleDraft() {
     color: '#8a909c',
     glyph: '',
     body: '',
-    exec: { ...ROLE_EXEC_FORM_DEFAULTS },
+    default_profile: '',
   };
 }
 
@@ -264,43 +238,391 @@ function sortRoleCards(items) {
   return items.slice().sort((a, b) => Number(Boolean(b.builtin)) - Number(Boolean(a.builtin)) || a.name.localeCompare(b.name));
 }
 
-function RoleExecFields({ value, onChange, idPrefix, disabled = false }) {
-  const setField = (field) => (event) => onChange({ ...value, [field]: event.target.value });
-  const thinkingKnown = ROLE_THINKING_LEVELS.includes(value.thinking);
+function profileProvider(provider, model) {
+  return window.ModelProviders?.resolveProvider?.(provider, model)
+    || window.ModelProviders?.fallback
+    || { id: 'fallback', label: 'Unknown' };
+}
+
+function ProfileMark({ provider, model, harness = false }) {
+  const entry = harness
+    ? window.ModelProviders?.harnessForId?.(provider || 'pi')
+    : profileProvider(provider, model);
+  const src = entry?.iconIdleSrc || entry?.iconSrc || null;
   return (
-    <div className="role-exec-fields" role="group" aria-label="Execution preset">
-      <div className="role-exec-heading">Execution preset</div>
-      <div className="role-exec-grid">
-        <div className="role-exec-field">
-          <label htmlFor={`${idPrefix}-harness`}>Harness</label>
-          <input id={`${idPrefix}-harness`} className="mono" type="text" value={value.harness} onChange={setField('harness')} disabled={disabled} spellCheck="false"/>
+    <span className={`model-profile-mark ${harness ? 'harness-mark' : `provider-mark provider-${entry?.id || 'fallback'}`}`} title={entry?.label || provider || 'Unknown'} aria-hidden="true">
+      {src ? <img src={src} alt=""/> : <span className="model-profile-mark-fallback">{harness ? 'π' : '·'}</span>}
+    </span>
+  );
+}
+
+// Native select elements cannot render provider/model icons consistently. This
+// compact listbox keeps the same keyboard/click surface while letting profile
+// choices show their resolved family mark.
+function ProfileChoice({ value, options, onChange, id, placeholder = 'Select a profile', disabled = false, ariaLabel }) {
+  const [open, setOpen] = React.useState(false);
+  const rootRef = React.useRef(null);
+  React.useEffect(() => {
+    if (!open) return undefined;
+    const close = (event) => {
+      if (!rootRef.current?.contains(event.target)) setOpen(false);
+    };
+    const escape = (event) => { if (event.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', escape);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', escape);
+    };
+  }, [open]);
+  const current = options.find((option) => option.value === value) || null;
+  const choose = (next) => {
+    onChange(next);
+    setOpen(false);
+  };
+  return (
+    <div className={`model-profile-choice ${open ? 'is-open' : ''}`} ref={rootRef}>
+      <button
+        id={id}
+        type="button"
+        className="model-profile-choice-trigger"
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        disabled={disabled}
+        onClick={() => setOpen((state) => !state)}
+      >
+        {current?.provider && <ProfileMark provider={current.provider} model={current.model}/>}
+        <span className={!current ? 'is-placeholder' : ''}>{current?.label || placeholder}</span>
+        <span className="model-profile-choice-caret" aria-hidden="true">▾</span>
+      </button>
+      {open && (
+        <div className="model-profile-choice-menu" role="listbox" aria-labelledby={id}>
+          {options.length === 0 ? (
+            <div className="model-profile-choice-empty">No choices available</div>
+          ) : options.map((option) => (
+            <button
+              key={option.value || '__empty'}
+              type="button"
+              role="option"
+              aria-selected={option.value === value}
+              className={`model-profile-choice-option ${option.value === value ? 'is-selected' : ''}`}
+              onClick={() => choose(option.value)}
+            >
+              {option.provider && <ProfileMark provider={option.provider} model={option.model}/>}
+              <span>{option.label}</span>
+            </button>
+          ))}
         </div>
-        <div className="role-exec-field">
-          <label htmlFor={`${idPrefix}-provider`}>Provider</label>
-          <input id={`${idPrefix}-provider`} className="mono" type="text" value={value.provider} onChange={setField('provider')} disabled={disabled} spellCheck="false"/>
+      )}
+    </div>
+  );
+}
+
+function roleProfileOptions(profiles, value) {
+  const options = [{ value: '', label: 'No default — use role exec' }];
+  const rows = Array.isArray(profiles) ? profiles : [];
+  for (const profile of rows) {
+    options.push({
+      value: profile.name,
+      label: profile.name,
+      provider: profile.provider,
+      model: profile.model,
+    });
+  }
+  if (value && !options.some((option) => option.value === value)) {
+    options.push({ value, label: `${value} (missing)` });
+  }
+  return options;
+}
+
+function RoleProfileField({ value, onChange, profiles, idPrefix, disabled = false }) {
+  return (
+    <div className="role-profile-field" role="group" aria-label="Default model profile">
+      <div className="role-profile-heading">Default model profile</div>
+      <ProfileChoice
+        id={`${idPrefix}-default-profile`}
+        value={value || ''}
+        options={roleProfileOptions(profiles, value)}
+        onChange={onChange}
+        disabled={disabled}
+        ariaLabel="Default model profile"
+        placeholder="No default — use role exec"
+      />
+      <div className="role-profile-hint">Profiles resolve into the retained role exec at launch.</div>
+    </div>
+  );
+}
+
+function catalogProviders(catalog, current) {
+  const values = Array.isArray(catalog?.providers) ? catalog.providers.slice() : [];
+  if (current && !values.includes(current)) values.unshift(current);
+  return values;
+}
+
+function catalogModels(catalog, provider, current) {
+  const values = Array.isArray(catalog?.modelsByProvider?.[provider])
+    ? catalog.modelsByProvider[provider].slice()
+    : [];
+  if (current && !values.includes(current)) values.unshift(current);
+  return values;
+}
+
+function ModelProfileEditor({ profile, catalog, onCancel, onSave, saving, error }) {
+  const [draft, setDraft] = React.useState(() => ({
+    name: profile?.name || '',
+    provider: profile?.provider || '',
+    model: profile?.model || '',
+    thinking: profile?.thinking || 'medium',
+  }));
+  React.useEffect(() => {
+    setDraft({
+      name: profile?.name || '',
+      provider: profile?.provider || '',
+      model: profile?.model || '',
+      thinking: profile?.thinking || 'medium',
+    });
+  }, [profile?.name, profile?.provider, profile?.model, profile?.thinking]);
+
+  const providers = catalogProviders(catalog, draft.provider);
+  const models = catalogModels(catalog, draft.provider, draft.model);
+  const providerOptions = providers.map((provider) => ({
+    value: provider,
+    label: provider,
+    provider,
+    model: catalogModels(catalog, provider, '')[0] || draft.model,
+  }));
+  const modelOptions = models.map((model) => ({
+    value: model,
+    label: model,
+    provider: draft.provider,
+    model,
+  }));
+  const catalogReady = Array.isArray(catalog?.providers) && catalog.providers.length > 0;
+  const setProvider = (provider) => {
+    const nextModels = catalogModels(catalog, provider, '');
+    const nextModel = nextModels.includes(draft.model) ? draft.model : (nextModels[0] || draft.model);
+    setDraft({ ...draft, provider, model: nextModel });
+  };
+  const submit = (event) => {
+    event.preventDefault();
+    onSave({ ...draft, name: draft.name.trim(), provider: draft.provider.trim(), model: draft.model.trim() });
+  };
+  return (
+    <div className="model-profile-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+      <div className="model-profile-modal" role="dialog" aria-modal="true" aria-labelledby="model-profile-editor-title" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="model-profile-modal-head">
+          <div>
+            <div id="model-profile-editor-title" className="model-profile-modal-title">{profile ? 'Edit Model Profile' : 'Add Model Profile'}</div>
+            <div className="roles-save-state">Named Pi execution config shared by roles.</div>
+          </div>
+          <button className="orch-btn ghost" type="button" onClick={onCancel} aria-label="Close model profile editor">×</button>
         </div>
-        <div className="role-exec-field role-exec-field-wide">
-          <label htmlFor={`${idPrefix}-model`}>Model</label>
-          <input id={`${idPrefix}-model`} className="mono" type="text" value={value.model} onChange={setField('model')} disabled={disabled} spellCheck="false"/>
-        </div>
-        <div className="role-exec-field">
-          <label htmlFor={`${idPrefix}-thinking`}>Thinking</label>
-          <select id={`${idPrefix}-thinking`} className="mono" value={value.thinking} onChange={setField('thinking')} disabled={disabled}>
-            {!thinkingKnown && value.thinking && <option value={value.thinking}>{value.thinking} (invalid)</option>}
-            {ROLE_THINKING_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}
-          </select>
-        </div>
-        <div className="role-exec-field role-exec-field-wide">
-          <label htmlFor={`${idPrefix}-name`}>Name <span className="role-field-optional">optional</span></label>
-          <input id={`${idPrefix}-name`} className="mono" type="text" value={value.name} onChange={setField('name')} disabled={disabled} placeholder="auto" spellCheck="false"/>
-        </div>
+        <form className="model-profile-form" onSubmit={submit}>
+          <div className="model-profile-form-grid">
+            <label className="model-profile-field">
+              <span>Name</span>
+              <input data-testid="model-profile-name" className="mono" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} required maxLength={80} autoFocus/>
+            </label>
+            <label className="model-profile-field">
+              <span>Harness</span>
+              <input className="mono" value="pi" disabled aria-label="Harness"/>
+            </label>
+            <div className="model-profile-field">
+              <span>Provider</span>
+              {catalogReady ? (
+                <ProfileChoice
+                  id="model-profile-provider"
+                  value={draft.provider}
+                  options={providerOptions}
+                  onChange={setProvider}
+                  ariaLabel="Profile provider"
+                  placeholder="Select provider"
+                />
+              ) : (
+                <input data-testid="model-profile-provider-input" className="mono" value={draft.provider} onChange={(event) => setDraft({ ...draft, provider: event.target.value })} placeholder="provider (catalog unavailable)" required/>
+              )}
+            </div>
+            <div className="model-profile-field model-profile-field-wide">
+              <span>Model</span>
+              {catalogReady ? (
+                <ProfileChoice
+                  id="model-profile-model"
+                  value={draft.model}
+                  options={modelOptions}
+                  onChange={(model) => setDraft({ ...draft, model })}
+                  disabled={!draft.provider}
+                  ariaLabel="Profile model"
+                  placeholder={draft.provider ? 'Select model' : 'Select provider first'}
+                />
+              ) : (
+                <input data-testid="model-profile-model-input" className="mono" value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })} placeholder="model (catalog unavailable)" required/>
+              )}
+            </div>
+            <label className="model-profile-field">
+              <span>Thinking</span>
+              <select data-testid="model-profile-thinking" className="mono" value={draft.thinking} onChange={(event) => setDraft({ ...draft, thinking: event.target.value })}>
+                {ROLE_THINKING_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}
+              </select>
+            </label>
+          </div>
+          <div className="model-profile-catalog-note">
+            {catalog?.error
+              ? `Catalog unavailable — saved values remain editable. ${catalog.error}`
+              : 'Provider and model choices come from Pi’s offline catalog.'}
+          </div>
+          {error && <div className="roles-inline-error" role="alert">{error}</div>}
+          <div className="model-profile-modal-actions">
+            <button className="orch-btn ghost" type="button" onClick={onCancel}>Cancel</button>
+            <button className="orch-btn" data-testid="model-profile-save" type="submit" disabled={saving || !draft.name.trim() || !draft.provider.trim() || !draft.model.trim()}>{saving ? 'Saving…' : 'Save profile'}</button>
+          </div>
+        </form>
       </div>
     </div>
   );
 }
 
-function RolesPanel({ rev }) {
+function ModelProfilesPanel({ rev, onChanged }) {
+  const [store, setStore] = React.useState({ profiles: [], role_defaults: {}, seeded_from_roles: false });
+  const [catalog, setCatalog] = React.useState({ providers: [], modelsByProvider: {}, source: 'loading', stale: false, error: null });
+  const [loading, setLoading] = React.useState(true);
+  const [catalogLoading, setCatalogLoading] = React.useState(true);
+  const [listError, setListError] = React.useState(null);
+  const [editor, setEditor] = React.useState(null);
+  const [saving, setSaving] = React.useState(false);
+  const [deleting, setDeleting] = React.useState(null);
+  const [editorError, setEditorError] = React.useState(null);
+  const [panelError, setPanelError] = React.useState(null);
+
+  const loadProfiles = React.useCallback(async () => {
+    setLoading(true);
+    setListError(null);
+    try {
+      const next = await window.SubstrateAPI.modelProfiles();
+      setStore(next && typeof next === 'object' ? next : { profiles: [], role_defaults: {}, seeded_from_roles: false });
+    } catch (error) {
+      setListError(roleErrorMessage(error, 'model profiles could not be loaded'));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const loadCatalog = React.useCallback(async (refresh = false) => {
+    setCatalogLoading(true);
+    try {
+      const next = await (refresh ? window.SubstrateAPI.refreshModelCatalog() : window.SubstrateAPI.modelCatalog());
+      setCatalog(next && typeof next === 'object' ? next : { providers: [], modelsByProvider: {}, source: 'unavailable', stale: true, error: 'empty catalog response' });
+    } catch (error) {
+      setCatalog({ providers: [], modelsByProvider: {}, source: 'unavailable', stale: true, error: roleErrorMessage(error, 'catalog request failed') });
+    } finally {
+      setCatalogLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    loadProfiles();
+    loadCatalog();
+  }, [loadProfiles, loadCatalog, rev]);
+
+  const openNew = () => {
+    setEditorError(null);
+    setPanelError(null);
+    setEditor({ name: '', provider: '', model: '', thinking: 'medium' });
+  };
+  const openExisting = (profile) => {
+    setEditorError(null);
+    setPanelError(null);
+    setEditor({ ...profile });
+  };
+  const save = async (draft) => {
+    setSaving(true);
+    setEditorError(null);
+    try {
+      if (editor?.name) await window.SubstrateAPI.saveModelProfile(editor.name, draft);
+      else await window.SubstrateAPI.createModelProfile(draft);
+      setEditor(null);
+      await loadProfiles();
+      onChanged?.();
+    } catch (error) {
+      setEditorError(roleErrorMessage(error, 'model profile could not be saved'));
+    } finally {
+      setSaving(false);
+    }
+  };
+  const remove = async (profile) => {
+    setPanelError(null);
+    if (!window.confirm(`Delete model profile “${profile.name}”?`)) return;
+    setDeleting(profile.name);
+    try {
+      await window.SubstrateAPI.deleteModelProfile(profile.name);
+      await loadProfiles();
+      onChanged?.();
+    } catch (error) {
+      setPanelError(roleErrorMessage(error, 'model profile could not be deleted'));
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  const defaults = store.role_defaults && typeof store.role_defaults === 'object' ? store.role_defaults : {};
+  return (
+    <div className="agents-section model-profiles-panel" data-testid="model-profiles-panel">
+      <div className="agents-section-head model-profiles-head">
+        <Icon.Agents size={16}/>
+        <span className="agents-section-title">Model Profiles</span>
+        <span className="agents-section-count">{Array.isArray(store.profiles) ? store.profiles.length : 0}</span>
+        {loading && <span className="roles-save-state">loading…</span>}
+        {listError && <span className="roles-save-state error">{listError}</span>}
+        <span className="model-profiles-head-spacer"/>
+        <span className={`model-catalog-status ${catalog.stale ? 'is-stale' : ''}`} title={catalog.error || `catalog source: ${catalog.source}`}>
+          {catalogLoading ? 'catalog loading…' : catalog.stale ? 'catalog unavailable' : `${catalog.providers?.length || 0} providers`}
+        </span>
+        <button className="orch-btn ghost small" type="button" data-testid="model-catalog-refresh" onClick={() => loadCatalog(true)} disabled={catalogLoading}>{catalogLoading ? 'Refreshing…' : 'Refresh catalog'}</button>
+        <button className="orch-btn small" type="button" data-testid="model-profile-add" onClick={openNew}>+ Add profile</button>
+      </div>
+      {panelError && <div className="roles-inline-error" role="alert">{panelError}</div>}
+      {!loading && !listError && (!store.profiles || store.profiles.length === 0) && (
+        <div className="model-profiles-empty">
+          <strong>No model profiles yet.</strong>
+          <span>Add a named Pi configuration, then assign it to a role below.</span>
+          <button className="orch-btn small" type="button" onClick={openNew}>Create first profile</button>
+        </div>
+      )}
+      <div className="model-profiles-grid">
+        {(store.profiles || []).map((profile) => {
+          const assigned = Object.entries(defaults).filter(([, name]) => name === profile.name).map(([role]) => role);
+          return (
+            <article className="model-profile-card" data-testid={`model-profile-card-${profile.name}`} key={profile.name}>
+              <div className="model-profile-card-head">
+                <div className="model-profile-card-name" title={profile.name}>{profile.name}</div>
+                <span className="model-profile-harness-chip"><ProfileMark provider="pi" harness/> pi</span>
+              </div>
+              <div className="model-profile-card-model">
+                <ProfileMark provider={profile.provider} model={profile.model}/>
+                <span className="model-profile-card-model-text">
+                  <strong>{profile.model}</strong>
+                  <span className="mono">{profile.provider}</span>
+                </span>
+              </div>
+              <div className="model-profile-card-meta">
+                <span className="model-profile-thinking-chip">thinking · {profile.thinking}</span>
+                <span title={assigned.length ? `Default for ${assigned.join(', ')}` : 'Not assigned to a role'}>{assigned.length ? `default · ${assigned.join(', ')}` : 'unassigned'}</span>
+              </div>
+              <div className="model-profile-card-actions">
+                <button className="orch-btn ghost small" type="button" onClick={() => openExisting(profile)}>Edit</button>
+                <button className="orch-btn danger ghost small" type="button" disabled={deleting === profile.name} onClick={() => remove(profile)}>{deleting === profile.name ? 'Deleting…' : 'Delete'}</button>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+      {editor && <ModelProfileEditor profile={editor.name ? editor : null} catalog={catalog} onCancel={() => setEditor(null)} onSave={save} saving={saving} error={editorError}/>}    </div>
+  );
+}
+
+function RolesPanel({ rev, profilesRev = 0 }) {
   const [roles, setRoles] = React.useState([]);
+  const [profiles, setProfiles] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [listError, setListError] = React.useState(null);
   const [createError, setCreateError] = React.useState(null);
@@ -319,22 +641,23 @@ function RolesPanel({ rev }) {
     let cancelled = false;
     setLoading(true);
     setListError(null);
-    window.SubstrateAPI.listRoles()
-      .then((list) => {
+    Promise.all([window.SubstrateAPI.listRoles(), window.SubstrateAPI.modelProfiles()])
+      .then(([list, profileStore]) => {
         if (cancelled) return;
         setRoles(Array.isArray(list) ? sortRoleCards(list) : []);
+        setProfiles(Array.isArray(profileStore?.profiles) ? profileStore.profiles : []);
       })
       .catch((err) => { if (!cancelled) setListError(roleErrorMessage(err, 'roles could not be loaded')); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [rev]);
+  }, [rev, profilesRev]);
 
   const create = async (event) => {
     event.preventDefault();
     setCreateError(null);
     setCreating(true);
     try {
-      const role = await window.SubstrateAPI.createRole({ ...draft, exec: roleExecPayload(draft.exec) });
+      const role = await window.SubstrateAPI.createRole({ ...draft });
       upsertRole(role);
       setDraft(newRoleDraft());
     } catch (error) {
@@ -354,7 +677,7 @@ function RolesPanel({ rev }) {
         {listError && <span className="roles-save-state error">{listError}</span>}
       </div>
       <div className="roles-grid">
-        {roles.map((role) => <RoleEditor key={role.name} role={role} onSaved={upsertRole} onDeleted={removeRole}/>)}
+        {roles.map((role) => <RoleEditor key={role.name} role={role} profiles={profiles} onSaved={upsertRole} onDeleted={removeRole}/>)}
       </div>
       {!loading && !listError && roles.length === 0 && <div className="roles-empty">No roles are registered.</div>}
       <form className="role-editor-card role-create-card" onSubmit={create}>
@@ -370,7 +693,7 @@ function RolesPanel({ rev }) {
           <input className="mono" placeholder="glyph" value={draft.glyph} maxLength={4} onChange={(e) => setDraft({ ...draft, glyph: e.target.value })}/>
           <input className="mono" type="color" value={draft.color} onChange={(e) => setDraft({ ...draft, color: e.target.value })}/>
         </div>
-        <RoleExecFields value={draft.exec} onChange={(exec) => setDraft({ ...draft, exec })} idPrefix="create-role"/>
+        <RoleProfileField value={draft.default_profile} onChange={(default_profile) => setDraft({ ...draft, default_profile })} profiles={profiles} idPrefix="create-role"/>
         {createError && <div className="roles-inline-error" role="alert">{createError}</div>}
         <textarea className="role-editor-body mono" value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} placeholder="Optional role card body" spellCheck="false"/>
       </form>
@@ -378,26 +701,26 @@ function RolesPanel({ rev }) {
   );
 }
 
-function RoleEditor({ role, onSaved, onDeleted }) {
+function RoleEditor({ role, profiles, onSaved, onDeleted }) {
   const [body, setBody] = React.useState(role.body || '');
   const [meta, setMeta] = React.useState({ color: role.color || '#8a909c', glyph: role.glyph || '' });
-  const [exec, setExec] = React.useState(() => roleExecFormValue(role.exec));
+  const [defaultProfile, setDefaultProfile] = React.useState(role.default_profile || '');
   const [state, setState] = React.useState('saved');
-  const [execState, setExecState] = React.useState('saved');
-  const [execError, setExecError] = React.useState(null);
+  const [profileState, setProfileState] = React.useState('saved');
+  const [profileError, setProfileError] = React.useState(null);
   const [deleteError, setDeleteError] = React.useState(null);
   const [pushResult, setPushResult] = React.useState(null);
 
   React.useEffect(() => {
     setBody(role.body || '');
     setMeta({ color: role.color || '#8a909c', glyph: role.glyph || '' });
-    setExec(roleExecFormValue(role.exec));
+    setDefaultProfile(role.default_profile || '');
     setState('saved');
-    setExecState('saved');
-    setExecError(null);
+    setProfileState('saved');
+    setProfileError(null);
     setDeleteError(null);
     setPushResult(null);
-  }, [role.name, role.body, role.color, role.glyph, role.exec?.harness, role.exec?.provider, role.exec?.model, role.exec?.thinking, role.exec?.name]);
+  }, [role.name, role.body, role.color, role.glyph, role.default_profile]);
 
   React.useEffect(() => {
     if (body === (role.body || '') && meta.color === (role.color || '#8a909c') && meta.glyph === (role.glyph || '')) return;
@@ -413,23 +736,18 @@ function RoleEditor({ role, onSaved, onDeleted }) {
     return () => clearTimeout(timer);
   }, [body, meta.color, meta.glyph, role.name, role.body, role.color, role.glyph, onSaved]);
 
-  const updateExec = (next) => {
-    setExec(next);
-    if (execError) setExecError(null);
-  };
-
-  const saveExec = async (event) => {
+  const saveDefaultProfile = async (event) => {
     event.preventDefault();
-    setExecState('saving');
-    setExecError(null);
+    setProfileState('saving');
+    setProfileError(null);
     try {
-      const saved = await window.SubstrateAPI.saveRole(role.name, { exec: roleExecPayload(exec) });
-      setExecState('saved');
+      const saved = await window.SubstrateAPI.saveRoleDefaultProfile(role.name, defaultProfile);
+      setProfileState('saved');
       setState('saved');
       if (saved?.name) onSaved?.(saved);
     } catch (error) {
-      setExecState('error');
-      setExecError(roleErrorMessage(error, 'preset save failed'));
+      setProfileState('error');
+      setProfileError(roleErrorMessage(error, 'default profile save failed'));
     }
   };
 
@@ -455,12 +773,6 @@ function RoleEditor({ role, onSaved, onDeleted }) {
   const status = state === 'saved'
     ? (role.overridden ? `saved override${role.updated_at ? ` · ${window.SubstrateFmt?.fmtTimeAgo?.(role.updated_at) || role.updated_at}` : ''}` : 'using default')
     : state;
-  const hasExecPreset = role.exec && typeof role.exec === 'object' && !Array.isArray(role.exec);
-  const execStatus = execState === 'saving'
-    ? 'saving preset…'
-    : execState === 'error'
-      ? 'preset save failed'
-      : 'preset saved';
   const pushed = pushResult?.result;
   const okCount = pushed?.results?.filter((r) => r.ok).length ?? 0;
   return (
@@ -471,7 +783,7 @@ function RoleEditor({ role, onSaved, onDeleted }) {
           <div className={`roles-save-state ${String(state).includes('failed') || String(state).includes('error') ? 'error' : ''}`}>{status}</div>
         </div>
         <div className="role-editor-actions">
-          <button className="orch-btn" type="button" onClick={push} disabled={state === 'saving' || execState === 'saving' || pushResult?.state === 'pushing'}>Update running agents</button>
+          <button className="orch-btn" type="button" onClick={push} disabled={state === 'saving' || profileState === 'saving' || pushResult?.state === 'pushing'}>Update running agents</button>
           {!role.builtin && <button className="orch-btn danger" type="button" onClick={remove} disabled={state === 'deleting'}>{state === 'deleting' ? 'Deleting…' : 'Delete'}</button>}
         </div>
       </div>
@@ -479,21 +791,16 @@ function RoleEditor({ role, onSaved, onDeleted }) {
         <input className="mono" value={meta.glyph} maxLength={4} onChange={(e) => setMeta({ ...meta, glyph: e.target.value })} aria-label={`${role.name} glyph`} disabled={role.builtin} title={role.builtin ? 'Builtin identity is fixed' : undefined}/>
         <input className="mono" type="color" value={meta.color} onChange={(e) => setMeta({ ...meta, color: e.target.value })} aria-label={`${role.name} color`} disabled={role.builtin} title={role.builtin ? 'Builtin identity is fixed' : undefined}/>
       </div>
-      {hasExecPreset ? (
-        <form className="role-exec-form" onSubmit={saveExec}>
-          <RoleExecFields value={exec} onChange={updateExec} idPrefix={`role-${role.name}`} />
-          <div className="role-exec-actions">
-            <span className={`roles-save-state ${execState === 'error' ? 'error' : ''}`}>{execStatus}</span>
-            <button className="orch-btn" type="submit" disabled={execState === 'saving'}>{execState === 'saving' ? 'Saving…' : 'Save preset'}</button>
-          </div>
-          {execError && <div className="roles-inline-error" role="alert">{execError}</div>}
-        </form>
-      ) : (
-        <div className="roles-preset-unavailable" role="note">
-          <strong>No execution preset configured.</strong>
-          {role.name === 'lead' ? ' Lead is orchestration-only and is not launched as a Pi worker.' : ' This role has no Pi execution preset to edit.'}
+      <form className="role-profile-form" onSubmit={saveDefaultProfile}>
+        <RoleProfileField value={defaultProfile} onChange={setDefaultProfile} profiles={profiles} idPrefix={`role-${role.name}`} disabled={false}/>
+        <div className="role-exec-actions">
+          <span className={`roles-save-state ${profileState === 'error' ? 'error' : ''}`}>
+            {profileState === 'saving' ? 'saving default…' : profileState === 'error' ? 'default save failed' : defaultProfile ? 'using selected profile' : 'using retained role exec'}
+          </span>
+          <button className="orch-btn" type="submit" disabled={profileState === 'saving'}>{profileState === 'saving' ? 'Saving…' : 'Save default'}</button>
         </div>
-      )}
+        {profileError && <div className="roles-inline-error" role="alert">{profileError}</div>}
+      </form>
       {deleteError && <div className="roles-inline-error" role="alert">{deleteError}</div>}
       <textarea
         className="role-editor-body mono"

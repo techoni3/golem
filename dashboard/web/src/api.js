@@ -196,6 +196,13 @@
     setSessionRole: (sessionId, role) =>
       postJSON(`/api/sessions/${encodeURIComponent(sessionId)}/role`, { role }),
     listRoles: () => getJSON('/api/roles'),
+    modelProfiles: () => getJSON('/api/model-profiles'),
+    createModelProfile: (profile) => postJSON('/api/model-profiles', profile),
+    saveModelProfile: (name, patch) => patchJSON(`/api/model-profiles/${encodeURIComponent(name)}`, patch),
+    deleteModelProfile: (name) => delJSON(`/api/model-profiles/${encodeURIComponent(name)}`),
+    modelCatalog: (refresh = false) => getJSON(`/api/model-catalog${refresh ? '?refresh=1' : ''}`),
+    refreshModelCatalog: () => postJSON('/api/model-catalog/refresh', {}),
+    saveRoleDefaultProfile: (name, profile) => patchJSON(`/api/roles/${encodeURIComponent(name)}`, { default_profile: profile || null }),
     createRole: (role) => postJSON('/api/roles', role),
     saveRole: (name, patch) =>
       fetch(`/api/roles/${encodeURIComponent(name)}`, {

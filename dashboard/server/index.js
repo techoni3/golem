@@ -26,6 +26,19 @@ import { acceptedDelivery, publishDurableEnvelope, settleDurableEnvelope } from 
 import { recordTypedEnvelopeOutcome } from './typed-delivery.js';
 import { sameEndpointSecret } from '../../lib/typed-worker-endpoint.js';
 import { hasTypedWorkerCapability, readEndpointLeases, readSessionFacts } from '../../lib/session-facts.js';
+import {
+  clearRoleDefault,
+  createProfile,
+  deleteProfile,
+  loadProfilesStore,
+  setRoleDefault,
+  updateProfile,
+} from '../../lib/model-profiles.js';
+import {
+  readModelCatalogCache,
+  readPiModelCatalog,
+  writeModelCatalogCache,
+} from './model-catalog.js';
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const WEB_SOURCE_ROOT = path.resolve(__dirname, '..', 'web');
@@ -38,6 +51,65 @@ const WEB_ROOT = fs.existsSync(path.join(WEB_DIST_ROOT, 'index.html')) ? WEB_DIS
 // repo root) and point at that dir. Used by GET /api/templates.
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const TEMPLATES_DIR = path.join(REPO_ROOT, 'substrate', 'skills', 'tracker', 'templates');
+
+function modelProfilesPayload() {
+  return loadProfilesStore();
+}
+
+function roleCardsWithDefaults() {
+  const defaults = modelProfilesPayload().role_defaults;
+  return listRoleCards().map((role) => ({
+    ...role,
+    default_profile: defaults[role.name] ?? null,
+  }));
+}
+
+function profileRouteError(reply, error) {
+  const message = String(error?.message ?? error);
+  const code = /not found/i.test(message)
+    ? 404
+    : /already exists|default model profile|referenced/i.test(message)
+      ? 409
+      : 400;
+  return reply.code(code).send({ error: message });
+}
+
+function catalogPayload(catalog, { source, stale = false, fetchedAt = null, error = null } = {}) {
+  return {
+    providers: catalog?.providers ?? [],
+    modelsByProvider: catalog?.modelsByProvider ?? {},
+    source: source ?? 'unavailable',
+    stale: !!stale,
+    fetched_at: fetchedAt ?? null,
+    error: error ? String(error) : null,
+  };
+}
+
+function refreshCatalogPayload() {
+  const cached = readModelCatalogCache();
+  try {
+    const fresh = writeModelCatalogCache(readPiModelCatalog());
+    return catalogPayload(fresh.catalog, { source: 'pi', fetchedAt: fresh.fetched_at });
+  } catch (error) {
+    const message = String(error?.message ?? error);
+    if (cached) {
+      return catalogPayload(cached.catalog, {
+        source: 'cache',
+        stale: true,
+        fetchedAt: cached.fetched_at,
+        error: message,
+      });
+    }
+    return catalogPayload(null, { source: 'unavailable', stale: true, error: message });
+  }
+}
+
+function readCatalogPayload() {
+  const cached = readModelCatalogCache();
+  return cached
+    ? catalogPayload(cached.catalog, { source: 'cache', fetchedAt: cached.fetched_at })
+    : refreshCatalogPayload();
+}
 
 // Legacy markdown tracker columns (kept in /api/meta for API stability; the UI
 // no longer renders the markdown board).
@@ -2065,7 +2137,59 @@ async function main() {
     return enriched.map((row) => ({ ...row, suggested: row.session_id === assists.suggested_manager?.session_id ? 'lead' : null }));
   });
 
-  fastify.get('/api/roles', async () => listRoleCards());
+  fastify.get('/api/roles', async () => roleCardsWithDefaults());
+
+  fastify.get('/api/model-profiles', async () => modelProfilesPayload());
+
+  fastify.post('/api/model-profiles', async (req, reply) => {
+    try {
+      const profile = createProfile(req.body ?? {});
+      const roles = roleCardsWithDefaults();
+      broadcastWS({ type: 'model-profiles-updated', profiles: modelProfilesPayload(), roles, meta: roleMetaMap() });
+      broadcastWS({ type: 'roles-updated', roles, meta: roleMetaMap() });
+      return reply.code(201).send(profile);
+    } catch (error) {
+      return profileRouteError(reply, error);
+    }
+  });
+
+  fastify.route({
+    method: ['PATCH', 'PUT'],
+    url: '/api/model-profiles/:name',
+    handler: async (req, reply) => {
+      try {
+        const profile = updateProfile(req.params.name, req.body ?? {});
+        const roles = roleCardsWithDefaults();
+        broadcastWS({ type: 'model-profiles-updated', profiles: modelProfilesPayload(), roles, meta: roleMetaMap() });
+        broadcastWS({ type: 'roles-updated', roles, meta: roleMetaMap() });
+        return profile;
+      } catch (error) {
+        return profileRouteError(reply, error);
+      }
+    },
+  });
+
+  fastify.delete('/api/model-profiles/:name', async (req, reply) => {
+    try {
+      const result = deleteProfile(req.params.name);
+      const roles = roleCardsWithDefaults();
+      broadcastWS({ type: 'model-profiles-updated', profiles: modelProfilesPayload(), roles, meta: roleMetaMap() });
+      broadcastWS({ type: 'roles-updated', roles, meta: roleMetaMap() });
+      return result;
+    } catch (error) {
+      return profileRouteError(reply, error);
+    }
+  });
+
+  // Pi's catalog is an editor aid only. A missing binary, an offline Pi, or a
+  // malformed table returns the last-good cache (or an empty catalog), never a
+  // failed dashboard route and never a spawn-path dependency.
+  fastify.get('/api/model-catalog', async (req) => (
+    req.query?.refresh === '1' || req.query?.refresh === 'true'
+      ? refreshCatalogPayload()
+      : readCatalogPayload()
+  ));
+  fastify.post('/api/model-catalog/refresh', async () => refreshCatalogPayload());
 
   async function pushRoleToLive(name) {
     if (typeof state.refreshNativeSessions === 'function') await state.refreshNativeSessions();
@@ -2104,9 +2228,17 @@ async function main() {
 
   fastify.post('/api/roles', async (req, reply) => {
     try {
-      const role = createRole(req.body ?? {});
-      broadcastWS({ type: 'roles-updated', roles: listRoleCards(), meta: roleMetaMap() });
-      return reply.code(201).send(role);
+      const incoming = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? { ...req.body } : {};
+      const hasDefaultProfile = Object.hasOwn(incoming, 'default_profile');
+      const defaultProfile = incoming.default_profile;
+      delete incoming.default_profile;
+      const role = createRole(incoming);
+      if (hasDefaultProfile) {
+        setRoleDefault(role.name, defaultProfile == null || String(defaultProfile).trim() === '' ? null : defaultProfile);
+      }
+      const roles = roleCardsWithDefaults();
+      broadcastWS({ type: 'roles-updated', roles, meta: roleMetaMap() });
+      return reply.code(201).send(roles.find((item) => item.name === role.name) || role);
     } catch (err) {
       const msg = String(err?.message ?? err);
       const code = /already exists/i.test(msg) ? 409 : 400;
@@ -2114,37 +2246,47 @@ async function main() {
     }
   });
 
-  fastify.put('/api/roles/:name', async (req, reply) => {
+  fastify.route({
+    method: ['PUT', 'PATCH'],
+    url: '/api/roles/:name',
+    handler: async (req, reply) => {
     const name = req.params.name;
     const existing = getRole(name);
     if (!existing) return reply.code(404).send({ error: 'role_not_found' });
     try {
-      const incoming = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+      const incoming = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? { ...req.body } : {};
       const hasBody = typeof incoming.body === 'string';
-      // Builtin identity is fixed. Execution fields remain editable, while
-      // color/glyph/builtin in a stale or hand-written request cannot rewrite
-      // the role's identity. The model layer owns exec validation.
+      const hasDefaultProfile = Object.hasOwn(incoming, 'default_profile');
+      const defaultProfile = incoming.default_profile;
+      delete incoming.default_profile;
+      // Builtin identity is fixed. The model layer owns execution validation;
+      // default_profile is stored in profiles.json, never in the role row.
       const patch = existing.builtin
         ? { ...incoming, color: existing.color, glyph: existing.glyph, builtin: existing.builtin }
         : incoming;
       updateRoleMeta(name, patch);
+      if (hasDefaultProfile) {
+        setRoleDefault(name, defaultProfile == null || String(defaultProfile).trim() === '' ? null : defaultProfile);
+      }
       if (hasBody) writeRoleCard(existing.name, incoming.body);
       // Always return the complete card. writeRoleCard() only returns card
       // metadata, which would otherwise drop exec from a body-only round-trip.
-      const role = listRoleCards().find((r) => r.name === existing.name);
-      broadcastWS({ type: 'roles-updated', roles: listRoleCards(), meta: roleMetaMap() });
+      const role = roleCardsWithDefaults().find((r) => r.name === existing.name);
+      broadcastWS({ type: 'roles-updated', roles: roleCardsWithDefaults(), meta: roleMetaMap() });
       return role;
     } catch (err) {
       // validateRolePreset() throws a readable model-layer message. Keep it
       // as a client error so the editor can show it inline instead of a 500.
       return reply.code(400).send({ error: String(err?.message ?? err) });
     }
+    },
   });
 
   fastify.delete('/api/roles/:name', async (req, reply) => {
     try {
       const result = deleteRole(req.params.name, { force: req.query?.force === 'true' || req.query?.force === '1' });
-      broadcastWS({ type: 'roles-updated', roles: listRoleCards(), meta: roleMetaMap() });
+      clearRoleDefault(req.params.name);
+      broadcastWS({ type: 'roles-updated', roles: roleCardsWithDefaults(), meta: roleMetaMap() });
       if (typeof state.refreshNativeSessions === 'function') await state.refreshNativeSessions();
       broadcastWS({ type: 'native-sessions-update', native_sessions: enrichSessionRows(state.nativeSessions(), state.channels()), channels: state.channels() });
       return result;

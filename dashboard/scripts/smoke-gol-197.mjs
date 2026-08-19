@@ -80,8 +80,9 @@ try {
   const lead = listed.payload.find((role) => role.name === 'lead');
   assert.equal(lead?.exec, undefined);
   const editorSource = fs.readFileSync(path.join(repoRoot, 'dashboard/web/src/other-pages.jsx'), 'utf8');
-  assert.match(editorSource, /const hasExecPreset = role\.exec && typeof role\.exec === 'object'/);
-  assert.match(editorSource, /No execution preset configured\./);
+  assert.match(editorSource, /RoleProfileField/);
+  assert.match(editorSource, /Default model profile/);
+  assert.doesNotMatch(editorSource, /const hasExecPreset = role\.exec && typeof role\.exec === 'object'/);
 
   const invalid = await request(base, 'PUT', '/api/roles/explorer', { exec: { thinking: 'invalid' } });
   assert.equal(invalid.status, 400);
@@ -123,12 +124,12 @@ try {
   console.log(JSON.stringify({
     ok: true,
     checks: [
-      'GET lists complete execution presets',
-      'no-exec lead is guarded by an explanatory UI state',
-      'invalid preset is readable, rejected, and not persisted',
-      'valid preset round-trips through PUT and GET',
+      'GET lists retained execution snapshots and role default_profile pointers',
+      'role editor source uses the single default-profile control',
+      'invalid retained preset is readable, rejected, and not persisted',
+      'valid retained preset round-trips through PUT and GET',
       'builtin identity remains fixed and builtin delete returns 409',
-      'POST creates a validated preset with defaults',
+      'POST creates a validated retained preset with defaults',
     ],
   }, null, 2));
 } finally {
