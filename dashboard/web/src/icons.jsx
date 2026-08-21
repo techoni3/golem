@@ -39,6 +39,57 @@ const Icon = {
       <path d="M5 12h3"/>
     </svg>
   ),
+  // GOL-273: kind icons for board cards — spec keeps the doc-with-lines
+  // glyph; doc is an open book; task is a check-square. Rendered colored via
+  // CSS ([data-kind]) instead of the old text pill.
+  Doc: ({ size = 13 }) => (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8 3.5C6.5 2.5 4.5 2.2 2 2.5v10c2.5-.3 4.5 0 6 1 1.5-1 3.5-1.3 6-1v-10c-2.5-.3-4.5 0-6 1z"/>
+      <path d="M8 3.5v10"/>
+    </svg>
+  ),
+  Task: ({ size = 13 }) => (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="2" width="12" height="12" rx="2"/>
+      <path d="M5.5 8l2 2 3.5-4"/>
+    </svg>
+  ),
+  SpecIcon: ({ size = 13 }) => (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3.5 1.5H10L12.5 4V14a.5.5 0 0 1-.5.5H3.5a.5.5 0 0 1-.5-.5V2a.5.5 0 0 1 .5-.5z"/>
+      <path d="M10 1.5V4h2.5"/>
+      <path d="M5 7h5"/>
+      <path d="M5 9.5h5"/>
+      <path d="M5 12h3"/>
+    </svg>
+  ),
+  // GOL-273: external-link glyph — reused as the reader-open icon after the
+  // standalone view was scrubbed.
+  External: ({ size = 12 }) => (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6.5 3H3.5a1 1 0 0 0-1 1v8.5a1 1 0 0 0 1 1H12a1 1 0 0 0 1-1V9.5"/>
+      <path d="M9.5 2.5H13.5V6.5"/>
+      <path d="M13.5 2.5L7.5 8.5"/>
+    </svg>
+  ),
+  // GOL-273: footer-chip icons — robot (assignee), flag (priority). Clock
+  // already exists above.
+  Robot: ({ size = 11 }) => (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="5.5" width="10" height="7.5" rx="1.5"/>
+      <path d="M8 5.5V3"/>
+      <circle cx="8" cy="2.2" r="0.9"/>
+      <circle cx="6" cy="9" r="0.4" fill="currentColor"/>
+      <circle cx="10" cy="9" r="0.4" fill="currentColor"/>
+      <path d="M6 11h4"/>
+    </svg>
+  ),
+  Flag: ({ size = 11 }) => (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3.5 14V2.5"/>
+      <path d="M3.5 3h8.5l-2 3 2 3h-8.5"/>
+    </svg>
+  ),
   Logs: ({ size = 14 }) => (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
       <path d="M3 4H13"/>

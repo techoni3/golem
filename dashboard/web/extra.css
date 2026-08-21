@@ -2690,7 +2690,53 @@ select.ct-input { appearance: none; cursor: pointer; padding-right: 26px;
   border-radius: var(--radius-1);
 }
 .td-open-page:hover { background: var(--bg-3); color: var(--text-0); }
-.td-reader-open { font-size: 12px; letter-spacing: 0.04em; }
+.td-reader-open { display: inline-flex; align-items: center; padding: 2px 5px; border-radius: 4px; color: var(--text-2); }
+
+/* ===== GOL-273: board card head + fixed footer chips ===== */
+/* Colored kind icon replacing the text pill. Same palette as the rails. */
+.tk-kind-icon { display: inline-flex; align-items: center; flex: 0 0 auto; }
+.tk-kind-icon[data-kind="spec"] { color: #34d3b8; }
+.tk-kind-icon[data-kind="doc"] { color: #b394ff; }
+.tk-kind-icon[data-kind="task"], .tk-kind-icon:not([data-kind]) { color: #4ade80; }
+
+/* Compact reader-open button at the head row's right edge. */
+.tk-reader-btn {
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 4px;
+  border-radius: 4px;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.tk-reader-btn:hover { color: var(--text-0); background: var(--bg-3); }
+
+/* Fixed footer chips — always rendered, icon + value, with empty states. */
+.tk-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border-1);
+  background: var(--bg-1);
+  color: var(--text-3);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  line-height: 1.5;
+}
+.tk-chip-val {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 130px;
+}
+.tk-chip-warn { color: var(--status-review); border-color: rgba(251,191,36,0.35); }
+.tk-prio-p0 { color: var(--status-blocked); border-color: rgba(248,113,113,0.35); }
+.tk-prio-p1 { color: var(--status-review); border-color: rgba(251,191,36,0.35); }
 
 /* ===== Reader view (/read/<id>) ===== */
 /* The ticket document alone: no sidebar/topbar (App skips the shell), and the
@@ -2972,7 +3018,7 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
   margin: 0 auto;
   padding: 24px 40px 72px;
   min-height: 100%;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   box-sizing: border-box;
 }
 .td-md > *:first-child { margin-top: 0; }
@@ -3088,15 +3134,20 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
   display: block; max-width: 100%; overflow-x: auto;
   width: 100%; border-collapse: collapse; margin: 14px 0;
   font-size: 13.5px; border: 1px solid var(--border-2); border-radius: var(--radius-2);
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 .td-md th, .td-md td {
   text-align: left; padding: 8px 12px; vertical-align: top;
   border-bottom: 1px solid var(--border-1);
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 .td-md th {
   font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.06em;
   text-transform: uppercase; color: var(--text-2); font-weight: 500;
   background: var(--bg-3); border-bottom: 1px solid var(--border-2);
+  white-space: nowrap;
 }
 .td-md td { color: var(--text-1); }
 .td-md tr:last-child td { border-bottom: none; }
@@ -3162,7 +3213,7 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
 
 .mermaid-fs-overlay {
   position: fixed; inset: 0; z-index: 10000;
-  background: rgba(70, 70, 70, 0.92);
+  background: #777777;
   display: grid; overflow: hidden; isolation: isolate;
   opacity: 0; transition: opacity .2s ease;
 }
@@ -3221,6 +3272,18 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
   border-radius: var(--radius-2); background: var(--bg-0);
 }
 .td-md svg text { font-family: var(--font-mono); }
+
+/* Images in ticket/spec markdown bodies and comments */
+.td-md img,
+.anno-card .body img,
+.anno-card .reply .body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-1);
+  border: 1px solid var(--border-2);
+  margin: 8px 0;
+  display: block;
+}
 
 @media (max-width: 900px) {
   .td-md { padding: 14px 16px 50px; font-size: 13px; }
@@ -3371,6 +3434,26 @@ mark.anno.anno-tail::after {
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .anno-card .body { font-size: 13.5px; color: var(--text-0); line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }
+.anno-card .body table {
+  display: block; max-width: 100%; overflow-x: auto;
+  width: 100%; border-collapse: collapse; margin: 8px 0;
+  font-size: 12.5px; border: 1px solid var(--border-2); border-radius: var(--radius-1);
+  overflow-wrap: break-word;
+  word-break: normal;
+  white-space: normal;
+}
+.anno-card .body th, .anno-card .body td {
+  text-align: left; padding: 6px 10px; vertical-align: top;
+  border-bottom: 1px solid var(--border-1);
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+.anno-card .body th {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--text-2); font-weight: 500;
+  background: var(--bg-3); border-bottom: 1px solid var(--border-2);
+  white-space: nowrap;
+}
 .anno-card .reply { margin-top: 7px; padding-top: 7px; border-top: 1px dashed var(--border-2); }
 .anno-card .reply .ch { margin-bottom: 3px; }
 .anno-card .reply .body { font-size: 12.5px; color: var(--text-2); }
@@ -3415,6 +3498,7 @@ mark.anno.anno-tail::after {
   padding: 8px 10px;
 }
 .anno-composer textarea:focus { outline: none; border-color: var(--accent-border); }
+.anno-composer .ct-uploads { margin-top: 6px; margin-bottom: 6px; }
 .anno-composer .row { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 7px; }
 .anno-composer-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .anno-composer .send {
@@ -3925,9 +4009,11 @@ mark.anno.anno-tail::after {
    meta-role palette so the visual language is consistent with the chat
    composer and other role-tagged UI. The stripe replaces the existing
    left border so it reads as a single accent. */
-.ticket.kind-task { border-left: 3px solid var(--status-open); padding-left: 8px; }
-.ticket.kind-spec { border-left: 3px solid #60a5fa; padding-left: 8px; }
-.ticket.kind-doc { border-left: 3px solid #c08bff; padding-left: 8px; }
+/* GOL-273: kind-colored left rails — spec teal, doc purple, task green
+   (matches the kind-icon palette below). Archived stays neutral. */
+.ticket.kind-task { border-left: 3px solid #4ade80; padding-left: 8px; }
+.ticket.kind-spec { border-left: 3px solid #34d3b8; padding-left: 8px; }
+.ticket.kind-doc { border-left: 3px solid #b394ff; padding-left: 8px; }
 
 /* Priority accent — strong for P0/P1, subdued for P2/P3. */
 .ticket-priority.p0 { background: rgba(248, 113, 113, 0.18); color: #fca5a5; border: 1px solid rgba(248, 113, 113, 0.45); }
@@ -4604,9 +4690,9 @@ mark.anno.anno-tail::after {
 
 /* ===== GOL-496: H1 living-passport AgentCard ===== */
 .agent-card.native-session-card {
-  --agent-card-pad: 16px;
-  --agent-portrait-width: 116px;
-  --agent-orb-size: 76px;
+  --agent-card-pad: 8px;
+  --agent-portrait-width: 87px;
+  --agent-orb-size: 57px;
   --agent-card-signal: var(--text-3);
   --agent-card-signal-soft: color-mix(in oklab, var(--text-3) 10%, transparent);
   position: relative;
@@ -4656,9 +4742,9 @@ mark.anno.anno-tail::after {
   opacity: .68;
 }
 .agent-card.native-session-card.compact {
-  --agent-card-pad: 12px;
-  --agent-portrait-width: 98px;
-  --agent-orb-size: 68px;
+  --agent-card-pad: 6px;
+  --agent-portrait-width: 74px;
+  --agent-orb-size: 51px;
 }
 
 .agent-card-surface {
@@ -4711,8 +4797,8 @@ mark.anno.anno-tail::after {
   min-width: 0;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
-  padding: 22px 12px 13px;
+  gap: 12px;
+  padding: 16px 6px 10px;
   border-right: 1px solid var(--border-1);
   background:
     radial-gradient(circle at 50% 29%, var(--agent-card-signal-soft), transparent 47%),
@@ -4759,8 +4845,8 @@ mark.anno.anno-tail::after {
 /* The model orb and the raw harness mark size their icon uniformly. */
 .agent-card-orb .agent-model-icon,
 .agent-card-harness-mark .agent-harness-icon {
-  width: 40px;
-  height: 40px;
+  width: 30px;
+  height: 30px;
 }
 /* Harness sits below the model orb as a raw animated mark — no orb ring or ripple. */
 .agent-card-harness-mark {
@@ -4810,7 +4896,7 @@ mark.anno.anno-tail::after {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  padding: 17px 16px 14px 15px;
+  padding: 12px 8px 10px 8px;
 }
 .agent-card-identity { position: relative; min-width: 0; padding-right: 40px; }
 .agent-card-project-action {
@@ -4829,6 +4915,15 @@ mark.anno.anno-tail::after {
 }
 .agent-card-project-action .project-card-glyph { width: 34px !important; height: 34px !important; }
 .agent-card-project-action:disabled { cursor: not-allowed; opacity: .72; }
+.agent-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.agent-card-title-row .agent-card-name { flex: 1 1 auto; min-width: 0; }
+.agent-card-title-row .agent-model-pill { flex: 0 0 auto; margin-top: 0; }
 .agent-card-name {
   overflow: hidden;
   color: var(--text-0);
@@ -4845,7 +4940,7 @@ mark.anno.anno-tail::after {
   width: fit-content;
   max-width: 100%;
   gap: 6px;
-  margin-top: 7px;
+  margin-top: 0;
   border-color: color-mix(in oklab, var(--accent) 28%, var(--border-2));
   background: color-mix(in oklab, var(--accent) 8%, var(--bg-2));
   padding: 4px 7px;
@@ -4886,9 +4981,9 @@ mark.anno.anno-tail::after {
 .agent-card-operations {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 11px 14px;
+  gap: 8px 7px;
   margin-top: auto;
-  padding-top: 13px;
+  padding-top: 10px;
   border-top: 1px solid var(--border-1);
 }
 .agent-card-field {
@@ -5075,14 +5170,14 @@ mark.anno.anno-tail::after {
 
 @container (max-width: 420px) {
   .agent-card.native-session-card {
-    --agent-card-pad: 12px;
-    --agent-portrait-width: 92px;
-    --agent-orb-size: 64px;
+    --agent-card-pad: 6px;
+    --agent-portrait-width: 69px;
+    --agent-orb-size: 48px;
     min-height: 0;
   }
   .agent-card-passport { min-height: 0; gap: 0; }
-  .agent-card-portrait { gap: 12px; padding: 18px 8px 12px; }
-  .agent-card-main { padding: 15px 12px 13px; }
+  .agent-card-portrait { gap: 9px; padding: 14px 4px 10px; }
+  .agent-card-main { padding: 10px 6px 10px; }
   .agent-card-operations { grid-template-columns: minmax(0, 1fr); margin-top: 12px; padding-top: 0; }
   .agent-card-field { min-height: 0; }
 }

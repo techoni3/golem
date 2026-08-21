@@ -79,11 +79,10 @@
         showArchived: !!query.showArchived,
       };
     }
-    const tm = p.match(/^\/tickets\/(.+)$/);
-    if (tm) return { kind: 'ticket', id: decodeURIComponent(tm[1]) };
-    // /read/<id> — reader view: the ticket document with no app chrome.
-    const rm = p.match(/^\/read\/(.+)$/);
-    if (rm) return { kind: 'ticket', id: decodeURIComponent(rm[1]), reader: true };
+    // GOL-273: the standalone ticket view was scrubbed — /tickets/<id> is a
+    // legacy deep link that now lands in the reader view.
+    const tm = p.match(/^\/(?:tickets|read)\/(.+)$/);
+    if (tm) return { kind: 'ticket', id: decodeURIComponent(tm[1]), reader: true };
     return { kind: 'dashboard' };
   };
 
@@ -114,9 +113,9 @@
         if (route.showArchived) q.showArchived = '1';
         return `/project/${encodeURIComponent(route.id)}${stringifyQuery(q)}`;
       }
-      case 'ticket': return route.reader
-        ? `/read/${encodeURIComponent(route.id)}`
-        : `/tickets/${encodeURIComponent(route.id)}`;
+      // GOL-273: every ticket link builds to the reader view — the standalone
+      // page no longer exists.
+      case 'ticket': return `/read/${encodeURIComponent(route.id)}`;
       default: return '/';
     }
   };

@@ -337,9 +337,11 @@ function TicketColumns({ cols, tickets, projectByContract, resolveAssignee }) {
         {activeTicket ? (
           <div className="ticket ticket-drag-overlay">
             <div className="tracker-card-tags">
-              <span className="pill tracker-kind-pill" data-kind={activeTicket.kind}>{activeTicket.kind}</span>
-            </div>
-            <div className="ticket-id">{activeTicket.display_id || activeTicket.id}</div>
+            {(() => { const K = activeTicket.kind === 'spec' ? Icon.SpecIcon : activeTicket.kind === 'doc' ? Icon.Doc : Icon.Task; return (
+              <span className="tk-kind-icon" data-kind={activeTicket.kind}><K/></span>
+            ); })()}
+            <span className="ticket-id mono">{activeTicket.display_id || activeTicket.id}</span>
+          </div>
             <div className="ticket-title">{activeTicket.title}</div>
           </div>
         ) : null}
@@ -394,6 +396,9 @@ function TrackerCard({ ticket: t, project, assigneeLabel }) {
   const stale = (t.state === 'in_progress' || t.state === 'review')
     ? stalenessInfo(t.updated_at)
     : null;
+  // GOL-273: the updated chip always renders (fixed field with an empty
+  // state) — compact ago text, amber past 72h when stale applies.
+  const ago = compactAgo(t.updated_at);
   // TKT-0286: small ⏳ glyph when the ticket has a pending dispatch-queue row
   // (the snapshot's has_pending_dispatch flag, or the live pending_dispatch
   // from a ticket-updated broadcast — the || covers both). Complements the
@@ -413,6 +418,7 @@ function TrackerCard({ ticket: t, project, assigneeLabel }) {
     id: t.id,
     data: { kind: t.kind, fromState: t.state },
   });
+  const KindIcon = t.kind === 'spec' ? Icon.SpecIcon : t.kind === 'doc' ? Icon.Doc : Icon.Task;
   return (
     <div
       ref={setNodeRef}
@@ -428,31 +434,65 @@ function TrackerCard({ ticket: t, project, assigneeLabel }) {
       {...attributes}
       {...listeners}
     >
+      {/* GOL-273: single head row — colored kind icon + id share one line with
+          the project chip / badges; the reader button opens /read/<id> in a new
+          tab and stops propagation so the card's own drawer-open never fires. */}
       <div className="tracker-card-tags">
+        <span className="tk-kind-icon" data-kind={t.kind || 'task'} title={t.kind || 'task'}><KindIcon/></span>
+        <span className="ticket-id mono">{t.display_id || t.id}</span>
         {project && (
           <span className="cc-chip tracker-project-chip" title={project.name}>
             <span className="cc-chip-dot" style={{ background: project.color }}/>
             <span className="cc-chip-text">{project.glyph ? `${project.glyph} ` : ''}{project.name}</span>
           </span>
         )}
-        <span className="pill tracker-kind-pill" data-kind={t.kind}>{t.kind}</span>
         {unacked && (window.UnackedDispatchBadge
           ? <window.UnackedDispatchBadge warning={unackedWarning} compact/>
           : <span className="pill tracker-answer-badge" title="dispatch needs explicit acknowledgement">⚠ awaiting ack</span>)}
+        <a className="tk-reader-btn" aria-label="Open reader view in new tab"
+          href={window.Router.buildHref({ kind: 'ticket', id: t.id, reader: true })}
+          target="_blank" rel="noopener"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+          title="Reader view (new tab)"><Icon.External size={11}/></a>
       </div>
-      <div className="ticket-id">{t.display_id || t.id}</div>
       <div className="ticket-title">{t.title}</div>
+      {/* GOL-273: fixed footer — three chips that always render, with valid
+          empty states, so fields stop coming and going. */}
       <div className="ticket-footer">
-        <div className="ticket-assignee">
+        <span className="tk-chip" title={`assignee: ${displayLabel || 'unassigned'}`}>
+          <Icon.Robot/>
+          <span className="tk-chip-val">{displayLabel || 'unassigned'}</span>
           {working && <Icon.Gear size={12} className="gear gear-working"/>}
           {queued && <span className="ticket-queue-glyph" title="dispatch queued — delivers when the session is idle">⏳</span>}
-          <span>{displayLabel}</span>
-          {stale && <span className={`ticket-staleness${stale.aged ? ' stale-old' : ''}`} title={`stale — not updated in ${stale.text}`}>◷ {stale.text}</span>}
-        </div>
-        {prio && <span className={`ticket-priority ${prio}`}>{t.priority}</span>}
+        </span>
+        <span className={`tk-chip${stale?.aged ? ' tk-chip-warn' : ''}`}
+          title={`updated ${ago ? `${ago} ago` : '—'}`}>
+          <Icon.Clock size={11}/>
+          <span className="tk-chip-val tnum">{ago || '—'}</span>
+        </span>
+        <span className={`tk-chip${prio ? ` tk-prio-${prio}` : ''}`}
+          title={`priority: ${t.priority || 'unset'}`}>
+          <Icon.Flag/>
+          <span className="tk-chip-val">{t.priority || '—'}</span>
+        </span>
       </div>
     </div>
   );
+}
+
+// GOL-273: compact ago for the fixed updated chip — "3h", "6d", or '' when
+// the timestamp is missing/unparseable (the chip then shows an em dash).
+function compactAgo(iso) {
+  if (!iso) return '';
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '';
+  const mins = Math.floor((Date.now() - t) / 60000);
+  if (mins < 1) return 'now';
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h`;
+  return `${Math.floor(hrs / 24)}d`;
 }
 
 window.TrackerBoard = TrackerBoard;

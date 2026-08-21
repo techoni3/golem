@@ -38,6 +38,25 @@ function tdLoadWidth() {
   } catch { return '90'; }
 }
 
+function collectImages(dt) {
+  if (!dt) return [];
+  const out = [];
+  if (dt.items) {
+    for (const it of dt.items) {
+      if (it.kind === 'file') {
+        const f = it.getAsFile();
+        if (f && /^image\//.test(f.type)) out.push(f);
+      }
+    }
+  }
+  if (dt.files) {
+    for (const f of dt.files) {
+      if (f && /^image\//.test(f.type) && !out.includes(f)) out.push(f);
+    }
+  }
+  return out;
+}
+
 // State → .pill modifier (the pill color set is keyed off the same --status-*
 // vars the board columns use). todo/archived have no dedicated pill class.
 const TD_STATE_PILL = {
@@ -324,17 +343,72 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay', reader = f
   }, [ticketId]);
 
   // TKT-0233: body-only edit. editBuf is now { body } (title is edited inline).
+  const [editBodyUploads, setEditBodyUploads] = React.useState([]);
+  const uploadEditBodyOne = React.useCallback(async (file) => {
+    const id = `up_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    setEditBodyUploads((u) => [...u, { id, name: file.name || 'image.png', status: 'uploading' }]);
+    try {
+      const res = await window.SubstrateAPI.uploadAsset(file);
+      setEditBodyUploads((u) => u.map((x) => x.id === id ? { ...x, status: 'done', url: res.url } : x));
+      return { id, md: `![](${res.url})`, url: res.url };
+    } catch (err) {
+      setEditBodyUploads((u) => u.map((x) => x.id === id ? { ...x, status: 'error', error: String(err?.message || err) } : x));
+      throw err;
+    }
+  }, []);
+
+  const onEditBodyPaste = React.useCallback(async (e) => {
+    const files = collectImages(e.clipboardData);
+    if (files.length === 0) return;
+    e.preventDefault();
+    const textarea = editTextareaRef.current;
+    const cur = editBuf?.body ?? '';
+    const before = textarea?.selectionStart ?? cur.length;
+    const after = textarea?.selectionEnd ?? cur.length;
+    for (const f of files) {
+      try {
+        const { md } = await uploadEditBodyOne(f);
+        const insert = `\n${md}\n`;
+        const next = cur.slice(0, before) + insert + cur.slice(after);
+        setEditBuf({ ...editBuf, body: next });
+        requestAnimationFrame(() => {
+          if (textarea) {
+            const pos = before + insert.length;
+            textarea.setSelectionRange(pos, pos);
+            textarea.focus();
+          }
+        });
+        break;
+      } catch (err) { /* error surfaced in uploads strip */ }
+    }
+  }, [editBuf, uploadEditBodyOne]);
+
+  const onEditBodyDrop = React.useCallback(async (e) => {
+    const files = collectImages(e.dataTransfer);
+    if (files.length === 0) return;
+    e.preventDefault();
+    for (const f of files) {
+      try {
+        const { md } = await uploadEditBodyOne(f);
+        setEditBuf((buf) => buf ? { ...buf, body: (buf.body || '') + (buf.body?.endsWith('\n') ? '' : '\n') + md + '\n' } : buf);
+      } catch (err) { /* surfaced in uploads strip */ }
+    }
+  }, [uploadEditBodyOne]);
+
+  const isEditBodyUploading = editBodyUploads.some((u) => u.status === 'uploading');
+
   const onSaveEdit = React.useCallback(() => {
-    if (!ticketId || !editBuf) return;
+    if (!ticketId || !editBuf || isEditBodyUploading) return;
     setSaving(true);
     window.SubstrateAPI.updateTicket(ticketId, { body: editBuf.body, actor: 'human' })
       .then((updated) => {
         if (updated && updated.id) window.Store.upsertTrackerTicket(updated);
         setEditBuf(null);
+        setEditBodyUploads([]);
         setSaving(false);
       })
       .catch((err) => { console.error('save ticket failed', err); setSaving(false); });
-  }, [ticketId, editBuf]);
+  }, [ticketId, editBuf, isEditBodyUploading]);
 
   // Editing has a fixed bottom action bar outside .td-scroll. Measure only the
   // direct layout landmarks (not every nested field) so the editor follows the
@@ -659,15 +733,11 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay', reader = f
                     aria-pressed={widthPct === '90'}
                   >{widthPct === '90' ? <Icon.DrawerWide/> : <Icon.DrawerHalf/>}</button>
                 )}
-                {isPage ? null : (
-                  <a className="td-open-page" href={window.Router.buildHref({ kind: 'ticket', id: ticket.id })}
-                    target="_blank" rel="noopener" title="Open as standalone page (new tab)">↗</a>
-                )}
                 {reader ? null : (
                   <a className="td-open-page td-reader-open"
                     href={window.Router.buildHref({ kind: 'ticket', id: ticket.id, reader: true })}
                     {...(isPage ? {} : { target: '_blank', rel: 'noopener' })}
-                    title="Reader view — the document alone, no app chrome">reader</a>
+                    title="Reader view — the document alone (new tab)"><Icon.External/></a>
                 )}
                 {isPage ? null : <button className="drawer-close" onClick={close}><Icon.Close/></button>}
               </div>
@@ -937,9 +1007,25 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay', reader = f
                       rows={8}
                       value={editBuf.body}
                       onChange={(e) => setEditBuf({ ...editBuf, body: e.target.value })}
-                      onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setEditBuf(null); } }}
-                      placeholder="Body (Markdown) — plain text auto-wraps into paragraphs"
+                      onPaste={onEditBodyPaste}
+                      onDrop={onEditBodyDrop}
+                      onDragOver={(e) => { if (e.dataTransfer?.types?.includes('Files')) e.preventDefault(); }}
+                      onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setEditBuf(null); setEditBodyUploads([]); } }}
+                      placeholder="Body (Markdown) — plain text auto-wraps into paragraphs (paste/drop images)"
                     />
+                    {editBodyUploads.length > 0 && (
+                      <div className="ct-uploads">
+                        {editBodyUploads.map((u) => (
+                          <div key={u.id} className={`ct-upload ct-upload-${u.status}`}>
+                            {u.status === 'uploading' && <span className="ct-upload-spinner" />}
+                            {u.status === 'done' && u.url && <img src={u.url} alt={u.name} className="ct-upload-thumb" />}
+                            {u.status === 'error' && <span className="ct-upload-err">×</span>}
+                            <span className="ct-upload-name">{u.name}</span>
+                            {u.status === 'error' && <span className="ct-upload-err-msg">{u.error}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ) : ticket.body ? (
                   <TdAnnotate
