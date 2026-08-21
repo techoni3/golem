@@ -30,6 +30,35 @@ function App() {
   // directly with {replace:true}.
   const navigate = (r) => window.Router.go(r);
 
+  // GOL-275: per-view browser tab titles. The ticket lookup matches both
+  // keys: deep links carry the display id (GOL-275) while the store indexes
+  // tickets by their internal id (TKT-0537).
+  let ticket = null;
+  if (route.kind === 'ticket') {
+    for (const t of state.trackerTickets.values()) {
+      if (t.id === route.id || t.display_id === route.id) { ticket = t; break; }
+    }
+  }
+  const project = route.kind === 'project'
+    ? window.Store.getProjects().find((p) => p.id === route.id || p.project_id === route.id)
+    : null;
+  React.useEffect(() => {
+    let title = 'Golem';
+    if (route.kind === 'ticket') {
+      title = ticket ? `${ticket.title} · Golem`
+        : `Ticket ${route.id} · Golem`;
+    } else if (route.kind === 'project') {
+      title = project ? `${project.name} · Golem` : 'Project · Golem';
+    } else {
+      const names = {
+        dashboard: 'Dashboard', tracker: 'Tracker', specs: 'Specs',
+        projects: 'Projects', agents: 'Agents', logs: 'Logs', settings: 'Settings',
+      };
+      title = `${names[route.kind] || 'Dashboard'} · Golem`;
+    }
+    document.title = title;
+  }, [route, ticket?.title, project?.name]);
+
   // Reader view (/read/<id>): the ticket document alone — body + contents
   // rail, no sidebar/topbar/props chrome. The drawer handles its own loading;
   // TicketDrawer's td-reader class hides the in-page chrome via CSS.
