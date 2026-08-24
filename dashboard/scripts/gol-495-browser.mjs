@@ -196,17 +196,19 @@ try {
       fieldBorders: [...sample.querySelectorAll('.agent-card-field')].map((field) => getComputedStyle(field).borderTopWidth),
     };
   });
-  ok(passportGeometry.widths.length > 1 && passportGeometry.widths.every((width) => width <= 520.5) && passportGeometry.gridColumns === 2 && passportGeometry.portraitWidth >= 110 && passportGeometry.portraitDivider !== '0px' && passportGeometry.operationsColumns === 2 && passportGeometry.fieldBorders.every((border) => border === '0px'), 'project sessions use bounded two-up passport cards with a portrait rail and unboxed operations');
+  ok(passportGeometry.widths.length > 1 && passportGeometry.widths.every((width) => width > 520.5) && passportGeometry.gridColumns === 2 && passportGeometry.portraitWidth >= 60 && passportGeometry.portraitWidth < 110 && passportGeometry.portraitDivider !== '0px' && passportGeometry.operationsColumns === 1 && passportGeometry.fieldBorders.every((border) => border === '0px'), 'project sessions use freely expanding two-up cards with a compact portrait rail and one-column operations');
 
   const anatomy = await busy.evaluate((node) => ({
     element: node.tagName,
     surface: node.querySelector('.agent-card-surface')?.tagName,
     fields: [...node.querySelectorAll('.agent-card-operations > .agent-card-field > .agent-card-field-label')].map((label) => label.textContent.trim()),
     noWorkingBadge: !node.querySelector('.agent-status-badge'),
+    noPiTruth: !node.querySelector('.agent-card-pi-truth'),
+    separateTitleRows: !node.querySelector('.agent-card-title-row'),
     emptyWork: node.querySelector('.agent-card-field-value.is-empty')?.textContent.trim(),
     stableBay: getComputedStyle(node.querySelector('.agent-card-transient-bay')).minBlockSize,
   }));
-  ok(anatomy.element === 'ARTICLE' && anatomy.surface === 'BUTTON' && anatomy.fields.join('|') === 'Role|Communication|Current work|Dispatches' && anatomy.noWorkingBadge && anatomy.emptyWork === 'No current work' && anatomy.stableBay === '48px', 'busy no-ticket card has signed H1 anatomy, field order, empty work, stable bay, and no Working badge');
+  ok(anatomy.element === 'ARTICLE' && anatomy.surface === 'BUTTON' && anatomy.fields.join('|') === 'Role|Communication|Current work|Dispatches' && anatomy.noWorkingBadge && anatomy.noPiTruth && anatomy.separateTitleRows && anatomy.emptyWork === 'No current work' && anatomy.stableBay === '0px', 'busy no-ticket card has compact anatomy, field order, empty work, collapsed empty bay, and no metadata row');
   ok((await busy.locator('.agent-card-field').last().innerText()).includes('Queue clear'), 'busy no-ticket card renders the deliberate queue-clear empty state');
   const knownImages = busy.locator('.agent-harness-icon img, .agent-model-icon img');
   ok(await knownImages.count() === 3 && await knownImages.evaluateAll((images) => images.every((image) => image.complete && image.naturalWidth > 0)), 'known harness and provider artwork load across the twin orbs and the model chip');
@@ -277,7 +279,7 @@ try {
       busyAnimation: getComputedStyle(busyOrb, '::before').animationName,
     };
   });
-  ok(bayGeometry.waitingText === 'await ack' && bayGeometry.waitingBay === bayGeometry.busyBay && bayGeometry.waitingAnimation === 'none' && bayGeometry.busyAnimation.includes('agent-card-radiate'), 'waiting await-ack uses the same populated bay geometry while only busy radiates');
+  ok(bayGeometry.waitingText === 'await ack' && bayGeometry.waitingBay > 0 && bayGeometry.busyBay === 0 && bayGeometry.waitingAnimation === 'none' && bayGeometry.busyAnimation.includes('agent-card-radiate'), 'waiting await-ack keeps only its populated bay while the empty busy bay collapses and only busy radiates');
 
   const stateMatrix = await page.evaluate(() => {
     const names = ['H1 Idle Static', 'H1 Error Static', 'H1 Initializing Static', 'H1 Unknown Static', 'H1 Dead Static'];
@@ -309,6 +311,13 @@ try {
   await sessionsSection.locator('.agent-card.native-session-card').first().waitFor();
   await page.screenshot({ path: path.join(artifacts, 'desktop.png'), fullPage: true });
 
+  for (const [width, expectedColumns] of [[1499, 2], [1500, 3], [1900, 3], [1901, 4]]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const columns = await sessionsSection.locator('.native-sessions').evaluate((node) => getComputedStyle(node).gridTemplateColumns.split(' ').filter(Boolean).length);
+    ok(columns === expectedColumns, `${width}px viewport uses ${expectedColumns} agent-card columns`);
+  }
+
   for (const width of [520, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -322,13 +331,17 @@ try {
         durableFields: [...document.querySelectorAll('.agent-card-field-label')].filter((label) => ['Role', 'Communication', 'Current work', 'Dispatches'].includes(label.textContent.trim())).length >= 4,
       };
     });
-    const expectedOneColumn = width < 520;
-    ok(!reflow.documentOverflow && !reflow.cardOverflow && reflow.oneColumn === expectedOneColumn && reflow.durableFields, `${width}px viewport has no document/card overflow and preserves the expected durable-field reflow`);
+    ok(!reflow.documentOverflow && !reflow.cardOverflow && reflow.oneColumn && reflow.durableFields, `${width}px viewport has no document/card overflow and preserves the compact one-column field reflow`);
   }
   await page.screenshot({ path: path.join(artifacts, 'mobile-320.png'), fullPage: true });
 
   await page.goto(`${base}/dashboard`, { waitUntil: 'networkidle' });
   const controls = page.locator('.agent-card.native-session-card').filter({ has: page.locator('.agent-card-name', { hasText: long }) }).first();
+  const modelTextMetrics = await controls.locator('.agent-model-pill span:last-child').evaluate((node) => {
+    const style = getComputedStyle(node);
+    return { clientWidth: node.clientWidth, scrollWidth: node.scrollWidth, maxWidth: Number.parseFloat(style.maxWidth), overflow: style.overflow, textOverflow: style.textOverflow, whiteSpace: style.whiteSpace };
+  });
+  ok(modelTextMetrics.maxWidth <= 100 && modelTextMetrics.scrollWidth > modelTextMetrics.clientWidth && modelTextMetrics.overflow === 'hidden' && modelTextMetrics.textOverflow === 'ellipsis' && modelTextMetrics.whiteSpace === 'nowrap', 'long model names keep a 15-character ellipsis budget');
   ok(await controls.locator('.agent-card-controls-footer .cc-session-controls').count() === 1 && await controls.evaluate((node) => node.scrollWidth <= node.clientWidth), 'showControls long-content card retains controls without horizontal overflow');
   await page.goto(`${base}/project/${encodeURIComponent(alphaUiId)}`, { waitUntil: 'networkidle' });
   await sessionsSection.locator('.agent-card.native-session-card').first().waitFor();
@@ -349,7 +362,7 @@ try {
     portraitDivider: getComputedStyle(node.querySelector('.agent-card-portrait')).borderRightWidth,
     operationsColumns: getComputedStyle(node.querySelector('.agent-card-operations')).gridTemplateColumns.split(' ').filter(Boolean).length,
   }));
-  ok(agentsGeometry.width <= 520.5 && agentsGeometry.portraitDivider !== '0px' && agentsGeometry.operationsColumns === 2, 'Agents page shares the bounded passport card rather than a stretched compact variant');
+  ok(agentsGeometry.width > 520.5 && agentsGeometry.portraitDivider !== '0px' && agentsGeometry.operationsColumns === 1, 'Agents page shares the freely expanding compact passport card');
   await agentsPassport.screenshot({ path: path.join(artifacts, 'agents-passport.png') });
   await page.screenshot({ path: path.join(artifacts, 'agents.png'), fullPage: true });
   ok(pageErrors.length === 0, `browser emitted no page errors${pageErrors.length ? `: ${pageErrors.join('; ')}` : ''}`);

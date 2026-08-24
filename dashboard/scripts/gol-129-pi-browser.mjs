@@ -123,10 +123,12 @@ try {
   const card = page.locator('.agent-card.native-session-card').filter({ hasText: 'Pi first-class worker' }).first();
   await card.waitFor();
   assert.equal(await card.locator('.agent-harness-icon').getAttribute('aria-label'), 'Harness: Pi');
-  assert.equal(await card.locator('.agent-model-pill').getAttribute('title'), 'Ollama: deepseek-v4-flash:0731-cloud');
-  const truth = await card.locator('.agent-card-pi-truth').innerText();
-  for (const expected of ['ready', 'continuation pi-conti', 'supported · Pi 0.80.10', 'host-full-trust', 'turn settled']) {
-    assert.match(truth, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.equal(await card.locator('.agent-model-pill').getAttribute('title'), 'DeepSeek: deepseek-v4-flash:0731-cloud');
+  // GOL-274: operational Pi truth belongs in the drawer, not the compact card.
+  assert.equal(await card.locator('.agent-card-pi-truth').count(), 0);
+  const cardText = await card.innerText();
+  for (const hidden of ['continuation', 'supported · Pi', 'host-full-trust', 'turn settled']) {
+    assert.equal(cardText.includes(hidden), false, `compact Pi card still exposes ${hidden}`);
   }
 
   const role = card.locator('select');

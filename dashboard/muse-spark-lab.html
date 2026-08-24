@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Muse Spark — 10 Animation Variants</title>
+<style>
+  :root { --bg:#0B0C0F; --bg2:#15171B; --bg3:#1E2126; --text:#E8EAF0; --muted:#8B91A0; --border:#2A2E36; --accent:#0082FB; }
+  *{box-sizing:border-box}
+  body{margin:0; font-family:ui-sans-system,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; background:var(--bg); color:var(--text); line-height:1.5}
+  header{max-width:1160px;margin:0 auto;padding:28px 20px 10px}
+  header h1{margin:0 0 6px;font-size:22px;letter-spacing:-0.02em}
+  header p{margin:0;color:var(--muted);max-width:760px;font-size:14px}
+  header .meta{margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .badge{font-size:12px; border:1px solid var(--border); background:var(--bg3); padding:4px 8px; border-radius:999px; color:var(--muted)}
+  .badge b{color:var(--text)}
+  .reference{display:flex;gap:16px;align-items:center;margin-top:16px; padding:14px; background:var(--bg2); border:1px solid var(--border); border-radius:12px}
+  .reference .icon-box{width:72px;height:72px; background:var(--bg3); border:1px solid var(--border); border-radius:12px; display:grid; place-items:center}
+  .reference svg{width:48px;height:48px}
+  .grid{max-width:1160px;margin:0 auto;padding:18px 20px 40px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+  @media(max-width:860px){ .grid{grid-template-columns:1fr} }
+  .card{background:var(--bg2); border:1px solid var(--border); border-radius:14px; overflow:hidden; display:flex; flex-direction:column}
+  .card-head{padding:14px 16px 10px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px}
+  .num{width:26px;height:26px; border-radius:999px; display:grid; place-items:center; font-size:12px; font-weight:700; background:color-mix(in oklab, var(--accent) 18%, transparent); border:1px solid color-mix(in oklab, var(--accent) 30%, transparent); color:#A8D0FF}
+  .card-head h3{margin:0;font-size:14px}
+  .card-head span{margin-left:auto;font-size:11px;color:var(--muted); border:1px solid var(--border); padding:2px 6px; border-radius:999px}
+  .card-body{display:grid;grid-template-columns:112px 1fr;gap:0;min-height:132px}
+  .preview{border-right:1px solid var(--border); display:grid; grid-template-rows:1fr auto; background:radial-gradient(180px 180px at 50% 38%, color-mix(in oklab, var(--accent) 10%, transparent), transparent 65%), var(--bg3)}
+  .preview-main{ display:grid; place-items:center; padding:14px}
+  .preview-main svg{width:56px;height:56px; overflow:visible}
+  .preview-label{font-size:10px;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted);text-align:center;border-top:1px solid var(--border);padding:6px}
+  .info{padding:12px 14px}
+  .info p{margin:0 0 8px;color:var(--muted);font-size:13px}
+  .info ul{margin:0;padding-left:16px;color:var(--muted);font-size:12px}
+  .info li{margin:2px 0}
+  .pick{margin-top:10px;display:flex;gap:8px;align-items:center}
+  .pick code{font-size:11px;background:var(--bg3);border:1px solid var(--border);padding:3px 6px;border-radius:6px}
+  .note{max-width:1160px;margin:0 auto;padding:0 20px 30px;color:var(--muted);font-size:12px}
+  .note a{color:#A8D0FF}
+  /* ensure 0%==100% loops — no snap. Each variant declares its own keyframes with matching endpoints */
+
+  /* Variant 1 — Pulse */
+  .v1-group{transform-origin:12px 12px; animation:v1-pulse 2s ease-in-out infinite}
+  @keyframes v1-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
+
+  /* Variant 2 — Orbital Ring */
+  .v2-ring{transform-origin:12px 12px; animation:v2-spin 4.4s linear infinite}
+  .v2-icon{transform-origin:12px 12px; animation:v2-breathe 2.2s ease-in-out infinite}
+  @keyframes v2-spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+  @keyframes v2-breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.04)}}
+
+  /* Variant 3 — Sheen Sweep (clip-path sweep) */
+  .v3-icon{position:relative}
+  .v3-sheen{transform-origin:12px 12px}
+  .v3-shine{ animation:v3-sweep 1.9s ease-in-out infinite}
+  @keyframes v3-sweep{0%{transform:translateX(-14px) rotate(-18deg); opacity:0}25%{opacity:.75}50%{transform:translateX(14px) rotate(-18deg); opacity:.75}100%{transform:translateX(-14px) rotate(-18deg); opacity:0}}
+
+  /* Variant 4 — Ripple segments (stagger) */
+  .v4 p{ transform-origin:12px 12px; animation:v4-ripple 1.8s ease-in-out infinite}
+  .v4 p:nth-child(1){animation-delay:0s}
+  .v4 p:nth-child(2){animation-delay:.08s}
+  .v4 p:nth-child(3){animation-delay:.16s}
+  .v4 p:nth-child(4){animation-delay:.24s}
+  .v4 p:nth-child(5){animation-delay:.32s}
+  .v4 p:nth-child(6){animation-delay:.40s}
+  .v4 p:nth-child(7){animation-delay:.48s}
+  .v4 p:nth-child(8){animation-delay:.56s}
+  .v4 p:nth-child(9){animation-delay:.64s}
+  .v4 p:nth-child(10){animation-delay:.02s}
+  .v4 p:nth-child(11){animation-delay:.10s}
+  .v4 p:nth-child(12){animation-delay:.18s}
+  .v4 p:nth-child(13){animation-delay:.26s}
+  .v4 p:nth-child(14){animation-delay:.34s}
+  .v4 p:nth-child(15){animation-delay:.42s}
+  @keyframes v4-ripple{0%,100%{transform:scaleY(1) scaleX(1); opacity:1}50%{transform:scaleY(1.06) scaleX(0.98); opacity:.92}}
+
+  /* Variant 5 — Aurora (hue + glow) */
+  .v5-group{transform-origin:12px 12px; animation:v5-aurora 2.6s ease-in-out infinite}
+  @keyframes v5-aurora{0%,100%{filter:brightness(1) saturate(1) hue-rotate(0deg) drop-shadow(0 0 0 rgba(0,130,251,0))}
+    50%{filter:brightness(1.15) saturate(1.25) hue-rotate(10deg) drop-shadow(0 0 8px rgba(0,130,251,.35))}}
+
+  /* Variant 6 — Torsion (squeeze + tilt) */
+  .v6-group{transform-origin:12px 12px; animation:v6-torsion 2.4s ease-in-out infinite}
+  @keyframes v6-torsion{0%,100%{transform:scaleX(1) scaleY(1) rotate(0deg)}
+    25%{transform:scaleX(0.91) scaleY(1.07) rotate(-2deg)}
+    50%{transform:scaleX(1.06) scaleY(0.94) rotate(2deg)}
+    75%{transform:scaleX(0.96) scaleY(1.03) rotate(-1deg)}}
+
+  /* Variant 7 — Twin Sparks orbiting */
+  .v7-orbit{transform-origin:12px 12px; animation:v7-orbit 2.8s linear infinite}
+  .v7-orbit2{transform-origin:12px 12px; animation:v7-orbit 2.8s linear infinite reverse}
+  @keyframes v7-orbit{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+  .v7-icon{transform-origin:12px 12px; animation:v7-icon 2.8s ease-in-out infinite}
+  @keyframes v7-icon{0%,100%{transform:scale(1)}50%{transform:scale(1.03)}}
+
+  /* Variant 8 — Aura */
+  .v8-aura{transform-origin:12px 12px; animation:v8-aura 1.9s ease-in-out infinite}
+  .v8-icon{transform-origin:12px 12px; animation:v8-icon 1.9s ease-in-out infinite}
+  @keyframes v8-aura{0%,100%{transform:scale(0.78);opacity:.22}50%{transform:scale(1.28);opacity:.56}}
+  @keyframes v8-icon{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
+
+  /* Variant 9 — Trace (dashed infinity stroke) */
+  .v9-trace{animation:v9-dash 1.8s linear infinite}
+  @keyframes v9-dash{0%{stroke-dashoffset:0}100%{stroke-dashoffset:28}}
+  .v9-icon{transform-origin:12px 12px; animation:v9-icon 1.8s ease-in-out infinite}
+  @keyframes v9-icon{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+
+  /* Variant 10 — Sparkle Pop */
+  .v10-icon{transform-origin:12px 12px; animation:v10-float 2.2s ease-in-out infinite}
+  .v10-s1{transform-origin:6px 6px; animation:v10-pop 2.2s ease-in-out infinite}
+  .v10-s2{transform-origin:18px 7px; animation:v10-pop 2.2s ease-in-out infinite .36s}
+  .v10-s3{transform-origin:12px 18px; animation:v10-pop 2.2s ease-in-out infinite .72s}
+  @keyframes v10-float{0%,100%{transform:translateY(0px)}50%{transform:translateY(-1.2px)}}
+  @keyframes v10-pop{0%,100%{transform:scale(0) rotate(0deg);opacity:0}20%{transform:scale(1) rotate(18deg);opacity:1}45%{transform:scale(0.88) rotate(18deg);opacity:1}65%{transform:scale(0) rotate(18deg);opacity:0}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Meta Muse Spark — animation lab</h1>
+  <p>Base icon from <code>@lobehub/icons-static-svg</code> <code>meta-color.svg</code> (the Meta infinity loop, blue gradients). Each variant below is a <b>closed-loop</b> animation: <code>0% == 100%</code> so it restarts without a snap. The orb shows how the icon feels while the agent is <b>working</b>; the idle state is the static base with no animation. Tell me the variant number (1–10) you want shipped — I'll wire that <code>meta-active.svg</code> plus <code>meta-idle.svg</code> into the agent cards and role model-profile marks.</p>
+  <div class="meta">
+    <span class="badge"><b>Provider</b> &nbsp; meta · aliases opencode-go</span>
+    <span class="badge"><b>Model</b> &nbsp; muse-spark-1.2-contributor (…)</span>
+    <span class="badge"><b>Pattern</b> &nbsp; <code>/^muse/i</code></span>
+    <span class="badge"><b>Size</b> &nbsp; 24×24 · gradients on #0082FB family</span>
+  </div>
+  <div class="reference">
+    <div class="icon-box" title="idle — static base">
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><title>Meta idle</title>
+        <path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l.175.297.012.02 1.62-2.438-.012-.019a48.763 48.763 0 00-1.098-1.716 28.01 28.01 0 00-1.175-1.629C10.413 4.932 8.812 4 6.896 4z" fill="url(#ref-0)"/><path d="M6.873 4C4.95 4.01 3.247 5.258 2.02 7.17a4.352 4.352 0 00-.01.017l2.254 1.231.011-.017c.718-1.083 1.61-1.774 2.568-1.785h.021L6.896 4h-.023z" fill="url(#ref-1)"/><path d="M2.019 7.17l-.011.017C1.2 8.447.598 9.995.274 11.664l-.005.022 2.534.6.004-.022c.27-1.467.786-2.828 1.456-3.845l.011-.017L2.02 7.17z" fill="url(#ref-2)"/><path d="M2.807 12.264l-2.533-.6-.005.022c-.177.918-.267 1.851-.269 2.786v.023l2.598.233v-.023a12.591 12.591 0 01.21-2.44z" fill="url(#ref-3)"/><path d="M2.677 15.537a5.462 5.462 0 01-.079-.813v-.022L0 14.468v.024a8.89 8.89 0 00.146 1.652l2.535-.585a4.106 4.106 0 01-.004-.022z" fill="url(#ref-4)"/><path d="M3.27 16.89c-.284-.31-.484-.756-.589-1.328l-.004-.021-2.535.585.004.021c.192 1.01.568 1.85 1.106 2.487l.014.017 2.018-1.745a2.106 2.106 0 01-.015-.016z" fill="url(#ref-5)"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917a1.545 1.545 0 01-1.186-.508l-2.017 1.744.014.017C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13a41.283 41.283 0 00-1.227-1.886z" fill="#0082FB"/><path d="M13.502 5.946l-.016.016c-.4.43-.786.908-1.16 1.416.378.483.768 1.024 1.175 1.63.48-.743.928-1.345 1.367-1.807l.016-.016-1.382-1.24z" fill="url(#ref-6)"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944l-.016.016 1.382 1.24.016-.017c.715-.747 1.408-1.12 2.176-1.12.826 0 1.6.39 2.27 1.075l.015.016 1.589-1.425-.016-.016z" fill="#0082FB"/><path d="M23.998 14.125c-.06-3.467-1.27-6.566-3.064-8.396l-.016-.016-1.588 1.424.015.016c1.35 1.392 2.277 3.98 2.361 6.971v.023h2.292v-.022z" fill="url(#ref-7)"/><path d="M23.998 14.15v-.023h-2.292v.022c.004.14.006.282.006.424 0 .815-.121 1.474-.368 1.95l-.011.022 1.708 1.782.013-.02c.62-.96.946-2.293.946-3.91 0-.083 0-.165-.002-.247z" fill="url(#ref-8)"/><path d="M21.344 16.52l-.011.02c-.214.402-.519.67-.917.787l.778 2.462a3.493 3.493 0 00.438-.182 3.558 3.558 0 001.366-1.218l.044-.065.012-.02-1.71-1.784z" fill="url(#ref-9)"/><path d="M19.92 17.393c-.262 0-.492-.039-.718-.14l-.798 2.522c.449.153.927.222 1.46.222.492 0 .943-.073 1.352-.215l-.78-2.462c-.167.05-.341.075-.517.073z" fill="url(#ref-10)"/><path d="M18.323 16.534l-.014-.017-1.836 1.914.016.017c.637.682 1.246 1.105 1.937 1.337l.797-2.52c-.291-.125-.573-.353-.9-.731z" fill="url(#ref-11)"/><path d="M18.309 16.515c-.55-.642-1.232-1.712-2.303-3.44l-1.396-2.336-.011-.02-1.62 2.438.012.02.989 1.668c.959 1.61 1.74 2.774 2.493 3.585l.016.016 1.834-1.914a2.353 2.353 0 01-.014-.017z" fill="url(#ref-12)"/>
+        <defs><linearGradient id="ref-0" x1="75.897%" x2="26.312%" y1="89.199%" y2="12.194%"><stop offset=".06%" stop-color="#0867DF"/><stop offset="45.39%" stop-color="#0668E1"/><stop offset="85.91%" stop-color="#0064E0"/></linearGradient><linearGradient id="ref-1" x1="21.67%" x2="97.068%" y1="75.874%" y2="23.985%"><stop offset="13.23%" stop-color="#0064DF"/><stop offset="99.88%" stop-color="#0064E0"/></linearGradient><linearGradient id="ref-2" x1="38.263%" x2="60.895%" y1="89.127%" y2="16.131%"><stop offset="1.47%" stop-color="#0072EC"/><stop offset="68.81%" stop-color="#0064DF"/></linearGradient><linearGradient id="ref-3" x1="47.032%" x2="52.15%" y1="90.19%" y2="15.745%"><stop offset="7.31%" stop-color="#007CF6"/><stop offset="99.43%" stop-color="#0072EC"/></linearGradient><linearGradient id="ref-4" x1="52.155%" x2="47.591%" y1="58.301%" y2="37.004%"><stop offset="7.31%" stop-color="#007FF9"/><stop offset="100%" stop-color="#007CF6"/></linearGradient><linearGradient id="ref-5" x1="37.689%" x2="61.961%" y1="12.502%" y2="63.624%"><stop offset="7.31%" stop-color="#007FF9"/><stop offset="100%" stop-color="#0082FB"/></linearGradient><linearGradient id="ref-6" x1="34.808%" x2="62.313%" y1="68.859%" y2="23.174%"><stop offset="27.99%" stop-color="#007FF8"/><stop offset="91.41%" stop-color="#0082FB"/></linearGradient><linearGradient id="ref-7" x1="43.762%" x2="57.602%" y1="6.235%" y2="98.514%"><stop offset="0%" stop-color="#0082FB"/><stop offset="99.95%" stop-color="#0081FA"/></linearGradient><linearGradient id="ref-8" x1="60.055%" x2="39.88%" y1="4.661%" y2="69.077%"><stop offset="6.19%" stop-color="#0081FA"/><stop offset="100%" stop-color="#0080F9"/></linearGradient><linearGradient id="ref-9" x1="30.282%" x2="61.081%" y1="59.32%" y2="33.244%"><stop offset="0%" stop-color="#027AF3"/><stop offset="100%" stop-color="#0080F9"/></linearGradient><linearGradient id="ref-10" x1="20.433%" x2="82.112%" y1="50.001%" y2="50.001%"><stop offset="0%" stop-color="#0377EF"/><stop offset="99.94%" stop-color="#0279F1"/></linearGradient><linearGradient id="ref-11" x1="40.303%" x2="72.394%" y1="35.298%" y2="57.811%"><stop offset=".19%" stop-color="#0471E9"/><stop offset="100%" stop-color="#0377EF"/></linearGradient><linearGradient id="ref-12" x1="32.254%" x2="68.003%" y1="19.719%" y2="84.908%"><stop offset="27.65%" stop-color="#0867DF"/><stop offset="100%" stop-color="#0471E9"/></linearGradient></defs>
+      </svg>
+    </div>
+    <div>
+      <div style="font-size:13px;font-weight:600">idle (reference)</div>
+      <div style="font-size:12px;color:var(--muted)">Static. No animation. Used in the model-pill chip and when the agent is idle. The margin around the icon is the orb padding — the icon itself is 56px.</div>
+    </div>
+    <div style="margin-left:auto; text-align:right; font-size:11px; color:var(--muted)">from lobehub<br/><span class="mono">meta-color.svg</span></div>
+  </div>
+</header>
+
+<div class="grid">
+
+  <!-- 1 PULSE -->
+  <article class="card">
+    <div class="card-head"><span class="num">1</span><h3>Pulse</h3><span>2s · ease-in-out</span></div>
+    <div class="card-body">
+      <div class="preview"><div class="preview-main">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g class="v1-group">
+          <path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l.175.297.012.02 1.62-2.438-.012-.019a48.763 48.763 0 00-1.098-1.716 28.01 28.01 0 00-1.175-1.629C10.413 4.932 8.812 4 6.896 4z" fill="url(#v1-0)"/><path d="M6.873 4C4.95 4.01 3.247 5.258 2.02 7.17a4.352 4.352 0 00-.01.017l2.254 1.231.011-.017c.718-1.083 1.61-1.774 2.568-1.785h.021L6.896 4h-.023z" fill="url(#v1-1)"/><path d="M2.019 7.17l-.011.017C1.2 8.447.598 9.995.274 11.664l-.005.022 2.534.6.004-.022c.27-1.467.786-2.828 1.456-3.845l.011-.017L2.02 7.17z" fill="url(#v1-2)"/><path d="M2.807 12.264l-2.533-.6-.005.022c-.177.918-.267 1.851-.269 2.786v.023l2.598.233v-.023a12.591 12.591 0 01.21-2.44z" fill="url(#v1-3)"/><path d="M2.677 15.537a5.462 5.462 0 01-.079-.813v-.022L0 14.468v.024a8.89 8.89 0 00.146 1.652l2.535-.585a4.106 4.106 0 01-.004-.022z" fill="url(#v1-4)"/><path d="M3.27 16.89c-.284-.31-.484-.756-.589-1.328l-.004-.021-2.535.585.004.021c.192 1.01.568 1.85 1.106 2.487l.014.017 2.018-1.745a2.106 2.106 0 01-.015-.016z" fill="url(#v1-5)"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917a1.545 1.545 0 01-1.186-.508l-2.017 1.744.014.017C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13a41.283 41.283 0 00-1.227-1.886z" fill="#0082FB"/><path d="M13.502 5.946l-.016.016c-.4.43-.786.908-1.16 1.416.378.483.768 1.024 1.175 1.63.48-.743.928-1.345 1.367-1.807l.016-.016-1.382-1.24z" fill="url(#v1-6)"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944l-.016.016 1.382 1.24.016-.017c.715-.747 1.408-1.12 2.176-1.12.826 0 1.6.39 2.27 1.075l.015.016 1.589-1.425-.016-.016z" fill="#0082FB"/><path d="M23.998 14.125c-.06-3.467-1.27-6.566-3.064-8.396l-.016-.016-1.588 1.424.015.016c1.35 1.392 2.277 3.98 2.361 6.971v.023h2.292v-.022z" fill="url(#v1-7)"/><path d="M23.998 14.15v-.023h-2.292v.022c.004.14.006.282.006.424 0 .815-.121 1.474-.368 1.95l-.011.022 1.708 1.782.013-.02c.62-.96.946-2.293.946-3.91 0-.083 0-.165-.002-.247z" fill="url(#v1-8)"/><path d="M21.344 16.52l-.011.02c-.214.402-.519.67-.917.787l.778 2.462a3.493 3.493 0 00.438-.182 3.558 3.558 0 001.366-1.218l.044-.065.012-.02-1.71-1.784z" fill="url(#v1-9)"/><path d="M19.92 17.393c-.262 0-.492-.039-.718-.14l-.798 2.522c.449.153.927.222 1.46.222.492 0 .943-.073 1.352-.215l-.78-2.462c-.167.05-.341.075-.517.073z" fill="url(#v1-10)"/><path d="M18.323 16.534l-.014-.017-1.836 1.914.016.017c.637.682 1.246 1.105 1.937 1.337l.797-2.52c-.291-.125-.573-.353-.9-.731z" fill="url(#v1-11)"/><path d="M18.309 16.515c-.55-.642-1.232-1.712-2.303-3.44l-1.396-2.336-.011-.02-1.62 2.438.012.02.989 1.668c.959 1.61 1.74 2.774 2.493 3.585l.016.016 1.834-1.914a2.353 2.353 0 01-.014-.017z" fill="url(#v1-12)"/>
+        </g><defs><linearGradient id="v1-0" x1="75.897%" x2="26.312%" y1="89.199%" y2="12.194%"><stop offset=".06%" stop-color="#0867DF"/><stop offset="45.39%" stop-color="#0668E1"/><stop offset="85.91%" stop-color="#0064E0"/></linearGradient><linearGradient id="v1-1" x1="21.67%" x2="97.068%" y1="75.874%" y2="23.985%"><stop offset="13.23%" stop-color="#0064DF"/><stop offset="99.88%" stop-color="#0064E0"/></linearGradient><linearGradient id="v1-2" x1="38.263%" x2="60.895%" y1="89.127%" y2="16.131%"><stop offset="1.47%" stop-color="#0072EC"/><stop offset="68.81%" stop-color="#0064DF"/></linearGradient><linearGradient id="v1-3" x1="47.032%" x2="52.15%" y1="90.19%" y2="15.745%"><stop offset="7.31%" stop-color="#007CF6"/><stop offset="99.43%" stop-color="#0072EC"/></linearGradient><linearGradient id="v1-4" x1="52.155%" x2="47.591%" y1="58.301%" y2="37.004%"><stop offset="7.31%" stop-color="#007FF9"/><stop offset="100%" stop-color="#007CF6"/></linearGradient><linearGradient id="v1-5" x1="37.689%" x2="61.961%" y1="12.502%" y2="63.624%"><stop offset="7.31%" stop-color="#007FF9"/><stop offset="100%" stop-color="#0082FB"/></linearGradient><linearGradient id="v1-6" x1="34.808%" x2="62.313%" y1="68.859%" y2="23.174%"><stop offset="27.99%" stop-color="#007FF8"/><stop offset="91.41%" stop-color="#0082FB"/></linearGradient><linearGradient id="v1-7" x1="43.762%" x2="57.602%" y1="6.235%" y2="98.514%"><stop offset="0%" stop-color="#0082FB"/><stop offset="99.95%" stop-color="#0081FA"/></linearGradient><linearGradient id="v1-8" x1="60.055%" x2="39.88%" y1="4.661%" y2="69.077%"><stop offset="6.19%" stop-color="#0081FA"/><stop offset="100%" stop-color="#0080F9"/></linearGradient><linearGradient id="v1-9" x1="30.282%" x2="61.081%" y1="59.32%" y2="33.244%"><stop offset="0%" stop-color="#027AF3"/><stop offset="100%" stop-color="#0080F9"/></linearGradient><linearGradient id="v1-10" x1="20.433%" x2="82.112%" y1="50.001%" y2="50.001%"><stop offset="0%" stop-color="#0377EF"/><stop offset="99.94%" stop-color="#0279F1"/></linearGradient><linearGradient id="v1-11" x1="40.303%" x2="72.394%" y1="35.298%" y2="57.811%"><stop offset=".19%" stop-color="#0471E9"/><stop offset="100%" stop-color="#0377EF"/></linearGradient><linearGradient id="v1-12" x1="32.254%" x2="68.003%" y1="19.719%" y2="84.908%"><stop offset="27.65%" stop-color="#0867DF"/><stop offset="100%" stop-color="#0471E9"/></linearGradient></defs></svg>
+      </div><div class="preview-label">working · loop ✓</div></div>
+      <div class="info"><p><b>Simple heartbeat.</b> Entire glyph scales 1→1.08→1. No rotation, no snap. The calmest busy state — pairs well with any orb background.</p><ul><li>0%==100% scale(1) · 50% peak</li><li>Feels alive without stealing focus</li></ul><div class="pick"><code>v1 · pulse</code></div></div>
+    </div>
+  </article>
+
+  <!-- 2 ORBITAL RING -->
+  <article class="card">
+    <div class="card-head"><span class="num">2</span><h3>Orbital Ring</h3><span>4.4s · linear</span></div>
+    <div class="card-body">
+      <div class="preview"><div class="preview-main">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <circle class="v2-ring" cx="12" cy="12" r="10.6" fill="none" stroke="#0082FB" stroke-width="0.7" stroke-dasharray="2.2 3.2" opacity=".45"/>
+          <g class="v2-icon">
+          <path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l.175.297.012.02 1.62-2.438-.012-.019a48.763 48.763 0 00-1.098-1.716 28.01 28.01 0 00-1.175-1.629C10.413 4.932 8.812 4 6.896 4z" fill="url(#v2-0)"/><path d="M6.873 4C4.95 4.01 3.247 5.258 2.02 7.17a4.352 4.352 0 00-.01.017l2.254 1.231.011-.017c.718-1.083 1.61-1.774 2.568-1.785h.021L6.896 4h-.023z" fill="url(#v2-1)"/><path d="M2.019 7.17l-.011.017C1.2 8.447.598 9.995.274 11.664l-.005.022 2.534.6.004-.022c.27-1.467.786-2.828 1.456-3.845l.011-.017L2.02 7.17z" fill="url(#v2-2)"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917a1.545 1.545 0 01-1.186-.508l-2.017 1.744.014.017C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13a41.283 41.283 0 00-1.227-1.886z" fill="#0082FB"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944l-.016.016 1.382 1.24.016-.017c.715-.747 1.408-1.12 2.176-1.12.826 0 1.6.39 2.27 1.075l.015.016 1.589-1.425-.016-.016z" fill="#0082FB"/><path d="M23.998 14.125c-.06-3.467-1.27-6.566-3.064-8.396l-.016-.016-1.588 1.424.015.016c1.35 1.392 2.277 3.98 2.361 6.971v.023h2.292v-.022z" fill="url(#v2-7)"/><path d="M21.344 16.52l-.011.02c-.214.402-.519.67-.917.787l.778 2.462a3.493 3.493 0 00.438-.182 3.558 3.558 0 001.366-1.218l.044-.065.012-.02-1.71-1.784z" fill="url(#v2-9)"/><path d="M19.92 17.393c-.262 0-.492-.039-.718-.14l-.798 2.522c.449.153.927.222 1.46.222.492 0 .943-.073 1.352-.215l-.78-2.462c-.167.05-.341.075-.517.073z" fill="url(#v2-10)"/><path d="M18.309 16.515c-.55-.642-1.232-1.712-2.303-3.44l-1.396-2.336-.011-.02-1.62 2.438.012.02.989 1.668c.959 1.61 1.74 2.774 2.493 3.585l.016.016 1.834-1.914a2.353 2.353 0 01-.014-.017z" fill="url(#v2-12)"/>
+          </g>
+          <defs><linearGradient id="v2-0" x1="75.897%" x2="26.312%" y1="89.199%" y2="12.194%"><stop offset=".06%" stop-color="#0867DF"/><stop offset="85.91%" stop-color="#0064E0"/></linearGradient><linearGradient id="v2-1" x1="21.67%" x2="97.068%" y1="75.874%" y2="23.985%"><stop offset="13.23%" stop-color="#0064DF"/><stop offset="99.88%" stop-color="#0064E0"/></linearGradient><linearGradient id="v2-2" x1="38.263%" x2="60.895%" y1="89.127%" y2="16.131%"><stop offset="1.47%" stop-color="#0072EC"/><stop offset="68.81%" stop-color="#0064DF"/></linearGradient><linearGradient id="v2-7" x1="43.762%" x2="57.602%" y1="6.235%" y2="98.514%"><stop offset="0%" stop-color="#0082FB"/><stop offset="99.95%" stop-color="#0081FA"/></linearGradient><linearGradient id="v2-9" x1="30.282%" x2="61.081%" y1="59.32%" y2="33.244%"><stop offset="0%" stop-color="#027AF3"/><stop offset="100%" stop-color="#0080F9"/></linearGradient><linearGradient id="v2-10" x1="20.433%" x2="82.112%" y1="50.001%" y2="50.001%"><stop offset="0%" stop-color="#0377EF"/><stop offset="99.94%" stop-color="#0279F1"/></linearGradient><linearGradient id="v2-12" x1="32.254%" x2="68.003%" y1="19.719%" y2="84.908%"><stop offset="27.65%" stop-color="#0867DF"/><stop offset="100%" stop-color="#0471E9"/></linearGradient></defs>
+        </svg>
+      </div><div class="preview-label">working · ring 360° loop ✓</div></div>
+      <div class="info"><p><b>Satellite orbit.</b> A faint dashed ring circles the loop forever (360°→0° is visually identical), while the glyph breathes 1→1.04→1 underneath.</p><ul><li>Ring is pure rotation — closed by definition</li><li>Busy is obvious at a glance in the agent grid</li></ul><div class="pick"><code>v2 · orbital ring</code></div></div>
+    </div>
+  </article>
+
+  <!-- 3 SHEEN -->
+  <article class="card">
+    <div class="card-head"><span class="num">3</span><h3>Sheen Sweep</h3><span>1.9s · ease-in-out</span></div>
+    <div class="card-body">
+      <div class="preview"><div class="preview-main">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <clipPath id="v3-clip"><path d="M6.897 4l-.024 0.031 2.615 0.022c1.715 0 3.046 1.357 5.94 6.246l1.807 1.512L20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944L10.78 9.654C8.745 12.854 7.04 13.571 5.543 13.571a1.545 1.545 0 01-1.186-.508L2.34 14.807C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13 3.067 5.087c.959 1.61 1.74 2.774 2.493 3.585l1.834-1.914c-.55-.642-1.232-1.712-2.303-3.44l-1.396-2.336L23.998 14.125c-.06-3.467-1.27-6.566-3.064-8.396l-1.588 1.424c1.35 1.392 2.277 3.98 2.361 6.971L2.02 7.17C.598 9.995.274 11.664.269 14.473L0 14.468v.024c.146 1.652.538 2.474 1.106 2.487l2.018-1.745-.015-.016 2.803-2.954z"/></clipPath>
+            <linearGradient id="v3-grad" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="white" stop-opacity="0"/><stop offset="50%" stop-color="white" stop-opacity=".95"/><stop offset="100%" stop-color="white" stop-opacity="0"/></linearGradient>
+          </defs>
+          <g >
+            <path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l.175.297.012.02 1.62-2.438-.012-.019a48.763 48.763 0 00-1.098-1.716 28.01 28.01 0 00-1.175-1.629C10.413 4.932 8.812 4 6.896 4z" fill="#0A66E0"/><path d="M6.873 4C4.95 4.01 3.247 5.258 2.02 7.17a4.352 4.352 0 00-.01.017l2.254 1.231.011-.017c.718-1.083 1.61-1.774 2.568-1.785h.021L6.896 4h-.023z" fill="#0A66E0"/><path d="M2.019 7.17l-.011.017C1.2 8.447.598 9.995.274 11.664l-.005.022 2.534.6.004-.022c.27-1.467.786-2.828 1.456-3.845l.011-.017L2.02 7.17z" fill="#0A66E0"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917a1.545 1.545 0 01-1.186-.508l-2.017 1.744.014.017C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13a41.283 41.283 0 00-1.227-1.886z" fill="#0082FB"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944l-.016.016 1.382 1.24.016-.017c.715-.747 1.408-1.12 2.176-1.12.826 0 1.6.39 2.27 1.075l.015.016 1.589-1.425-.016-.016z" fill="#0082FB"/><path d="M23.998 14.125c-.06-3.467-1.27-6.566-3.064-8.396l-.016-.016-1.588 1.424.015.016c1.35 1.392 2.277 3.98 2.361 6.971v.023h2.292v-.022z" fill="#0A66E0"/><path d="M18.309 16.515c-.55-.642-1.232-1.712-2.303-3.44l-1.396-2.336-.011-.02-1.62 2.438.012.02.989 1.668c.959 1.61 1.74 2.774 2.493 3.585l.016.016 1.834-1.914a2.353 2.353 0 01-.014-.017z" fill="#0A66E0"/>
+          </g>
+          <g clip-path="url(#v3-clip)"><rect class="v3-shine" x="-8" y="4" width="10" height="18" fill="url(#v3-grad)" opacity=".95" /></g>
+        </svg>
+      </div><div class="preview-label">working · closed bounce ✓</div></div>
+      <div class="info"><p><b>Light sweep.</b> A soft white sheen slides diagonally across the loop and returns — like a highlight rolling over polished metal.</p><ul><li>Bounces -14px ↔ +14px, endpoints match</li><li>Most “premium” feel; very quiet</li></ul><div class="pick"><code>v3 · sheen</code></div></div>
+    </div>
+  </article>
+
+  <!-- 4 RIPPLE -->
+  <article class="card">
+    <div class="card-head"><span class="num">4</span><h3>Ripple</h3><span>1.8s · stagger</span></div>
+    <div class="card-body">
+      <div class="preview"><div class="preview-main">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g class="v4">
+          <p d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246z" style="display:none"/><path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l.175.297.012.02 1.62-2.438-.012-.019a48.763 48.763 0 00-1.098-1.716 28.01 28.01 0 00-1.175-1.629C10.413 4.932 8.812 4 6.896 4z" fill="#0867DF"/><path d="M6.873 4C4.95 4.01 3.247 5.258 2.02 7.17a4.352 4.352 0 00-.01.017l2.254 1.231.011-.017c.718-1.083 1.61-1.774 2.568-1.785h.021L6.896 4h-.023z" fill="#0064DF"/><path d="M2.019 7.17l-.011.017C1.2 8.447.598 9.995.274 11.664l-.005.022 2.534.6.004-.022c.27-1.467.786-2.828 1.456-3.845l.011-.017L2.02 7.17z" fill="#0072EC"/><path d="M2.807 12.264l-2.533-.6-.005.022c-.177.918-.267 1.851-.269 2.786v.023l2.598.233v-.023a12.591 12.591 0 01.21-2.44z" fill="#007CF6"/><path d="M2.677 15.537a5.462 5.462 0 01-.079-.813v-.022L0 14.468v.024a8.89 8.89 0 00.146 1.652l2.535-.585a4.106 4.106 0 01-.004-.022z" fill="#007FF9"/><path d="M3.27 16.89c-.284-.31-.484-.756-.589-1.328l-.004-.021-2.535.585.004.021c.192 1.01.568 1.85 1.106 2.487l.014.017 2.018-1.745a2.106 2.106 0 01-.015-.016z" fill="#007FF9"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917a1.545 1.545 0 01-1.186-.508l-2.017 1.744.014.017C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13a41.283 41.283 0 00-1.227-1.886z" fill="#0082FB"/><path d="M13.502 5.946l-.016.016c-.4.43-.786.908-1.16 1.416.378.483.768 1.024 1.175 1.63.48-.743.928-1.345 1.367-1.807l.016-.016-1.382-1.24z" fill="#007FF8"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944l-.016.016 1.382 1.24.016-.017c.715-.747 1.408-1.12 2.176-1.12.826 0 1.6.39 2.27 1.075l.015.016 1.589-1.425-.016-.016z" fill="#0082FB"/><path d="M23.998 14.125c-.06-3.467-1.27-6.566-3.064-8.396l-.016-.016-1.588 1.424.015.016c1.35 1.392 2.277 3.98 2.361 6.971v.023h2.292v-.022z" fill="#0082FB"/><path d="M23.998 14.15v-.023h-2.292v.022c.004.14.006.282.006.424 0 .815-.121 1.474-.368 1.95l-.011.022 1.708 1.782.013-.02c.62-.96.946-2.293.946-3.91 0-.083 0-.165-.002-.247z" fill="#0081FA"/><path d="M21.344 16.52l-.011.02c-.214.402-.519.67-.917.787l.778 2.462a3.493 3.493 0 00.438-.182 3.558 3.558 0 001.366-1.218l.044-.065.012-.02-1.71-1.784z" fill="#027AF3"/><path d="M19.92 17.393c-.262 0-.492-.039-.718-.14l-.798 2.522c.449.153.927.222 1.46.222.492 0 .943-.073 1.352-.215l-.78-2.462c-.167.05-.341.075-.517.073z" fill="#0377EF"/><path d="M18.323 16.534l-.014-.017-1.836 1.914.016.017c.637.682 1.246 1.105 1.937 1.337l.797-2.52c-.291-.125-.573-.353-.9-.731z" fill="#0471E9"/><path d="M18.309 16.515c-.55-.642-1.232-1.712-2.303-3.44l-1.396-2.336-.011-.02-1.62 2.438.012.02.989 1.668c.959 1.61 1.74 2.774 2.493 3.585l.016.016 1.834-1.914a2.353 2.353 0 01-.014-.017z" fill="#0867DF"/>
+        </g></svg>
+      </div><div class="preview-label">working · per-segment loop ✓</div></div>
+      <div class="info"><p><b>Staggered ripple.</b> Each ribbon segment breathes independently with a 80ms offset — wave travels around the infinity loop and resolves flat.</p><ul><li>Each path 0%==100% — whole travels closed</li><li>Most kinetic; like the Anthropic spokes but subtler</li></ul><div class="pick"><code>v4 · ripple</code></div></div>
+    </div>
+  </article>
+
+  <!-- 5 AURORA -->
+  <article class="card">
+    <div class="card-head"><span class="num">5</span><h3>Aurora</h3><span>2.6s · glow</span></div>
+    <div class="card-body">
+      <div class="preview"><div class="preview-main">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g class="v5-group">
+          <path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l.175.297.012.02 1.62-2.438-.012-.019a48.763 48.763 0 00-1.098-1.716 28.01 28.01 0 00-1.175-1.629C10.413 4.932 8.812 4 6.896 4z" fill="#0867DF"/><path d="M6.873 4C4.95 4.01 3.247 5.258 2.02 7.17a4.352 4.352 0 00-.01.017l2.254 1.231.011-.017c.718-1.083 1.61-1.774 2.568-1.785h.021L6.896 4h-.023z" fill="#0064DF"/><path d="M2.019 7.17l-.011.017C1.2 8.447.598 9.995.274 11.664l-.005.022 2.534.6.004-.022c.27-1.467.786-2.828 1.456-3.845l.011-.017L2.02 7.17z" fill="#0072EC"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917a1.545 1.545 0 01-1.186-.508l-2.017 1.744.014.017C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13a41.283 41.283 0 00-1.227-1.886z" fill="#0082FB"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944l-.016.016 1.382 1.24.016-.017c.715-.747 1.408-1.12 2.176-1.12.826 0 1.6.39 2.27 1.075l.015.016 1.589-1.425-.016-.016z" fill="#0082FB"/><path d="M23.998 14.125c-.06-3.467-1.27-6.566-3.064-8.396l-.016-.016-1.588 1.424.015.016c1.35 1.392 2.277 3.98 2.361 6.971v.023h2.292v-.022z" fill="#0082FB"/><path d="M18.309 16.515c-.55-.642-1.232-1.712-2.303-3.44l-1.396-2.336-.011-.02-1.62 2.438.012.02.989 1.668c.959 1.61 1.74 2.774 2.493 3.585l.016.016 1.834-1.914a2.353 2.353 0 01-.014-.017z" fill="#0867DF"/>
+        </g></svg>
+      </div><div class="preview-label">working · filter loop ✓</div></div>
+      <div class="info"><p><b>Gradient breathe.</b> No movement — just a gentle hue/brightness wash and a soft outer glow that fades in and out.</p><ul><li>hue 0→10°→0 closes perfectly</li><li>Ideal if you want motion without geometry change</li></ul><div class="pick"><code>v5 · aurora</code></div></div>
+    </div>
+  </article>
+
+  <!-- 6 TORSION -->
+  <article class="card">
+    <div class="card-head"><span class="num">6</span><h3>Torsion</h3><span>2.4s · squeeze</span></div>
+    <div class="card-body">
+      <div class="preview"><div class="preview-main">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g class="v6-group">
+          <path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l.175.297.012.02 1.62-2.438-.012-.019a48.763 48.763 0 00-1.098-1.716 28.01 28.01 0 00-1.175-1.629C10.413 4.932 8.812 4 6.896 4z" fill="#0867DF"/><path d="M6.873 4C4.95 4.01 3.247 5.258 2.02 7.17a4.352 4.352 0 00-.01.017l2.254 1.231.011-.017c.718-1.083 1.61-1.774 2.568-1.785h.021L6.896 4h-.023z" fill="#0064DF"/><path d="M2.019 7.17l-.011.017C1.2 8.447.598 9.995.274 11.664l-.005.022 2.534.6.004-.022c.27-1.467.786-2.828 1.456-3.845l.011-.017L2.02 7.17z" fill="#0072EC"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917a1.545 1.545 0 01-1.186-.508l-2.017 1.744.014.017C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13a41.283 41.283 0 00-1.227-1.886z" fill="#0082FB"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944l-.016.016 1.382 1.24.016-.017c.715-.747 1.408-1.12 2.176-1.12.826 0 1.6.39 2.27 1.075l.015.016 1.589-1.425-.016-.016z" fill="#0082FB"/><path d="M23.998 14.125c-.06-3.467-1.27-6.566-3.064-8.396l-.016-.016-1.588 1.424.015.016c1.35 1.392 2.277 3.98 2.361 6.971v.023h2.292v-.022z" fill="#0082FB"/><path d="M18.309 16.515c-.55-.642-1.232-1.712-2.303-3.44l-1.396-2.336-.011-.02-1.62 2.438.012.02.989 1.668c.959 1.61 1.74 2.774 2.493 3.585l.016.016 1.834-1.914a2.353 2.353 0 01-.014-.017z" fill="#0867DF"/>
+        </g></svg>
+      </div><div class="preview-label">working · squeeze loop ✓</div></div>
+      <div class="info"><p><b>Infinity flex.</b> The whole loop gently squeezes and tilts side-to-side, like the infinity ribbon is being pulled — fluid and physical.</p><ul><li>scaleX/Y + rotate all return to identity</li><li>Pairs badly with a rotating ring; best solo</li></ul><div class="pick"><code>v6 · torsion</code></div></div>
+    </div>
+  </article>
+
+  <!-- 7 SPARKS -->
+  <article class="card">
+    <div class="card-head"><span class="num">7</span><h3>Twin Sparks</h3><span>2.8s · orbit</span></div>
+    <div class="card-body">
+      <div class="preview"><div class="preview-main">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <g class="v7-icon">
+            <path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l.175.297.012.02 1.62-2.438-.012-.019a48.763 48.763 0 00-1.098-1.716 28.01 28.01 0 00-1.175-1.629C10.413 4.932 8.812 4 6.896 4z" fill="#0867DF"/><path d="M6.873 4C4.95 4.01 3.247 5.258 2.02 7.17a4.352 4.352 0 00-.01.017l2.254 1.231.011-.017c.718-1.083 1.61-1.774 2.568-1.785h.021L6.896 4h-.023z" fill="#0064DF"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917a1.545 1.545 0 01-1.186-.508l-2.017 1.744.014.017C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13a41.283 41.283 0 00-1.227-1.886z" fill="#0082FB"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944l-.016.016 1.382 1.24.016-.017c.715-.747 1.408-1.12 2.176-1.12.826 0 1.6.39 2.27 1.075l.015.016 1.589-1.425-.016-.016z" fill="#0082FB"/><path d="M23.998 14.125c-.06-3.467-1.27-6.566-3.064-8.396l-.016-.016-1.588 1.424.015.016c1.35 1.392 2.277 3.98 2.361 6.971v.023h2.292v-.022z" fill="#0082FB"/><path d="M18.309 16.515c-.55-.642-1.232-1.712-2.303-3.44l-1.396-2.336-.011-.02-1.62 2.438.012.02.989 1.668c.959 1.61 1.74 2.774 2.493 3.585l.016.016 1.834-1.914a2.353 2.353 0 01-.014-.017z" fill="#0867DF"/>
+          </g>
+          <g class="v7-orbit"><circle cx="12" cy="3.2" r="1.05" fill="#3DA1FF" stroke="white" stroke-width="0.5"/></g>
+          <g class="v7-orbit2"><circle cx="12" cy="20.8" r="0.85" fill="#86C4FF" stroke="white" stroke-width="0.45"/></g>
+        </svg>
+      </div><div class="preview-label">working · orbit loop ✓</div></div>
+      <div class="info"><p><b>Two sparks chase the loop.</b> Tiny dots orbit opposite directions around the infinity — “thinking spark” metaphor for Muse Spark.</p><ul><li>Both orbs do full 360° loops (closed)</li><li>Name pun: <em>muse-spark</em> → literal sparks</li></ul><div class="pick"><code>v7 · twin sparks</code></div></div>
+    </div>
+  </article>
+
+  <!-- 8 AURA -->
+  <article class="card">
+    <div class="card-head"><span class="num">8</span><h3>Aura</h3><span>1.9s · glow</span></div>
+    <div class="card-body">
+      <div class="preview"><div class="preview-main">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <circle class="v8-aura" cx="12" cy="12" r="10" fill="url(#v8-rad)"/>
+          <g class="v8-icon">
+            <path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l.175.297.012.02 1.62-2.438-.012-.019a48.763 48.763 0 00-1.098-1.716 28.01 28.01 0 00-1.175-1.629C10.413 4.932 8.812 4 6.896 4z" fill="#0867DF"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917a1.545 1.545 0 01-1.186-.508l-2.017 1.744.014.017C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13a41.283 41.283 0 00-1.227-1.886z" fill="#0082FB"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944l-.016.016 1.382 1.24.016-.017c.715-.747 1.408-1.12 2.176-1.12.826 0 1.6.39 2.27 1.075l.015.016 1.589-1.425-.016-.016z" fill="#0082FB"/><path d="M23.998 14.125c-.06-3.467-1.27-6.566-3.064-8.396l-.016-.016-1.588 1.424.015.016c1.35 1.392 2.277 3.98 2.361 6.971v.023h2.292v-.022z" fill="#0082FB"/><path d="M18.309 16.515c-.55-.642-1.232-1.712-2.303-3.44l-1.396-2.336-.011-.02-1.62 2.438.012.02.989 1.668c.959 1.61 1.74 2.774 2.493 3.585l.016.016 1.834-1.914a2.353 2.353 0 01-.014-.017z" fill="#0867DF"/>
+          </g>
+          <defs><radialGradient id="v8-rad" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#0082FB" stop-opacity=".85"/><stop offset="100%" stop-color="#0082FB" stop-opacity="0"/></radialGradient></defs>
+        </svg>
+      </div><div class="preview-label">working · aura loop ✓</div></div>
+      <div class="info"><p><b>Breathing halo.</b> A radial blue aura expands and fades behind the loop; glyph lifts slightly in sync. Like the MiniMax aura but tighter.</p><ul><li>Aura 0.78↔1.28 scale closes; icon 1↔1.05</li><li>Feels warm — busy but not frantic</li></ul><div class="pick"><code>v8 · aura</code></div></div>
+    </div>
+  </article>
+
+  <!-- 9 TRACE -->
+  <article class="card">
+    <div class="card-head"><span class="num">9</span><h3>Trace</h3><span>1.8s · dash</span></div>
+    <div class="card-body">
+      <div class="preview"><div class="preview-main">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <ellipse cx="12" cy="12" rx="10.2" ry="7.2" fill="none" stroke="#4FA3FF" stroke-width="0.65" stroke-dasharray="3.2 3.2" stroke-linecap="round" opacity=".5" class="v9-trace" />
+          <g class="v9-icon">
+            <path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l.175.297.012.02 1.62-2.438-.012-.019a48.763 48.763 0 00-1.098-1.716 28.01 28.01 0 00-1.175-1.629C10.413 4.932 8.812 4 6.896 4z" fill="#0867DF"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917a1.545 1.545 0 01-1.186-.508l-2.017 1.744.014.017C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13a41.283 41.283 0 00-1.227-1.886z" fill="#0082FB"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944l-.016.016 1.382 1.24.016-.017c.715-.747 1.408-1.12 2.176-1.12.826 0 1.6.39 2.27 1.075l.015.016 1.589-1.425-.016-.016z" fill="#0082FB"/><path d="M18.309 16.515c-.55-.642-1.232-1.712-2.303-3.44l-1.396-2.336-.011-.02-1.62 2.438.012.02.989 1.668c.959 1.61 1.74 2.774 2.493 3.585l.016.016 1.834-1.914a2.353 2.353 0 01-.014-.017z" fill="#0867DF"/>
+          </g>
+        </svg>
+      </div><div class="preview-label">working · dash loop ✓</div></div>
+      <div class="info"><p><b>Running trace.</b> An elliptical dashed track orbits the glyph with a marching-ants flow, while the glyph itself gently scales.</p><ul><li>dashoffset 0→28 loops seamless (28 = pattern length)</li><li>Most “process / working” semantic</li></ul><div class="pick"><code>v9 · trace</code></div></div>
+    </div>
+  </article>
+
+  <!-- 10 SPARKLE POP -->
+  <article class="card">
+    <div class="card-head"><span class="num">10</span><h3>Sparkle Pop</h3><span>2.2s · pop</span></div>
+    <div class="card-body">
+      <div class="preview"><div class="preview-main">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <g class="v10-icon">
+            <path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l.175.297.012.02 1.62-2.438-.012-.019a48.763 48.763 0 00-1.098-1.716 28.01 28.01 0 00-1.175-1.629C10.413 4.932 8.812 4 6.896 4z" fill="#0867DF"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917a1.545 1.545 0 01-1.186-.508l-2.017 1.744.014.017C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13a41.283 41.283 0 00-1.227-1.886z" fill="#0082FB"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944l-.016.016 1.382 1.24.016-.017c.715-.747 1.408-1.12 2.176-1.12.826 0 1.6.39 2.27 1.075l.015.016 1.589-1.425-.016-.016z" fill="#0082FB"/><path d="M18.309 16.515c-.55-.642-1.232-1.712-2.303-3.44l-1.396-2.336-.011-.02-1.62 2.438.012.02.989 1.668c.959 1.61 1.74 2.774 2.493 3.585l.016.016 1.834-1.914a2.353 2.353 0 01-.014-.017z" fill="#0867DF"/>
+          </g>
+          <!-- three sparkle stars -->
+          <g class="v10-s1" opacity="0"><path d="M6 3.2 L6.45 4.9 L8.2 5.35 L6.45 5.8 L6 7.5 L5.55 5.8 L3.8 5.35 L5.55 4.9 Z" fill="#60B2FF"/></g>
+          <g class="v10-s2" opacity="0"><path d="M18 5 L18.35 6.2 L19.6 6.55 L18.35 6.9 L18 8.1 L17.65 6.9 L16.4 6.55 L17.65 6.2 Z" fill="#7CC2FF"/></g>
+          <g class="v10-s3" opacity="0"><path d="M12 16.8 L12.4 18 L13.6 18.4 L12.4 18.8 L12 20 L11.6 18.8 L10.4 18.4 L11.6 18 Z" fill="#3DA1FF"/></g>
+        </svg>
+      </div><div class="preview-label">working · pop loop ✓</div></div>
+      <div class="info"><p><b>Pop sparkles.</b> Three tiny stars wink in sequence around the loop while the glyph floats up 1.2px and back — playful, “spark” literal.</p><ul><li>Each star 0→scale(1)→0 with 0.36s stagger, loop closed</li><li>Most distinctive; reads as Meta AI / spark</li></ul><div class="pick"><code>v10 · sparkle pop</code></div></div>
+    </div>
+  </article>
+
+</div>
+
+<div class="note">
+  <p>How to pick: open this file in your browser (<code>dashboard/muse-spark-lab.html</code>). All animations loop forever; watch which one you can stare at for 20s without it feeling “jumpy” at the seam. Reply with the number (e.g. “v7”) and any tweak (“slower”, “no glow”, “smaller ring”) — I’ll bake the winner into <code>meta-idle.svg</code> + <code>meta-active.svg</code> and wire <code>meta / opencode-go → muse-spark</code> into <code>model-provider-match.mjs</code> + <code>model-providers.js</code> plus the model-profile provider list. The catalog already knows <code>opencode-go / muse-spark-1.2-contributor</code> from <code>pi --list-models</code>; no server change needed beyond the provider icon.</p>
+  <p>Concerns before shipping: (1) naming: proposal is <b>provider id <code>meta</code> with alias <code>opencode-go</code></b> and pattern <code>/^muse/i</code> — so both the Pi provider string and the model id resolve to the Meta mark. If you want <code>opencode-go</code> as its own provider label instead, say so. (2) idle file will keep the exact lobehub gradients (not a flat recolor) for brand fidelity. (3) All active loops above are <code>0%==100%</code>; gemini’s 0→180 snap is the anti-pattern we’re avoiding.</p>
+</div>
+</body>
+</html>

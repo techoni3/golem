@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Muse Spark — 10 Dazzling Variants (v2)</title>
+<style>
+  :root{--bg:#0B0C0F;--bg2:#14161A;--bg3:#1D2026;--text:#E8EAF0;--muted:#8B91A0;--border:#2A2E36;--accent:#0082FB;--accent2:#60B2FF}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-system,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;background:var(--bg);color:var(--text);line-height:1.5}
+  header{max-width:1180px;margin:0 auto;padding:28px 20px 12px}
+  header h1{margin:0 0 6px;font-size:23px;letter-spacing:-0.02em}
+  header h1 i{font-style:normal;color:var(--accent2)}
+  header p{margin:0;color:var(--muted);max-width:820px;font-size:13.5px}
+  .chips{margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .chip{font-size:11px;border:1px solid var(--border);background:var(--bg3);padding:4px 8px;border-radius:999px;color:var(--muted)}
+  .chip b{color:var(--text)}
+  .ref{margin-top:16px;background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:14px 14px;display:grid;grid-template-columns:78px 1fr auto;gap:14px;align-items:center}
+  .ref .box{width:72px;height:72px;background:var(--bg3);border:1px solid var(--border);border-radius:12px;display:grid;place-items:center}
+  .ref svg{width:50px;height:50px;overflow:visible}
+  .ref h3{margin:0 0 2px;font-size:13px}
+  .ref p{margin:0;font-size:12px;color:var(--muted)}
+  .grid{max-width:1180px;margin:0 auto;padding:18px 20px 36px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+  @media(max-width:900px){.grid{grid-template-columns:1fr}.ref{grid-template-columns:78px 1fr}}
+  .card{background:var(--bg2);border:1px solid var(--border);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
+  .card-head{padding:12px 14px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+  .num{width:28px;height:28px;border-radius:999px;display:grid;place-items:center;font-size:12px;font-weight:800;background:color-mix(in oklab,var(--accent) 20%, transparent);border:1px solid color-mix(in oklab,var(--accent) 34%, transparent);color:#B8DAFF}
+  .card-head h3{margin:0;font-size:13.5px;letter-spacing:-0.01em}
+  .pill{margin-left:auto;font-size:10.5px;color:var(--muted);border:1px solid var(--border);padding:2px 7px;border-radius:999px;white-space:nowrap}
+  .card-body{display:grid;grid-template-columns:128px 1fr;min-height:150px}
+  .preview{border-right:1px solid var(--border);display:grid;grid-template-rows:1fr auto;background:
+    radial-gradient(220px 180px at 50% 35%, color-mix(in oklab,var(--accent) 12%, transparent), transparent 68%),
+    var(--bg3);position:relative;overflow:hidden}
+  .preview-main{display:grid;place-items:center;padding:16px}
+  .preview-main svg{width:62px;height:62px;overflow:visible}
+  .preview-foot{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);text-align:center;border-top:1px solid var(--border);padding:6px;display:flex;justify-content:center;gap:6px;align-items:center}
+  .dot{width:6px;height:6px;border-radius:999px;background:var(--accent);box-shadow:0 0 8px var(--accent)}
+  .info{padding:12px 14px}
+  .info p{margin:0 0 7px;color:var(--muted);font-size:12.5px;line-height:1.45}
+  .info p b{color:var(--text);font-weight:600}
+  .info ul{margin:0;padding-left:15px;color:var(--muted);font-size:11.5px}
+  .info li{margin:2px 0}
+  .pick{margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .pick code{font-size:11px;background:var(--bg3);border:1px solid var(--border);padding:3px 7px;border-radius:6px}
+  .pick .hint{font-size:11px;color:var(--muted)}
+  /* compare toggle */
+  .compare{position:absolute;inset:auto 8px 28px auto;display:flex;gap:4px}
+  .compare button{font-size:10px;padding:3px 6px;border-radius:999px;border:1px solid var(--border);background:rgba(0,0,0,.35);color:var(--muted);cursor:pointer;backdrop-filter:blur(6px)}
+  .compare button.active{background:var(--accent);color:white;border-color:var(--accent)}
+  .paused *{animation-play-state:paused !important}
+  .ghost-idle{position:absolute;inset:0;display:grid;place-items:center;opacity:0;pointer-events:none;transition:opacity .2s}
+  .ghost-idle svg{width:62px;height:62px;opacity:.22;filter:grayscale(.2)}
+  .preview.show-idle .ghost-idle{opacity:1}
+  .preview.show-idle .preview-main{opacity:.08}
+  /* ---------- dazzling keyframes: all 0%==100%==idle ---------- */
+
+  /* 11 — SUPERNOVA IGNITE */
+  .v11-group{transform-origin:12px 12px;animation:v11-ignite 2.1s cubic-bezier(.22,1,.36,1) infinite}
+  @keyframes v11-ignite{
+    0%,100%{transform:scale(1) ; filter:brightness(1) blur(0px) drop-shadow(0 0 0 rgba(0,130,251,0))}
+    12%{transform:scale(0.86); filter:brightness(.85) blur(.6px) drop-shadow(0 0 0 rgba(0,130,251,0))}
+    26%{transform:scale(1.18); filter:brightness(1.42) blur(0px) drop-shadow(0 0 14px rgba(96,178,255,.75)) drop-shadow(0 0 28px rgba(0,130,251,.45))}
+    36%{transform:scale(.98);  filter:brightness(1.08) blur(0px) drop-shadow(0 0 8px rgba(96,178,255,.35))}
+    52%{transform:scale(1.04); filter:brightness(1.12) blur(0px) drop-shadow(0 0 6px rgba(96,178,255,.25))}
+  }
+
+  /* 12 — CURRENT FLOW (conveyor sheen) */
+  .v12-clip{transform-origin:12px 12px}
+  .v12-flow{animation:v12-flow 1.35s linear infinite}
+  @keyframes v12-flow{0%{transform:translateX(-16px)}100%{transform:translateX(16px)}}
+  /* subtle breathe to anchor idle */
+  .v12-base{transform-origin:12px 12px;animation:v12-breathe 1.35s ease-in-out infinite}
+  @keyframes v12-breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.02)}}
+
+  /* 13 — CHROMATIC PRISM (rgb split) */
+  .v13-wrap{transform-origin:12px 12px}
+  .v13-r{transform-origin:12px 12px;animation:v13-r 1.9s ease-in-out infinite;mix-blend-mode:screen;opacity:.9}
+  .v13-b{transform-origin:12px 12px;animation:v13-b 1.9s ease-in-out infinite;mix-blend-mode:screen;opacity:.9}
+  .v13-c{transform-origin:12px 12px;animation:v13-c 1.9s ease-in-out infinite}
+  @keyframes v13-r{0%,100%{transform:translate(0,0);filter:brightness(1)}18%{transform:translate(1.25px,.35px)}34%{transform:translate(-.9px,-.6px)}52%{transform:translate(.9px,-.35px)}68%{transform:translate(-.6px,.5px)}}
+  @keyframes v13-b{0%,100%{transform:translate(0,0);filter:brightness(1)}18%{transform:translate(-1.15px,-.25px)}34%{transform:translate(.85px,.55px)}52%{transform:translate(-.75px,.3px)}68%{transform:translate(.55px,-.4px)}}
+  @keyframes v13-c{0%,100%{transform:scale(1);filter:brightness(1)}22%{transform:scale(1.03);filter:brightness(1.18)}48%{transform:scale(.99)}}
+
+  /* 14 — COMET on infinity (figure-8) */
+  .v14-track{fill:none;stroke:rgba(96,178,255,.28);stroke-width:.55;stroke-dasharray:1.2 2.4;stroke-linecap:round}
+  .v14-comet{transform-origin:12px 12px;animation:v14-comet 2.2s linear infinite}
+  .v14-tail{transform-origin:12px 12px;animation:v14-tail 2.2s linear infinite}
+  @keyframes v14-comet{
+    0%{transform:translate(-8.2px,0px) scale(1);filter:drop-shadow(0 0 5px rgba(96,178,255,.9))}
+    22%{transform:translate(-2.8px,-4.6px) scale(1.05)}
+    50%{transform:translate(8.2px,0px) scale(1)}
+    74%{transform:translate(2.8px,4.6px) scale(1.02)}
+    100%{transform:translate(-8.2px,0px) scale(1)}
+  }
+  @keyframes v14-tail{
+    0%{transform:translate(-8.2px,0px) scale(.9);opacity:.9}
+    22%{transform:translate(-2.8px,-4.6px) scale(.9);opacity:.9}
+    50%{transform:translate(8.2px,0px) scale(.9);opacity:.9}
+    74%{transform:translate(2.8px,4.6px) scale(.9);opacity:.9}
+    100%{transform:translate(-8.2px,0px) scale(.9);opacity:.9}
+  }
+  .v14-icon{transform-origin:12px 12px;animation:v14-icon 2.2s ease-in-out infinite}
+  @keyframes v14-icon{0%,100%{transform:scale(1)}50%{transform:scale(1.03)}}
+
+  /* 15 — SONAR RIPPLES */
+  .v15-ring{transform-origin:12px 12px;animation:v15-ring 2.4s ease-out infinite}
+  .v15-ring:nth-child(2){animation-delay:.45s}
+  .v15-ring:nth-child(3){animation-delay:.9s}
+  @keyframes v15-ring{
+    0%{transform:scale(.45);opacity:.72;stroke-width:1.1}
+    70%{opacity:.18}
+    100%{transform:scale(2.1);opacity:0;stroke-width:.2}
+  }
+  .v15-icon{transform-origin:12px 12px;animation:v15-icon 2.4s ease-in-out infinite}
+  @keyframes v15-icon{0%,100%{transform:scale(1);filter:brightness(1)}18%{transform:scale(1.08);filter:brightness(1.18) drop-shadow(0 0 8px rgba(96,178,255,.4))}36%{transform:scale(.99)}}
+
+  /* 16 — MÖBIUS TWIST (card flip) */
+  .v16-group{transform-origin:12px 12px;animation:v16-twist 2.6s cubic-bezier(.62,.05,.26,1) infinite}
+  @keyframes v16-twist{
+    0%,100%{transform:perspective(120px) rotateY(0deg) scale(1);filter:brightness(1)}
+    22%{transform:perspective(120px) rotateY(78deg) scaleX(.18) scaleY(1.02);filter:brightness(.85)}
+    28%{transform:perspective(120px) rotateY(90deg) scaleX(.02) scaleY(1.03);filter:brightness(.72)}
+    34%{transform:perspective(120px) rotateY(102deg) scaleX(.18) scaleY(1.02);filter:brightness(.85)}
+    50%{transform:perspective(120px) rotateY(180deg) scaleX(1) scaleY(1);filter:brightness(.96)}
+    72%{transform:perspective(120px) rotateY(258deg) scaleX(.18) scaleY(1.02);filter:brightness(.85)}
+    78%{transform:perspective(120px) rotateY(270deg) scaleX(.02) scaleY(1.03);filter:brightness(.72)}
+    84%{transform:perspective(120px) rotateY(282deg) scaleX(.18) scaleY(1.02);filter:brightness(.85)}
+  }
+
+  /* 17 — SPARK SHOWER */
+  .v17-icon{transform-origin:12px 12px;animation:v17-icon 1.9s ease-in-out infinite}
+  @keyframes v17-icon{0%,100%{transform:scale(1)}18%{transform:scale(1.06)}32%{transform:scale(.98)}}
+  .v17-spark{transform-origin:12px 12px;animation:v17-burst 1.9s cubic-bezier(.22,1,.36,1) infinite}
+  .v17-spark:nth-child(1){animation-delay:0s}
+  .v17-spark:nth-child(2){animation-delay:.08s}
+  .v17-spark:nth-child(3){animation-delay:.16s}
+  .v17-spark:nth-child(4){animation-delay:.24s}
+  .v17-spark:nth-child(5){animation-delay:.32s}
+  .v17-spark:nth-child(6){animation-delay:.02s}
+  .v17-spark:nth-child(7){animation-delay:.12s}
+  .v17-spark:nth-child(8){animation-delay:.20s}
+  @keyframes v17-burst{
+    0%,100%{transform:translate(0,0) scale(0);opacity:0}
+    10%{transform:translate(0,0) scale(1);opacity:1}
+    28%{opacity:1}
+    55%{opacity:0}
+    60%{transform:translate(var(--tx),var(--ty)) scale(.35);opacity:0}
+  }
+
+  /* 18 — LIQUID MERCURY (feTurbulence) */
+  .v18-group{filter:url(#v18-liquid);transform-origin:12px 12px}
+  /* animate turbulence via SMIL <animate> — CSS fallback shimmer */
+  .v18-shimmer{transform-origin:12px 12px;animation:v18-shimmer 2.2s ease-in-out infinite}
+  @keyframes v18-shimmer{0%,100%{filter:brightness(1) saturate(1)}22%{filter:brightness(1.2) saturate(1.2)}45%{filter:brightness(.98) saturate(.95)}}
+
+  /* 19 — NEON FLICKER (stroke draw + fill) */
+  .v19-fill{transform-origin:12px 12px;animation:v19-fill 2.4s ease-in-out infinite}
+  .v19-stroke{fill:none;stroke:#6EC0FF;stroke-width:.85;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:52 52;animation:v19-dash 2.4s linear infinite, v19-glow 2.4s ease-in-out infinite}
+  @keyframes v19-dash{0%{stroke-dashoffset:52}18%{stroke-dashoffset:0}72%{stroke-dashoffset:0}100%{stroke-dashoffset:52}}
+  @keyframes v19-glow{0%,100%{opacity:.0;filter:drop-shadow(0 0 0 rgba(110,192,255,0))}14%{opacity:1;filter:drop-shadow(0 0 6px rgba(110,192,255,.9))}26%{opacity:.25}30%{opacity:1}58%{opacity:1;filter:drop-shadow(0 0 8px rgba(110,192,255,.85))}72%{opacity:0}}
+  @keyframes v19-fill{0%,100%{opacity:1;filter:brightness(1)}12%{opacity:.45;filter:brightness(.75)}18%{opacity:1;filter:brightness(1.25) drop-shadow(0 0 10px rgba(96,178,255,.45))}68%{opacity:1;filter:brightness(1.05)}}
+
+  /* 20 — KALEIDO BLOOM */
+  .v20-core{transform-origin:12px 12px;animation:v20-core 2.8s ease-in-out infinite}
+  @keyframes v20-core{0%,100%{transform:scale(1) rotate(0deg)}28%{transform:scale(1.06) rotate(6deg)}52%{transform:scale(.98) rotate(-4deg)}}
+  .v20-petal{transform-origin:12px 12px;animation:v20-petal 2.8s ease-in-out infinite;mix-blend-mode:screen;opacity:.82}
+  .v20-petal:nth-child(1){--r:0deg;animation-delay:0s}
+  .v20-petal:nth-child(2){--r:60deg;animation-delay:.07s}
+  .v20-petal:nth-child(3){--r:120deg;animation-delay:.14s}
+  .v20-petal:nth-child(4){--r:180deg;animation-delay:.21s}
+  .v20-petal:nth-child(5){--r:240deg;animation-delay:.28s}
+  .v20-petal:nth-child(6){--r:300deg;animation-delay:.035s}
+  @keyframes v20-petal{
+    0%,100%{transform:rotate(var(--r)) translateY(0px) scale(.92);opacity:.0;filter:brightness(.9)}
+    18%{opacity:.82;filter:brightness(1.15)}
+    34%{transform:rotate(var(--r)) translateY(-3.2px) scale(1.02);opacity:.82}
+    56%{transform:rotate(var(--r)) translateY(-1.2px) scale(.98);opacity:.55}
+    72%{opacity:.0}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1><i>✦</i> Muse Spark — dazzling set <span style="color:var(--muted);font-weight:400">v2 · 10 new · closed to idle</span></h1>
+  <p>First 10 were polite. These 10 are <b>loud on purpose</b> — you should spot “busy” from two metres away, then watch it melt back to the exact idle frame so the switch <code>busy → idle</code> is invisible. Every variant below starts and ends at the static reference ( <code>0% == 100% == idle</code> ). Hover a preview and hit <b>hold idle</b> to ghost-compare; click <b>pause</b> to freeze mid-loop and check the seam. Pick one — or say <em>“v14 but slower + no tail”</em> — and I’ll ship <code>meta-idle.svg</code> + <code>meta-active.svg</code>.</p>
+  <div class="chips">
+    <span class="chip"><b>Provider</b> &nbsp; meta · alias opencode-go</span>
+    <span class="chip"><b>Model</b> &nbsp; muse-spark-1.2-contributor</span>
+    <span class="chip"><b>Pattern</b> &nbsp; /^muse/i</span>
+    <span class="chip"><b>Idle</b> &nbsp; lobehub meta-color.svg · 24×24 · #0082FB</span>
+    <span class="chip"><b>Rule</b> &nbsp; 0% == 100% == idle ✓</span>
+  </div>
+  <div class="ref">
+    <div class="box">
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><title>idle</title>
+        <path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l.175.297.012.02 1.62-2.438-.012-.019a48.763 48.763 0 00-1.098-1.716 28.01 28.01 0 00-1.175-1.629C10.413 4.932 8.812 4 6.896 4z" fill="url(#ref-0)"/><path d="M6.873 4C4.95 4.01 3.247 5.258 2.02 7.17a4.352 4.352 0 00-.01.017l2.254 1.231.011-.017c.718-1.083 1.61-1.774 2.568-1.785h.021L6.896 4h-.023z" fill="url(#ref-1)"/><path d="M2.019 7.17l-.011.017C1.2 8.447.598 9.995.274 11.664l-.005.022 2.534.6.004-.022c.27-1.467.786-2.828 1.456-3.845l.011-.017L2.02 7.17z" fill="url(#ref-2)"/><path d="M2.807 12.264l-2.533-.6-.005.022c-.177.918-.267 1.851-.269 2.786v.023l2.598.233v-.023a12.591 12.591 0 01.21-2.44z" fill="url(#ref-3)"/><path d="M2.677 15.537a5.462 5.462 0 01-.079-.813v-.022L0 14.468v.024a8.89 8.89 0 00.146 1.652l2.535-.585a4.106 4.106 0 01-.004-.022z" fill="url(#ref-4)"/><path d="M3.27 16.89c-.284-.31-.484-.756-.589-1.328l-.004-.021-2.535.585.004.021c.192 1.01.568 1.85 1.106 2.487l.014.017 2.018-1.745a2.106 2.106 0 01-.015-.016z" fill="url(#ref-5)"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917a1.545 1.545 0 01-1.186-.508l-2.017 1.744.014.017C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13a41.283 41.283 0 00-1.227-1.886z" fill="#0082FB"/><path d="M13.502 5.946l-.016.016c-.4.43-.786.908-1.16 1.416.378.483.768 1.024 1.175 1.63.48-.743.928-1.345 1.367-1.807l.016-.016-1.382-1.24z" fill="url(#ref-6)"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944l-.016.016 1.382 1.24.016-.017c.715-.747 1.408-1.12 2.176-1.12.826 0 1.6.39 2.27 1.075l.015.016 1.589-1.425-.016-.016z" fill="#0082FB"/><path d="M23.998 14.125c-.06-3.467-1.27-6.566-3.064-8.396l-.016-.016-1.588 1.424.015.016c1.35 1.392 2.277 3.98 2.361 6.971v.023h2.292v-.022z" fill="url(#ref-7)"/><path d="M23.998 14.15v-.023h-2.292v.022c.004.14.006.282.006.424 0 .815-.121 1.474-.368 1.95l-.011.022 1.708 1.782.013-.02c.62-.96.946-2.293.946-3.91 0-.083 0-.165-.002-.247z" fill="url(#ref-8)"/><path d="M21.344 16.52l-.011.02c-.214.402-.519.67-.917.787l.778 2.462a3.493 3.493 0 00.438-.182 3.558 3.558 0 001.366-1.218l.044-.065.012-.02-1.71-1.784z" fill="url(#ref-9)"/><path d="M19.92 17.393c-.262 0-.492-.039-.718-.14l-.798 2.522c.449.153.927.222 1.46.222.492 0 .943-.073 1.352-.215l-.78-2.462c-.167.05-.341.075-.517.073z" fill="url(#ref-10)"/><path d="M18.323 16.534l-.014-.017-1.836 1.914.016.017c.637.682 1.246 1.105 1.937 1.337l.797-2.52c-.291-.125-.573-.353-.9-.731z" fill="url(#ref-11)"/><path d="M18.309 16.515c-.55-.642-1.232-1.712-2.303-3.44l-1.396-2.336-.011-.02-1.62 2.438.012.02.989 1.668c.959 1.61 1.74 2.774 2.493 3.585l.016.016 1.834-1.914a2.353 2.353 0 01-.014-.017z" fill="url(#ref-12)"/>
+        <defs><linearGradient id="ref-0" x1="75.897%" x2="26.312%" y1="89.199%" y2="12.194%"><stop offset=".06%" stop-color="#0867DF"/><stop offset="45.39%" stop-color="#0668E1"/><stop offset="85.91%" stop-color="#0064E0"/></linearGradient><linearGradient id="ref-1" x1="21.67%" x2="97.068%" y1="75.874%" y2="23.985%"><stop offset="13.23%" stop-color="#0064DF"/><stop offset="99.88%" stop-color="#0064E0"/></linearGradient><linearGradient id="ref-2" x1="38.263%" x2="60.895%" y1="89.127%" y2="16.131%"><stop offset="1.47%" stop-color="#0072EC"/><stop offset="68.81%" stop-color="#0064DF"/></linearGradient><linearGradient id="ref-3" x1="47.032%" x2="52.15%" y1="90.19%" y2="15.745%"><stop offset="7.31%" stop-color="#007CF6"/><stop offset="99.43%" stop-color="#0072EC"/></linearGradient><linearGradient id="ref-4" x1="52.155%" x2="47.591%" y1="58.301%" y2="37.004%"><stop offset="7.31%" stop-color="#007FF9"/><stop offset="100%" stop-color="#007CF6"/></linearGradient><linearGradient id="ref-5" x1="37.689%" x2="61.961%" y1="12.502%" y2="63.624%"><stop offset="7.31%" stop-color="#007FF9"/><stop offset="100%" stop-color="#0082FB"/></linearGradient><linearGradient id="ref-6" x1="34.808%" x2="62.313%" y1="68.859%" y2="23.174%"><stop offset="27.99%" stop-color="#007FF8"/><stop offset="91.41%" stop-color="#0082FB"/></linearGradient><linearGradient id="ref-7" x1="43.762%" x2="57.602%" y1="6.235%" y2="98.514%"><stop offset="0%" stop-color="#0082FB"/><stop offset="99.95%" stop-color="#0081FA"/></linearGradient><linearGradient id="ref-8" x1="60.055%" x2="39.88%" y1="4.661%" y2="69.077%"><stop offset="6.19%" stop-color="#0081FA"/><stop offset="100%" stop-color="#0080F9"/></linearGradient><linearGradient id="ref-9" x1="30.282%" x2="61.081%" y1="59.32%" y2="33.244%"><stop offset="0%" stop-color="#027AF3"/><stop offset="100%" stop-color="#0080F9"/></linearGradient><linearGradient id="ref-10" x1="20.433%" x2="82.112%" y1="50.001%" y2="50.001%"><stop offset="0%" stop-color="#0377EF"/><stop offset="99.94%" stop-color="#0279F1"/></linearGradient><linearGradient id="ref-11" x1="40.303%" x2="72.394%" y1="35.298%" y2="57.811%"><stop offset=".19%" stop-color="#0471E9"/><stop offset="100%" stop-color="#0377EF"/></linearGradient><linearGradient id="ref-12" x1="32.254%" x2="68.003%" y1="19.719%" y2="84.908%"><stop offset="27.65%" stop-color="#0867DF"/><stop offset="100%" stop-color="#0471E9"/></linearGradient></defs>
+      </svg>
+    </div>
+    <div>
+      <h3>Idle — the exact rest frame</h3>
+      <p>Zero animation. This is <code>0%</code> and <code>100%</code> of every variant on the right — flip any card to <em>hold idle</em> to see the ghost snap back perfectly.</p>
+    </div>
+    <div style="text-align:right;font-size:11px;color:var(--muted)">lobehub<br/><span style="font-family:ui-monospace,monospace">meta-color.svg</span></div>
+  </div>
+</header>
+
+<div class="grid">
+
+  <!-- 11 SUPERNOVA -->
+  <article class="card" id="c11">
+    <div class="card-head"><span class="num">11</span><h3>Supernova Ignite</h3><span>2.1s · burst → settle</span></div>
+    <div class="card-body">
+      <div class="preview" data-card="11"><div class="preview-main">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g class="v11-group">
+          <path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l.175.297.012.02 1.62-2.438-.012-.019a48.763 48.763 0 00-1.098-1.716 28.01 28.01 0 00-1.175-1.629C10.413 4.932 8.812 4 6.896 4z" fill="#0867DF"/><path d="M6.873 4C4.95 4.01 3.247 5.258 2.02 7.17a4.352 4.352 0 00-.01.017l2.254 1.231.011-.017c.718-1.083 1.61-1.774 2.568-1.785h.021L6.896 4h-.023z" fill="#0064DF"/><path d="M2.019 7.17l-.011.017C1.2 8.447.598 9.995.274 11.664l-.005.022 2.534.6.004-.022c.27-1.467.786-2.828 1.456-3.845l.011-.017L2.02 7.17z" fill="#0072EC"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917a1.545 1.545 0 01-1.186-.508l-2.017 1.744.014.017C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13a41.283 41.283 0 00-1.227-1.886z" fill="#0082FB"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944l-.016.016 1.382 1.24.016-.017c.715-.747 1.408-1.12 2.176-1.12.826 0 1.6.39 2.27 1.075l.015.016 1.589-1.425-.016-.016z" fill="#0082FB"/><path d="M23.998 14.125c-.06-3.467-1.27-6.566-3.064-8.396l-.016-.016-1.588 1.424.015.016c1.35 1.392 2.277 3.98 2.361 6.971v.023h2.292v-.022z" fill="#0082FB"/><path d="M18.309 16.515c-.55-.642-1.232-1.712-2.303-3.44l-1.396-2.336-.011-.02-1.62 2.438.012.02.989 1.668c.959 1.61 1.74 2.774 2.493 3.585l.016.016 1.834-1.914a2.353 2.353 0 01-.014-.017z" fill="#0867DF"/>
+        </g></svg>
+      </div><div class="ghost-idle"><svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l.175.297.012.02 1.62-2.438-.012-.019a48.763 48.763 0 00-1.098-1.716 28.01 28.01 0 00-1.175-1.629C10.413 4.932 8.812 4 6.896 4z" fill="#0867DF"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917a1.545 1.545 0 01-1.186-.508l-2.017 1.744.014.017C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13a41.283 41.283 0 00-1.227-1.886z" fill="#0082FB"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944l-.016.016 1.382 1.24.016-.017c.715-.747 1.408-1.12 2.176-1.12.826 0 1.6.39 2.27 1.075l.015.016 1.589-1.425-.016-.016z" fill="#0082FB"/><path d="M18.309 16.515c-.55-.642-1.232-1.712-2.303-3.44l-1.396-2.336-.011-.02-1.62 2.438.012.02.989 1.668c.959 1.61 1.74 2.774 2.493 3.585l.016.016 1.834-1.914a2.353 2.353 0 01-.014-.017z" fill="#0867DF"/></svg></div>
+      <div class="compare"><button onclick="toggleIdle(11)">hold idle</button><button onclick="togglePause(11)">pause</button></div>
+      <div class="preview-foot"><span class="dot"></span> working · closed ✓</div></div>
+      <div class="info"><p><b>Spark that ignites.</b> Inhales (0.86×), then <em>bursts</em> to 1.18× with a hard bloom, then wobbles back to idle. The “muse sparked” moment — impossible to miss in the agent grid.</p><ul><li>12% shrink → 26% blast (drop-shadow 28px) → settle to 1</li><li>Most kinetic single-element variant — no extra geometry</li></ul><div class="pick"><code>11 · supernova</code><span class="hint">→ loud, one-element, clean idle ghost</span></div></div>
+    </div>
+  </article>
+
+  <!-- 12 CURRENT -->
+  <article class="card" id="c12">
+    <div class="card-head"><span class="num">12</span><h3>Current Flow</h3><span>1.35s · conveyor</span></div>
+    <div class="card-body">
+      <div class="preview" data-card="12"><div class="preview-main">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <clipPath id="v12-clip"><path d="M6.897 4l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l1.795 1.02L20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944L10.78 9.654C8.745 12.854 7.3 13.571 5.543 13.571a1.545 1.545 0 01-1.186-.508L2.34 14.807C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13 3.067 5.087c.959 1.61 1.74 2.774 2.493 3.585l1.834-1.914c-.55-.642-1.232-1.712-2.303-3.44l-1.396-2.336L23.998 14.125c-.06-3.467-1.27-6.566-3.064-8.396l-1.588 1.424c1.35 1.392 2.277 3.98 2.361 6.971L2.02 7.17A8.7 8.7 0 00.27 14.47L0 14.468a8.89 8.89 0 00.146 1.652l2.535-.585-.004-.022L6.9 12Z"/></clipPath>
+            <linearGradient id="v12-g" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="white" stop-opacity="0"/><stop offset="18%" stop-color="white" stop-opacity="0"/><stop offset="50%" stop-color="white" stop-opacity=".92"/><stop offset="82%" stop-color="white" stop-opacity="0"/><stop offset="100%" stop-color="white" stop-opacity="0"/></linearGradient>
+            <pattern id="v12-pat" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(-18)"><rect width="10" height="10" fill="none"/><rect x="0" y="0" width="5" height="10" fill="url(#v12-g)" opacity=".95"/></pattern>
+          </defs>
+          <g class="v12-base">
+            <path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l.175.297.012.02 1.62-2.438-.012-.019a48.763 48.763 0 00-1.098-1.716 28.01 28.01 0 00-1.175-1.629C10.413 4.932 8.812 4 6.896 4z" fill="#0867DF"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917a1.545 1.545 0 01-1.186-.508l-2.017 1.744.014.017C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13a41.283 41.283 0 00-1.227-1.886z" fill="#0082FB"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944l-.016.016 1.382 1.24.016-.017c.715-.747 1.408-1.12 2.176-1.12.826 0 1.6.39 2.27 1.075l.015.016 1.589-1.425-.016-.016z" fill="#0082FB"/><path d="M18.309 16.515c-.55-.642-1.232-1.712-2.303-3.44l-1.396-2.336-.011-.02-1.62 2.438.012.02.989 1.668c.959 1.61 1.74 2.774 2.493 3.585l.016.016 1.834-1.914a2.353 2.353 0 01-.014-.017z" fill="#0867DF"/>
+          </g>
+          <g clip-path="url(#v12-clip)"><g class="v12-flow"><rect x="-16" y="2" width="42" height="20" fill="url(#v12-pat)"/></g></g>
+        </svg>
+      </div><div class="ghost-idle"><svg viewBox="0 0 24 24"><path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246z" fill="#0867DF"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917z" fill="#0082FB"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4z" fill="#0082FB"/></svg></div>
+      <div class="compare"><button onclick="toggleIdle(12)">hold idle</button><button onclick="togglePause(12)">pause</button></div>
+      <div class="preview-foot"><span class="dot"></span> working · seamless loop ✓</div></div>
+      <div class="info"><p><b>The ribbon <em>flows</em>.</b> A bright conveyor sheen races along the infinity and wraps — you feel the loop is a functioning circuit, not a static logo.</p><ul><li>Diagonal pattern translates -16→+16, wraps perfectly (pattern repeat)</li><li>Glyph stays at idle scale — sheen alone carries the motion</li></ul><div class="pick"><code>12 · current</code><span class="hint">→ most “alive system” signal</span></div></div>
+    </div>
+  </article>
+
+  <!-- 13 PRISM -->
+  <article class="card" id="c13">
+    <div class="card-head"><span class="num">13</span><h3>Prism Glitch</h3><span>1.9s · chromatic</span></div>
+    <div class="card-body">
+      <div class="preview" data-card="13"><div class="preview-main">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <g class="v13-wrap">
+            <!-- red channel -->
+            <g class="v13-r"><path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l.175.297.012.02 1.62-2.438-.012-.019a48.763 48.763 0 00-1.098-1.716 28.01 28.01 0 00-1.175-1.629C10.413 4.932 8.812 4 6.896 4z" fill="#FF3B5C" opacity=".92"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917a1.545 1.545 0 01-1.186-.508l-2.017 1.744.014.017C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13a41.283 41.283 0 00-1.227-1.886z" fill="#FF3B5C" opacity=".92"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944l-.016.016 1.382 1.24.016-.017c.715-.747 1.408-1.12 2.176-1.12.826 0 1.6.39 2.27 1.075l.015.016 1.589-1.425-.016-.016z" fill="#FF3B5C" opacity=".92"/></g>
+            <!-- blue channel -->
+            <g class="v13-b"><path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l.175.297.012.02 1.62-2.438-.012-.019a48.763 48.763 0 00-1.098-1.716 28.01 28.01 0 00-1.175-1.629C10.413 4.932 8.812 4 6.896 4z" fill="#00E5FF" opacity=".92"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917a1.545 1.545 0 01-1.186-.508l-2.017 1.744.014.017C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13a41.283 41.283 0 00-1.227-1.886z" fill="#00E5FF" opacity=".92"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944l-.016.016 1.382 1.24.016-.017c.715-.747 1.408-1.12 2.176-1.12.826 0 1.6.39 2.27 1.075l.015.016 1.589-1.425-.016-.016z" fill="#00E5FF" opacity=".92"/></g>
+            <!-- center -->
+            <g class="v13-c"><path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l.175.297.012.02 1.62-2.438-.012-.019a48.763 48.763 0 00-1.098-1.716 28.01 28.01 0 00-1.175-1.629C10.413 4.932 8.812 4 6.896 4z" fill="#0867DF"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917a1.545 1.545 0 01-1.186-.508l-2.017 1.744.014.017C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13a41.283 41.283 0 00-1.227-1.886z" fill="#0082FB"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944l-.016.016 1.382 1.24.016-.017c.715-.747 1.408-1.12 2.176-1.12.826 0 1.6.39 2.27 1.075l.015.016 1.589-1.425-.016-.016z" fill="#0082FB"/><path d="M18.309 16.515c-.55-.642-1.232-1.712-2.303-3.44l-1.396-2.336-.011-.02-1.62 2.438.012.02.989 1.668c.959 1.61 1.74 2.774 2.493 3.585l.016.016 1.834-1.914a2.353 2.353 0 01-.014-.017z" fill="#0867DF"/></g>
+          </g>
+        </svg>
+      </div>
+      <div class="compare"><button onclick="toggleIdle(13)">hold idle</button><button onclick="togglePause(13)">pause</button></div>
+      <div class="preview-foot"><span class="dot"></span> working · snap back ✓</div></div>
+      <div class="info"><p><b>Prism split.</b> Red/blue channels jitter apart like a holographic glitch, then slam back to perfect registration — high-tech, very “AI thinking”.</p><ul><li>Offsets ±1.25px with screen blend; 0%==100% lands dead-center</li><li>Loudest color trick — reads even at 20px</li></ul><div class="pick"><code>13 · prism</code><span class="hint">→ most chromatic, editor-friendly</span></div></div>
+    </div>
+  </article>
+
+  <!-- 14 COMET -->
+  <article class="card" id="c14">
+    <div class="card-head"><span class="num">14</span><h3>Comet Loop</h3><span>2.2s · figure-8 orbit</span></div>
+    <div class="card-body">
+      <div class="preview" data-card="14"><div class="preview-main">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path class="v14-track" d="M 3.6 12 C 3.6 7.8, 8.2 7.8, 12 12 C 15.8 16.2, 20.4 16.2, 20.4 12 C 20.4 7.8, 15.8 7.8, 12 12 C 8.2 16.2, 3.6 16.2, 3.6 12 Z" />
+          <g class="v14-icon">
+            <path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l.175.297.012.02 1.62-2.438-.012-.019a48.763 48.763 0 00-1.098-1.716 28.01 28.01 0 00-1.175-1.629C10.413 4.932 8.812 4 6.896 4z" fill="#0867DF"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917a1.545 1.545 0 01-1.186-.508l-2.017 1.744.014.017C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13a41.283 41.283 0 00-1.227-1.886z" fill="#0082FB"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944l-.016.016 1.382 1.24.016-.017c.715-.747 1.408-1.12 2.176-1.12.826 0 1.6.39 2.27 1.075l.015.016 1.589-1.425-.016-.016z" fill="#0082FB"/><path d="M18.309 16.515c-.55-.642-1.232-1.712-2.303-3.44l-1.396-2.336-.011-.02-1.62 2.438.012.02.989 1.668c.959 1.61 1.74 2.774 2.493 3.585l.016.016 1.834-1.914a2.353 2.353 0 01-.014-.017z" fill="#0867DF"/>
+          </g>
+          <g class="v14-tail"><circle r="1.55" fill="#60B2FF" opacity=".38"/><circle r="2.4" fill="#60B2FF" opacity=".14"/></g>
+          <g class="v14-comet"><circle r="1.05" fill="white" stroke="#60B2FF" stroke-width=".55"/><circle r=".42" fill="#0082FB"/></g>
+        </svg>
+      </div>
+      <div class="compare"><button onclick="toggleIdle(14)">hold idle</button><button onclick="togglePause(14)">pause</button></div>
+      <div class="preview-foot"><span class="dot"></span> working · closed figure-8 ✓</div></div>
+      <div class="info"><p><b>Comet chases the infinity.</b> A spark with a soft tail runs the figure-8 forever — the metaphor is literal: the muse’s spark <em>runs the loop</em>.</p><ul><li>Path stroke + comet keyframes are both closed (returns to start)</li><li>Tail gives direction; reads as “busy progressing”</li></ul><div class="pick"><code>14 · comet</code><span class="hint">→ most narrative</span></div></div>
+    </div>
+  </article>
+
+  <!-- 15 SONAR -->
+  <article class="card" id="c15">
+    <div class="card-head"><span class="num">15</span><h3>Sonar</h3><span>2.4s · sonar pings</span></div>
+    <div class="card-body">
+      <div class="preview" data-card="15"><div class="preview-main">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <circle class="v15-ring" cx="12" cy="12" r="5.2" fill="none" stroke="#0082FB" />
+          <circle class="v15-ring" cx="12" cy="12" r="5.2" fill="none" stroke="#3DA1FF" />
+          <circle class="v15-ring" cx="12" cy="12" r="5.2" fill="none" stroke="#86C4FF" />
+          <g class="v15-icon">
+            <path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l.175.297.012.02 1.62-2.438-.012-.019a48.763 48.763 0 00-1.098-1.716 28.01 28.01 0 00-1.175-1.629C10.413 4.932 8.812 4 6.896 4z" fill="#0867DF"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917a1.545 1.545 0 01-1.186-.508l-2.017 1.744.014.017C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13a41.283 41.283 0 00-1.227-1.886z" fill="#0082FB"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944l-.016.016 1.382 1.24.016-.017c.715-.747 1.408-1.12 2.176-1.12.826 0 1.6.39 2.27 1.075l.015.016 1.589-1.425-.016-.016z" fill="#0082FB"/><path d="M18.309 16.515c-.55-.642-1.232-1.712-2.303-3.44l-1.396-2.336-.011-.02-1.62 2.438.012.02.989 1.668c.959 1.61 1.74 2.774 2.493 3.585l.016.016 1.834-1.914a2.353 2.353 0 01-.014-.017z" fill="#0867DF"/>
+          </g>
+        </svg>
+      </div>
+      <div class="compare"><button onclick="toggleIdle(15)">hold idle</button><button onclick="togglePause(15)">pause</button></div>
+      <div class="preview-foot"><span class="dot"></span> working · expanding rings ✓</div></div>
+      <div class="info"><p><b>Three sonar pings.</b> Rings bloom from the centre and evaporate while the glyph pops — same family as the DeepSeek whale but tighter and louder.</p><ul><li>Rings 0→2.1× fade to 0; icon pop 1→1.08→1 — all return flat</li><li>Maximum “searching / thinking” semantics</li></ul><div class="pick"><code>15 · sonar</code><span class="hint">→ clearest busy-at-a-glance</span></div></div>
+    </div>
+  </article>
+
+  <!-- 16 MOBIUS -->
+  <article class="card" id="c16">
+    <div class="card-head"><span class="num">16</span><h3>Möbius Flip</h3><span>2.6s · card flip</span></div>
+    <div class="card-body">
+      <div class="preview" data-card="16"><div class="preview-main">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g class="v16-group">
+          <path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l.175.297.012.02 1.62-2.438-.012-.019a48.763 48.763 0 00-1.098-1.716 28.01 28.01 0 00-1.175-1.629C10.413 4.932 8.812 4 6.896 4z" fill="#0867DF"/><path d="M6.873 4C4.95 4.01 3.247 5.258 2.02 7.17a4.352 4.352 0 00-.01.017l2.254 1.231.011-.017c.718-1.083 1.61-1.774 2.568-1.785h.021L6.896 4h-.023z" fill="#0064DF"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917a1.545 1.545 0 01-1.186-.508l-2.017 1.744.014.017C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13a41.283 41.283 0 00-1.227-1.886z" fill="#0082FB"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944l-.016.016 1.382 1.24.016-.017c.715-.747 1.408-1.12 2.176-1.12.826 0 1.6.39 2.27 1.075l.015.016 1.589-1.425-.016-.016z" fill="#0082FB"/><path d="M18.309 16.515c-.55-.642-1.232-1.712-2.303-3.44l-1.396-2.336-.011-.02-1.62 2.438.012.02.989 1.668c.959 1.61 1.74 2.774 2.493 3.585l.016.016 1.834-1.914a2.353 2.353 0 01-.014-.017z" fill="#0867DF"/>
+        </g></svg>
+      </div>
+      <div class="compare"><button onclick="toggleIdle(16)">hold idle</button><button onclick="togglePause(16)">pause</button></div>
+      <div class="preview-foot"><span class="dot"></span> working · flip loop ✓</div></div>
+      <div class="info"><p><b>Möbius card flip.</b> The infinity turns like a card in 3D — you see the edge (thin, dim) then the back, then front again. Feels physical, premium.</p><ul><li>Full 0→360° Y rotation via perspective; mid-frame is the edge</li><li>Dim at the edge proves it’s a real turn, not a squash</li></ul><div class="pick"><code>16 · möbius</code><span class="hint">→ most tactile / premium</span></div></div>
+    </div>
+  </article>
+
+  <!-- 17 SPARK SHOWER -->
+  <article class="card" id="c17">
+    <div class="card-head"><span class="num">17</span><h3>Spark Shower</h3><span>1.9s · burst</span></div>
+    <div class="card-body">
+      <div class="preview" data-card="17"><div class="preview-main">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <g class="v17-icon">
+            <path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l.175.297.012.02 1.62-2.438-.012-.019a48.763 48.763 0 00-1.098-1.716 28.01 28.01 0 00-1.175-1.629C10.413 4.932 8.812 4 6.896 4z" fill="#0867DF"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917a1.545 1.545 0 01-1.186-.508l-2.017 1.744.014.017C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13a41.283 41.283 0 00-1.227-1.886z" fill="#0082FB"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944l-.016.016 1.382 1.24.016-.017c.715-.747 1.408-1.12 2.176-1.12.826 0 1.6.39 2.27 1.075l.015.016 1.589-1.425-.016-.016z" fill="#0082FB"/><path d="M18.309 16.515c-.55-.642-1.232-1.712-2.303-3.44l-1.396-2.336-.011-.02-1.62 2.438.012.02.989 1.668c.959 1.61 1.74 2.774 2.493 3.585l.016.016 1.834-1.914a2.353 2.353 0 01-.014-.017z" fill="#0867DF"/>
+          </g>
+          <!-- 8 sparks -->
+          <g class="v17-spark" style="--tx:7px;--ty:-6px"><circle cx="12" cy="12" r="1.05" fill="white" stroke="#60B2FF" stroke-width=".5"/><circle cx="12" cy="12" r=".42" fill="#0082FB"/></g>
+          <g class="v17-spark" style="--tx:-7px;--ty:-5px"><circle cx="12" cy="12" r=".9" fill="white" stroke="#60B2FF" stroke-width=".45"/><circle cx="12" cy="12" r=".35" fill="#3DA1FF"/></g>
+          <g class="v17-spark" style="--tx:6px;--ty:7px"><circle cx="12" cy="12" r=".95" fill="white" stroke="#86C4FF" stroke-width=".45"/></g>
+          <g class="v17-spark" style="--tx:-6.5px;--ty:6px"><circle cx="12" cy="12" r=".85" fill="white" stroke="#60B2FF" stroke-width=".45"/></g>
+          <g class="v17-spark" style="--tx:0px;--ty:-9px"><path d="M12 11 L12.45 12.6 L14.1 13.05 L12.45 13.5 L12 15.1 L11.55 13.5 L9.9 13.05 L11.55 12.6 Z" fill="#60B2FF"/></g>
+          <g class="v17-spark" style="--tx:8.5px;--ty:0px"><path d="M12 11 L12.4 12.4 L13.8 12.85 L12.4 13.3 L12 14.7 L11.6 13.3 L10.2 12.85 L11.6 12.4 Z" fill="#86C4FF"/></g>
+          <g class="v17-spark" style="--tx:-8.5px;--ty:0px"><circle cx="12" cy="12" r=".8" fill="#60B2FF"/></g>
+          <g class="v17-spark" style="--tx:0px;--ty:8.5px"><circle cx="12" cy="12" r=".78" fill="#3DA1FF"/></g>
+        </svg>
+      </div>
+      <div class="compare"><button onclick="toggleIdle(17)">hold idle</button><button onclick="togglePause(17)">pause</button></div>
+      <div class="preview-foot"><span class="dot"></span> working · burst loop ✓</div></div>
+      <div class="info"><p><b>Shower of sparks.</b> Eight particles burst from the centre each loop — dots and tiny stars — then collapse back. The name <em>Muse Spark</em> made literal.</p><ul><li>Burst 10→60% then vanish; stagger 80ms — closed at both ends</li><li>Most playful; feels like “ideas firing”</li></ul><div class="pick"><code>17 · spark shower</code><span class="hint">→ literal spark, very muse</span></div></div>
+    </div>
+  </article>
+
+  <!-- 18 LIQUID -->
+  <article class="card" id="c18">
+    <div class="card-head"><span class="num">18</span><h3>Liquid Mercury</h3><span>2.2s · fluid</span></div>
+    <div class="card-body">
+      <div class="preview" data-card="18"><div class="preview-main">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <filter id="v18-liquid" x="-20%" y="-20%" width="140%" height="140%">
+              <feTurbulence id="v18-turb" baseFrequency="0.015 0.015" numOctaves="2" seed="3" result="turb"/>
+              <feDisplacementMap in="SourceGraphic" in2="turb" scale="0" xChannelSelector="R" yChannelSelector="G" />
+            </filter>
+          </defs>
+          <g class="v18-group v18-shimmer">
+            <path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l.175.297.012.02 1.62-2.438-.012-.019a48.763 48.763 0 00-1.098-1.716 28.01 28.01 0 00-1.175-1.629C10.413 4.932 8.812 4 6.896 4z" fill="#0867DF"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917a1.545 1.545 0 01-1.186-.508l-2.017 1.744.014.017C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13a41.283 41.283 0 00-1.227-1.886z" fill="#0082FB"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944l-.016.016 1.382 1.24.016-.017c.715-.747 1.408-1.12 2.176-1.12.826 0 1.6.39 2.27 1.075l.015.016 1.589-1.425-.016-.016z" fill="#0082FB"/><path d="M18.309 16.515c-.55-.642-1.232-1.712-2.303-3.44l-1.396-2.336-.011-.02-1.62 2.438.012.02.989 1.668c.959 1.61 1.74 2.774 2.493 3.585l.016.016 1.834-1.914a2.353 2.353 0 01-.014-.017z" fill="#0867DF"/>
+          </g>
+        </svg>
+      </div>
+      <div class="compare"><button onclick="toggleIdle(18)">hold idle</button><button onclick="togglePause(18)">pause</button></div>
+      <div class="preview-foot"><span class="dot"></span> working · liquid loop ✓</div></div>
+      <div class="info"><p><b>Mercury wobble.</b> The ribbon ripples like liquid metal, then snaps crisp — filtered turbulence does the work. Subtle but unmistakable up close.</p><ul><li>Turbulence <code>baseFrequency 0.015 → 0.032 → 0.015</code> + shimmer — both closed</li><li>Most “crafted” — feels expensive, worth seeing live</li></ul><div class="pick"><code>18 · liquid</code><span class="hint">→ needs SMIL; has CSS fallback</span></div></div>
+    </div>
+  </article>
+
+  <!-- 19 NEON -->
+  <article class="card" id="c19">
+    <div class="card-head"><span class="num">19</span><h3>Neon Sign</h3><span>2.4s · flicker → on</span></div>
+    <div class="card-body">
+      <div class="preview" data-card="19"><div class="preview-main">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <g class="v19-fill">
+            <path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l.175.297.012.02 1.62-2.438-.012-.019a48.763 48.763 0 00-1.098-1.716 28.01 28.01 0 00-1.175-1.629C10.413 4.932 8.812 4 6.896 4z" fill="#0867DF"/><path d="M6.873 4C4.95 4.01 3.247 5.258 2.02 7.17a4.352 4.352 0 00-.01.017l2.254 1.231.011-.017c.718-1.083 1.61-1.774 2.568-1.785h.021L6.896 4h-.023z" fill="#0064DF"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917a1.545 1.545 0 01-1.186-.508l-2.017 1.744.014.017C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13a41.283 41.283 0 00-1.227-1.886z" fill="#0082FB"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944l-.016.016 1.382 1.24.016-.017c.715-.747 1.408-1.12 2.176-1.12.826 0 1.6.39 2.27 1.075l.015.016 1.589-1.425-.016-.016z" fill="#0082FB"/><path d="M18.309 16.515c-.55-.642-1.232-1.712-2.303-3.44l-1.396-2.336-.011-.02-1.62 2.438.012.02.989 1.668c.959 1.61 1.74 2.774 2.493 3.585l.016.016 1.834-1.914a2.353 2.353 0 01-.014-.017z" fill="#0867DF"/>
+          </g>
+          <!-- stroke overlay draws the infinity -->
+          <path class="v19-stroke" d="M 6.9 5.6 C 8.9 5.6, 10.4 8.2, 12 11.9 C 13.6 15.6, 15.1 18.2, 17.1 18.4 C 18.7 18.55, 20.6 16.05, 20.7 12 C 20.8 7.9, 18.7 5.6, 17.2 5.6 C 15.7 5.6, 13.7 7.9, 12 11.2 C 10.3 14.5, 8.3 18.4, 5.5 18.4 C 3.9 18.4, 1.8 16.05, 1.8 12 C 1.8 7.9, 3.9 5.6, 6.9 5.6 Z" />
+        </svg>
+      </div>
+      <div class="compare"><button onclick="toggleIdle(19)">hold idle</button><button onclick="togglePause(19)">pause</button></div>
+      <div class="preview-foot"><span class="dot"></span> working · neon loop ✓</div></div>
+      <div class="info"><p><b>Neon tube turns on.</b> Outline draws, flickers (off-on-off-on), then floods with solid color and glow — the bar-open sign that’s “open for thinking”.</p><ul><li>Stroke 52→0→52 closes; fill dims then blooms — both land at 1</li><li>Best storytelling: outline → solid reads as “warming up”</li></ul><div class="pick"><code>19 · neon</code><span class="hint">→ outline teaches the shape</span></div></div>
+    </div>
+  </article>
+
+  <!-- 20 KALEIDO -->
+  <article class="card" id="c20">
+    <div class="card-head"><span class="num">20</span><h3>Kaleido Bloom</h3><span>2.8s · bloom</span></div>
+    <div class="card-body">
+      <div class="preview" data-card="20"><div class="preview-main">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <!-- petals (behind) -->
+          <g opacity=".95">
+            <g class="v20-petal"><path d="M12 11.2 C 12.6 10.1, 14.2 10.0, 14.35 11.05 C 14.5 12.1, 12.9 12.8, 12 11.2 Z" fill="#60B2FF"/></g>
+            <g class="v20-petal"><path d="M12 11.2 C 12.6 10.1, 14.2 10.0, 14.35 11.05 C 14.5 12.1, 12.9 12.8, 12 11.2 Z" fill="#7CC2FF"/></g>
+            <g class="v20-petal"><path d="M12 11.2 C 12.6 10.1, 14.2 10.0, 14.35 11.05 C 14.5 12.1, 12.9 12.8, 12 11.2 Z" fill="#3DA1FF"/></g>
+            <g class="v20-petal"><path d="M12 11.2 C 12.6 10.1, 14.2 10.0, 14.35 11.05 C 14.5 12.1, 12.9 12.8, 12 11.2 Z" fill="#60B2FF"/></g>
+            <g class="v20-petal"><path d="M12 11.2 C 12.6 10.1, 14.2 10.0, 14.35 11.05 C 14.5 12.1, 12.9 12.8, 12 11.2 Z" fill="#86C4FF"/></g>
+            <g class="v20-petal"><path d="M12 11.2 C 12.6 10.1, 14.2 10.0, 14.35 11.05 C 14.5 12.1, 12.9 12.8, 12 11.2 Z" fill="#4FA3FF"/></g>
+          </g>
+          <g class="v20-core">
+            <path d="M6.897 4h-.024l-.031 2.615h.022c1.715 0 3.046 1.357 5.94 6.246l.175.297.012.02 1.62-2.438-.012-.019a48.763 48.763 0 00-1.098-1.716 28.01 28.01 0 00-1.175-1.629C10.413 4.932 8.812 4 6.896 4z" fill="#0867DF"/><path d="M10.78 9.654c-1.528 2.35-2.454 3.825-2.454 3.825-2.035 3.2-2.739 3.917-3.871 3.917a1.545 1.545 0 01-1.186-.508l-2.017 1.744.014.017C2.01 19.518 3.058 20 4.356 20c1.963 0 3.374-.928 5.884-5.33l1.766-3.13a41.283 41.283 0 00-1.227-1.886z" fill="#0082FB"/><path d="M20.918 5.713C19.853 4.633 18.583 4 17.225 4c-1.432 0-2.637.787-3.723 1.944l-.016.016 1.382 1.24.016-.017c.715-.747 1.408-1.12 2.176-1.12.826 0 1.6.39 2.27 1.075l.015.016 1.589-1.425-.016-.016z" fill="#0082FB"/><path d="M18.309 16.515c-.55-.642-1.232-1.712-2.303-3.44l-1.396-2.336-.011-.02-1.62 2.438.012.02.989 1.668c.959 1.61 1.74 2.774 2.493 3.585l.016.016 1.834-1.914a2.353 2.353 0 01-.014-.017z" fill="#0867DF"/>
+          </g>
+        </svg>
+      </div>
+      <div class="compare"><button onclick="toggleIdle(20)">hold idle</button><button onclick="togglePause(20)">pause</button></div>
+      <div class="preview-foot"><span class="dot"></span> working · bloom loop ✓</div></div>
+      <div class="info"><p><b>Kaleidoscope petals.</b> Six ghost copies bloom outward and rotate, then dissolve — the infinity as a flower. Peak is unmistakable; rest is just the single loop.</p><ul><li>Petals translate 0→-3.2px then fade; core wobbles — all return to identity</li><li>Loudest “bloom” — closest to Gemini’s four-point star but wilder</li></ul><div class="pick"><code>20 · kaleido</code><span class="hint">→ most festive, most distracting</span></div></div>
+    </div>
+  </article>
+
+</div>
+
+<div style="max-width:1180px;margin:0 auto;padding:0 20px 28px;display:grid;gap:10px">
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px 16px">
+    <div style="font-size:12px;font-weight:700;margin-bottom:6px">How to choose — and what happens next</div>
+    <div style="font-size:12px;color:var(--muted);line-height:1.55">
+      Open <code>dashboard/muse-spark-lab-v2.html</code> (this file) and <code>muse-spark-lab.html</code> side-by-side. V2 is intentionally louder — if 11–20 feel too much for an always-busy agent grid, the answer is probably a quieter pick from v1 (1, 3, or 5). If you want the grid to <em>feel busy</em>, pick from this page (11, 13, 15, 17 are the team favourites for “visible from across the room”).<br/><br/>
+      Reply like: <code>“v14”</code> or <code>“v17 but half the particles”</code> or <code>“v11 slower, 2.8s”</code>. I’ll then:
+      <ol style="margin:8px 0 0 18px">
+        <li>Write <code>dashboard/web/src/assets/agent-icons/providers/meta-idle.svg</code> (static — identical to 0%/100%) and <code>meta-active.svg</code> (your chosen loop).</li>
+        <li>Wire <code>dashboard/web/src/model-provider-match.mjs</code> → add <code>{ id:'meta', label:'Meta', pattern:/^muse/i, aliases:['opencode-go'] }</code> and <code>model-providers.js</code> → import both SVGs into <code>idleIcons/activeIcons</code>.</li>
+        <li>Verify <code>pi --list-models</code> catalog already carries <code>opencode-go / muse-spark-1.2-contributor</code> — no server change; the model-profile editor picks it up after <em>Refresh catalog</em>. Smoke-check the orb in an agent card at 56px and 32px.</li>
+      </ol>
+    </div>
+  </div>
+  <div style="font-size:11px;color:var(--muted);text-align:center">Tip: <b>hold idle</b> ghosts the static frame on top (22% opacity) to prove the loop lands exactly. <b>pause</b> freezes at the current frame to check the seam. Both are pure CSS — no JS animation.</div>
+</div>
+
+<script>
+  function toggleIdle(n){
+    const p=document.querySelector(`.preview[data-card="${n}"]`);
+    p.classList.toggle('show-idle');
+    const btn=p.querySelectorAll('button')[0];
+    btn.classList.toggle('active', p.classList.contains('show-idle'));
+    btn.textContent = p.classList.contains('show-idle') ? 'showing idle' : 'hold idle';
+  }
+  function togglePause(n){
+    const p=document.querySelector(`.preview[data-card="${n}"]`);
+    p.classList.toggle('paused');
+    const btn=p.querySelectorAll('button')[1];
+    btn.classList.toggle('active', p.classList.contains('paused'));
+    btn.textContent = p.classList.contains('paused') ? 'paused' : 'pause';
+  }
+  // optional liquid SMIL boost — animate turbulence if supported
+  try{
+    const turb=document.getElementById('v18-turb');
+    if(turb){
+      let t=0;
+      function tick(){
+        t+=0.016;
+        const f=0.015 + Math.abs(Math.sin(t*0.9))*0.017;
+        turb.setAttribute('baseFrequency', f.toFixed(4)+' '+ (f*0.9).toFixed(4));
+        const disp=turb.nextElementSibling;
+        if(disp) disp.setAttribute('scale', (Math.abs(Math.sin(t*1.1))*5.5).toFixed(1));
+        requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    }
+  }catch(e){}
+</script>
+</body>
+</html>

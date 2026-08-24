@@ -21,6 +21,8 @@ import qwenIdle from './assets/agent-icons/providers/qwen-idle.svg?url';
 import qwenActive from './assets/agent-icons/providers/qwen-active.svg?url';
 import zaiIdle from './assets/agent-icons/providers/zai-idle.svg?url';
 import zaiActive from './assets/agent-icons/providers/zai-active.svg?url';
+import metaIdle from './assets/agent-icons/providers/meta-idle.svg?url';
+import metaActive from './assets/agent-icons/providers/meta-active.svg?url';
 import claudeCodeIdle from './assets/agent-icons/harnesses/claudecode-idle.svg?url';
 import claudeCodeActive from './assets/agent-icons/harnesses/claudecode-active.svg?url';
 import openCodeIdle from './assets/agent-icons/harnesses/opencode-idle.svg?url';
@@ -54,6 +56,7 @@ import {
     tencent: tencentIcon,
     grok: grokIdle,
     qwen: qwenIdle,
+    meta: metaIdle,
   };
   const activeIcons = {
     ollama: ollamaActive,
@@ -67,6 +70,7 @@ import {
     tencent: tencentIcon,
     grok: grokActive,
     qwen: qwenActive,
+    meta: metaActive,
   };
 
   function iconsFor(id) {

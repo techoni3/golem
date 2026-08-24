@@ -12,6 +12,7 @@ export const PROVIDER_MATCHERS = [
   { id: 'tencent', label: 'Tencent', pattern: /^hy3/i },
   { id: 'grok', label: 'Grok', pattern: /^grok/i, aliases: ['xai'] },
   { id: 'qwen', label: 'Qwen', pattern: /^qwen/i },
+  { id: 'meta', label: 'Meta', pattern: /^muse-spark/i, aliases: ['opencode-go'] },
 ];
 
 export const FALLBACK = { id: 'fallback', label: 'Unknown', pattern: /.^/ };

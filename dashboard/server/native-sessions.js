@@ -610,11 +610,9 @@ export async function readNativeSessions(registeredIdLookup, verifiedChannels = 
     const fact = s._fact ?? null;
     const piVersion = fact?.observations?.pi_version ?? null;
     const compatibility = harness === 'pi' ? piCompatibility(piVersion) : null;
-    const projectedStatus = harness === 'pi' && verifiedEndpoint?.delivery_ready === true
-      ? 'idle'
-      : harness === 'pi' && ['active'].includes(String(s.status || '').toLowerCase())
-        ? 'busy'
-        : s.status;
+    const projectedStatus = harness === 'pi'
+      ? (['active', 'busy'].includes(String(s.status || '').toLowerCase()) ? 'busy' : (s.status || 'idle'))
+      : s.status;
     out.push({
       session_id: s.session_id,
       pid: bridgePid || s.pid,

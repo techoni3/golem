@@ -398,16 +398,6 @@ function AgentCard({ session, name, queueCount = 0, setRoute, showControls = fal
             </div>
           </div>
 
-          {s.harness === 'pi' && (
-            <div className="agent-card-pi-truth mono" aria-label="Pi worker truth">
-              <span title={`delivery ${s.delivery_mode || 'unknown'}`}>{s.delivery_ready === true ? 'ready' : `not ready${s.delivery_reason ? ` · ${s.delivery_reason}` : ''}`}</span>
-              {s.delivery_state && <span>turn {s.delivery_state}</span>}
-              <span title={`continuation ${s.continuation_key || 'unknown'}`}>continuation {s.continuation_key ? s.continuation_key.slice(0, 8) : 'unknown'}</span>
-              <span>{s.compatibility?.status || 'unverified'} · Pi {s.pi_version || '?'}</span>
-              <span>{s.trust || 'trust unknown'}</span>
-            </div>
-          )}
-
           <div className="agent-card-operations">
             <div className="agent-card-field agent-card-role-field">
               <label className="agent-card-field-label agent-card-role-label" htmlFor={roleControlId}>Role</label>
