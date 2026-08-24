@@ -89,9 +89,9 @@ function SpecsBoardView({ projectId = null }) {
     return m;
   }, [dispatchable]);
   const resolveAssignee = (a) => {
-    if (a === 'human') return 'You';
+    if (a === 'human' || a === 'you' || a === 'human:dashboard') return 'Lavee';
     if (!a) return 'Unassigned';
-    return labelBySession.get(a) || `session ${String(a).slice(0, 8)}`;
+    return labelBySession.get(a) || window.Store?.getNativeSessionById?.(a)?.name || window.Store?.getNativeSessionById?.(a)?.label || `session ${String(a).slice(0, 8)}`;
   };
 
   const filter = {

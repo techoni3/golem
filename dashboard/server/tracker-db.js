@@ -746,7 +746,13 @@ WHERE state_changed_at IS NULL`).run();
            @dispatched_at, @source_ref, @created_at, @updated_at, @pseq, @display_id)
       `),
       getTicket: db.prepare('SELECT * FROM tickets WHERE id = ?'),
-      getComments: db.prepare('SELECT * FROM comments WHERE ticket_id = ? ORDER BY created_at ASC, id ASC'),
+      getComments: db.prepare(`
+        SELECT c.*, sl.label AS author_label
+        FROM comments c
+        LEFT JOIN session_labels sl ON sl.session_id = c.author
+        WHERE c.ticket_id = ?
+        ORDER BY c.created_at ASC, c.id ASC
+      `),
       insertComment: db.prepare(`
         INSERT INTO comments
           (id, ticket_id, author, body, quote, prefix, suffix, section, section_id,
@@ -1053,13 +1059,21 @@ WHERE state_changed_at IS NULL`).run();
   // resolver). stmts is populated after prepare(), which runs before any
   // getTicket/listTickets call, so this is safe at request time.
   function resolveAssigneeLabel(assignee) {
-    if (!assignee || assignee === 'human') return null;
+    if (!assignee || assignee === 'human' || assignee === 'you' || assignee === 'human:dashboard') return null;
     try {
       const row = stmts.getSessionLabel.get(assignee);
       return row ? row.label : null;
     } catch {
       return null;
     }
+  }
+
+  function hydrateComment(row) {
+    if (!row) return null;
+    const authorLabel = (row.author === 'human' || row.author === 'you' || row.author === 'human:dashboard')
+      ? 'Lavee'
+      : (row.author_label || resolveAssigneeLabel(row.author) || null);
+    return { ...row, author_label: authorLabel };
   }
 
   function activeActorFormsForSession(sessionId) {
@@ -1600,7 +1614,7 @@ WHERE state_changed_at IS NULL`).run();
     getTicket(id) {
       const row = stmts.getTicket.get(id);
       if (!row) return null;
-      const comments = stmts.getComments.all(id);
+      const comments = stmts.getComments.all(id).map(hydrateComment);
       const links = stmts.listLinks.all(id, id);
       // TKT-0245: embed any pending dispatch so the drawer needs no extra fetch.
       const pending_dispatch = stmts.getPendingForTicket.get(id) ?? null;
@@ -2826,7 +2840,7 @@ WHERE state_changed_at IS NULL`).run();
           data: { comment_id: row.id },
         });
         commentDispatch.markAddressedByComment(row);
-        return row;
+        return hydrateComment(row);
       });
       return txn();
     },
@@ -2853,7 +2867,13 @@ WHERE state_changed_at IS NULL`).run();
 
     getComment(commentId) {
       if (!commentId) return null;
-      return db.prepare('SELECT * FROM comments WHERE id = ?').get(commentId) ?? null;
+      const row = db.prepare(`
+        SELECT c.*, sl.label AS author_label
+        FROM comments c
+        LEFT JOIN session_labels sl ON sl.session_id = c.author
+        WHERE c.id = ?
+      `).get(commentId);
+      return hydrateComment(row);
     },
 
     recomputeCommentDispatchState(commentId) {
@@ -2910,7 +2930,13 @@ WHERE state_changed_at IS NULL`).run();
         actor: patch.actor ?? existing.author,
         data: { comment_id },
       });
-      return db.prepare('SELECT * FROM comments WHERE id = ?').get(comment_id);
+      const updated = db.prepare(`
+        SELECT c.*, sl.label AS author_label
+        FROM comments c
+        LEFT JOIN session_labels sl ON sl.session_id = c.author
+        WHERE c.id = ?
+      `).get(comment_id);
+      return hydrateComment(updated);
     },
 
     addLink(from_ticket, to_ticket, type) {

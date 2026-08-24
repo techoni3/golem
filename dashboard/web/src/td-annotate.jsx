@@ -2,11 +2,13 @@
 // Renders the ticket body as HTML and mounts a Google-Docs-style comment rail.
 
 const TA_AUTHORS = {
-  you:        { label: 'You',         color: '#f5a623' },
-  claude_opus:{ label: 'Claude Opus', color: '#b394ff' },
-  gemini35:   { label: 'Gemini 3.5',  color: '#5b8cff' },
-  kimi_k27:   { label: 'Kimi K2.7',   color: '#ff6f9c' },
-  minimax_m3: { label: 'MiniMax M3',  color: '#2dd4a7' },
+  you:               { label: 'Lavee',       color: '#f5a623' },
+  human:             { label: 'Lavee',       color: '#f5a623' },
+  'human:dashboard': { label: 'Lavee',       color: '#f5a623' },
+  claude_opus:       { label: 'Claude Opus', color: '#b394ff' },
+  gemini35:          { label: 'Gemini 3.5',  color: '#5b8cff' },
+  kimi_k27:          { label: 'Kimi K2.7',   color: '#ff6f9c' },
+  minimax_m3:        { label: 'MiniMax M3',  color: '#2dd4a7' },
 };
 
 // TKT-0172: the left-gutter "+" affordance that appears on block hover. Fully
@@ -30,7 +32,23 @@ const BLOCK_PLUS_SETTLE_MS = 500;
 
 const CTX = 42;
 
-function authorMeta(a) { return TA_AUTHORS[a] || { label: a, color: '#9aa4bb' }; }
+function authorMeta(a, labelHint) {
+  if (TA_AUTHORS[a]) return TA_AUTHORS[a];
+  if (a === 'human' || a === 'you' || a === 'human:dashboard') {
+    return { label: 'Lavee', color: '#f5a623' };
+  }
+  if (labelHint) {
+    return { label: labelHint, color: '#9aa4bb' };
+  }
+  const session = window.Store?.getNativeSessionById?.(a);
+  if (session?.label || session?.name) {
+    return { label: session.label || session.name, color: '#9aa4bb' };
+  }
+  if (typeof a === 'string' && a.length > 12 && /^[0-9a-fA-F-]+$/.test(a)) {
+    return { label: `session ${a.slice(0, 8)}`, color: '#9aa4bb' };
+  }
+  return { label: a || 'Agent', color: '#9aa4bb' };
+}
 
 // Fullscreen Mermaid. After window.runMermaid renders SVGs into .mermaid
 // blocks, attach an expand button to each. The overlay is vanilla DOM because
@@ -297,6 +315,50 @@ function bodyHtml(text) {
   return text.split(/\n\n+/).map((p) => `<p>${p.trim().replace(/\n/g, '<br/>')}</p>`).join('');
 }
 
+function countWords(text) {
+  const value = String(text ?? '').trim();
+  return value ? value.split(/\s+/).length : 0;
+}
+
+// Keep Markdown-rendered structure intact while clipping a comment at a word
+// boundary. The full HTML is still used when the divider is expanded; this
+// temporary DOM only supplies the collapsed preview.
+function clampHtmlToWords(html, limit = 300) {
+  if (!html || typeof document === 'undefined') return html || '';
+  const root = document.createElement('div');
+  root.innerHTML = html;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let remaining = limit;
+  let boundary = null;
+  let node;
+  while ((node = walker.nextNode())) {
+    const words = node.nodeValue.match(/\S+/g) || [];
+    if (words.length <= remaining) {
+      remaining -= words.length;
+      continue;
+    }
+    const matcher = /\S+/g;
+    let match;
+    let end = 0;
+    for (let index = 0; index < remaining && (match = matcher.exec(node.nodeValue)); index += 1) {
+      end = match.index + match[0].length;
+    }
+    node.nodeValue = node.nodeValue.slice(0, end);
+    boundary = node;
+    break;
+  }
+  if (!boundary) return root.innerHTML;
+
+  // Remove every sibling after the boundary, walking back through its
+  // ancestors. This preserves the tags that wrap the visible 300 words.
+  let current = boundary;
+  while (current && current !== root) {
+    while (current.nextSibling) current.nextSibling.remove();
+    current = current.parentNode;
+  }
+  return root.innerHTML;
+}
+
 // TKT-0172: comment bodies are now stored verbatim as Markdown, so editing is
 // trivial — the stored body is already editable text. No HTML→text inverse is
 // needed; this is kept as a thin passthrough for the existing call site.
@@ -398,7 +460,7 @@ function wrapOffsets(root, start, end, ann) {
     mk.className = 'anno';
     mk.dataset.id = ann.id;
     mk.dataset.author = ann.author;
-    mk.title = authorMeta(ann.author).label;
+    mk.title = authorMeta(ann.author, ann.author_label).label;
     if (ann.status === 'resolved') mk.classList.add('resolved');
     applyAuthorVars(mk, ann.author);
     if (t === targets.length - 1) mk.classList.add('anno-tail');
@@ -874,14 +936,18 @@ function nearestSection(range, root = null) {
 // annotation pill portals into. The ticket drawer passes `.drawer-ticket`
 // (position:fixed); the standalone ticket page passes `.ticket-page`. Defaults
 // to `.drawer-ticket` for backward compatibility.
-function TdAnnotate({ body, comments, currentAuthor = 'you', onCreate, onCreateAndDispatch, onUpdate, onReply, onDispatchComment, canDispatchComments = false, undispatchedCount = 0, dispatchTargetLabel = null, onBatchDispatch, commentDispatching = false, commentDispatchNote = null, containerSelector = '.drawer-ticket', documentKey = '', documentTitle = '' }) {
+function TdAnnotate({ body, comments, currentAuthor = 'you', onCreate, onCreateAndDispatch, onUpdate, onReply, onReplyAndDispatch, onDispatchComment, canDispatchComments = false, undispatchedCount = 0, dispatchTargetLabel = null, onBatchDispatch, commentDispatching = false, commentDispatchNote = null, containerSelector = '.drawer-ticket', documentKey = '', documentTitle = '' }) {
   const rootRef = React.useRef(null);
   const railRef = React.useRef(null);
+  const listRef = React.useRef(null);
+  const nearBottomRef = React.useRef(true);
   const [annotations, setAnnotations] = React.useState(comments || []);
   const [tocHeadings, setTocHeadings] = React.useState([]);
   const [activeId, setActiveId] = React.useState(null);
   const [showResolved, setShowResolved] = React.useState(false);
-  const [railOpen, setRailOpen] = React.useState(false);
+  // The spec page is the live inbox: keep the rail and its composer visible on
+  // first render. The FAB remains available as a narrow-screen toggle.
+  const [railOpen, setRailOpen] = React.useState(true);
   const [saveState, setSaveState] = React.useState('');
   const [pendingComposer, setPendingComposer] = React.useState(null);
   // Option/Alt+click-to-comment: track the modifier so the cursor can signal
@@ -967,6 +1033,57 @@ function TdAnnotate({ body, comments, currentAuthor = 'you', onCreate, onCreateA
   );
 
   React.useEffect(() => { setAnnotations(comments || []); }, [comments]);
+
+  // Track the reader's position before updates. New comments should only move
+  // the rail when the reader was already near its bottom edge.
+  React.useEffect(() => {
+    const list = listRef.current;
+    if (!list) return undefined;
+    const updateNearBottom = () => {
+      nearBottomRef.current = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+    };
+    updateNearBottom();
+    list.addEventListener('scroll', updateNearBottom, { passive: true });
+    return () => list.removeEventListener('scroll', updateNearBottom);
+  }, [comments, railOpen]);
+
+  // Follow the bottom in layout + several animation frames. Comment bodies can
+  // change height after the first React commit (Markdown, images, Mermaid), so
+  // one passive effect is not enough to guarantee the live inbox stays pinned.
+  React.useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list || !nearBottomRef.current) return undefined;
+    const flow = list.querySelector('.rail-flow') || list;
+    let frame1 = 0;
+    let frame2 = 0;
+    let frame3 = 0;
+    let resizeFrame = 0;
+    const follow = () => {
+      if (nearBottomRef.current) list.scrollTop = list.scrollHeight;
+    };
+    const onResize = () => {
+      if (!nearBottomRef.current) return;
+      cancelAnimationFrame(resizeFrame);
+      resizeFrame = requestAnimationFrame(follow);
+    };
+    follow();
+    frame1 = requestAnimationFrame(() => {
+      follow();
+      frame2 = requestAnimationFrame(() => {
+        follow();
+        frame3 = requestAnimationFrame(follow);
+      });
+    });
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(onResize) : null;
+    observer?.observe(flow);
+    return () => {
+      cancelAnimationFrame(frame1);
+      cancelAnimationFrame(frame2);
+      cancelAnimationFrame(frame3);
+      cancelAnimationFrame(resizeFrame);
+      observer?.disconnect();
+    };
+  }, [annotations, comments, showResolved]);
 
   React.useLayoutEffect(() => {
     const root = rootRef.current;
@@ -1214,18 +1331,6 @@ React.useEffect(() => {
     };
   }, [html, containerSelector]);
 
-  const docOrder = React.useCallback(() => {
-    const root = rootRef.current;
-    const order = new Map(); let i = 0;
-    if (root) root.querySelectorAll('[data-anno-block-ids], mark.anno').forEach((anchor) => {
-      const ids = anchor.matches('[data-anno-block-ids]')
-        ? blockAnnotationIds(anchor)
-        : [anchor.dataset.id];
-      ids.forEach((id) => { if (id && !order.has(id)) order.set(id, i++); });
-    });
-    return (annotations || []).filter((a) => a.status !== 'deleted').slice().sort((a, b) => (order.has(a.id) ? order.get(a.id) : 1e9) - (order.has(b.id) ? order.get(b.id) : 1e9));
-  }, [annotations]);
-
   const flashSaved = React.useCallback(() => {
     setSaveState('saving');
     setTimeout(() => setSaveState('saved'), 200);
@@ -1262,25 +1367,78 @@ React.useEffect(() => {
   }, [onCreateAndDispatch, flashSaved]);
 
   const updateComment = React.useCallback((id, patch) => {
-    setAnnotations((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch, updated_at: nowISO() } : a)));
+    setAnnotations((prev) => prev.map((annotation) => {
+      if (annotation.id === id) return { ...annotation, ...patch, updated_at: nowISO() };
+      if (!(annotation.replies || []).some((reply) => reply.id === id)) return annotation;
+      return {
+        ...annotation,
+        replies: annotation.replies.map((reply) => reply.id === id
+          ? { ...reply, ...patch, updated_at: nowISO() }
+          : reply),
+        updated_at: nowISO(),
+      };
+    }));
     flashSaved();
     if (onUpdate) onUpdate(id, patch);
   }, [onUpdate, flashSaved]);
 
+  const makeReply = (parentId, text, author) => {
+    const createdAt = nowISO();
+    return {
+      id: uid(), author, body: text, text,
+      parent_id: parentId, status: 'open', dispatch_state: 'undispatched',
+      created_at: createdAt, updated_at: createdAt, ts: createdAt,
+    };
+  };
+
+  const appendReply = React.useCallback((parentId, reply) => {
+    setAnnotations((prev) => prev.map((annotation) => {
+      const ownsReply = annotation.id === parentId
+        || (annotation.replies || []).some((candidate) => candidate.id === parentId);
+      return ownsReply
+        ? { ...annotation, replies: [...(annotation.replies || []), reply], updated_at: reply.updated_at }
+        : annotation;
+    }));
+  }, []);
+
   const addReply = React.useCallback((parentId, text, author) => {
-    const reply = { author, text, ts: nowISO() };
-    setAnnotations((prev) => prev.map((a) => a.id === parentId ? { ...a, replies: [...(a.replies || []), reply], updated_at: nowISO() } : a));
+    const reply = makeReply(parentId, text, author);
+    appendReply(parentId, reply);
     flashSaved();
     if (onReply) onReply(parentId, reply);
-  }, [onReply, flashSaved]);
+  }, [appendReply, onReply, flashSaved]);
+
+  const addReplyAndDispatch = React.useCallback((parentId, text, author) => {
+    const reply = makeReply(parentId, text, author);
+    appendReply(parentId, reply);
+    flashSaved();
+    if (!onReplyAndDispatch) return Promise.resolve(reply);
+    return Promise.resolve(onReplyAndDispatch(parentId, reply)).then(
+      () => reply,
+      (err) => {
+        if (err?.golemCommentSaved !== true) {
+          setAnnotations((prev) => prev.map((annotation) => ({
+            ...annotation,
+            replies: (annotation.replies || []).filter((candidate) => candidate.id !== reply.id),
+          })));
+        }
+        throw err;
+      },
+    );
+  }, [appendReply, flashSaved, onReplyAndDispatch]);
 
   const deleteComment = React.useCallback((id) => {
-    setAnnotations((prev) => prev.filter((a) => a.id !== id));
+    setAnnotations((prev) => prev
+      .filter((annotation) => annotation.id !== id)
+      .map((annotation) => ({
+        ...annotation,
+        replies: (annotation.replies || []).filter((reply) => reply.id !== id),
+      })));
     flashSaved();
     if (onUpdate) onUpdate(id, { status: 'deleted' });
   }, [onUpdate, flashSaved]);
 
-  const focusAnnotation = React.useCallback((id, fromMark) => {
+  const focusAnnotation = React.useCallback((id, jumpToAnchor = false) => {
     setActiveId(id);
     setRailOpen(true);
     const root = rootRef.current;
@@ -1288,12 +1446,28 @@ React.useEffect(() => {
     setTimeout(() => {
       const card = railRef.current?.querySelector(`.anno-card[data-id="${id}"]`);
       if (card) card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      if (!fromMark) {
+      if (jumpToAnchor) {
         const anchor = root && findAnnotationAnchor(root, id);
         if (anchor) anchor.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
     }, 50);
   }, []);
+
+  // Anchor marks have an explicit jump action. Clicking the mark itself keeps
+  // the existing direct-to-anchor behavior, while clicking a card only focuses
+  // the card and leaves document scroll untouched.
+  React.useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const onMarkClick = (event) => {
+      const mark = event.target?.closest?.('mark.anno');
+      if (!mark || !root.contains(mark) || !mark.dataset.id) return;
+      event.stopPropagation();
+      focusAnnotation(mark.dataset.id, true);
+    };
+    root.addEventListener('click', onMarkClick);
+    return () => root.removeEventListener('click', onMarkClick);
+  }, [focusAnnotation, html, annotations]);
 
   const startNewComment = React.useCallback(() => {
     const range = pendingRangeRef.current;
@@ -1365,7 +1539,8 @@ React.useEffect(() => {
       const t = e.target;
       const typing = t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.isContentEditable;
       if (e.key === 'Escape') {
-        document.getElementById('anno-rail')?.classList.remove('open');
+        // Esc clears transient selection/attach affordances, but never hides
+        // the inbox rail. The spec composer remains available by default.
         const pill = document.getElementById('anno-pill'); if (pill) pill.style.display = 'none';
         const plus = document.getElementById('anno-block-plus'); if (plus) plus.style.display = 'none';
         return;
@@ -1410,8 +1585,84 @@ React.useEffect(() => {
 
   const openCount = annotations.filter((a) => a.status === 'open').length;
   const resolvedCount = annotations.filter((a) => a.status === 'resolved').length;
-  const visible = docOrder().filter((a) => showResolved || a.status !== 'resolved');
-  const [plainComposer, setPlainComposer] = React.useState(false);
+  const isDraftAnnotation = (annotation) => {
+    const state = annotation.dispatch_state
+      || ((annotation.author === 'human' || annotation.author === 'you') ? 'undispatched' : null);
+    return state === 'undispatched';
+  };
+  const orderedComments = annotations
+    .filter((annotation) => annotation.status !== 'deleted')
+    .slice()
+    .sort((a, b) => {
+      const draftOrder = Number(isDraftAnnotation(a)) - Number(isDraftAnnotation(b));
+      if (draftOrder) return draftOrder;
+      return String(a.created_at || '').localeCompare(String(b.created_at || ''));
+    });
+  const visible = orderedComments.filter((a) => showResolved || a.status !== 'resolved');
+  const history = visible.filter((annotation) => !isDraftAnnotation(annotation));
+  const drafts = visible.filter(isDraftAnnotation);
+
+  const composerInput = React.useCallback((text, anchor) => {
+    const input = { author: currentAuthor, body: text };
+    if (!anchor) return input;
+    return {
+      ...input,
+      block_id: anchor.blockId || null,
+      anchor_kind: anchor.anchorKind || 'text',
+      quote: anchor.quote || '',
+      prefix: anchor.prefix || '',
+      suffix: anchor.suffix || '',
+      section: (anchor.section && anchor.section.title) || '',
+      section_id: (anchor.section && anchor.section.id) || '',
+    };
+  }, [currentAuthor]);
+
+  const sendComposer = React.useCallback((text) => {
+    const anchor = pendingComposer;
+    createComment(composerInput(text, anchor));
+    setPendingComposer(null);
+  }, [composerInput, createComment, pendingComposer]);
+
+  const sendComposerAndDispatch = React.useCallback((text) => {
+    const anchor = pendingComposer;
+    const done = createCommentAndDispatch(composerInput(text, anchor));
+    setPendingComposer(null);
+    return done;
+  }, [composerInput, createCommentAndDispatch, pendingComposer]);
+
+  const renderComment = (annotation) => (
+    <React.Fragment key={annotation.id}>
+      <CommentCard
+        ann={annotation}
+        active={annotation.id === activeId}
+        onFocus={() => focusAnnotation(annotation.id)}
+        onJump={() => focusAnnotation(annotation.id, true)}
+        onResolve={() => updateComment(annotation.id, { status: annotation.status === 'resolved' ? 'open' : 'resolved' })}
+        onDelete={() => deleteComment(annotation.id)}
+        onReply={(text) => addReply(annotation.id, text, currentAuthor)}
+        onReplyAndDispatch={(text) => addReplyAndDispatch(annotation.id, text, currentAuthor)}
+        onEditBody={(text) => updateComment(annotation.id, { body: text })}
+        onDispatch={onDispatchComment}
+        canDispatch={canDispatchComments}
+      />
+      {annotation.replies?.length > 0 && (
+        <CommentThread
+          parentId={annotation.id}
+          replies={annotation.replies}
+          showResolved={showResolved}
+          activeId={activeId}
+          onFocus={focusAnnotation}
+          onResolve={updateComment}
+          onDelete={deleteComment}
+          onReply={(id, text) => addReply(id, text, currentAuthor)}
+          onReplyAndDispatch={(id, text) => addReplyAndDispatch(id, text, currentAuthor)}
+          onEditBody={updateComment}
+          onDispatch={onDispatchComment}
+          canDispatch={canDispatchComments}
+        />
+      )}
+    </React.Fragment>
+  );
 
   // TKT-0108: hoist rail + FAB out of the scrollable body via a portal to the
   // drawer root. Otherwise both scroll with the body, which the user
@@ -1501,97 +1752,66 @@ React.useEffect(() => {
               <div className="meta">{openCount} open · {resolvedCount} resolved</div>
             </div>
             <div className="rail-tools">
-              <button className="rail-btn" onClick={() => { setRailOpen(true); setPlainComposer(true); }}>+ New</button>
+              <button className="rail-btn" onClick={() => { setPendingComposer(null); setRailOpen(true); }}>+ New</button>
               <label className="rail-check">
                 <input type="checkbox" checked={showResolved} onChange={(e) => setShowResolved(e.target.checked)} />
                 Show resolved
               </label>
-              <button className="rail-btn" onClick={() => setRailOpen(false)}>Close</button>
             </div>
           </div>
-          {undispatchedCount >= 1 && dispatchTargetLabel && (
-            <div className="rail-head-dispatch">
-              <button
-                className="rail-btn rail-dispatch-btn"
-                onClick={onBatchDispatch}
-                disabled={commentDispatching}
-                title={`Dispatch ${undispatchedCount} undispatched comment${undispatchedCount === 1 ? '' : 's'} to ${dispatchTargetLabel}`}
-              >
-                {commentDispatching
-                  ? 'Dispatching…'
-                  : `Dispatch ${undispatchedCount} comment${undispatchedCount === 1 ? '' : 's'} to @${dispatchTargetLabel}`}
-              </button>
-              {commentDispatchNote && <span className="rail-dispatch-note">{commentDispatchNote}</span>}
-            </div>
-          )}
         </div>
-        <div id="anno-list">
-          {plainComposer && (
-            <AnnoComposer
-              canDispatch={canDispatchComments && !!onCreateAndDispatch}
-              onSend={(text) => { createComment({ author: currentAuthor, body: text }); setPlainComposer(false); }}
-              onSendAndDispatch={(text) => {
-                // The composer closes immediately either way: on a delivery
-                // failure the comment is still saved, and on a save failure the
-                // rail withdraws its optimistic card. Both outcomes are
-                // reported on the drawer's comment-dispatch note (GOL-101).
-                const done = createCommentAndDispatch({ author: currentAuthor, body: text });
-                setPlainComposer(false);
-                return done;
-              }}
-              onCancel={() => setPlainComposer(false)}
-            />
-          )}
-          {pendingComposer && (
-            <AnnoComposer
-              quote={pendingComposer.quote}
-              canDispatch={canDispatchComments && !!onCreateAndDispatch}
-              onSend={(text) => {
-                createComment({
-                  author: currentAuthor, body: text,
-                  block_id: pendingComposer.blockId || null,
-                  anchor_kind: pendingComposer.anchorKind || 'text',
-                  quote: pendingComposer.quote,
-                  prefix: pendingComposer.prefix || '',
-                  suffix: pendingComposer.suffix || '',
-                  section: (pendingComposer.section && pendingComposer.section.title) || '',
-                  section_id: (pendingComposer.section && pendingComposer.section.id) || '',
-                });
-                setPendingComposer(null);
-              }}
-              onSendAndDispatch={(text) => {
-                const done = createCommentAndDispatch({
-                  author: currentAuthor, body: text,
-                  block_id: pendingComposer.blockId || null,
-                  anchor_kind: pendingComposer.anchorKind || 'text',
-                  quote: pendingComposer.quote,
-                  prefix: pendingComposer.prefix || '',
-                  suffix: pendingComposer.suffix || '',
-                  section: (pendingComposer.section && pendingComposer.section.title) || '',
-                  section_id: (pendingComposer.section && pendingComposer.section.id) || '',
-                });
-                setPendingComposer(null);
-                return done;
-              }}
-              onCancel={() => setPendingComposer(null)}
-            />
-          )}
-          {visible.length === 0 ? (
-            <div className="empty">No comments yet.<br/>Select any text, or click + New.</div>
-          ) : visible.map((ann) => (
-            <CommentCard
-              key={ann.id}
-              ann={ann}
-              active={ann.id === activeId}
-              onFocus={() => focusAnnotation(ann.id)}
-              onResolve={() => updateComment(ann.id, { status: ann.status === 'resolved' ? 'open' : 'resolved' })}
-              onDelete={() => deleteComment(ann.id)}
-              onReply={(text) => addReply(ann.id, text, currentAuthor)}
-              onEditBody={(text) => updateComment(ann.id, { body: text })}
-              onDispatch={onDispatchComment}
-              canDispatch={canDispatchComments}
-            />
-          ))}
+        <div id="anno-list" ref={listRef} className="rail-scroll">
+          <div className="rail-flow">
+            {visible.length === 0 ? (
+              <div className="empty">No comments yet.<br/>Start a message below or attach a section.</div>
+            ) : (
+              <>
+                {history.length > 0 && (
+                  <div className="history" data-message-count={history.length}>
+                    {history.map(renderComment)}
+                  </div>
+                )}
+                {drafts.length > 0 && (
+                  <div className="draft-queue" data-draft-count={drafts.length}>
+                    <div className="draft-queue-head">
+                      <div className="draft-queue-label">Draft queue · {drafts.length} not yet dispatched</div>
+                    </div>
+                    <div className="draft-queue-items">{drafts.map(renderComment)}</div>
+                    {onBatchDispatch && (
+                      <div className="draft-queue-foot">
+                        <button
+                          type="button"
+                          className="rail-btn rail-dispatch-btn draft-queue-dispatch-btn"
+                          onClick={onBatchDispatch}
+                          disabled={commentDispatching}
+                          title={dispatchTargetLabel ? `Dispatch all ${undispatchedCount} undispatched comment${undispatchedCount === 1 ? '' : 's'} to @${dispatchTargetLabel}` : `Dispatch all ${undispatchedCount} undispatched comment${undispatchedCount === 1 ? '' : 's'}`}
+                        >
+                          {commentDispatching ? 'Dispatching…' : (dispatchTargetLabel ? `↗ Dispatch all to @${dispatchTargetLabel}` : `↗ Dispatch all (${undispatchedCount})`)}
+                        </button>
+                        {commentDispatchNote && <span className="rail-dispatch-note draft-queue-note">{commentDispatchNote}</span>}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+        <div className="anno-composer-dock">
+          <AnnoComposer
+            rail
+            autoFocus={railOpen}
+            quote={pendingComposer?.anchorKind === 'block' ? null : pendingComposer?.quote}
+            attachment={pendingComposer ? {
+              title: pendingComposer.section?.title || '',
+              id: pendingComposer.section?.id || pendingComposer.blockId || '',
+            } : null}
+            canDispatch={canDispatchComments && !!onCreateAndDispatch}
+            onSend={sendComposer}
+            onSendAndDispatch={sendComposerAndDispatch}
+            onCancel={() => setPendingComposer(null)}
+            onClearAttachment={() => setPendingComposer(null)}
+          />
         </div>
       </div>
 
@@ -1615,21 +1835,194 @@ React.useEffect(() => {
   );
 }
 
-function CommentCard({ ann, active, onFocus, onResolve, onDelete, onReply, onEditBody, onDispatch, canDispatch = false }) {
+function collectImages(dt) {
+  if (!dt) return [];
+  const out = [];
+  if (dt.items) {
+    for (const it of dt.items) {
+      if (it.kind === 'file') {
+        const f = it.getAsFile();
+        if (f && /^image\//.test(f.type)) out.push(f);
+      }
+    }
+  }
+  if (dt.files) {
+    for (const f of dt.files) {
+      if (f && /^image\//.test(f.type) && !out.includes(f)) out.push(f);
+    }
+  }
+  return out;
+}
+
+function openImageLightbox(url, alt = 'Image preview') {
+  if (!url || typeof document === 'undefined') return;
+  document.querySelector('.anno-image-lightbox')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'anno-image-lightbox';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-label', alt);
+  const image = document.createElement('img');
+  image.src = url;
+  image.alt = alt;
+  const closeButton = document.createElement('button');
+  closeButton.type = 'button';
+  closeButton.className = 'anno-image-lightbox-close';
+  closeButton.setAttribute('aria-label', 'Close image preview');
+  closeButton.title = 'Close image preview';
+  closeButton.textContent = '×';
+  overlay.append(image, closeButton);
+  const close = () => {
+    document.removeEventListener('keydown', onKey, true);
+    overlay.remove();
+  };
+  const onKey = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      close();
+    }
+  };
+  closeButton.addEventListener('click', close);
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) close();
+  });
+  document.addEventListener('keydown', onKey, true);
+  document.body.appendChild(overlay);
+  requestAnimationFrame(() => {
+    overlay.classList.add('open');
+    closeButton.focus();
+  });
+}
+
+function CommentThread({ parentId, replies = [], showResolved = false, activeId, onFocus, onResolve, onDelete, onReply, onReplyAndDispatch, onEditBody, onDispatch, canDispatch = false }) {
+  const [collapsed, setCollapsed] = React.useState(false);
+  const visibleReplies = replies.filter((reply) => (
+    reply.status !== 'deleted' && (showResolved || reply.status !== 'resolved')
+  ));
+  const count = visibleReplies.length;
+  if (count === 0) return null;
+  return (
+    <div className="thread" data-thread-id={parentId} data-reply-count={count}>
+      <div className="thread-head">
+        <span className="thread-label">⎿ {count} replies ·</span>
+        <button
+          type="button"
+          className="thread-toggle"
+          aria-expanded={!collapsed}
+          onClick={() => setCollapsed((value) => !value)}
+        >
+          {collapsed ? 'Show' : 'Hide'}
+        </button>
+      </div>
+      {!collapsed && (
+        <div className="thread-replies">
+          {visibleReplies.map((reply) => {
+            const annotation = reply.body == null
+              ? { ...reply, body: reply.text || '', created_at: reply.created_at || reply.ts }
+              : reply;
+            return (
+              <CommentCard
+                key={annotation.id}
+                ann={annotation}
+                active={annotation.id === activeId}
+                onFocus={() => onFocus(annotation.id)}
+                onJump={() => onFocus(annotation.id, true)}
+                onResolve={() => onResolve(annotation.id, { status: annotation.status === 'resolved' ? 'open' : 'resolved' })}
+                onDelete={() => onDelete(annotation.id)}
+                onReply={(text) => onReply(annotation.id, text)}
+                onReplyAndDispatch={onReplyAndDispatch ? (text) => onReplyAndDispatch(annotation.id, text) : undefined}
+                onEditBody={(text) => onEditBody(annotation.id, { body: text })}
+                onDispatch={onDispatch}
+                canDispatch={canDispatch}
+              />
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CommentCard({ ann, active, onFocus, onJump, onResolve, onDelete, onReply, onReplyAndDispatch, onEditBody, onDispatch, canDispatch = false }) {
   const [replying, setReplying] = React.useState(false);
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState('');
-  // TKT-0237: collapsed-by-default comment cards (~7-line preview).
+  const [editUploads, setEditUploads] = React.useState([]);
   const [expanded, setExpanded] = React.useState(false);
-  const [overflows, setOverflows] = React.useState(false);
-  const contentRef = React.useRef(null);
-  const c = authorMeta(ann.author);
+  const c = authorMeta(ann.author, ann.author_label);
   const editRef = React.useRef(null);
-  const replyCount = (ann.replies || []).length;
+  const commentBody = ann.body ?? ann.text ?? '';
+  const totalWords = countWords(commentBody);
+  const longBody = totalWords > 300;
+  const fullBodyHtml = bodyHtml(commentBody);
+  const collapsedBodyHtml = longBody ? clampHtmlToWords(fullBodyHtml, 300) : fullBodyHtml;
+  const dispatchState = ann.dispatch_state
+    || ((ann.author === 'human' || ann.author === 'you') ? 'undispatched' : null);
+
+  const uploadEditOne = React.useCallback(async (file) => {
+    const id = `up_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    setEditUploads((u) => [...u, { id, name: file.name || 'image.png', status: 'uploading' }]);
+    try {
+      const res = await window.SubstrateAPI.uploadAsset(file);
+      const md = `![](${res.url})`;
+      setEditUploads((u) => u.map((x) => x.id === id ? { ...x, status: 'done', url: res.url, md } : x));
+      return { id, md, url: res.url };
+    } catch (err) {
+      setEditUploads((u) => u.map((x) => x.id === id ? { ...x, status: 'error', error: String(err?.message || err) } : x));
+      throw err;
+    }
+  }, []);
+
+  const onEditPaste = React.useCallback(async (e) => {
+    const files = collectImages(e.clipboardData);
+    if (files.length === 0) return;
+    e.preventDefault();
+    const before = editRef.current?.selectionStart ?? draft.length;
+    const after = editRef.current?.selectionEnd ?? draft.length;
+    for (const f of files) {
+      try {
+        const { md } = await uploadEditOne(f);
+        const insert = `\n${md}\n`;
+        setDraft((cur) => {
+          const next = cur.slice(0, before) + insert + cur.slice(after);
+          requestAnimationFrame(() => {
+            if (editRef.current) {
+              const pos = before + insert.length;
+              editRef.current.setSelectionRange(pos, pos);
+              editRef.current.focus();
+            }
+          });
+          return next;
+        });
+        break;
+      } catch (err) { /* error surfaced in uploads strip */ }
+    }
+  }, [draft, uploadEditOne]);
+
+  const onEditDrop = React.useCallback(async (e) => {
+    const files = collectImages(e.dataTransfer);
+    if (files.length === 0) return;
+    e.preventDefault();
+    for (const f of files) {
+      try {
+        const { md } = await uploadEditOne(f);
+        setDraft((cur) => cur + (cur.endsWith('\n') ? '' : '\n') + md + '\n');
+      } catch (err) { /* surfaced in uploads strip */ }
+    }
+  }, [uploadEditOne]);
+
+  const isEditUploading = editUploads.some((u) => u.status === 'uploading');
+  const removeEditUpload = (id) => {
+    const upload = editUploads.find((item) => item.id === id);
+    setEditUploads((items) => items.filter((item) => item.id !== id));
+    if (upload?.md) setDraft((value) => value.replace(upload.md, '').replace(/\n{3,}/g, '\n\n'));
+  };
 
   const startEdit = (e) => {
     e.stopPropagation();
-    setDraft(htmlToEditableText(ann.body));
+    setDraft(htmlToEditableText(commentBody));
+    setEditUploads([]);
     setEditing(true);
     setReplying(false);
     setExpanded(true); // TKT-0237: auto-expand on Edit (never collapse)
@@ -1637,11 +2030,11 @@ function CommentCard({ ann, active, onFocus, onResolve, onDelete, onReply, onEdi
   };
   const saveEdit = () => {
     const t = draft.trim();
-    if (!t) return;
+    if (!t || isEditUploading) return;
     onEditBody(t);
     setEditing(false);
   };
-  const cancelEdit = () => { setEditing(false); setDraft(''); };
+  const cancelEdit = () => { setEditing(false); setDraft(''); setEditUploads([]); };
   const dispatchComment = (e) => {
     e.stopPropagation();
     if (onDispatch) onDispatch(ann.id);
@@ -1650,131 +2043,333 @@ function CommentCard({ ann, active, onFocus, onResolve, onDelete, onReply, onEdi
   // comment so the target receives the latest text.
   const saveEditAndDispatch = async () => {
     const t = draft.trim();
-    if (!t) return;
+    if (!t || isEditUploading) return;
     setEditing(false);
     await onEditBody(t);
     if (onDispatch) onDispatch(ann.id);
   };
 
-  // TKT-0237: auto-expand when the card becomes active (user clicked its mark).
-  React.useEffect(() => { if (active) setExpanded(true); }, [active]);
-
-  // TKT-0237: decide whether the content overflows the ~7-line clamp.
-  // scrollHeight is accurate even while .clamped applies (ignores overflow:
-  // hidden). 8px slack so a single hidden line doesn't trigger a clamp.
-  React.useLayoutEffect(() => {
-    const el = contentRef.current;
-    if (!el) return;
-    setOverflows(el.scrollHeight > 150 + 8);
-  }, [ann.body, ann.quote, replyCount, editing]);
-
-  const clamped = !expanded && !editing && !replying && overflows;
-
-  // TKT-0237: click anywhere toggles expand/collapse AND focuses — except on
-  // interactive elements, dead space in .acts, or the end of a text selection.
-  // The closest() guard is the belt to the buttons' existing stopPropagation()
-  // suspenders (the ticket fears the reply-click-collapses regression).
+  // Card clicks only focus the card. Expansion is owned by the in-flow divider
+  // below the body, so clicking message text never causes a hidden scroll or
+  // an unexpected collapse.
   const onCardClick = (e) => {
-    onFocus();
     if (e.target.closest('button, a, textarea, input, select, .acts, .anno-composer')) return;
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed) return;
-    if (overflows) setExpanded((v) => !v);
+    onFocus();
   };
+
+  const isHuman = ann.author === 'human' || ann.author === 'you' || ann.author === 'human:dashboard';
+
+  const onBodyClick = (e) => {
+    const target = e.target;
+    if (target && target.tagName === 'IMG' && target.src) {
+      e.stopPropagation();
+      openImageLightbox(target.src, target.alt || 'Comment image');
+    }
+  };
+
+  const initials = isHuman
+    ? (c.label.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'L')
+    : (c.label.split(/[\s:_-]+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'A');
 
   return (
     <div
-      className={`anno-card ${active ? 'is-active' : ''} ${ann.status === 'resolved' ? 'resolved' : ''} ${ann._orphan ? 'orphan' : ''}`}
+      className={`anno-card ${isHuman ? 'anno-card-human' : 'anno-card-agent'} ${active ? 'is-active' : ''} ${ann.status === 'resolved' ? 'resolved' : ''} ${ann._orphan ? 'orphan' : ''}`}
       data-id={ann.id}
-      style={{ '--_ac': c.color, '--_ac-soft': hexA(c.color, 0.1), '--_ac-bd': hexA(c.color, 0.5) }}
       onClick={onCardClick}
-      aria-expanded={overflows ? expanded : undefined}
-      data-collapsible={overflows ? '1' : undefined}
     >
       <div className="ch">
-        {ann.dispatch_state && ann.dispatch_state !== 'n/a' && (
-          <span className={`anno-dispatch-chip ${ann.dispatch_state}`}>{ann.dispatch_state}</span>
+        <span className="anno-author">
+          <span className={`anno-avatar ${isHuman ? 'anno-avatar-human' : 'anno-avatar-agent'}`} aria-label={`${c.label} avatar`}>{initials}</span>
+          <span className="anno-author-name">{c.label}</span>
+        </span>
+        <span className="when">{shortTime(ann.created_at || ann.ts)}</span>
+        {ann._orphan && <span className="anno-orphan-pill">· anchor lost</span>}
+        {dispatchState && dispatchState !== 'n/a' && (
+          <span className={`anno-dispatch-chip ${dispatchState}`}>{dispatchState}</span>
         )}
-        <span className="when">{shortTime(ann.created_at)}</span>
       </div>
-      <div ref={contentRef} className={`anno-card-content ${clamped ? 'clamped' : ''}`}>
+      <div className="anno-card-content">
         {ann.quote && <div className="quote">{esc(ann.quote)}</div>}
         {editing ? (
           <div className="anno-composer anno-edit">
-            <textarea ref={editRef} rows={5} value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Edit comment…"
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); saveEdit(); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelEdit(); } }}/>
+            {editUploads.length > 0 && (
+              <div className="ct-uploads anno-image-previews">
+                {editUploads.map((u) => (
+                  <div key={u.id} className={`ct-upload ct-upload-${u.status}`}>
+                    {u.status === 'uploading' && <span className="ct-upload-spinner" />}
+                    {u.status === 'done' && u.url && (
+                      <button type="button" className="ct-upload-preview" aria-label={`Preview ${u.name}`} onClick={(e) => { e.stopPropagation(); openImageLightbox(u.url, u.name); }}>
+                        <img src={u.url} alt={u.name} className="ct-upload-thumb" />
+                      </button>
+                    )}
+                    {u.status === 'error' && <span className="ct-upload-err">×</span>}
+                    <span className="ct-upload-name">{u.name}</span>
+                    {u.status === 'error' && <span className="ct-upload-err-msg">{u.error}</span>}
+                    {u.status !== 'uploading' && (
+                      <button type="button" className="ct-upload-remove" aria-label={`Remove ${u.name}`} onClick={(e) => { e.stopPropagation(); removeEditUpload(u.id); }}>×</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            <textarea
+              ref={editRef}
+              rows={5}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onPaste={onEditPaste}
+              onDrop={onEditDrop}
+              onDragOver={(e) => { if (e.dataTransfer?.types?.includes('Files')) e.preventDefault(); }}
+              placeholder="Edit comment… (paste/drop images)"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault(); e.stopPropagation(); saveEdit();
+                } else if (e.key === 'Escape') {
+                  e.preventDefault(); e.stopPropagation(); cancelEdit();
+                }
+              }}
+            />
             <div className="row">
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' }}>
                 <button className="cancel" onClick={cancelEdit}>esc</button>
-                {ann.dispatch_state === 'undispatched' && canDispatch && (
-                  <button className="send secondary" onClick={saveEditAndDispatch} disabled={!draft.trim()}>Dispatch</button>
+                {dispatchState === 'undispatched' && canDispatch && (
+                  <button className="send secondary" onClick={saveEditAndDispatch} disabled={!draft.trim() || isEditUploading}>Dispatch</button>
                 )}
-                <button className="send" onClick={saveEdit} disabled={!draft.trim()}>Save</button>
+                <button className="send" onClick={saveEdit} disabled={!draft.trim() || isEditUploading}>Save</button>
               </div>
             </div>
             <div className="hint">Enter to save · Shift+Enter newline · Esc cancel</div>
           </div>
         ) : (
-          <div className="body" dangerouslySetInnerHTML={{ __html: bodyHtml(ann.body) }}/>
+          <>
+            <div className="body" onClick={onBodyClick} dangerouslySetInnerHTML={{ __html: expanded ? fullBodyHtml : collapsedBodyHtml }}/>
+            {longBody && (
+              <button
+                type="button"
+                className="anno-body-divider"
+                aria-expanded={expanded}
+                onClick={(e) => { e.stopPropagation(); setExpanded((value) => !value); }}
+              >
+                <span>{expanded ? 'Show less ↑' : `Show ${totalWords - 300} more words ↓`}</span>
+              </button>
+            )}
+          </>
         )}
-        {(ann.replies || []).map((rep, i) => (
-          <div className="reply" key={i}>
-            <div className="ch">
-              <span className="when">{shortTime(rep.ts)}</span>
-            </div>
-            <div className="body" dangerouslySetInnerHTML={{ __html: bodyHtml(rep.text) }}/>
-          </div>
-        ))}
       </div>
-      {overflows && !editing && !replying && (
-        <div className="anno-expand-hint">{expanded ? '⌃ less' : `⌄ more${replyCount ? ` · ${replyCount} ${replyCount === 1 ? 'reply' : 'replies'}` : ''}`}</div>
+      {replying && (
+        <AnnoComposer
+          canDispatch={canDispatch && !!onReplyAndDispatch}
+          dispatchLabel="Comment + Dispatch"
+          onSend={(text) => { onReply(text); setReplying(false); }}
+          onSendAndDispatch={onReplyAndDispatch ? (text) => {
+            const done = onReplyAndDispatch(text);
+            setReplying(false);
+            return done;
+          } : undefined}
+          onCancel={() => setReplying(false)}
+        />
       )}
-      {replying && <AnnoComposer onSend={(text) => { onReply(text); setReplying(false); }} onCancel={() => setReplying(false)}/>}
       <div className="acts">
-        <button onClick={(e) => { e.stopPropagation(); setExpanded(true); setReplying(true); }}>Reply</button>
-        <button onClick={(e) => { e.stopPropagation(); startEdit(e); }}>Edit</button>
-        {ann.dispatch_state === 'undispatched' && canDispatch && (
-          <button onClick={dispatchComment}>Dispatch</button>
+        <button type="button" className="act-reply" onClick={(e) => { e.stopPropagation(); setReplying(true); }}>
+          <span aria-hidden="true">💬</span> Reply
+        </button>
+        {ann.block_id && onJump && (
+          <button type="button" className="act-jump" title="Jump to section" aria-label="Jump to section" onClick={(e) => { e.stopPropagation(); onJump(); }}>
+            <span aria-hidden="true">⧉</span> Jump
+          </button>
         )}
-        <button onClick={(e) => { e.stopPropagation(); onResolve(); }}>{ann.status === 'resolved' ? 'Reopen' : 'Resolve'}</button>
-        <button className="danger" onClick={(e) => { e.stopPropagation(); onDelete(); }}>Delete</button>
+        <button type="button" className="act-edit" onClick={(e) => { e.stopPropagation(); startEdit(e); }}>
+          <span aria-hidden="true">✎</span> Edit
+        </button>
+        {dispatchState === 'undispatched' && canDispatch && (
+          <button type="button" className="act-dispatch" onClick={dispatchComment}>
+            <span aria-hidden="true">↗</span> Dispatch
+          </button>
+        )}
+        <button type="button" className="act-resolve" onClick={(e) => { e.stopPropagation(); onResolve(); }}>
+          <span aria-hidden="true">{ann.status === 'resolved' ? '↩' : '✓'}</span> {ann.status === 'resolved' ? 'Reopen' : 'Resolve'}
+        </button>
+        <button type="button" className="act-delete" onClick={(e) => { e.stopPropagation(); onDelete(); }}>
+          <span aria-hidden="true">🗑</span> Delete
+        </button>
       </div>
     </div>
   );
 }
 
-function AnnoComposer({ quote, onSend, onSendAndDispatch, canDispatch = false, onCancel }) {
+function AnnoComposer({ quote, attachment, onSend, onSendAndDispatch, canDispatch = false, dispatchLabel = 'Dispatch', onCancel, onClearAttachment, rail = false, autoFocus = true }) {
   const [text, setText] = React.useState('');
+  const [uploads, setUploads] = React.useState([]);
   const taRef = React.useRef(null);
-  React.useEffect(() => { taRef.current?.focus(); }, []);
+  const words = countWords(text);
+
+  React.useEffect(() => {
+    if (autoFocus) taRef.current?.focus();
+  }, [autoFocus]);
+
+  React.useLayoutEffect(() => {
+    const textarea = taRef.current;
+    if (!textarea || !rail) return;
+    textarea.style.height = 'auto';
+    const minHeight = 72;
+    const maxHeight = 150;
+    if (!textarea.value) {
+      textarea.style.height = `${minHeight}px`;
+      textarea.style.overflowY = 'hidden';
+      return;
+    }
+    const nextHeight = Math.min(maxHeight, Math.max(minHeight, textarea.scrollHeight));
+    textarea.style.height = `${nextHeight}px`;
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  }, [rail, text]);
+
+  const uploadOne = React.useCallback(async (file) => {
+    const id = `up_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    setUploads((u) => [...u, { id, name: file.name || 'image.png', status: 'uploading' }]);
+    try {
+      const res = await window.SubstrateAPI.uploadAsset(file);
+      const md = `![](${res.url})`;
+      setUploads((u) => u.map((x) => x.id === id ? { ...x, status: 'done', url: res.url, md } : x));
+      return { id, md, url: res.url };
+    } catch (err) {
+      setUploads((u) => u.map((x) => x.id === id ? { ...x, status: 'error', error: String(err?.message || err) } : x));
+      throw err;
+    }
+  }, []);
+
+  const onPaste = React.useCallback(async (e) => {
+    const files = collectImages(e.clipboardData);
+    if (files.length === 0) return;
+    e.preventDefault();
+    const before = taRef.current?.selectionStart ?? text.length;
+    const after = taRef.current?.selectionEnd ?? text.length;
+    for (const f of files) {
+      try {
+        const { md } = await uploadOne(f);
+        const insert = `\n${md}\n`;
+        setText((cur) => {
+          const next = cur.slice(0, before) + insert + cur.slice(after);
+          requestAnimationFrame(() => {
+            if (taRef.current) {
+              const pos = before + insert.length;
+              taRef.current.setSelectionRange(pos, pos);
+              taRef.current.focus();
+            }
+          });
+          return next;
+        });
+        break;
+      } catch (err) { /* error surfaced in uploads strip */ }
+    }
+  }, [text, uploadOne]);
+
+  const onDrop = React.useCallback(async (e) => {
+    const files = collectImages(e.dataTransfer);
+    if (files.length === 0) return;
+    e.preventDefault();
+    for (const f of files) {
+      try {
+        const { md } = await uploadOne(f);
+        setText((cur) => cur + (cur.endsWith('\n') ? '' : '\n') + md + '\n');
+      } catch (err) { /* surfaced in uploads strip */ }
+    }
+  }, [uploadOne]);
+
+  const isUploading = uploads.some((u) => u.status === 'uploading');
+  const removeUpload = (id) => {
+    const upload = uploads.find((item) => item.id === id);
+    setUploads((items) => items.filter((item) => item.id !== id));
+    if (upload?.md) setText((value) => value.replace(upload.md, '').replace(/\n{3,}/g, '\n\n'));
+  };
+
+  const clearDraft = () => {
+    setText('');
+    setUploads([]);
+  };
 
   const fire = () => {
     const t = text.trim();
-    if (!t) return;
+    if (!t || isUploading) return;
     onSend(t);
+    clearDraft();
   };
   // GOL-101: swallow nothing. A rejected dispatch is reported on the drawer's
   // comment-dispatch note; catching here only keeps it from surfacing as an
   // unhandled rejection.
   const fireDispatch = () => {
     const t = text.trim();
-    if (!t || !onSendAndDispatch) return;
+    if (!t || !onSendAndDispatch || isUploading) return;
     const result = onSendAndDispatch(t);
+    clearDraft();
     if (result && typeof result.catch === 'function') {
       result.catch((err) => console.error('comment dispatch failed', err));
     }
   };
+  const cancel = () => {
+    clearDraft();
+    if (onCancel) onCancel();
+  };
 
   return (
-    <div className="anno-composer">
+    <div className={`anno-composer${rail ? ' anno-rail-composer' : ''}`}>
+      {attachment && (
+        <div className="anno-attachment-pill" title={attachment.title || attachment.id || 'Attached section'}>
+          <span aria-hidden="true">⧉ Section</span>
+          {attachment.title && <span className="anno-attachment-title">· {attachment.title}</span>}
+          {onClearAttachment && (
+            <button type="button" aria-label="Remove section attachment" title="Remove section attachment" onClick={(e) => { e.stopPropagation(); onClearAttachment(); }}>×</button>
+          )}
+        </div>
+      )}
       {quote && <div className="quote">{esc(quote)}</div>}
-      <textarea ref={taRef} rows={5} value={text} onChange={(e) => setText(e.target.value)} placeholder="Comment — Markdown (+ ```mermaid; > [!NOTE]/[!WARNING]/[!IMPORTANT])"
-        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); fire(); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onCancel && onCancel(); } }}/>
+      {uploads.length > 0 && (
+        <div className="ct-uploads anno-image-previews">
+          {uploads.map((u) => (
+            <div key={u.id} className={`ct-upload ct-upload-${u.status}`}>
+              {u.status === 'uploading' && <span className="ct-upload-spinner" />}
+              {u.status === 'done' && u.url && (
+                <button type="button" className="ct-upload-preview" aria-label={`Preview ${u.name}`} onClick={(e) => { e.stopPropagation(); openImageLightbox(u.url, u.name); }}>
+                  <img src={u.url} alt={u.name} className="ct-upload-thumb" />
+                </button>
+              )}
+              {u.status === 'error' && <span className="ct-upload-err">×</span>}
+              <span className="ct-upload-name">{u.name}</span>
+              {u.status === 'error' && <span className="ct-upload-err-msg">{u.error}</span>}
+              {u.status !== 'uploading' && (
+                <button type="button" className="ct-upload-remove" aria-label={`Remove ${u.name}`} onClick={(e) => { e.stopPropagation(); removeUpload(u.id); }}>×</button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      <textarea
+        ref={taRef}
+        rows={rail ? 3 : 5}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onPaste={onPaste}
+        onDrop={onDrop}
+        onDragOver={(e) => { if (e.dataTransfer?.types?.includes('Files')) e.preventDefault(); }}
+        placeholder="Comment — Markdown (+ ```mermaid; > [!NOTE]/[!WARNING]/[!IMPORTANT]; paste/drop images)"
+        aria-describedby={rail ? 'anno-composer-word-count' : undefined}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault(); e.stopPropagation(); fire();
+          } else if (e.key === 'Escape') {
+            e.preventDefault(); e.stopPropagation(); cancel();
+          }
+        }}
+      />
       <div className="row">
+        {rail && (
+          <span id="anno-composer-word-count" className={`anno-word-count${words > 300 ? ' warn' : ''}`} aria-live="polite">
+            {words} {words === 1 ? 'word' : 'words'}
+          </span>
+        )}
         <div className="anno-composer-actions">
-          <button className="cancel" onClick={onCancel}>esc</button>
-          {canDispatch && <button className="send secondary" onClick={fireDispatch} disabled={!text.trim()}>Dispatch</button>}
-          <button className="send" onClick={fire} disabled={!text.trim()}>Comment</button>
+          <button className="cancel" onClick={cancel}>esc</button>
+          {canDispatch && <button className="send secondary" onClick={fireDispatch} disabled={!text.trim() || isUploading}>{dispatchLabel}</button>}
+          <button className="send" onClick={fire} disabled={!text.trim() || isUploading}>Comment</button>
         </div>
       </div>
       <div className="hint">Enter to send · Shift+Enter newline · Esc cancel</div>

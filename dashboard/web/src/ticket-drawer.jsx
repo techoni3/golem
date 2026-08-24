@@ -134,24 +134,53 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay', reader = f
   const flatComments = ticket
     ? window.Store.getTicketComments(ticket.id)
     : (ticketId ? window.Store.getTicketComments(ticketId) : []);
-  // Group flat top-level comments + replies by parent_id. The schema stores
-  // replies as separate rows (parent_id set), but the annotation rail renders
-  // them nested under their parent card — so assemble the tree here.
+  // Group flat comment rows into top-level threads without changing storage.
+  // Reply-to-reply rows resolve to the same root so the rail can enforce one
+  // visible reply layer while retaining each row's own id and lifecycle.
   const comments = React.useMemo(() => {
+    const byId = new Map(flatComments.map((comment) => [comment.id, comment]));
     const tops = [];
-    const repliesByParent = new Map();
-    for (const c of flatComments) {
-      if (c.parent_id) {
-        const arr = repliesByParent.get(c.parent_id) ?? [];
-        arr.push({ author: c.author, text: c.body, ts: c.created_at, id: c.id });
-        repliesByParent.set(c.parent_id, arr);
-      } else {
-        tops.push(c);
+    const repliesByRoot = new Map();
+    const sortByCreated = (a, b) => {
+      const left = String(a.created_at || a.ts || '');
+      const right = String(b.created_at || b.ts || '');
+      return left.localeCompare(right);
+    };
+    const isDraft = (comment) => comment.dispatch_state === 'undispatched'
+      || (!comment.dispatch_state && (comment.author === 'human' || comment.author === 'you'));
+    const sortForRail = (a, b) => (Number(isDraft(a)) - Number(isDraft(b))) || sortByCreated(a, b);
+
+    const rootFor = (comment) => {
+      let current = comment;
+      const seen = new Set();
+      while (current?.parent_id && byId.has(current.parent_id) && !seen.has(current.id)) {
+        seen.add(current.id);
+        current = byId.get(current.parent_id);
       }
+      return current && !current.parent_id ? current : null;
+    };
+
+    for (const comment of flatComments) {
+      if (comment.parent_id && comment.status === 'deleted') continue;
+      if (!comment.parent_id) {
+        tops.push(comment);
+        continue;
+      }
+      const root = rootFor(comment);
+      if (!root) {
+        // Preserve a reply whose parent was deleted or is not in the payload;
+        // it remains visible as an orphan top-level message.
+        tops.push({ ...comment, parent_id: null });
+        continue;
+      }
+      const replies = repliesByRoot.get(root.id) ?? [];
+      replies.push(comment);
+      repliesByRoot.set(root.id, replies);
     }
-    return tops.map((t) => ({
-      ...t,
-      replies: (repliesByParent.get(t.id) ?? []).slice().sort((a, b) => String(a.ts).localeCompare(String(b.ts))),
+
+    return tops.sort(sortForRail).map((top) => ({
+      ...top,
+      replies: (repliesByRoot.get(top.id) ?? []).slice().sort(sortByCreated),
     }));
   }, [flatComments]);
   const projects = window.Store.getProjects();
@@ -237,8 +266,8 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay', reader = f
   // The live assignee is the only comment-dispatch target now that the bulk
   // panel moved to the comments drawer header (which shows only when the
   // assignee is live). Label it for the header button.
-  const dispatchTargetLabel = defaultCommentDispatchSession
-    ? (labelBySession.get(defaultCommentDispatchSession) || null)
+  const dispatchTargetLabel = selectedCommentDispatchSession
+    ? (labelBySession.get(selectedCommentDispatchSession) || null)
     : null;
 
   React.useEffect(() => {
@@ -324,12 +353,12 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay', reader = f
   }, [ticketId, ticket?.kind, pendingDispatch?.id]);
 
   const resolveActor = React.useCallback((a, persistedLabel) => {
-    if (a === 'human') return 'You';
+    if (a === 'human' || a === 'you' || a === 'human:dashboard') return 'Lavee';
     if (!a) return 'Unassigned';
     // TKT-0266: prefer the durable persisted label (from session_labels) so
     // the meta strip still shows the friendly name after the session goes
     // offline. Falls back to the live resolver, then the uuid stub.
-    return persistedLabel || labelBySession.get(a) || `session ${String(a).slice(0, 8)}`;
+    return persistedLabel || labelBySession.get(a) || window.Store?.getNativeSessionById?.(a)?.name || window.Store?.getNativeSessionById?.(a)?.label || `session ${String(a).slice(0, 8)}`;
   }, [labelBySession]);
 
   // Commit a single field immediately (actor: human).
@@ -643,6 +672,38 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay', reader = f
     return window.SubstrateAPI.replyComment(ticketId, parentId, { author: 'human', body: reply.text });
   }, [ticketId]);
 
+  const onReplyCommentAndDispatch = React.useCallback(async (parentId, reply) => {
+    if (!ticketId) return null;
+    const target = selectedCommentDispatchSession;
+    setCommentDispatchNote(null);
+    if (!target) {
+      setCommentDispatchNote('Pick a session before dispatching comments');
+      throw new Error('Pick a session before dispatching comments');
+    }
+    let comment;
+    try {
+      comment = await onReplyComment(parentId, reply);
+    } catch (err) {
+      setCommentDispatchNote(err?.payload?.error || err?.message || 'Saving the reply failed');
+      throw err;
+    }
+    if (!comment?.id) {
+      setCommentDispatchNote('Reply saved but not dispatched — the server returned no comment id');
+      return comment;
+    }
+    try {
+      const res = await window.SubstrateAPI.dispatchComment(comment.id, { session_id: target });
+      if (res?.ticket?.id) window.Store.upsertTrackerTicket(res.ticket);
+      if (res?.ticket?.comments) window.Store.seedTicketComments(res.ticket.id, res.ticket.comments);
+      setCommentDispatchNote(`dispatched to ${labelBySession.get(target) || target}`);
+      return res;
+    } catch (err) {
+      if (err && typeof err === 'object') err.golemCommentSaved = true;
+      setCommentDispatchNote(err?.payload?.error || err?.message || 'Reply dispatch failed — the reply is still undispatched');
+      throw err;
+    }
+  }, [ticketId, onReplyComment, selectedCommentDispatchSession, labelBySession]);
+
   // GOL-150: state is the only lifecycle, so the history strip reads
   // state_change events alone (older rows may still carry phase_change).
   const stateEvents = React.useMemo(() => {
@@ -801,7 +862,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay', reader = f
                     compact
                     options={[
                       { value: '', label: 'Unassigned' },
-                      { value: 'human', label: 'You' },
+                      { value: 'human', label: 'Lavee' },
                       ...dispatchable.map((s) => ({ value: s.session_id, label: s.label })),
                       ...(ticket.assignee && ticket.assignee !== 'human' && !labelBySession.has(ticket.assignee)
                         // TKT-0266: prefer the persisted durable label so the
@@ -938,7 +999,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay', reader = f
                       </div>
                       <div className="td-meta-row">
                         <span className="td-meta-key">Created by</span>
-                        <span>{ticket.created_by && ticket.created_by !== 'human' ? ticket.created_by.slice(0, 8) : 'You'}</span>
+                        <span>{ticket.created_by && ticket.created_by !== 'human' && ticket.created_by !== 'you' ? (ticket.created_by_label || (ticket.created_by.length > 12 ? `session ${ticket.created_by.slice(0, 8)}` : ticket.created_by)) : 'Lavee'}</span>
                         <span className="td-meta-value">· {tdAgo(ticket.created_at)}</span>
                       </div>
                       <div className="td-meta-row">
@@ -1036,6 +1097,7 @@ function TicketDrawer({ open, ticketId, onClose, variant = 'overlay', reader = f
                     onCreateAndDispatch={onAddCommentAndDispatch}
                     onUpdate={onUpdateComment}
                     onReply={onReplyComment}
+                    onReplyAndDispatch={onReplyCommentAndDispatch}
                     onDispatchComment={onDispatchComment}
                     canDispatchComments={!!selectedCommentDispatchSession}
                     undispatchedCount={undispatchedCount}

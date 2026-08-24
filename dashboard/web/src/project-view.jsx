@@ -215,9 +215,9 @@ function ProjectTrackerBoard({ contractId, ...shell }) {
     return m;
   }, [dispatchable]);
   const resolveAssignee = React.useCallback((a) => {
-    if (a === 'human') return 'You';
+    if (a === 'human' || a === 'you' || a === 'human:dashboard') return 'Lavee';
     if (!a) return 'Unassigned';
-    return labelBySession.get(a) || `session ${String(a).slice(0, 8)}`;
+    return labelBySession.get(a) || window.Store?.getNativeSessionById?.(a)?.name || window.Store?.getNativeSessionById?.(a)?.label || `session ${String(a).slice(0, 8)}`;
   }, [labelBySession]);
 
   const tickets = window.Store.getTrackerTickets({ project_id: contractId, includeArchived: showArchived, exclude_kind: 'spec' });

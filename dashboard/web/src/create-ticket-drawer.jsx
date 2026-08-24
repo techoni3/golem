@@ -521,7 +521,7 @@ const discard = () => {
               <label className="ct-label">Assignee</label>
               <select className="ct-input" value={assignee} onChange={(e) => setAssignee(e.target.value)} disabled={submitting || !projectId}>
                 <option value="">Unassigned</option>
-                <option value="human">Human</option>
+                <option value="human">Lavee</option>
                 {sessions.map((s) => <option key={s.session_id} value={s.session_id}>{s.label}</option>)}
               </select>
             </div>

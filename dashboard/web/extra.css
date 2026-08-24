@@ -1,3 +1,6 @@
+/* GOL-274: outer right content bar padding 5-8px (against outer edges, not inner card padding) */
+.page { padding: 8px !important; }
+
 /* Additions on top of the design's styles.css for live-data UI states. */
 
 /* Connection banner */
@@ -124,7 +127,7 @@
   left: 14px;
   bottom: 62px;
   width: min(340px, calc(100vw - 24px));
-  z-index: 40;
+  z-index: 100;
   background-color: var(--bg-1);
   background-image: var(--surface-pattern);
   border: 1px solid var(--border-2);
@@ -970,12 +973,19 @@
 /* ---- Native Claude Code sessions panel (Agents page) ---- */
 .native-sessions {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 520px));
-  justify-content: center;
-  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 .project-native-sessions {
-  grid-template-columns: repeat(auto-fit, minmax(320px, 520px));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (min-width: 1500px) {
+  .native-sessions,
+  .project-native-sessions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 1901px) {
+  .native-sessions,
+  .project-native-sessions { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 .native-session-card {
   border: 1px solid var(--border-2);
@@ -3319,6 +3329,7 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
 
 #anno-rail {
   position: absolute; top: 0; right: 0; height: 100%; width: var(--anno-rail-w); z-index: 65;
+  min-height: 0; overflow: hidden;
   background: var(--bg-1); background-image: var(--surface-pattern);
   border-left: 1px solid var(--border-2);
   display: flex; flex-direction: column;
@@ -3346,8 +3357,56 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
 }
 .rail-dispatch-btn:disabled { opacity: .6; cursor: default; }
 .rail-dispatch-note { font-size: 10px; color: var(--text-3); line-height: 1.4; }
-#anno-list { flex: 1 1 auto; overflow-y: auto; padding: 12px 14px 60px; }
+#anno-list.rail-scroll {
+  display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column;
+  overflow-y: auto; overflow-x: hidden;
+  padding: 12px 14px;
+}
+#anno-list .rail-flow {
+  display: flex; flex: 0 0 auto; min-height: min-content; flex-direction: column;
+  margin-top: auto;
+}
+#anno-list .history,
+#anno-list .draft-queue-items { display: flex; flex-direction: column; }
 #anno-list .empty { color: var(--text-3); font-family: var(--font-mono); font-size: 12px; text-align: center; padding: 36px 16px; line-height: 1.7; }
+.draft-queue {
+  margin-top: 6px; padding: 8px 10px 4px;
+  border: 1px dashed color-mix(in oklab, var(--status-review) 42%, var(--border-2));
+  border-radius: var(--radius-2);
+  background: color-mix(in oklab, var(--status-review) 6%, transparent);
+}
+.draft-queue .anno-card {
+  border-style: dashed;
+  border-color: color-mix(in oklab, var(--status-review) 35%, var(--border-2));
+  background: color-mix(in oklab, var(--bg-2) 80%, transparent);
+}
+.draft-queue-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin: 0 0 8px; flex-wrap: wrap;
+}
+.draft-queue-label {
+  margin: 0; color: var(--status-review);
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .04em;
+  text-transform: uppercase; font-weight: 600;
+}
+.draft-queue-foot {
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  margin-top: 8px; padding-top: 6px;
+  border-top: 1px dashed color-mix(in oklab, var(--status-review) 30%, var(--border-2));
+  flex-wrap: wrap;
+}
+.draft-queue-dispatch-btn {
+  font-size: 9.5px; padding: 4px 10px; border-radius: 999px; font-weight: 600;
+}
+.draft-queue-note {
+  margin: 0 0 6px; font-size: 9.5px; color: var(--status-review);
+}
+.anno-composer-dock {
+  flex: 0 0 auto;
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--border-1);
+  background: color-mix(in oklab, var(--bg-1) 94%, var(--bg-0));
+}
 
 .rail-btn {
   font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .5px; text-transform: uppercase;
@@ -3393,13 +3452,52 @@ mark.anno.anno-tail::after {
 /* comment cards */
 .anno-card {
   background: var(--bg-2); border: 1px solid var(--border-2);
-  border-left: 3px solid var(--_ac, #f5a623); border-radius: 10px;
-  padding: 10px 12px; margin: 0 0 10px; transition: .15s;
+  border-radius: var(--radius-2);
+  padding: 10px 12px; margin: 0 0 10px;
+  transition: outline .15s, box-shadow .15s, border-color .15s;
 }
-.anno-card.is-active { border-color: var(--_ac, #f5a623); box-shadow: 0 0 0 1px var(--_ac, #f5a623); }
+.anno-card.anno-card-human {
+  background: color-mix(in oklab, var(--bg-2) 94%, #f59e0b 6%);
+}
+.anno-card.anno-card-agent {
+  background: color-mix(in oklab, var(--bg-2) 94%, #7e8bff 6%);
+}
+.anno-card.is-active {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 15%, transparent);
+}
 .anno-card.resolved { opacity: .55; }
-.anno-card.orphan { border-left-color: var(--status-blocked); }
-.anno-card .ch { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; }
+.anno-orphan-pill {
+  color: var(--status-blocked);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  margin-left: 4px;
+}
+.anno-card .ch { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; min-width: 0; }
+.anno-author { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.anno-avatar {
+  display: inline-grid; place-items: center; flex: 0 0 auto;
+  width: 24px; height: 24px; border-radius: 50%;
+  font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; letter-spacing: .02em;
+}
+.anno-avatar.anno-avatar-human {
+  background: linear-gradient(135deg, #f59e0b, #ef4444);
+  color: #ffffff;
+  border: none;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+.anno-avatar.anno-avatar-agent {
+  background: linear-gradient(135deg, #7e8bff, #2dd4a7);
+  color: #ffffff;
+  border: none;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+.anno-author-name {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-1); font-size: 11.5px; font-weight: 600;
+}
 .anno-chip {
   font-family: "JetBrains Mono", monospace; font-size: 9px; letter-spacing: .6px; text-transform: uppercase;
   padding: 2px 8px; border-radius: 20px; white-space: nowrap;
@@ -3410,12 +3508,17 @@ mark.anno.anno-tail::after {
   display: inline-flex;
   align-items: center;
   border-radius: 999px;
-  border: 1px solid color-mix(in oklab, var(--status-running) 32%, transparent);
-  background: color-mix(in oklab, var(--status-running) 10%, transparent);
-  color: var(--status-running);
-  font-size: 9px;
-  line-height: 1;
-  padding: 3px 6px;
+  border: 1px solid color-mix(in oklab, var(--accent) 34%, transparent);
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
+  color: var(--accent);
+  font-family: var(--font-mono); font-size: 9px; line-height: 1;
+  letter-spacing: .04em; text-transform: uppercase;
+  padding: 3px 6px; white-space: nowrap;
+}
+.anno-dispatch-chip.dispatched {
+  border-color: color-mix(in oklab, var(--accent) 34%, transparent);
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
+  color: var(--accent);
 }
 .anno-dispatch-chip.addressed {
   border-color: color-mix(in oklab, var(--status-active) 32%, transparent);
@@ -3423,17 +3526,54 @@ mark.anno.anno-tail::after {
   color: var(--status-active);
 }
 .anno-dispatch-chip.undispatched {
-  border-color: color-mix(in oklab, var(--text-3) 34%, transparent);
-  background: color-mix(in oklab, var(--text-3) 8%, transparent);
-  color: var(--text-3);
+  border-color: color-mix(in oklab, var(--status-review) 34%, transparent);
+  background: color-mix(in oklab, var(--status-review) 10%, transparent);
+  color: var(--status-review);
 }
-.anno-card .when { font-family: var(--font-mono); font-size: 9px; color: var(--text-3); margin-left: auto; }
+.anno-card .when { font-family: var(--font-mono); font-size: 9px; color: var(--text-3); margin-left: auto; white-space: nowrap; }
 .anno-card .quote {
   font-size: 11.5px; color: var(--text-2); border-left: 2px solid var(--border-2);
   padding-left: 8px; margin: 2px 0 6px; line-height: 1.45; font-style: italic;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
-.anno-card .body { font-size: 13.5px; color: var(--text-0); line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }
+.anno-card .body {
+  font-size: 13px; color: var(--text-0); line-height: 1.5;
+  word-wrap: break-word; overflow-wrap: break-word;
+}
+.anno-card .body > *:first-child { margin-top: 0; }
+.anno-card .body > *:last-child { margin-bottom: 0; }
+.anno-card .body p { margin: 6px 0; }
+.anno-card .body strong { color: var(--text-0); font-weight: 600; }
+.anno-card .body em { font-style: italic; }
+.anno-card .body a { color: var(--accent); text-decoration: underline; text-decoration-color: var(--border-2); }
+.anno-card .body a:hover { text-decoration-color: var(--accent); }
+.anno-card .body ul, .anno-card .body ol { margin: 6px 0; padding-left: 20px; }
+.anno-card .body li { margin: 3px 0; }
+.anno-card .body li > p { margin: 2px 0; }
+.anno-card .body code {
+  font-family: var(--font-mono); font-size: .88em;
+  padding: 2px 5px; border-radius: 4px; background: var(--bg-3);
+  color: var(--text-0);
+}
+.anno-card .body pre {
+  margin: 8px 0; padding: 8px 10px; border-radius: var(--radius-1);
+  background: var(--bg-0); border: 1px solid var(--border-2);
+  overflow-x: auto;
+}
+.anno-card .body pre code { background: none; padding: 0; }
+.anno-card .body blockquote {
+  margin: 6px 0; padding: 4px 10px; border-left: 2px solid var(--border-2);
+  color: var(--text-2); background: transparent;
+}
+.anno-card .body blockquote p { margin: 4px 0; }
+.anno-card .body hr { border: none; border-top: 1px solid var(--border-2); margin: 10px 0; }
+.anno-card .body h1, .anno-card .body h2, .anno-card .body h3, .anno-card .body h4, .anno-card .body h5, .anno-card .body h6 {
+  font-family: var(--font-sans); font-weight: 600; color: var(--text-0); margin: 8px 0 4px;
+}
+.anno-card .body h1 { font-size: 15.5px; border-bottom: 1px solid var(--border-1); padding-bottom: 2px; }
+.anno-card .body h2 { font-size: 14.5px; }
+.anno-card .body h3 { font-size: 13.5px; }
+.anno-card .body h4, .anno-card .body h5, .anno-card .body h6 { font-size: 13px; }
 .anno-card .body table {
   display: block; max-width: 100%; overflow-x: auto;
   width: 100%; border-collapse: collapse; margin: 8px 0;
@@ -3454,34 +3594,126 @@ mark.anno.anno-tail::after {
   background: var(--bg-3); border-bottom: 1px solid var(--border-2);
   white-space: nowrap;
 }
-.anno-card .reply { margin-top: 7px; padding-top: 7px; border-top: 1px dashed var(--border-2); }
-.anno-card .reply .ch { margin-bottom: 3px; }
-.anno-card .reply .body { font-size: 12.5px; color: var(--text-2); }
-.anno-card .acts { display: flex; gap: 6px; margin-top: 6px; }
-.anno-card .acts button {
-  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .4px; text-transform: uppercase;
-  background: none; border: none; color: var(--text-3); cursor: pointer;
-  padding: 6px 9px; min-height: 26px; border-radius: 6px; transition: .15s;
+.anno-card .body img {
+  max-width: 200px;
+  width: auto;
+  height: auto;
+  object-fit: cover;
+  border-radius: var(--radius-1);
+  border: 1px solid var(--border-2);
+  margin: 6px 0;
+  cursor: pointer;
+  transition: transform .15s, border-color .15s;
+  display: block;
 }
-.anno-card .acts button:hover { color: var(--text-0); background: var(--accent-soft); }
-.anno-card .acts button.danger:hover { color: var(--status-blocked); background: color-mix(in oklab, var(--status-blocked) 10%, transparent); }
-.anno-card .acts button:first-child { margin-left: -9px; }
+.anno-card .body img:hover {
+  border-color: var(--accent-border);
+  transform: scale(1.02);
+}
+.anno-card .acts { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.anno-card .acts button {
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .04em; text-transform: uppercase;
+  font-weight: 600; display: inline-flex; align-items: center; gap: 4px;
+  background: var(--bg-1); border: 1px solid var(--border-2); color: var(--text-2); cursor: pointer;
+  padding: 4px 8px; min-height: 24px; border-radius: 999px; transition: .15s;
+}
+.anno-card .acts button:hover { color: var(--text-0); background: var(--bg-3); border-color: var(--border-3); }
+.anno-card .acts button.act-reply {
+  color: color-mix(in oklab, var(--accent) 90%, var(--text-1));
+  border-color: color-mix(in oklab, var(--accent) 30%, transparent);
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+}
+.anno-card .acts button.act-reply:hover {
+  border-color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 18%, transparent);
+  color: var(--text-0);
+}
+.anno-card .acts button.act-edit {
+  color: color-mix(in oklab, var(--status-review) 90%, var(--text-1));
+  border-color: color-mix(in oklab, var(--status-review) 30%, transparent);
+  background: color-mix(in oklab, var(--status-review) 8%, transparent);
+}
+.anno-card .acts button.act-edit:hover {
+  border-color: var(--status-review);
+  background: color-mix(in oklab, var(--status-review) 18%, transparent);
+  color: var(--text-0);
+}
+.anno-card .acts button.act-dispatch {
+  color: #0d0e13;
+  background: var(--text-0);
+  border-color: var(--text-0);
+  font-weight: 700;
+}
+.anno-card .acts button.act-dispatch:hover {
+  background: #ffffff;
+  border-color: #ffffff;
+}
+.anno-card .acts button.act-resolve {
+  color: color-mix(in oklab, var(--status-active) 90%, var(--text-1));
+  border-color: color-mix(in oklab, var(--status-active) 30%, transparent);
+  background: color-mix(in oklab, var(--status-active) 8%, transparent);
+}
+.anno-card .acts button.act-resolve:hover {
+  border-color: var(--status-active);
+  background: color-mix(in oklab, var(--status-active) 18%, transparent);
+  color: var(--text-0);
+}
+.anno-card .acts button.act-delete {
+  color: color-mix(in oklab, var(--status-blocked) 90%, var(--text-1));
+  border-color: color-mix(in oklab, var(--status-blocked) 30%, transparent);
+  background: color-mix(in oklab, var(--status-blocked) 8%, transparent);
+}
+.anno-card .acts button.act-delete:hover {
+  border-color: var(--status-blocked);
+  background: color-mix(in oklab, var(--status-blocked) 20%, transparent);
+  color: var(--status-blocked);
+}
+.anno-card .acts button.act-jump {
+  color: var(--text-2);
+  border-color: var(--border-2);
+  background: transparent;
+}
+.anno-card .acts button.act-jump:hover {
+  border-color: var(--accent);
+  color: var(--text-0);
+}
 .anno-card.orphan .quote::after { content: " · anchor lost"; color: var(--status-blocked); font-style: normal; }
 
-/* TKT-0237: collapsed-by-default comment cards. Clamp ≈7 body lines
-   (7 × 20.25px + quote sliver); fade tells the user there's more. The fade
-   ends in var(--panel) so it blends into the card background (no hard line). */
-.anno-card .anno-card-content.clamped { max-height: 150px; overflow: hidden; position: relative; }
-.anno-card .anno-card-content.clamped::after {
-  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 34px;
-  background: linear-gradient(180deg, transparent, var(--bg-2)); pointer-events: none;
+.thread {
+  margin: 0 0 10px 14px; padding-left: 12px;
+  border-left: 2px solid color-mix(in oklab, var(--accent) 28%, var(--border-2));
 }
-.anno-card[data-collapsible] { cursor: pointer; }
-.anno-expand-hint {
-  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .5px;
-  text-transform: uppercase; color: var(--text-3); text-align: center; padding: 3px 0 0;
+.thread-head {
+  display: flex; align-items: center; gap: 6px; min-height: 28px;
+  margin: 0 0 4px; color: var(--text-3);
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .03em;
+  text-transform: uppercase;
 }
-.anno-card:hover .anno-expand-hint { color: var(--text-1); }
+.thread-label { color: var(--text-2); }
+.thread-toggle {
+  min-height: 26px; padding: 3px 7px; color: var(--text-3);
+  background: transparent; border: 1px solid var(--border-2); border-radius: var(--radius-1);
+  font: inherit; cursor: pointer;
+}
+.thread-toggle:hover { color: var(--text-0); border-color: var(--accent-border); }
+.thread-replies { display: flex; flex-direction: column; }
+.thread-replies .anno-card { margin-bottom: 8px; }
+
+/* The body owns expansion at the exact 300-word boundary. Keep the divider
+   in-flow so it remains discoverable without a corner control. */
+.anno-body-divider {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px;
+  margin: 4px 0 0; padding: 0; color: var(--accent);
+  background: transparent; border: 0; cursor: pointer;
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .03em;
+}
+.anno-body-divider::before,
+.anno-body-divider::after {
+  content: ""; flex: 1 1 auto; height: 1px; background: var(--border-2);
+}
+.anno-body-divider:hover { color: var(--text-0); }
+.anno-body-divider:hover::before,
+.anno-body-divider:hover::after { background: var(--accent-border); }
 
 /* composer */
 .anno-composer { margin: 0 0 10px; }
@@ -3491,6 +3723,19 @@ mark.anno.anno-tail::after {
   padding-left: 8px; margin: 0 0 7px; line-height: 1.45; font-style: italic;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }
+.anno-attachment-pill {
+  display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
+  margin: 0 0 7px; padding: 4px 7px;
+  color: var(--accent); background: var(--accent-soft);
+  border: 1px solid var(--accent-border); border-radius: 999px;
+  font-family: var(--font-mono); font-size: 10px; line-height: 1.2;
+}
+.anno-attachment-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.anno-attachment-pill button {
+  display: inline-grid; place-items: center; width: 16px; height: 16px; margin-left: 2px;
+  padding: 0; color: var(--text-3); background: transparent; border: 0; border-radius: 50%; cursor: pointer;
+}
+.anno-attachment-pill button:hover { color: var(--text-0); background: var(--bg-3); }
 .anno-composer textarea {
   width: 100%; min-height: 60px; resize: vertical; box-sizing: border-box;
   background: var(--bg-0); border: 1px solid var(--border-2); border-radius: var(--radius-2);
@@ -3498,8 +3743,19 @@ mark.anno.anno-tail::after {
   padding: 8px 10px;
 }
 .anno-composer textarea:focus { outline: none; border-color: var(--accent-border); }
+.anno-composer.anno-rail-composer { margin: 0; }
+.anno-composer.anno-rail-composer textarea {
+  min-height: 72px; height: 72px; max-height: 150px;
+  font-size: 13.5px; line-height: 1.5; padding: 10px 12px;
+  resize: none; overflow-y: hidden;
+}
 .anno-composer .ct-uploads { margin-top: 6px; margin-bottom: 6px; }
 .anno-composer .row { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 7px; }
+.anno-word-count {
+  margin-right: auto; color: var(--text-3); font-family: var(--font-mono);
+  font-size: 9.5px; letter-spacing: .03em;
+}
+.anno-word-count.warn { color: var(--status-review); font-weight: 700; }
 .anno-composer-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .anno-composer .send {
   font-family: var(--font-mono); font-size: 10px; letter-spacing: .5px; text-transform: uppercase;
@@ -4061,6 +4317,52 @@ mark.anno.anno-tail::after {
   border: 1px solid var(--border-2);
 }
 .ct-upload-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
+.anno-image-previews {
+  align-items: flex-start;
+  min-height: 82px;
+}
+.anno-image-previews .ct-upload {
+  position: relative;
+  display: flex; flex-direction: column; align-items: stretch; gap: 3px;
+  width: 82px; max-width: 100px; padding: 4px;
+}
+.anno-image-previews .ct-upload-preview {
+  display: block; width: 72px; height: 72px; padding: 0;
+  background: var(--bg-0); border: 0; border-radius: 3px; cursor: zoom-in;
+}
+.anno-image-previews .ct-upload-thumb {
+  display: block; width: 72px; height: 72px; object-fit: cover;
+  border-radius: 3px; border: 1px solid var(--border-2);
+}
+.anno-image-previews .ct-upload-name { max-width: 76px; font-size: 9px; }
+.ct-upload-remove {
+  position: absolute; top: 1px; right: 1px; z-index: 1;
+  display: grid; place-items: center; width: 18px; height: 18px;
+  padding: 0; color: var(--text-0); background: color-mix(in oklab, var(--bg-0) 88%, transparent);
+  border: 1px solid var(--border-2); border-radius: 50%; cursor: pointer; line-height: 1;
+}
+.ct-upload-remove:hover { color: var(--status-blocked); border-color: var(--status-blocked); }
+.ct-upload-preview:focus-visible,
+.ct-upload-remove:focus-visible { outline: 2px solid var(--accent-border); outline-offset: 1px; }
+.anno-image-lightbox {
+  position: fixed; inset: 0; z-index: 120;
+  display: flex; align-items: center; justify-content: center;
+  padding: 40px; background: rgba(4, 6, 12, .84);
+  opacity: 0; transition: opacity .16s ease;
+}
+.anno-image-lightbox.open { opacity: 1; }
+.anno-image-lightbox img {
+  display: block; max-width: min(92vw, 1400px); max-height: 88vh;
+  object-fit: contain; border: 1px solid var(--border-2); border-radius: var(--radius-2);
+  box-shadow: 0 18px 70px rgba(0, 0, 0, .45);
+}
+.anno-image-lightbox-close {
+  position: absolute; top: 16px; right: 20px;
+  width: 36px; height: 36px; display: grid; place-items: center;
+  color: var(--text-0); background: var(--bg-2); border: 1px solid var(--border-2);
+  border-radius: 50%; font-size: 24px; line-height: 1; cursor: pointer;
+}
+.anno-image-lightbox-close:hover { border-color: var(--accent-border); color: var(--accent); }
 .ct-upload-spinner {
   width: 10px; height: 10px;
   border: 1.5px solid var(--border-3);
@@ -4690,8 +4992,8 @@ mark.anno.anno-tail::after {
 
 /* ===== GOL-496: H1 living-passport AgentCard ===== */
 .agent-card.native-session-card {
-  --agent-card-pad: 8px;
-  --agent-portrait-width: 87px;
+  --agent-card-pad: 4px;
+  --agent-portrait-width: 78px;
   --agent-orb-size: 57px;
   --agent-card-signal: var(--text-3);
   --agent-card-signal-soft: color-mix(in oklab, var(--text-3) 10%, transparent);
@@ -4700,7 +5002,7 @@ mark.anno.anno-tail::after {
   flex: initial;
   min-width: 0;
   max-width: 100%;
-  min-height: 248px;
+  min-height: 0;
   padding: 0;
   border-radius: 16px;
   overflow: hidden;
@@ -4742,8 +5044,8 @@ mark.anno.anno-tail::after {
   opacity: .68;
 }
 .agent-card.native-session-card.compact {
-  --agent-card-pad: 6px;
-  --agent-portrait-width: 74px;
+  --agent-card-pad: 4px;
+  --agent-portrait-width: 68px;
   --agent-orb-size: 51px;
 }
 
@@ -4786,7 +5088,7 @@ mark.anno.anno-tail::after {
   display: grid;
   grid-template-columns: var(--agent-portrait-width) minmax(0, 1fr);
   gap: 0;
-  min-height: 248px;
+  min-height: 0;
   padding: 0;
   pointer-events: none;
 }
@@ -4797,8 +5099,8 @@ mark.anno.anno-tail::after {
   min-width: 0;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
-  padding: 16px 6px 10px;
+  gap: 8px;
+  padding: 10px 4px 8px;
   border-right: 1px solid var(--border-1);
   background:
     radial-gradient(circle at 50% 29%, var(--agent-card-signal-soft), transparent 47%),
@@ -4876,7 +5178,7 @@ mark.anno.anno-tail::after {
   display: grid;
   width: 100%;
   min-width: 0;
-  min-block-size: 48px;
+  min-block-size: 0;
   place-items: center;
   color: var(--status-review);
   font-family: var(--font-mono);
@@ -4884,6 +5186,7 @@ mark.anno.anno-tail::after {
   line-height: 1.35;
   text-align: center;
 }
+.agent-card-transient-bay:empty { display: none; }
 .agent-card-transient-bay > span {
   display: -webkit-box;
   overflow: hidden;
@@ -4896,7 +5199,8 @@ mark.anno.anno-tail::after {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  padding: 12px 8px 10px 8px;
+  gap: 4px;
+  padding: 10px;
 }
 .agent-card-identity { position: relative; min-width: 0; padding-right: 40px; }
 .agent-card-project-action {
@@ -4915,20 +5219,11 @@ mark.anno.anno-tail::after {
 }
 .agent-card-project-action .project-card-glyph { width: 34px !important; height: 34px !important; }
 .agent-card-project-action:disabled { cursor: not-allowed; opacity: .72; }
-.agent-card-title-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  flex-wrap: wrap;
-}
-.agent-card-title-row .agent-card-name { flex: 1 1 auto; min-width: 0; }
-.agent-card-title-row .agent-model-pill { flex: 0 0 auto; margin-top: 0; }
 .agent-card-name {
   overflow: hidden;
   color: var(--text-0);
   font-family: var(--font-display);
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 760;
   letter-spacing: -.025em;
   line-height: 1.1;
@@ -4938,22 +5233,29 @@ mark.anno.anno-tail::after {
 .agent-model-pill {
   display: inline-flex;
   width: fit-content;
-  max-width: 100%;
-  gap: 6px;
-  margin-top: 0;
+  max-width: 132px;
+  margin-top: 5px;
+  gap: 5px;
   border-color: color-mix(in oklab, var(--accent) 28%, var(--border-2));
   background: color-mix(in oklab, var(--accent) 8%, var(--bg-2));
   padding: 4px 7px;
   font-size: 10px;
 }
 .agent-model-icon { width: 15px; height: 15px; }
-.agent-model-pill span:last-child { min-width: 0; }
+.agent-model-pill span:last-child {
+  display: inline-block;
+  min-width: 0;
+  max-width: 15ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .agent-card-time {
   display: flex;
   align-items: center;
   min-width: 0;
-  gap: 7px;
-  margin-top: 10px;
+  gap: 6px;
+  margin-top: 2px;
   color: var(--text-3);
   font-size: 10px;
   font-weight: 590;
@@ -4963,27 +5265,12 @@ mark.anno.anno-tail::after {
 .agent-card-time svg { flex: 0 0 auto; color: var(--text-4); }
 .agent-card-time span { overflow: hidden; text-overflow: ellipsis; }
 
-.agent-card-pi-truth {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px 9px;
-  margin-top: 9px;
-  color: var(--text-3);
-  font-size: 9px;
-  line-height: 1.3;
-}
-.agent-card-pi-truth span:not(:last-child)::after {
-  margin-left: 9px;
-  color: var(--border-3);
-  content: '·';
-}
-
 .agent-card-operations {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px 7px;
-  margin-top: auto;
-  padding-top: 10px;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 6px;
   border-top: 1px solid var(--border-1);
 }
 .agent-card-field {
@@ -4991,16 +5278,19 @@ mark.anno.anno-tail::after {
   display: flex;
   min-width: 0;
   min-height: 0;
-  flex-direction: column;
-  gap: 5px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   padding: 0;
 }
 .agent-card-field-label {
+  flex: 0 0 96px;
   color: var(--text-3);
   font-family: var(--font-mono);
   font-size: 9px;
   font-weight: 600;
-  letter-spacing: .1em;
+  letter-spacing: .09em;
   text-transform: uppercase;
 }
 .agent-card-role-label { cursor: pointer; }
@@ -5170,14 +5460,14 @@ mark.anno.anno-tail::after {
 
 @container (max-width: 420px) {
   .agent-card.native-session-card {
-    --agent-card-pad: 6px;
-    --agent-portrait-width: 69px;
+    --agent-card-pad: 4px;
+    --agent-portrait-width: 62px;
     --agent-orb-size: 48px;
     min-height: 0;
   }
   .agent-card-passport { min-height: 0; gap: 0; }
-  .agent-card-portrait { gap: 9px; padding: 14px 4px 10px; }
-  .agent-card-main { padding: 10px 6px 10px; }
+  .agent-card-portrait { gap: 6px; padding: 8px 3px 6px; }
+  .agent-card-main { padding: 6px 4px 6px; }
   .agent-card-operations { grid-template-columns: minmax(0, 1fr); margin-top: 12px; padding-top: 0; }
   .agent-card-field { min-height: 0; }
 }

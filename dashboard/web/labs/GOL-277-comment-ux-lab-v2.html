@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>GOL-277 v2 — Hybrid Slack-Linear Design Screens</title>
+<style>
+  :root{
+    --bg0:#0d0e13; --bg1:#15161d; --bg2:#1c1e29; --bg3:#232535; --bg4:#2a2d42;
+    --line:rgba(255,255,255,.07); --line2:rgba(255,255,255,.11); --line3:rgba(255,255,255,.15);
+    --t0:#ececf3; --t1:#b9bdd0; --t2:#8c90a8; --t3:#6b6f86;
+    --accent:#7e8bff; --teal:#2dd4a7; --warn:#f5a623; --danger:#ff5d5d;
+    --mono:"JetBrains Mono", ui-monospace, monospace; --sans: Inter, system-ui, Segoe UI, Roboto, sans-serif;
+    --r12:12px; --r16:16px; --r22:22px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0; background:radial-gradient(1100px 600px at 18% -8%, rgba(126,139,255,.16), transparent 60%), radial-gradient(900px 520px at 88% 0%, rgba(45,212,167,.10), transparent 60%), var(--bg0); color:var(--t0); font-family:var(--sans); line-height:1.45}
+  a{color:var(--accent)}
+  .wrap{max-width:1280px; margin:0 auto; padding:22px 16px 80px}
+  header{border-bottom:1px solid var(--line); padding-bottom:14px; display:flex; gap:14px; flex-wrap:wrap; align-items:flex-start; justify-content:space-between}
+  header h1{margin:0; font-size:26px; letter-spacing:-.02em}
+  header h1 em{font-style:normal; color:var(--accent)}
+  .pill{font:600 11px var(--mono); letter-spacing:.06em; text-transform:uppercase; border:1px solid var(--line2); background:rgba(255,255,255,.04); color:var(--t2); padding:5px 9px; border-radius:999px; display:inline-flex; gap:6px; align-items:center}
+  .pill b{color:var(--t0)}
+  .bar{display:flex; gap:8px; flex-wrap:wrap; margin:14px 0 10px}
+  .btn{font:600 11px var(--mono); letter-spacing:.05em; text-transform:uppercase; border:1px solid var(--line2); background:rgba(255,255,255,.04); color:var(--t1); padding:8px 10px; border-radius:999px; cursor:pointer}
+  .btn.active{background:var(--t0); color:#0d0e13; border-color:var(--t0)}
+  .btn.primary{background:var(--t0); color:#0d0e13; border-color:var(--t0)}
+  .btn.ghost{border-color:transparent; background:transparent}
+  .grid{display:grid; grid-template-columns: 1.05fr .95fr; gap:16px}
+  @media(max-width:1000px){ .grid{grid-template-columns:1fr} }
+  .card{background:rgba(255,255,255,.04); border:1px solid var(--line); border-radius:18px; overflow:hidden}
+  .card-h{padding:12px 14px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; gap:10px}
+  .card-h h3{margin:0; font:700 11px var(--mono); letter-spacing:.06em; text-transform:uppercase; color:var(--t2)}
+  .card-h .tag{font:700 10px var(--mono); letter-spacing:.06em; text-transform:uppercase; padding:4px 8px; border-radius:999px; border:1px solid var(--line2); color:var(--t2)}
+  .card-b{padding:14px}
+  .kpi{display:flex; gap:8px; flex-wrap:wrap}
+  .kpi div{flex:1 1 160px; border:1px solid var(--line); background:rgba(255,255,255,.03); border-radius:12px; padding:10px 12px}
+  .kpi b{font-size:17px; display:block}
+  .kpi span{font:500 11px var(--mono); color:var(--t2)}
+
+  /* Spec mock + Rail mock shell */
+  .stage-shell{display:grid; grid-template-columns: 1.2fr 480px; gap:0; border:1px solid var(--line2); border-radius:18px; overflow:hidden; background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02)); min-height:560px}
+  @media(max-width:1000px){ .stage-shell{grid-template-columns:1fr} }
+  .spec-pane{border-right:1px solid var(--line); background:rgba(255,255,255,.02); padding:16px; overflow:auto}
+  .spec-pane h2{margin:0 0 8px; font-size:16px}
+  .spec-block{border:1px solid var(--line); background:rgba(255,255,255,.03); border-radius:12px; padding:12px; margin:10px 0; position:relative}
+  .spec-block.selected{border-color:rgba(126,139,255,.45); box-shadow:0 0 0 2px rgba(126,139,255,.18)}
+  .spec-block .lbl{font:700 10px var(--mono); letter-spacing:.06em; text-transform:uppercase; color:var(--t2)}
+  .spec-block .quote-mini{font:500 12px var(--sans); color:var(--t1); border-left:2px solid var(--line2); padding-left:8px; margin-top:6px}
+
+  /* Rail - Slack-like: history top, composer bottom */
+  .rail{position:relative; display:flex; flex-direction:column; background:rgba(0,0,0,.14); min-height:560px; max-height:560px}
+  .rail-head{padding:10px 12px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; gap:8px; background:rgba(255,255,255,.02)}
+  .rail-head b{font:700 12px var(--mono); letter-spacing:.06em; text-transform:uppercase; color:var(--t2)}
+  .rail-head .count{font:600 11px var(--mono); color:var(--t2)}
+  .rail-scroll{flex:1; overflow:auto; padding:10px 10px 8px; display:flex; flex-direction:column; gap:8px; scroll-behavior:smooth}
+  .rail-scroll::-webkit-scrollbar{width:6px}
+  .rail-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12); border-radius:999px}
+
+  /* Message card - new style */
+  .msg{border:1px solid var(--line); background:rgba(255,255,255,.05); border-radius:16px; padding:10px 12px; position:relative}
+  .msg.agent{background:rgba(255,255,255,.04)}
+  .msg.human{border-color:rgba(126,139,255,.22)}
+  .msg-head{display:flex; align-items:center; gap:8px; margin-bottom:6px}
+  .ava{width:26px; height:26px; border-radius:999px; display:grid; place-items:center; font:700 10px var(--mono); color:white; flex:0 0 auto}
+  .ava.h{ background:linear-gradient(135deg,#f59e0b,#ef4444)}
+  .ava.a{ background:linear-gradient(135deg,#7e8bff,#4fd1c5)}
+  .who{font:700 12px var(--sans); color:var(--t0)}
+  .when{font:500 11px var(--mono); color:var(--t2); margin-left:4px}
+  .chips{margin-left:auto; display:flex; gap:6px; align-items:center; flex-wrap:wrap}
+  .chip{font:700 9px var(--mono); letter-spacing:.06em; text-transform:uppercase; padding:3px 7px; border-radius:999px; border:1px solid var(--line2); color:var(--t2)}
+  .chip.und{ color:var(--warn); border-color:rgba(245,166,35,.30); background:rgba(245,166,35,.10)}
+  .chip.disp{ color:var(--accent); border-color:rgba(126,139,255,.30); background:rgba(126,139,255,.12)}
+  .chip.addr{ color:var(--teal); border-color:rgba(45,212,167,.28); background:rgba(45,212,167,.10)}
+  .msg-quote{font:500 12px var(--sans); color:var(--t1); border-left:2px solid var(--line2); padding:6px 8px; margin:6px 0; background:rgba(255,255,255,.03); border-radius:8px}
+  .msg-body{font-size:13px; color:var(--t0); white-space:pre-wrap; line-height:1.55}
+  .msg-body a{color:var(--accent)}
+  .msg-acts{display:flex; gap:6px; margin-top:8px; flex-wrap:wrap}
+  .act{font:600 10px var(--mono); letter-spacing:.04em; text-transform:uppercase; border:1px solid var(--line2); background:rgba(255,255,255,.04); color:var(--t1); padding:6px 8px; border-radius:999px; display:inline-flex; gap:5px; align-items:center; cursor:pointer}
+  .act.primary{background:var(--t0); color:#0d0e13; border-color:var(--t0)}
+  .act.danger{color:var(--danger)}
+  .anchor-btn{font:600 10px var(--mono); border:1px solid var(--line2); background:transparent; color:var(--t2); padding:5px 7px; border-radius:999px; display:inline-flex; gap:4px; align-items:center}
+  .anchor-btn:hover{border-color:var(--accent); color:var(--t0)}
+
+  /* 300 words divider collapse */
+  .divider{position:relative; margin:10px 0 2px; border-top:1px solid var(--line2); display:flex; align-items:center; justify-content:center; height:0}
+  .divider button{position:relative; top:-1px; font:700 10px var(--mono); letter-spacing:.06em; text-transform:uppercase; border:1px solid var(--line2); background:var(--bg2); color:var(--t1); padding:4px 9px; border-radius:999px; cursor:pointer}
+  .divider button:hover{border-color:var(--accent); color:var(--t0)}
+  .clamped{max-height:132px; overflow:hidden; position:relative}
+  .clamped::after{content:""; position:absolute; left:0; right:0; bottom:0; height:36px; background:linear-gradient(180deg, transparent, rgba(28,30,41,1)); pointer-events:none}
+  /* thread */
+  .thread{margin:6px 0 0 10px; padding-left:10px; border-left:2px solid rgba(255,255,255,.08); display:grid; gap:8px}
+  .thread-head{font:600 11px var(--mono); color:var(--t2); display:flex; align-items:center; gap:6px}
+  .thread-head button{font:600 10px var(--mono); border:1px solid var(--line2); background:transparent; color:var(--t2); padding:3px 7px; border-radius:999px; cursor:pointer}
+  /* draft queue separation */
+  .section-label{font:700 10px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--t3); padding:6px 2px 2px; display:flex; align-items:center; gap:8px}
+  .section-label::after{content:""; flex:1; height:1px; background:var(--line)}
+  .queue{border:1px dashed rgba(245,166,35,.28); background:rgba(245,166,35,.07); border-radius:16px; padding:8px; display:grid; gap:8px}
+  .queue .msg{border-style:dashed; background:rgba(255,255,255,.03)}
+  .queue-label{font:700 10px var(--mono); letter-spacing:.06em; text-transform:uppercase; color:var(--warn); display:flex; align-items:center; gap:6px}
+  .history{border:1px solid var(--line); background:rgba(255,255,255,.02); border-radius:16px; padding:8px; display:grid; gap:8px}
+  /* composer - always visible bottom */
+  .composer{border-top:1px solid var(--line); background:rgba(255,255,255,.02); padding:10px; display:grid; gap:8px}
+  .composer .previews{display:flex; gap:8px; flex-wrap:wrap}
+  .composer .previews .imgprev{position:relative; width:72px; height:72px; border-radius:12px; overflow:hidden; border:1px solid var(--line2); background:rgba(255,255,255,.04); display:grid; place-items:center; font:600 10px var(--mono); color:var(--t2); cursor:pointer}
+  .composer .previews .imgprev img{width:100%; height:100%; object-fit:cover}
+  .composer .previews .imgprev .x{position:absolute; top:4px; right:4px; width:18px; height:18px; border-radius:999px; background:rgba(0,0,0,.6); border:1px solid var(--line2); color:white; display:grid; place-items:center; font-size:11px}
+  .attach-pill{font:600 11px var(--mono); border:1px solid rgba(126,139,255,.28); background:rgba(126,139,255,.12); color:var(--accent); padding:5px 8px; border-radius:999px; display:inline-flex; gap:6px; align-items:center}
+  .attach-pill button{border:none; background:transparent; color:var(--accent); cursor:pointer; font:700 12px var(--mono)}
+  .ta-wrap{position:relative; border:1px solid var(--line2); background:rgba(255,255,255,.04); border-radius:16px; padding:8px 10px; display:grid; gap:6px}
+  .ta-wrap:focus-within{border-color:rgba(126,139,255,.45)}
+  .ta{width:100%; min-height:44px; max-height:132px; resize:none; border:none; outline:none; background:transparent; color:var(--t0); font:400 13px var(--sans); line-height:1.5; overflow:auto}
+  .ta-row{display:flex; gap:8px; align-items:center; justify-content:space-between; flex-wrap:wrap}
+  .ta-hint{font:500 11px var(--mono); color:var(--t3)}
+  .send{font:700 11px var(--mono); letter-spacing:.06em; text-transform:uppercase; padding:8px 12px; border-radius:999px; border:1px solid var(--t0); background:var(--t0); color:#0d0e13; cursor:pointer; display:inline-flex; gap:6px; align-items:center}
+  .send:disabled{opacity:.45; cursor:default}
+  .send.secondary{background:transparent; color:var(--t0); border-color:var(--line2)}
+  .legend{display:flex; gap:8px; flex-wrap:wrap; margin-top:8px}
+  .legend span{font:600 10px var(--mono); letter-spacing:.06em; text-transform:uppercase; border:1px solid var(--line); border-radius:999px; padding:4px 8px; color:var(--t2)}
+  .legend span.ok{border-color:rgba(45,212,167,.28); color:var(--teal)}
+  .legend span.warn{border-color:rgba(245,166,35,.28); color:var(--warn)}
+  .note{border-left:3px solid var(--accent); background:rgba(126,139,255,.08); padding:10px 12px; border-radius:10px; color:var(--t1); font-size:13px}
+  .muted{color:var(--t2); font-size:12px}
+  .img-lightbox{position:fixed; inset:0; background:rgba(0,0,0,.78); display:none; place-items:center; z-index:99; padding:20px}
+  .img-lightbox.open{display:grid}
+  .img-lightbox img{max-width:92vw; max-height:88vh; border-radius:16px; border:1px solid var(--line2)}
+  .stage-tabs{display:flex; gap:6px; flex-wrap:wrap; margin:8px 0}
+  .stage-tabs button{font:600 11px var(--mono); padding:7px 9px; border-radius:999px; border:1px solid var(--line2); background:rgba(255,255,255,.03); color:var(--t1); cursor:pointer}
+  .stage-tabs button.active{background:var(--t0); color:#0d0e13; border-color:var(--t0)}
+  /* word count bar under composer */
+  .wc{font:500 11px var(--mono); color:var(--t3)}
+  .wc.warn{color:var(--warn)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="pill">GOL-277 · v2 Hybrid <b>Slack + Linear</b> · staged screens</div>
+      <h1>Hybrid comment <em>inbox</em> — your tightened brief, visualized</h1>
+      <p style="color:var(--t1); max-width:860px; margin:6px 0 0">You chose: 2-level threading only, always-visible bottom chatbox, 300-word intra-divider collapse, single dispatch lifecycle (undispatched → dispatched → addressed), ordering + draft-queue separation, auto-grow textarea, tiny image previews. Below stages prove each, so you can commit or tweak.</p>
+      <div class="legend" style="margin-top:8px">
+        <span class="ok">● addressed (done)</span>
+        <span class="warn">● undispatched (draft-queue)</span>
+        <span>◆ dispatched (in-flight)</span>
+        <span>⧉ anchor = jump, no separate expand button</span>
+      </div>
+    </div>
+    <div style="min-width:240px; display:grid; gap:8px">
+      <div class="note">Lab links<br/>
+        <b>v2 this file:</b> <code>dashboard/web/labs/GOL-277-comment-ux-lab-v2.html</code><br/>
+        <span class="muted">Serve: <code>/labs/GOL-277-comment-ux-lab-v2.html</code> after copy to dist/labs</span><br/>
+        <span class="muted">v1 kept: <code>GOL-277-comment-ux-lab.html</code> (compare)</span>
+      </div>
+      <div class="kpi">
+        <div><b>2 levels</b><span>top + replies, no deep nesting</span></div>
+        <div><b>300 words</b><span>intra-divider collapse</span></div>
+      </div>
+    </div>
+  </header>
+
+  <div class="bar">
+    <button class="btn" onclick="setBriefFilter('all')">All requirements</button>
+    <button class="btn" onclick="scrollToStage('s1')">Jump to stages →</button>
+    <span class="pill">Hybrid = Linear 2-level + Slack chatbox</span>
+  </div>
+
+  <div class="card">
+    <div class="card-h"><h3>How your brief maps</h3><span class="tag">Understanding check</span></div>
+    <div class="card-b">
+      <table style="width:100%; border-collapse:collapse; font-size:13px">
+        <thead><tr style="text-align:left; color:var(--t2); font:700 11px var(--mono); letter-spacing:.05em; text-transform:uppercase"><th style="border:1px solid var(--line); padding:8px">Your line</th><th style="border:1px solid var(--line); padding:8px">Understood as</th><th style="border:1px solid var(--line); padding:8px">Shipped in stage</th></tr></thead>
+        <tbody style="color:var(--t1)">
+          <tr><td style="border:1px solid var(--line); padding:8px">Only 2 levels, not unlimited</td><td style="border:1px solid var(--line); padding:8px">Top-level + one reply layer. “Reply to reply” opens as sibling in same thread, never deeper.</td><td style="border:1px solid var(--line); padding:8px">S3, S4 threads</td></tr>
+          <tr><td style="border:1px solid var(--line); padding:8px">Always-present chatbox</td><td style="border:1px solid var(--line); padding:8px">Composer pinned to rail bottom; attaching a block just adds a pill, textarea stays.</td><td style="border:1px solid var(--line); padding:8px">All stages</td></tr>
+          <tr><td style="border:1px solid var(--line); padding:8px">Remove block id under name</td><td style="border:1px solid var(--line); padding:8px">No block-id text in header; attach shown as subtle pill + optional quote block inside message.</td><td style="border:1px solid var(--line); padding:8px">All msgs</td></tr>
+          <tr><td style="border:1px solid var(--line); padding:8px">Single dispatch lifecycle</td><td style="border:1px solid var(--line); padding:8px">One chip per message: <b>undispatched → dispatched → addressed</b>. <code>status=open/resolved</code> is orthogonal (dim, not second chip).</td><td style="border:1px solid var(--line); padding:8px">Header chips only dispatch</td></tr>
+          <tr><td style="border:1px solid var(--line); padding:8px">300 words full then divider collapse</td><td style="border:1px solid var(--line); padding:8px">Render full body; if &gt;300 words clamp at divider with inline button “Show 127 more words”. No card-corner expand.</td><td style="border:1px solid var(--line); padding:8px">S5 long msg</td></tr>
+          <tr><td style="border:1px solid var(--line); padding:8px">Undispatched at end + draft container</td><td style="border:1px solid var(--line); padding:8px">History sorted: committed (dispatched+addressed) first, drafts queued in dashed container at bottom of scroll but above composer. Agent reply inserts between.</td><td style="border:1px solid var(--line); padding:8px">S4 staged demo</td></tr>
+          <tr><td style="border:1px solid var(--line); padding:8px">Bottom-up, auto-scroll natural</td><td style="border:1px solid var(--line); padding:8px">Rail is column; new messages append bottom; auto-scroll only if user already near bottom (no yank). Show with scroll anchor.</td><td style="border:1px solid var(--line); padding:8px">S4 behavior note</td></tr>
+          <tr><td style="border:1px solid var(--line); padding:8px">Textarea auto-grow then scroll</td><td style="border:1px solid var(--line); padding:8px">Textarea grows to 132px then scrolls internally. Word count shows at 260/300.</td><td style="border:1px solid var(--line); padding:8px">Composer in all stages</td></tr>
+          <tr><td style="border:1px solid var(--line); padding:8px">Image paste tiny preview + fullscreen</td><td style="border:1px solid var(--line); padding:8px">Paste → 72px preview row above textarea; click → lightbox. Multiple previews wrap.</td><td style="border:1px solid var(--line); padding:8px">S6 image stage</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="stage-tabs" id="stageTabs">
+    <button class="active" data-s="s1" onclick="showStage('s1')">S1 Empty</button>
+    <button data-s="s2" onclick="showStage('s2')">S2 History</button>
+    <button data-s="s3" onclick="showStage('s3')">S3 Thread (2-level)</button>
+    <button data-s="s4" onclick="showStage('s4')">S4 Dispatch queue</button>
+    <button data-s="s5" onclick="showStage('s5')">S5 Long (300w)</button>
+    <button data-s="s6" onclick="showStage('s6')">S6 Image attach</button>
+    <button data-s="s7" onclick="showStage('s7')">S7 Full inbox</button>
+  </div>
+
+  <!-- Stage containers: spec pane left, rail right -->
+  <div id="stageHost" class="stage-shell">
+    <!-- spec pane -->
+    <div class="spec-pane" id="specPane">
+      <h2>Spec — GOL-277 “Spec comments improvements”</h2>
+      <p class="muted">Select text → #anno-pill · Hover block → + comment · Both attach block quote as composer pill (not header block-id). Spec scroll is independent of rail scroll.</p>
+      <div class="spec-block" id="b1"><div class="lbl">Section — Dispatching a nested comment</div><div>Dispatching a nested comment (reply to a comment) does not seem to be a thing. Assess what needs to be done to properly support it.</div><div class="quote-mini">Quote attach → pill “Section: Dispatching…” → no block-id in message header</div></div>
+      <div class="spec-block selected" id="b2"><div class="lbl">Section — 3. Grounding (selected)</div><div>Current rail anatomy, dispatch states, storage grouping.</div><div class="quote-mini">Hover shows + ; Alt/Option+click also opens composer with block attach pill</div></div>
+      <div class="spec-block" id="b3"><div class="lbl">Section — Colored rails</div><div>Some comments have orange/red left borders and thick orange border when active — what do they mean?</div></div>
+    </div>
+    <!-- rail -->
+    <div class="rail" id="rail">
+      <div class="rail-head"><b>Comments</b><span class="count" id="railCount">—</span><span class="muted" style="margin-left:auto; font:500 11px var(--mono)">Bottom-up · last at bottom</span></div>
+      <div class="rail-scroll" id="railScroll"></div>
+      <div class="composer" id="composer">
+        <div class="previews" id="imgPreviews" style="display:none"></div>
+        <div id="attachPillRow" style="display:none"></div>
+        <div class="ta-wrap">
+          <textarea id="ta" class="ta" rows="1" placeholder="Message — attach a block first or just type…  (Shift+Enter newline)"></textarea>
+          <div class="ta-row">
+            <span class="ta-hint">Pastе image → preview · Auto-grows to 132px</span>
+            <span class="wc" id="wc"></span>
+          </div>
+        </div>
+        <div class="ta-row">
+          <div class="muted" style="font:500 11px var(--mono)">Attach block: select text in spec or hover +</div>
+          <div style="display:flex; gap:6px">
+            <button class="act" onclick="demoSend(false)">Comment</button>
+            <button class="send" onclick="demoSend(true)">Comment + Dispatch</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex; gap:8px; margin:10px 0 6px; flex-wrap:wrap">
+    <button class="btn" onclick="addDemo(true)">+ Add dispatched (committed)</button>
+    <button class="btn" onclick="addDemo(false)">+ Add undispatched (draft queue)</button>
+    <button class="btn" onclick="simulateAgentReply()">Simulate agent reply</button>
+    <button class="btn ghost" onclick="clearDrafts()">Clear drafts</button>
+    <span class="muted">Ordering: committed history first, drafts pinned at bottom in dashed container. Agent inserts between.</span>
+  </div>
+
+  <div class="grid" style="margin-top:10px">
+    <div class="card"><div class="card-h"><h3>What feels right vs what to call out</h3><span class="tag">Reviewer lens</span></div>
+      <div class="card-b" style="color:var(--t1); font-size:13px">
+        <b>Glued:</b> bottom composer that never hides; 2-level threads; word-divider collapse; draft queue separation.<br/>
+        <b>Watch:</b> word-count at 300 can thrashed if typing fast — debounce + divider renders only after pause. Auto-scroll must respect manual scroll (IntersectionObserver anchor). Image previews need mime guard.
+      </div>
+    </div>
+    <div class="card"><div class="card-h"><h3>Spec deltas encoded in this stage</h3><span class="tag">If you approve, I apply</span></div>
+      <div class="card-b" style="color:var(--t1); font-size:13px">
+        D1→ hybrid A+Linear 2-level · D2 ordering + queue · D3 300-word divider · D5 no separate expand corner (divider owns it) · D6 avatar+legend without block-id header · Composer always visible + pill + auto-grow + image preview. Tell me “approve” or annotate a D-block; I will lock spec and decompose into 3–4 tasks.
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:14px"><div class="card-h"><h3>Screens at a glance</h3><span class="tag">7 stages</span></div>
+    <div class="card-b" style="color:var(--t1); font-size:13px">
+      <b>S1</b> Empty: only composer + hint. <b>S2</b> 2-message history (1 dispatched, 1 addressed). <b>S3</b> Thread open/closed (reply sibling cards, not nested deeper). <b>S4</b> Draft queue: 2 committed + 1 draft in dashed container. <b>S5</b> Long message with divider button. <b>S6</b> Image paste previews. <b>S7</b> Real inbox with history + queue + image + long divider together. Use top tabs to step through — each tab repopulates the same rail so transitions are obvious.
+    </div>
+  </div>
+</div>
+
+<div class="img-lightbox" id="lightbox" onclick="this.classList.remove('open')"><img id="lightboxImg" alt="preview"/></div>
+
+<script>
+  const railScroll = document.getElementById('railScroll');
+  const railCount = document.getElementById('railCount');
+  const ta = document.getElementById('ta');
+  const wc = document.getElementById('wc');
+  const imgPreviews = document.getElementById('imgPreviews');
+  const attachPillRow = document.getElementById('attachPillRow');
+  const stages = ['s1','s2','s3','s4','s5','s6','s7'];
+  let attached = null; // {label}
+  let msgs = []; // {role:'human'|'agent', text, words, dispatched, addresses?, hasImage?, long?}
+  let stage = 's1';
+
+  function esc(s){ return String(s).replace(/[&<>]/g,c=>({ '&':'&amp;','<':'&lt;','>':'&gt;' }[c])) }
+  function wordCount(t){ return String(t||'').trim().split(/\s+/).filter(Boolean).length }
+
+  function render(){
+    // attach pill row
+    if(attached){
+      attachPillRow.style.display = 'block';
+      attachPillRow.innerHTML = `<span class="attach-pill">⧉ ${esc(attached)} <button onclick="clearAttach()" title="Remove attach">×</button></span>`;
+    } else {
+      attachPillRow.style.display='none'; attachPillRow.innerHTML='';
+    }
+    // composer preview images placeholder already handled
+
+    // build rail content: history + queue separation
+    const committed = msgs.filter(m=> m.dispatched); // dispatched or addressed
+    const drafts = msgs.filter(m=> !m.dispatched);
+    const committedAddr = committed.filter(m=> m.chip==='addr').length;
+    let html = '';
+
+    if(msgs.length===0){
+      html += `<div class="muted" style="text-align:center; padding:32px 8px">No messages yet.<br/>Attach a block or just type in the bottom chatbox.</div>`;
+    } else {
+      if(committed.length){
+        html += `<div class="section-label">Committed history · ${committed.length} ${committedAddr?`· ${committedAddr} addressed`:''}</div>`;
+        html += `<div class="history" id="historyBox">`;
+        committed.forEach((m, i)=> html += renderMsg(m, i));
+        if(drafts.length) html += `<div class="muted" style="font:500 11px var(--mono); text-align:center; padding:6px 0 2px">— new agent messages appear here —</div>`;
+        html += `</div>`;
+      }
+      if(drafts.length){
+        html += `<div class="section-label" style="color:var(--warn)">Draft queue · ${drafts.length} not yet dispatched</div>`;
+        html += `<div class="queue" id="queueBox">`;
+        drafts.forEach((m,i)=> html += renderMsg(m,'d'+i));
+        html += `</div>`;
+      }
+    }
+
+    // legend under lists when thread explanatory
+    if(stage==='s3' || stage==='s7'){
+      html += `<div class="legend"><span>Thread = 2 levels only</span><span class="ok">Indent + connector</span><span>Hide / Show per thread</span></div>`;
+    }
+
+    railScroll.innerHTML = html;
+    railCount.textContent = `${committed.length} committed · ${drafts.length} draft${drafts.length===1?'':'s'}`;
+
+    // clamp long detection (>300 words)
+    document.querySelectorAll('[data-words]').forEach(el=>{
+      const w = parseInt(el.dataset.words||'0',10);
+      if(w>300 && !el.dataset.expanded){
+        // already rendered with divider; button toggles
+      }
+    });
+
+    // auto-scroll to bottom if user was near bottom
+    requestAnimationFrame(()=>{
+      const nearBottom = railScroll.scrollHeight - railScroll.scrollTop - railScroll.clientHeight < 80;
+      if(nearBottom || stage==='s4' || stage==='s7') railScroll.scrollTop = railScroll.scrollHeight;
+    });
+  }
+
+  function renderMsg(m, key){
+    const isHuman = m.role==='human';
+    const ava = isHuman ? `<div class="ava h">YO</div>` : `<div class="ava a">GB</div>`;
+    const name = isHuman ? `<span class="who">You</span>` : `<span class="who">golem:builder</span>`;
+    const time = `<span class="when">· ${m.time||'now'}</span>`;
+    let chip = '';
+    if(m.chip==='und') chip = `<span class="chip und">undispatched</span>`;
+    else if(m.chip==='disp') chip = `<span class="chip disp">dispatched</span>`;
+    else if(m.chip==='addr') chip = `<span class="chip addr">addressed</span>`;
+    // quote only if m.quote
+    const quote = m.quote ? `<div class="msg-quote">${esc(m.quote)}</div>` : ``;
+    // body with 300-word divider logic
+    let bodyHtml = '';
+    const words = m.words || wordCount(m.text);
+    const long = words>300;
+    const expanded = m.expanded;
+    if(long && !expanded){
+      // show clamped preview containing first ~300 words then divider
+      const wordsArr = String(m.text).split(/\s+/);
+      const preview = wordsArr.slice(0,300).join(' ');
+      bodyHtml = `<div class="msg-body clamped">${esc(preview)} …</div><div class="divider"><button onclick="toggleLong('${key}')">Show ${words-300} more words ↓</button></div>`;
+    } else if(long && expanded){
+      bodyHtml = `<div class="msg-body">${esc(m.text)}</div><div class="divider"><button onclick="toggleLong('${key}')">Show less ↑</button></div>`;
+    } else {
+      bodyHtml = `<div class="msg-body">${esc(m.text)}</div>`;
+    }
+    if(m.hasImage){
+      bodyHtml += `<div style="margin-top:8px; display:flex; gap:8px"><img src="https://picsum.photos/seed/golem${key}/160/100" style="width:120px; height:78px; object-fit:cover; border-radius:10px; border:1px solid var(--line2); cursor:pointer" onclick="openLight(this.src)" alt="attached image"/></div>`;
+    }
+    // acts: per-message dispatch (if undispatched) + reply (thread) + anchor jump if quote
+    const anchorBtn = m.quote ? `<button class="anchor-btn" onclick="jumpToBlock()">⧉ Jump to block</button>` : ``;
+    const dispatchBtn = m.chip==='und' ? `<button class="act primary" onclick="dispatchOne('${key}')">↗ Dispatch</button>` : ``;
+    const threadToggle = m.thread ? `<div class="thread"><div class="thread-head">⎿ ${m.thread.length} repl${m.thread.length===1?'y':'ies'} <button onclick="toggleThread('${key}')">${m.threadCollapsed?'Show':'Hide'}</button> ${m.thread.some(t=>t.chip==='addr')?'<span class="chip addr" style="margin-left:auto">thread addressed</span>':''}</div>${m.threadCollapsed? '' : m.thread.map((r,ri)=> renderMsg(r, key+'_r'+ri)).join('')}</div>` : ``;
+    return `<div class="msg ${isHuman?'human':'agent'}" data-key="${key}" data-words="${words}">
+      <div class="msg-head">${ava}${name}${time}<div class="chips">${chip} ${anchorBtn}</div></div>
+      ${quote}${bodyHtml}
+      <div class="msg-acts"><button class="act" onclick="replyTo('${key}')">💬 Reply</button>${dispatchBtn}<button class="act" onclick="toggleResolved('${key}')">${m.resolved?'↩ Reopen':'✓ Resolve'}</button><button class="act danger">🗑 Delete</button></div>
+      ${threadToggle}
+    </div>`;
+  }
+
+  function toggleLong(key){
+    const idx = findIdx(key);
+    if(idx) idx.expanded = !idx.expanded; else {
+      // search in threads
+      for(let m of msgs){ if(m.thread){ let f=m.thread.find((t,ri)=> (key===mKey(m)+'_r'+ri)); if(f){ f.expanded=!f.expanded; break; } } }
+    }
+    render();
+  }
+  function dispatchOne(key){
+    const m = findMsg(key); if(!m) return;
+    m.chip='disp'; // then quickly addressed simulation if agent replies? Keep as disp for demo
+    // move to committed (already dispatched qualifies); re-sort keeps drafts at bottom
+    setTimeout(()=>{ m.chip='addr'; render(); }, 900);
+    render();
+  }
+  function findMsg(key){
+    for(let m of msgs){
+      if(mKey(m)===key) return m;
+      if(m.thread){ for(let i=0;i<m.thread.length;i++) if(mKey(m)+'_r'+i===key) return m.thread[i];}
+    }
+    return null;
+  }
+  function findIdx(key){ return msgs.find(m=> mKey(m)===key) || null}
+  function mKey(m){ return String(msgs.indexOf(m)); }
+  function replyTo(key){ attached = 'Reply to thread'; ta.focus(); render(); ta.value = ''; autoGrow(); }
+  function toggleThread(key){ const m=findIdx(key); if(m) m.threadCollapsed=!m.threadCollapsed; render();}
+  function toggleResolved(key){ const m=findMsg(key); if(m) m.resolved=!m.resolved; render();}
+  function jumpToBlock(){ document.getElementById('b2')?.scrollIntoView({behavior:'smooth', block:'center'}); document.getElementById('b2').classList.add('selected'); setTimeout(()=>document.getElementById('b2').classList.remove('selected'), 900); }
+  function clearAttach(){ attached=null; render(); }
+  function openLight(src){ document.getElementById('lightboxImg').src=src; document.getElementById('lightbox').classList.add('open'); }
+
+  // composer behavior
+  ta.addEventListener('input', autoGrow);
+  ta.addEventListener('paste', (e)=>{
+    const items = e.clipboardData && e.clipboardData.items;
+    if(!items) return;
+    for(let it of items){ if(it.type.startsWith('image/')){ e.preventDefault(); showImgPreview(); break; } }
+  });
+  function autoGrow(){
+    ta.style.height='auto';
+    ta.style.height = Math.min(ta.scrollHeight, 132) + 'px';
+    ta.style.overflowY = ta.scrollHeight>132 ? 'auto' : 'hidden';
+    const w = wordCount(ta.value);
+    wc.textContent = w ? `${w} words` : '';
+    wc.className = w>300 ? 'wc warn' : 'wc';
+    if(w>300) wc.textContent += ' · will collapse with divider';
+  }
+  function showImgPreview(){
+    imgPreviews.style.display='flex';
+    imgPreviews.innerHTML = `<div class="imgprev" onclick="openLight('https://picsum.photos/seed/preview/400/300')"><img src="https://picsum.photos/seed/preview/160/100"/><span class="x">×</span></div><div class="muted" style="align-self:center; font:500 11px var(--mono)">Preview · click to fullscreen · will attach on send</div>`;
+  }
+  imgPreviews.addEventListener('click', (e)=>{
+    if(e.target.closest('.x')){ imgPreviews.style.display='none'; imgPreviews.innerHTML='';}
+  });
+  function demoSend(asDispatched){
+    const t = ta.value.trim(); if(!t) return;
+    const hasImg = imgPreviews.style.display!=='none';
+    const w = wordCount(t);
+    const msg = {role:'human', text:t, words:w, chip: asDispatched? 'disp':'und', time:'now', quote: attached? attached: null, hasImage:hasImg};
+    // ordering: drafts always at end, so push to end but render splits
+    msgs.push(msg);
+    ta.value=''; attached=null; imgPreviews.style.display='none'; imgPreviews.innerHTML=''; autoGrow(); render();
+    if(asDispatched) setTimeout(()=>{ msg.chip='addr'; render(); }, 800);
+  }
+  function addDemo(asDispatched){
+    const samples = [
+      {role:'human', text:"Can we tighten the rails legend? The orange thick border was confusing.", chip: asDispatched?'disp':'und', time:'10:42', quote:'coloured rails sitting on the left border'},
+      {role:'agent', text:"Legend added: thin tint = author, ring = active, dashed = draft queue.", chip:'addr', time:'10:43'},
+    ];
+    msgs.push(samples[0]); if(asDispatched) msgs.push(samples[1]);
+    render();
+  }
+  function simulateAgentReply(){
+    // lands below last committed but above drafts
+    const committedIdx = msgs.findLastIndex(m=> m.dispatched); // not accurate but demo
+    const reply = {role:'agent', text:"Got it — ordering now pins drafts at the bottom in a dashed container. New replies land between history and that queue.", chip:'addr', time:'now'};
+    // insert before drafts
+    const draftStart = msgs.findIndex(m=> !m.dispatched);
+    if(draftStart>=0) msgs.splice(draftStart, 0, {...reply, dispatched:true, chip:'addr'});
+    else msgs.push({...reply, dispatched:true, chip:'addr'});
+    // mark dispatched flag for ordering
+    msgs.forEach(m=> m.dispatched = m.chip!=='und');
+    render();
+  }
+  function clearDrafts(){ msgs = msgs.filter(m=> m.chip!=='und' && !m.thread?.some(t=>t.chip==='und')); render(); }
+
+  function showStage(id){
+    stage=id;
+    document.querySelectorAll('#stageTabs button').forEach(b=> b.classList.toggle('active', b.dataset.s===id));
+    // reset msgs per stage
+    if(id==='s1'){ msgs=[]; attached=null; }
+    if(id==='s2'){ msgs=[{role:'human', text:"Looks good — can we go Slack-like for live chat?", chip:'disp', dispatched:true, time:'10:40', quote:"philosophical change"}, {role:'agent', text:"Yes. Composer now pinned bottom, history bottom-up, drafts separated.", chip:'addr', dispatched:true, time:'10:41'}]; attached=null; }
+    if(id==='s3'){ msgs=[{role:'human', text:"Dispatching a nested comment does not seem to be a thing. What needs doing?", chip:'disp', dispatched:true, time:'10:42', quote:"Dispatching a nested comment…", thread:[{role:'agent', text:"Reply endpoint exists, UI lacked button. Now each reply has its own chip.", chip:'addr', time:'10:44'}, {role:'human', text:"Perfect — keep it 2 levels only.", chip:'disp', dispatched:true, time:'10:45'}], threadCollapsed:false}]; }
+    if(id==='s4'){ msgs=[{role:'human', text:"First committed question — dispatched and addressed.", chip:'addr', dispatched:true, time:'10:40'}, {role:'agent', text:"Acknowledged. Two history items now above the draft queue.", chip:'addr', dispatched:true, time:'10:41'}, {role:'human', text:"Draft: not yet dispatched — stays in dashed queue at bottom. Agent replies will slot above this.", chip:'und', dispatched:false, time:'10:45'}]; attached=null; }
+    if(id==='s5'){ const longText = ("This message demonstrates the 300-word divider rule. ".repeat(26)) + ("The divider button lives in the middle of the content, not in a corner. Clicking it expands the full text without a separate Expand control. ".repeat(10)); msgs=[{role:'human', text: longText, chip:'disp', dispatched:true, time:'10:50'}, {role:'human', text:"Short follow-up sits fully visible below the long collapsed one.", chip:'und', dispatched:false, time:'10:51'}]; }
+    if(id==='s6'){ msgs=[{role:'human', text:"Pasting design reference for the draft queue background.", chip:'und', dispatched:false, time:'10:52', hasImage:true}, {role:'agent', text:"Preview tiny row above textarea, click → fullscreen lightbox. Works with block attach pill together.", chip:'addr', dispatched:true, time:'10:53'}]; }
+    if(id==='s7'){ msgs=[{role:'human', text:"History item one — addressed.", chip:'addr', dispatched:true, time:'10:40'}, {role:'agent', text:"History item two — addressed.", chip:'addr', dispatched:true, time:'10:41'}, {role:'human', text:"Reply thread starter with two replies (2-level).", chip:'disp', dispatched:true, time:'10:42', thread:[{role:'agent', text:"First reply — addressed.", chip:'addr', time:'10:43'}, {role:'human', text:"Second reply draft — undispatched within thread (still counts as draft).", chip:'und', time:'10:44'}], threadCollapsed:false}, {role:'human', text:"Very long draft that will trigger the 300-word divider when expanded. " + ("Word ".repeat(340)), chip:'und', dispatched:false, time:'10:45'}, {role:'human', text:"Draft with image preview.", chip:'und', dispatched:false, time:'10:46', hasImage:true}]; attached="Section: Dispatching a nested comment"; setTimeout(showImgPreview, 200); }
+    imgPreviews.style.display='none'; imgPreviews.innerHTML='';
+    ta.value=''; autoGrow(); render();
+    railScroll.scrollTop = railScroll.scrollHeight;
+  }
+
+  // init
+  showStage('s4'); // default to the queue demo as it is the novel part
+  // spec block click → attach pill
+  document.querySelectorAll('.spec-block').forEach(b=> b.addEventListener('click', ()=>{
+    document.querySelectorAll('.spec-block').forEach(x=>x.classList.remove('selected'));
+    b.classList.add('selected');
+    attached = b.querySelector('.lbl')?.textContent || 'Block attach';
+    render(); ta.focus();
+  }));
+  function scrollToStage(id){ showStage(id); document.getElementById('stageHost').scrollIntoView({behavior:'smooth'}); }
+  function setBriefFilter(){ /* no-op placeholder */ }
+  // expose for inline handlers
+  window.toggleLong=toggleLong; window.dispatchOne=dispatchOne; window.replyTo=replyTo; window.toggleThread=toggleThread; window.toggleResolved=toggleResolved; window.jumpToBlock=jumpToBlock; window.clearAttach=clearAttach; window.openLight=openLight; window.demoSend=demoSend; window.addDemo=addDemo; window.simulateAgentReply=simulateAgentReply; window.clearDrafts=clearDrafts; window.showStage=showStage; window.scrollToStage=scrollToStage; window.setBriefFilter=setBriefFilter; window.showImgPreview=showImgPreview;
+</script>
+</body>
+</html>

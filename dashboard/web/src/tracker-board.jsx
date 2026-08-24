@@ -146,9 +146,9 @@ function TrackerBoard({ view, route = {} }) {
   }, [projects]);
 
   const resolveAssignee = (a) => {
-    if (a === 'human') return 'You';
+    if (a === 'human' || a === 'you' || a === 'human:dashboard') return 'Lavee';
     if (!a) return 'Unassigned';
-    return labelBySession.get(a) || `session ${String(a).slice(0, 8)}`;
+    return labelBySession.get(a) || window.Store?.getNativeSessionById?.(a)?.name || window.Store?.getNativeSessionById?.(a)?.label || `session ${String(a).slice(0, 8)}`;
   };
 
   // TKT-0104: client-side search. When the debounced searchQuery is non-empty
@@ -244,7 +244,7 @@ function TrackerBoard({ view, route = {} }) {
 // same-column reorder is optimistic for now (Phase C will persist via the
 // `move` endpoint that writes rank).
 function TicketColumns({ cols, tickets, projectByContract, resolveAssignee }) {
-  const resolve = resolveAssignee || ((a) => (a === 'human' ? 'You' : !a ? 'Unassigned' : `session ${String(a).slice(0, 8)}`));
+  const resolve = resolveAssignee || ((a) => ((a === 'human' || a === 'you' || a === 'human:dashboard') ? 'Lavee' : !a ? 'Unassigned' : `session ${String(a).slice(0, 8)}`));
   const dnd = useDndKit();
   // Hooks must be called unconditionally; pull from the dndkit global when
   // ready, otherwise fall through to no-op stubs (the render still works).
