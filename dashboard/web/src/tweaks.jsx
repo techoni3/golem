@@ -144,7 +144,7 @@ function TweaksButton() {
         <span className="appearance-accent-pip" style={{ background: accentFor(accent, theme) }}/>
       </button>
 
-      {open && (
+      {open && ReactDOM.createPortal(
         <div
           ref={panelRef}
           id="appearance-panel"
@@ -200,7 +200,8 @@ function TweaksButton() {
           <div className="tweaks-pop-version">
             Toggle with <span className="kbd">⌘ ,</span> <span className="appearance-platform-note">Ctrl+, on Linux/Windows</span>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
