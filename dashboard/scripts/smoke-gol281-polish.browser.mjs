@@ -13,7 +13,7 @@ const spec = await createScratchTicket({
   kind: 'spec',
   title: 'GOL-281 polish full journey',
   assignee: targetSession ? targetSession.session_id : null,
-  body: '## 1. Section Alpha\n\nFirst paragraph for testing comment inbox and block attachments.\n\n## 2. Section Beta\n\nSecond paragraph for attaching blocks.\n',
+  body: '## 1. Section Alpha\n\nFirst paragraph for testing comment inbox and block attachments.\n\n![body test image](/api/ticket-assets/362bbde582b092e5dcfe1c2103e7f67b933782f43aa9076372cade36b1125fd7.png)\n\n## 2. Section Beta\n\nSecond paragraph for attaching blocks.\n',
 });
 
 let chrome;
@@ -153,9 +153,30 @@ try {
   assert.equal(pillState.hasPill, true, 'attachment pill should appear on block select');
   assert.match(pillState.pillText, /⧉ Section/, 'pill should indicate section attachment');
 
+  // 6. Verify ticket body markdown image sizing & click-to-lightbox
+  const bodyImgMetrics = await page.evaluate(() => {
+    const img = document.querySelector('.td-md img');
+    const style = img ? window.getComputedStyle(img) : null;
+    return {
+      hasImg: !!img,
+      maxWidth: style?.maxWidth || '',
+      cursor: style?.cursor || '',
+    };
+  });
+  assert.equal(bodyImgMetrics.hasImg, true, 'ticket body image should exist');
+  assert.equal(bodyImgMetrics.maxWidth, 'min(100%, 480px)', 'ticket body image max-width should be min(100%, 480px)');
+  assert.equal(bodyImgMetrics.cursor, 'pointer', 'ticket body image cursor should be pointer');
+
+  await page.click('.td-md img');
+  await page.waitForSelector('.anno-image-lightbox', { timeout: 3000 });
+  const lbOpen = await page.evaluate(() => document.querySelector('.anno-image-lightbox')?.classList.contains('open'));
+  assert.equal(lbOpen, true, 'clicking ticket body image should open lightbox');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('.anno-image-lightbox'), { timeout: 3000 });
+
   // Capture verification screenshot
   await page.screenshot({ path: '/tmp/gol281-polish-screenshot.png' });
-  console.log(JSON.stringify({ ok: true, railState, queueState, growState, pillState, screenshot: '/tmp/gol281-polish-screenshot.png' }, null, 2));
+  console.log(JSON.stringify({ ok: true, railState, queueState, growState, pillState, bodyImgMetrics, screenshot: '/tmp/gol281-polish-screenshot.png' }, null, 2));
 } finally {
   if (chrome) await chrome.cleanup();
   await archiveTicket(spec.id);

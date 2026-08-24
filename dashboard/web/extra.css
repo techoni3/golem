@@ -3283,16 +3283,22 @@ select.td-select { appearance: none; cursor: pointer; padding-right: 26px;
 }
 .td-md svg text { font-family: var(--font-mono); }
 
-/* Images in ticket/spec markdown bodies and comments */
-.td-md img,
-.anno-card .body img,
-.anno-card .reply .body img {
-  max-width: 100%;
+/* Images in ticket/spec markdown bodies */
+.td-md img {
+  max-width: min(100%, 480px);
+  width: auto;
   height: auto;
+  object-fit: cover;
   border-radius: var(--radius-1);
   border: 1px solid var(--border-2);
-  margin: 8px 0;
+  margin: 10px 0;
+  cursor: pointer;
+  transition: transform .15s, border-color .15s;
   display: block;
+}
+.td-md img:hover {
+  border-color: var(--accent-border);
+  transform: scale(1.01);
 }
 
 @media (max-width: 900px) {

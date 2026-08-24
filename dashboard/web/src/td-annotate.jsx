@@ -974,8 +974,13 @@ function TdAnnotate({ body, comments, currentAuthor = 'you', onCreate, onCreateA
   // Explicit interactive elements (links, buttons, mermaid) keep their own
   // behavior.
   const onRootClick = (e) => {
-    if (!e.altKey) return;
     const target = e.target;
+    if (target && target.tagName === 'IMG' && target.src) {
+      e.stopPropagation();
+      openImageLightbox(target.src, target.alt || 'Document image');
+      return;
+    }
+    if (!e.altKey) return;
     if (target.closest('a, button, input, textarea, select, .mermaid-fs-btn, .mermaid')) return;
     const block = target.closest('[data-block-id]');
     if (!block) return;
