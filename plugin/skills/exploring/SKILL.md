@@ -23,7 +23,9 @@ spec id.
    actual response over what the docs claim.
 2. Distinguish confirmed from inferred, and cite where each came from. Say what you could not
    determine — an admitted unknown beats a confident guess, because a guess will be built on.
-3. Return: create a `doc` under the named spec (`ticket_create({kind:'doc', parent_id})`, the
+3. If the research report exceeds 30 lines, create a child `doc` and keep the comment or return
+   message to a three-line summary plus a link to that doc.
+4. Return: create a `doc` under the named spec (`ticket_create({kind:'doc', parent_id})`, the
    doc template: Question / Summary / Findings), then `session_notify` the delegating session id
    with the doc's ticket id. Do not return the full content as a message.
 
@@ -34,8 +36,10 @@ defined in the task.
 
 1. Re-run the claimed commands and checks yourself. A claim is not evidence, and neither is a
    green summary of a run you did not perform.
-2. Post the report as a comment on the task: PASS or FAIL, what you ran, the output you actually
-   observed; on FAIL, defects concrete enough to act on without a conversation.
+2. If the verification report exceeds 30 lines, create a child `doc` and keep the task comment
+   to a three-line summary plus a link to that doc. Post the report as a comment on the task:
+   PASS or FAIL, what you ran, and the output you actually observed; on FAIL, defects concrete
+   enough to act on without a conversation.
 3. `session_notify` the delegating session id. State moves are the lead's, not yours.
 
 ## Boundaries

@@ -101,8 +101,9 @@ One state field: `todo -> in_progress -> review -> done`, plus `blocked` and `ar
 - Evidence over claims: the commands you ran and their real output.
 - The human's comments may be dispatched to your session. Reply in that comment's thread or on
   the same block — that marks them addressed; the human resolves.
-- Large reports go in a comment or a child `doc`. Events are durable audit history only: they do
-  not wake sessions, and there is no subscription path.
+- Large reports go in a comment or a child `doc`. If a report exceeds 30 lines, create a child
+  doc and keep the comment to a three-line summary plus a link to that doc. Events are durable
+  audit history only: they do not wake sessions, and there is no subscription path.
 - Secrets: values never enter a ticket, comment, or chat. Name the required key NAMES and a
   git-ignored target file; the human writes the values there directly.
 

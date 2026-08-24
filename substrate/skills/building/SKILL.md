@@ -35,6 +35,8 @@ Arrives as a `ticket_dispatch` — the task body carries the implementation plan
 4. When the spec, the task, and the code disagree, report the conflict on the ticket instead of
    choosing silently — that call is the lead's.
 5. Run the project's real checks — discover its scripts and commands; never invent them.
+   If a report exceeds 30 lines, create a child `doc` and keep the closing comment to a
+   three-line summary plus a link to that doc.
 6. Close: post the closing comment (what changed, the acceptance checklist with real command
    output, deferred/not-done — explicit even when empty), move the task to `review`, then
    `session_notify` the delegating session id from the dispatch. Report first, ping after.
