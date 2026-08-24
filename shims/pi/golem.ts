@@ -48,6 +48,40 @@ function usageTotals(sessionManager) {
   return totals;
 }
 
+function lastTurnEndTime(sessionManager) {
+  const entries = sessionManager?.getEntries() || [];
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (entry.type === 'message' && entry.message?.role === 'assistant') {
+      const ts = entry.timestamp || entry.message?.timestamp;
+      if (ts) {
+        const d = new Date(ts);
+        if (!isNaN(d.getTime())) return d;
+      }
+    }
+  }
+  return null;
+}
+
+function formatTurnTiming(lastTurn) {
+  if (!lastTurn) return null;
+  const now = Date.now();
+  const diffSecs = Math.max(0, Math.floor((now - lastTurn.getTime()) / 1000));
+  const hrs = Math.floor(diffSecs / 3600);
+  const mins = Math.floor((diffSecs % 3600) / 60);
+  const ago = hrs >= 1 ? `${hrs}h${mins}m` : `${mins}m`;
+
+  const hh = String(lastTurn.getHours()).padStart(2, '0');
+  const mm = String(lastTurn.getMinutes()).padStart(2, '0');
+  const ended = `${hh}:${mm}`;
+
+  // For cloud models (ollama-cloud, antigravity, codex, zai, xai),
+  // cache is typically warm within ~10 minutes
+  const isWarm = diffSecs < 600;
+  const badge = isWarm ? '🔥' : '❄️';
+  return `${badge}${ended}(${ago})`;
+}
+
 function contextMeter(ctx, theme) {
   const usage = ctx.getContextUsage();
   const contextWindow = usage?.contextWindow || ctx.model?.contextWindow || 0;
@@ -71,12 +105,15 @@ function installFooter(pi) {
   let activeTui;
   let currentCtx = null;
   let disposeFooter = null;
+  let renderTimer = null;
 
   pi.on('session_info_changed', () => activeTui?.requestRender());
 
   // Session replacement (new/fork/switch/reload) invalidates the captured ctx.
   // Drop it and dispose the footer so no render touches the stale ctx.
   pi.on('session_shutdown', () => {
+    if (renderTimer) clearInterval(renderTimer);
+    renderTimer = null;
     currentCtx = null;
     disposeFooter?.();
     disposeFooter = null;
@@ -89,8 +126,14 @@ function installFooter(pi) {
     ctx.ui.setFooter((tui, theme, footerData) => {
       activeTui = tui;
       const unsubscribe = footerData.onBranchChange(() => tui.requestRender());
+      if (renderTimer) clearInterval(renderTimer);
+      renderTimer = setInterval(() => {
+        if (activeTui) activeTui.requestRender();
+      }, 30000);
       disposeFooter = () => {
         unsubscribe();
+        if (renderTimer) clearInterval(renderTimer);
+        renderTimer = null;
         if (activeTui === tui) activeTui = undefined;
       };
       return {
@@ -111,6 +154,9 @@ function installFooter(pi) {
             const identity = truncateToWidth(`${cwd}${branchText}${sessionText}`, width, '…');
 
             const totals = usageTotals(c.sessionManager);
+            const lastTurn = lastTurnEndTime(c.sessionManager);
+            const turnTiming = formatTurnTiming(lastTurn);
+
             const stats = [];
             if (totals.input) stats.push(`↑${formatTokens(totals.input)}`);
             if (totals.output) stats.push(`↓${formatTokens(totals.output)}`);
@@ -118,6 +164,7 @@ function installFooter(pi) {
             if (totals.cacheWrite) stats.push(`W${formatTokens(totals.cacheWrite)}`);
             if (totals.cacheHit != null && (totals.cacheRead || totals.cacheWrite)) stats.push(`CH${totals.cacheHit.toFixed(1)}%`);
             if (totals.cost) stats.push(`$${totals.cost.toFixed(3)}`);
+            if (turnTiming) stats.push(turnTiming);
             const left = `${theme.fg('muted', stats.join(' '))}${stats.length ? ' ' : ''}${contextMeter(c, theme)}`;
 
             const model = c.model?.id || 'no-model';

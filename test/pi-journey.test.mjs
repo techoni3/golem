@@ -94,7 +94,7 @@ function createHarness(extension, sessionId, { reason = 'startup', previousSessi
       handlers.set(event, list);
     },
     registerTool(tool) { tools.set(tool.name, tool); },
-    sendUserMessage(text) { sent.push(text); },
+    sendUserMessage(text, options) { sent.push(options ? { text, options } : text); },
     async setModel(model) { await sleep(5); ctx.model = model; return true; },
     getThinkingLevel: () => 'medium',
   };
@@ -314,10 +314,10 @@ async function main() {
   await harness.emit('agent_settled', {});
 
   // The first publish reserves synchronously. A second pre-agent publish cannot
-  // overtake it even though the mocked Pi context still reports idle.
+  // overtake it while starting preflight owns the slot.
   const firstPromise = postLease(lease, typedEnvelope(sessionId, 'first', 'first native turn'));
   await waitFor(() => harness.sent.length === 1, 'first native sendUserMessage was not invoked');
-  const secondBusy = await postLease(lease, typedEnvelope(sessionId, 'second', 'must wait'));
+  const secondBusy = await postLease(lease, typedEnvelope(sessionId, 'second', 'must wait while starting'));
   assert.equal(secondBusy.status, 409);
   assert.equal(harness.sent.length, 1);
   await harness.emit('input', { source: 'extension', text: 'first native turn' });
@@ -328,34 +328,46 @@ async function main() {
   assert.equal(firstBody.accepted, true);
   assert.equal(firstBody.delivery_state, 'accepted');
   assert.equal(firstBody.accepted_attempt_id, 'attempt-first');
-  const activeBusy = await postLease(lease, typedEnvelope(sessionId, 'second', 'must still wait', 'brief', 'attempt-second-a'));
-  assert.equal(activeBusy.status, 409);
+
+  // While Pi is active mid-turn, a subsequent brief is accepted and delivered
+  // as a mid-turn steer message.
+  const activeSteer = await postLease(lease, typedEnvelope(sessionId, 'second', 'steered mid-turn', 'brief', 'attempt-second-a'));
+  assert.equal(activeSteer.status, 200);
+  const activeSteerBody = await activeSteer.json();
+  assert.equal(activeSteerBody.accepted, true);
+  assert.equal(activeSteerBody.delivery_state, 'accepted');
+  assert.equal(harness.sent.length, 2);
+  assert.deepEqual(harness.sent[1], { text: 'steered mid-turn', options: { deliverAs: 'steer' } });
+
   harness.setIdle(true);
   await harness.emit('agent_settled', {});
+  const deliveriesAfterSettled = readJson(path.join(env.GOLEM_HOME, 'pi-workers', sessionId, 'delivery.json')).inbox.deliveries;
+  assert.equal(deliveriesAfterSettled.find((row) => row.envelope_id === 'first')?.lifecycle_state, 'settled');
+  assert.equal(deliveriesAfterSettled.find((row) => row.envelope_id === 'second')?.lifecycle_state, 'settled');
 
   // Terminal duplicate returns the immutable first disposition and never calls
-  // Pi twice. Then the queued second logical envelope can start.
+  // Pi twice. Then a new third envelope can start when idle.
   const duplicate = await postLease(lease, typedEnvelope(sessionId, 'first', 'first native turn', 'brief', 'attempt-first-retry'));
   assert.equal((await duplicate.json()).duplicate, true);
-  assert.equal(harness.sent.length, 1);
-  const secondPromise = postLease(lease, typedEnvelope(sessionId, 'second', 'second native turn', 'brief', 'attempt-second-b'));
-  await waitFor(() => harness.sent.length === 2, 'second native sendUserMessage was not invoked');
-  await harness.emit('input', { source: 'extension', text: 'second native turn' });
+  assert.equal(harness.sent.length, 2);
+  const thirdPromise = postLease(lease, typedEnvelope(sessionId, 'third', 'third native turn', 'brief', 'attempt-third-b'));
+  await waitFor(() => harness.sent.length === 3, 'third native sendUserMessage was not invoked');
+  await harness.emit('input', { source: 'extension', text: 'third native turn' });
   harness.setIdle(false);
   await harness.emit('agent_start', {});
-  assert.equal((await (await secondPromise).json()).accepted, true);
+  assert.equal((await (await thirdPromise).json()).accepted, true);
 
   // Busy interrupt is accepted through the control path, aborts Pi, and makes
   // the accepted work terminal rather than replaying it.
   const interruptPromise = postLease(lease, typedEnvelope(sessionId, 'interrupt-control', 'stop', 'interrupt'));
   await waitFor(() => harness.aborted, 'Pi abort was not requested');
-  assert.equal(readJson(path.join(env.GOLEM_HOME, 'pi-workers', sessionId, 'delivery.json')).inbox.deliveries.find((row) => row.envelope_id === 'second').lifecycle_state, 'accepted', 'control does not report terminal before Pi settles');
+  assert.equal(readJson(path.join(env.GOLEM_HOME, 'pi-workers', sessionId, 'delivery.json')).inbox.deliveries.find((row) => row.envelope_id === 'third').lifecycle_state, 'accepted', 'control does not report terminal before Pi settles');
   harness.setIdle(true);
   await harness.emit('agent_settled', {});
   const interrupt = await interruptPromise;
   assert.equal((await interrupt.json()).accepted, true);
   assert.equal(harness.aborted, true);
-  const delivery = readJson(path.join(env.GOLEM_HOME, 'pi-workers', sessionId, 'delivery.json')).inbox.deliveries.find((row) => row.envelope_id === 'second');
+  const delivery = readJson(path.join(env.GOLEM_HOME, 'pi-workers', sessionId, 'delivery.json')).inbox.deliveries.find((row) => row.envelope_id === 'third');
   assert.equal(delivery.lifecycle_state, 'interrupted');
 
   const halt = await postLease(lease, typedEnvelope(sessionId, 'halt-control', 'halt', 'halt'));
@@ -700,8 +712,11 @@ async function main() {
     assert.equal(nativeStartBody.delivery_state, 'accepted');
     await waitFor(() => providerRequests === 1, `native Pi did not call the isolated provider: ${nativeErr}`);
 
-    const nativeBusy = await postLease(nativeLease, typedEnvelope(nativeId, 'native-second', 'must remain FIFO'));
-    assert.equal(nativeBusy.status, 409, 'real Pi process rejects a second turn while native work is active');
+    const nativeSteer = await postLease(nativeLease, typedEnvelope(nativeId, 'native-second', 'steer real Pi turn'));
+    assert.equal(nativeSteer.status, 200, 'real Pi process accepts mid-turn steer while native work is active');
+    const nativeSteerBody = await nativeSteer.json();
+    assert.equal(nativeSteerBody.accepted, true);
+    assert.equal(nativeSteerBody.delivery_state, 'accepted');
     const nativeInterrupt = await postLease(nativeLease, typedEnvelope(nativeId, 'native-interrupt', 'abort real Pi', 'interrupt'));
     assert.equal((await nativeInterrupt.json()).accepted, true, `native interrupt did not observe settlement: ${nativeErr}`);
     const nativeRecord = readJson(path.join(env.GOLEM_HOME, 'pi-workers', nativeId, 'delivery.json'));

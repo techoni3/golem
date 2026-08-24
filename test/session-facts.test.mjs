@@ -104,17 +104,18 @@ upsertSessionFact({
   locator: { raw_session_id: 'pi-stale-live', session_file: '/tmp/pi-session.jsonl' },
   project_path: process.cwd(), name: 'Pi stale live', status: 'active',
   provider: 'ollama', model: 'deepseek-v4-flash:0731-cloud',
-  delivery: { mode: 'typed-worker', push: true, ready: false },
+  delivery: { mode: 'typed-worker', push: true, ready: true },
   capabilities: { typed_worker: true }, trust: 'host-full-trust',
   observations: { adapter_state: 'active', delivery_state: 'accepted', pi_version: '0.80.10', extension_version: '5.6.14' },
   observed_at: new Date(staleFactAt).toISOString(),
 });
 const piBusy = (await readNativeSessions(() => true, [{
-  session_id: 'pi-stale-live', endpoint_health: 'healthy', kind: 'typed-worker', delivery_ready: false,
+  session_id: 'pi-stale-live', endpoint_health: 'healthy', kind: 'typed-worker', delivery_ready: true,
 }])).find((row) => row.session_id === 'pi-stale-live');
 assert.equal(piBusy?.alive, true, 'healthy typed Pi lease keeps a quiet worker visible past fact recency');
 assert.equal(piBusy?.updated_at, staleFactAt, 'lease liveness does not forge Pi activity recency');
 assert.equal(piBusy?.status, 'busy', 'Pi active fact projects the canonical busy state');
+assert.equal(piBusy?.endpoint_health, 'healthy', 'busy Pi worker has healthy endpoint');
 assert.equal(piBusy?.provider, 'ollama');
 assert.equal(piBusy?.model, 'deepseek-v4-flash:0731-cloud');
 assert.equal(piBusy?.continuation_key, 'pi-continuation');
@@ -122,10 +123,22 @@ assert.equal(piBusy?.delivery_mode, 'typed-worker');
 assert.equal(piBusy?.delivery_state, 'accepted');
 assert.equal(piBusy?.trust, 'host-full-trust');
 assert.deepEqual(piBusy?.compatibility, { status: 'supported', pi_version: '0.80.10', supported_pi_version: '0.80.10', node_requirement: '>=22.19' });
+
+upsertSessionFact({
+  canonical_id: 'pi-idle-live', continuation_key: 'pi-continuation-idle', harness: 'pi',
+  locator: { raw_session_id: 'pi-idle-live', session_file: '/tmp/pi-idle.jsonl' },
+  project_path: process.cwd(), name: 'Pi idle live', status: 'idle',
+  provider: 'ollama', model: 'deepseek-v4-flash:0731-cloud',
+  delivery: { mode: 'typed-worker', push: true, ready: true },
+  capabilities: { typed_worker: true }, trust: 'host-full-trust',
+  observations: { adapter_state: 'idle', delivery_state: 'settled', pi_version: '0.80.10', extension_version: '5.6.14' },
+  observed_at: new Date(staleFactAt).toISOString(),
+});
 const piIdle = (await readNativeSessions(() => true, [{
-  session_id: 'pi-stale-live', endpoint_health: 'healthy', kind: 'typed-worker', delivery_ready: true,
-}])).find((row) => row.session_id === 'pi-stale-live');
-assert.equal(piIdle?.status, 'idle', 'live typed readiness outranks a stale active observation');
+  session_id: 'pi-idle-live', endpoint_health: 'healthy', kind: 'typed-worker', delivery_ready: true,
+}])).find((row) => row.session_id === 'pi-idle-live');
+assert.equal(piIdle?.status, 'idle', 'Pi idle fact projects the canonical idle state');
+assert.equal(piIdle?.endpoint_health, 'healthy', 'idle Pi worker has healthy endpoint');
 
 upsertSessionFact({
   canonical_id: 'pi-terminal-fact', continuation_key: 'pi-terminal-fact', harness: 'pi',
