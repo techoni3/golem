@@ -945,9 +945,7 @@ function TdAnnotate({ body, comments, currentAuthor = 'you', onCreate, onCreateA
   const [tocHeadings, setTocHeadings] = React.useState([]);
   const [activeId, setActiveId] = React.useState(null);
   const [showResolved, setShowResolved] = React.useState(false);
-  // The spec page is the live inbox: keep the rail and its composer visible on
-  // first render. The FAB remains available as a narrow-screen toggle.
-  const [railOpen, setRailOpen] = React.useState(true);
+  const [railOpen, setRailOpen] = React.useState(false);
   const [saveState, setSaveState] = React.useState('');
   const [pendingComposer, setPendingComposer] = React.useState(null);
   // Option/Alt+click-to-comment: track the modifier so the cursor can signal
