@@ -129,7 +129,7 @@ P5.5 makes live opencode sessions dispatchable without forking the dashboard
 dispatch path. The opencode shim owns a tiny localhost bridge because it is the
 only process with both the active `ses_*` id and opencode's SDK `client`; the MCP
 channel server remains the dashboard-facing endpoint for the shared active
-`session_notify`, `ack`, `respond`, and tracker protocol. Consultation is an
+`session_notify`, `ack`, and tracker protocol. Consultation is an
 ordinary `session_notify` message with an explicit advisory header and unique
 reference; there are no consult wrapper tools or passive subscriptions.
 

@@ -1,5 +1,5 @@
 // CEO chat drawer (v4) — slides in from the right when a channel chip is clicked.
-// Renders the chat lane (user briefs + CEO acks/responses + system events)
+// Renders the chat lane (user briefs + CEO acks + system events)
 // filtered to the active session, with a compose box pinned at the bottom.
 // Gate verdicts (v3 docs/agent-notes/gates/ flow) were removed in TKT-0009.
 

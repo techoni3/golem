@@ -859,8 +859,7 @@ async function main() {
   check('CC rejects conflicting injected identity before tool dispatch',
     spoofedCallerRead.result.isError && /conflicts with the launcher binding/.test(spoofedCallerRead.text),
     spoofedCallerRead.text);
-  const respondTool = tools.tools.find((tool) => tool.name === 'respond');
-  check('respond is user-facing only; no correlated envelope reply input', !!respondTool && !respondTool.inputSchema?.properties?.envelope_id && /not a correlated peer-handoff reply/.test(respondTool.description || ''), JSON.stringify(respondTool));
+  check('respond tool is retired — native chat response replaces it', !tools.tools.some((tool) => tool.name === 'respond'), tools.tools.map((tool) => tool.name).join(', '));
   // GOL-150: the phase machine is gone. ticket_update({state}) is the only
   // lifecycle API, so no transition tool may reappear in the advertised set.
   check('MCP no longer lists ticket_transition', !tools.tools.some((tool) => tool.name === 'ticket_transition'), tools.tools.map((tool) => tool.name).join(', '));

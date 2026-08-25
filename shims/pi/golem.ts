@@ -248,7 +248,6 @@ export default function golem(pi) {
               if (!envelope_id) return { ok: true, skipped: true, reason: 'uncorrelated acknowledgement has no durable envelope' };
               return client.acknowledgeEnvelope(envelope_id, body);
             },
-            respond: (body) => client.respond(body),
             setRole: ({ role }) => {
               validateSessionRole(role);
               return setSessionRole(sessionId, role, { by: 'self:mcp' });

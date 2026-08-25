@@ -30,11 +30,9 @@ sub-agents, and the golem channel MCP.
 - **Notification** → pushes the message to your ntfy topic so you get a phone
   ping on needs-input / idle. No-op when no topic is configured.
 - **Agents** → `worker`, `reviewer`, `researcher` (all `model: opus`).
-- **Channel MCP** (`golem`) → `ack` / `respond`, tracker tools, and one active
+- **Channel MCP** (`golem`) → `ack`, tracker tools, and one active
   `session_notify` primitive for delegated returns and advisory consultation. The
   `/events` SSE stream is dashboard chat telemetry, not a coordination bus.
-  `respond` is user-facing chat only; it is not a correlated delegated-return
-  route.
 - **Tracker tools** (on the same `golem` MCP) → live sessions read/write the
   cross-project ticket tracker — the source of truth for work, **replacing
   PLAN.md**. These are thin HTTP clients of the dashboard's REST API (the
@@ -171,7 +169,7 @@ plugin/
   skills/tracker/SKILL.md      # golem:tracker — tracker is the source of truth for work
   skills/reviewing/SKILL.md    # golem:reviewing — one-pass advisory design/code review
   skills/consulting/SKILL.md   # golem:consulting — answer a peer's consult, advisory only
-  mcp/channel/index.js         # golem channel MCP — ack/respond + tracker + active session_notify
+  mcp/channel/index.js         # golem channel MCP — ack + tracker + active session_notify
   mcp/channel/tracker-client.js# HTTP client of the dashboard tracker REST API
   mcp/channel/node_modules/    # bundled deps (@modelcontextprotocol/sdk)
   .mcp.json                    # wires the channel MCP via ${CLAUDE_PLUGIN_ROOT}

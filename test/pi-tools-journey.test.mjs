@@ -127,12 +127,6 @@ try {
   assert.equal(context.details.ok, true, context.content[0].text);
   assert.match(context.content[0].text, /Recent commits:/, 'project context renders bounded repo context');
 
-  const response = await worker.tools.get('respond').execute('respond-call', { text: 'Pi native response', kind: 'brief' }, undefined, undefined, worker.ctx);
-  assert.equal(response.details.ok, true, response.content[0].text);
-  const chat = await (await fetch(`${baseUrl}/api/chat`)).json();
-  assert.equal(chat.at(-1).session_id, 'pi-tools-worker');
-  assert.equal(chat.at(-1).text, 'Pi native response');
-
   const roleChange = await fetch(`${baseUrl}/api/sessions/pi-tools-worker/role`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role: 'reviewer' }),
   });
@@ -161,7 +155,7 @@ try {
   const afterRole = await worker.emit('before_agent_start', { prompt: 'review remains', systemPrompt: 'Pi base prompt' });
   assert.match(afterRole.systemPrompt, /Role: reviewer/, 'role change applies at the next safe boundary');
 
-  console.log('Pi native tool journey passed: shared tracker identity, read/comment/transition, L4, response, and safe-boundary role refresh');
+  console.log('Pi native tool journey passed: shared tracker identity, read/comment/transition, L4, and safe-boundary role refresh');
 } finally {
   if (ticket) {
     try {

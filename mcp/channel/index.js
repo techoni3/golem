@@ -432,17 +432,16 @@ const mcp = new Server(
       '  - gate_deny: the human denied it — hard stop for that thread.',
       '  - gate_cancel: the human cancelled it — drop that thread without resuming.',
       '  - session_notify brief: an active peer message. Delegated returns and consultations arrive as ordinary briefs with explicit headers and an authenticated sender session_id; read the durable report or context before acting.',
-      'You have TWO reply tools — both fire over the same SSE channel and surface in the dashboard chat:',
+      'You have ONE reply tool that fires over the SSE channel and surfaces in the dashboard chat:',
       '  • `ack` — fires IMMEDIATELY on receipt of every inbound event, no exceptions. One short sentence describing what this session understood and is about to do. Pass the same kind; include gate_id for gate_* events. For role_assign, ack is the entire job.',
-      '  • `respond` — fires when this session has something to say BACK to the human (chat answers, clarification questions, decision asks, final results of short briefs). Body is the actual reply text. Skip it when the brief just enters autonomous work and has nothing immediate to communicate — the dashboard timeline shows progress in that case. Skip respond on role_assign.',
-      '  `respond` is user-facing channel output only; it is not a correlated peer-handoff reply. Delegated returns and consultation replies use `session_notify` to the authenticated exact session_id.',
-      'Order of operations for any inbound channel event: 1) call ack on receipt, 2) do the work (role_assign: none), 3) optionally call respond with the user-facing answer, 4) yield.',
+      '  Direct user-facing answers (chat responses, clarifications, decision asks, final results of short briefs) are delivered via your normal chat response — do NOT use a tool for them. Delegated returns and consultation replies use `session_notify` to the authenticated exact session_id.',
+      'Order of operations for any inbound channel event: 1) call ack on receipt, 2) do the work (role_assign: none), 3) reply in chat if a user-facing answer is needed, 4) yield.',
       'Peer help uses `session_notify` only. Send a concise header plus the report or question to the exact captured session_id; there are no consult wrapper tools or passive subscriptions.',
     ].join(' '),
   },
 );
 
-// --- Reply tools: `ack` + `respond` ---------------------------------------
+// --- Reply tool: `ack` -----------------------------------------------
 mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: GOLEM_TOOL_CONTRACTS,
 }));
@@ -510,21 +509,6 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
     broadcast('ack', payload);
     return { content: [{ type: 'text', text: 'ack broadcast' }] };
-  }
-
-  if (name === 'respond') {
-    const text = typeof args.text === 'string' ? args.text : '';
-    if (!text.trim()) {
-      throw new Error('respond: `text` is required and must be non-empty');
-    }
-    const payload = {
-      kind: args.kind || 'brief',
-      gate_id: args.gate_id,
-      text,
-      ts: new Date().toISOString(),
-    };
-    broadcast('response', payload);
-    return { content: [{ type: 'text', text: 'response broadcast' }] };
   }
 
   if (name === 'session_role') {

@@ -992,18 +992,6 @@ async function main() {
       return reply.code(400).send({ error: String(err?.message ?? err) });
     }
   });
-  fastify.post('/api/messages/respond', async (req, reply) => {
-    const b = req.body ?? {};
-    const caller = String(req.headers['x-golem-caller-session'] || '').trim();
-    const text = typeof b.text === 'string' ? b.text.trim() : '';
-    if (!caller || !text) return reply.code(400).send({ error: 'response caller identity and text are required' });
-    const message = chat.record('ceo', 'response', text, {
-      session_id: caller,
-      event_kind: b.kind || 'brief',
-      gate_id: b.gate_id || undefined,
-    });
-    return { ok: true, message_id: message.id };
-  });
   fastify.post('/api/messages/control', async (req, reply) => {
     const b = req.body ?? {};
     const legacy = b.legacy && typeof b.legacy === 'object' ? b.legacy : null;

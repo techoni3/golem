@@ -54,7 +54,7 @@ export const CONFIG = {
   assetMaxBytes: parseInt(process.env.GOLEM_ASSET_MAX_BYTES ?? `${10 * 1024 * 1024}`, 10),
   // TKT-0106: allowed MIME types for upload.
   assetAllowedMime: ['image/png', 'image/jpeg', 'image/gif', 'image/webp'],
-  // Cap on retained CEO chat messages (user briefs + CEO acks/responses).
+  // Cap on retained CEO chat messages (user briefs + CEO acks).
   chatCap: parseInt(process.env.GOLEM_CHAT_CAP ?? '200', 10),
   // GOL-314: strict attribution rollout. Default is warn; reject is smoke-tested
   // but intentionally not enabled unless explicitly requested.

@@ -75,7 +75,7 @@ let currentSessionID = "";
 const GOLEM_TOOL_SUFFIXES = new Set([
   "ticket_list", "ticket_get", "ticket_create", "ticket_update", "ticket_comment",
   "ticket_comment_update", "ticket_comment_reply", "ticket_dispatch",
-  "ack", "respond", "session_notify", "session_role", "sessions_dispatchable",
+  "ack", "session_notify", "session_role", "sessions_dispatchable",
 ]);
 
 function isGolemToolName(name) {

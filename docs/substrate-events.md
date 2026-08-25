@@ -42,9 +42,9 @@ For delegated work, write the durable report/comment first, then notify the auth
 with the report location, outcome, and next action. The dispatch envelope carries the sender id so
 a renamed lead remains the correct return target. Large reports stay in the tracker.
 
-`respond` remains available for user-facing dashboard chat and ordinary channel answers. It is not
-the delegated-return mechanism and accepts no correlated dispatch reply route; delegated returns and
-consultation replies always use `session_notify` with the authenticated exact session id.
+User-facing answers are delivered via the harness's native chat response — no tool is used.
+Delegated returns and consultation replies always use `session_notify` with the authenticated exact
+session id.
 
 Consultation uses the same path: `CONSULT REQUEST — ADVISORY ONLY`, `CONSULT REPLY — ADVISORY ONLY`,
 or `CONSULT STATUS — ADVISORY ONLY`, each carrying a unique reference and sent to the exact

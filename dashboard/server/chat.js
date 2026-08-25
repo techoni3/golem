@@ -12,7 +12,7 @@
 //     frontend can filter chat lanes per CEO.
 //
 // What lives here:
-//   - A ring buffer of recent chat messages (user briefs + CEO acks/responses
+//   - A ring buffer of recent chat messages (user briefs + CEO acks
 //     + system events like halt/gate verdicts). Cap from CONFIG.chatCap.
 //   - The per-session SSE consumer pool.
 //   - record() — called from the dashboard's intrusion endpoints when the
@@ -139,16 +139,6 @@ export function createChat() {
         kind: 'ack',
         session_id: sid,
         text: typeof data.summary === 'string' ? data.summary : '',
-        event_kind: data.kind || undefined,
-        gate_id: data.gate_id || undefined,
-        ts: data.ts || undefined,
-      });
-    } else if (event === 'response') {
-      push({
-        role: 'ceo',
-        kind: 'response',
-        session_id: sid,
-        text: typeof data.text === 'string' ? data.text : '',
         event_kind: data.kind || undefined,
         gate_id: data.gate_id || undefined,
         ts: data.ts || undefined,
