@@ -30,6 +30,21 @@ Then render:
 golem sync --target opencode
 ```
 
+## Checkout-bound launch
+
+OpenCode is bound to this source checkout. The managed
+`~/.config/opencode/opencode.jsonc` merge points `mcp.golem` at the checkout's
+`mcp/channel/index.js` and adds the checkout's `shims/opencode/index.js` as an
+absolute `file://` plugin entry. Keep this repository in place while using the
+integration; if it moves, run `golem sync --target opencode` again. Golem does
+not provide a portable OpenCode package.
+
+After the sync completes, launch the native client normally:
+
+```bash
+opencode
+```
+
 ## What it renders
 
 opencode reads golem's pieces from **three** rendered locations (unlike the CC
@@ -52,9 +67,9 @@ pruning) as the CC target, keyed independently by output dir.
 Agent **frontmatter** is *translated*, not copied — a Claude Code agent's
 `tools:` + `model:` frontmatter is invalid under opencode:
 
-- `mode: subagent` (all three golem agents are subagents).
-- `permission: { edit: deny }` for read-only agents (reviewer, researcher);
-  writers (worker) get no permission block. This mirrors the one
+- `mode: subagent` for rendered Golem subagents.
+- `permission: { edit: deny }` for read-only roles (reviewer, explorer);
+  writers (builder) get no permission block. This mirrors the one
   security-meaningful boundary — read-only agents cannot edit — rather than
   attempting a full 1:1 tool-map.
 - `model` is **omitted** so the opencode session's own default model is
@@ -66,10 +81,10 @@ Agent and skill **bodies** are copied but run through the compiler's
 `{{#if opencode}}` / `{{#if claudecode}}` templating, so the two CC-specific
 bits render their opencode variant:
 
-- `skills/journaling` currently renders a stale claim that `hook.jsonl` is not
-  automatic under opencode. Runtime does map lifecycle, chat, and tool events
-  through the shim into the same journal scripts, so the file is written
-  without Claude Code's native hook manifest.
+- `skills/journaling` uses the same journal scripts under opencode. The shim
+  maps lifecycle, chat, and tool events into those scripts, so
+  `~/.golem/journals/<project_id>/hook.jsonl` is written without Claude Code's
+  native hook manifest.
 - `skills/git-conventions` — the `🤖 Generated with [Claude Code]` PR trailer
   becomes `[opencode]`.
 
@@ -151,7 +166,7 @@ Runtime flow:
   injects the canonical `<channel source="golem" kind="...">...</channel>` text
   into the live session with `client.session.promptAsync(...)`.
   That live bridge is the OpenCode consumer-readiness signal; Claude Channels'
-  Anthropic-authentication and MCP-initialization gates do not apply to it.
+  Anthropic authentication and MCP initialization rules do not apply to it.
 - `session.idle`, busy `session.status`, `chat.message`, and tool events update
   the bridge and `sessions.json` status/recency so `sessions_dispatchable` can
   show idle/busy and queue `when_idle` dispatches the same way it does for Claude
