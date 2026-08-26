@@ -17,7 +17,17 @@ fs.mkdirSync(state, { recursive: true });
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function linkPiTui(render) {
   const piCli = fs.realpathSync(execFileSync('which', ['pi'], { encoding: 'utf8' }).trim());
-  const source = path.join(path.dirname(path.dirname(piCli)), 'node_modules', '@earendil-works', 'pi-tui');
+  let current = path.dirname(piCli);
+  let source = null;
+  while (current && current !== path.dirname(current)) {
+    const candidate = path.join(current, 'node_modules', '@earendil-works', 'pi-tui');
+    if (fs.existsSync(candidate)) {
+      source = candidate;
+      break;
+    }
+    current = path.dirname(current);
+  }
+  if (!source) throw new Error(`Could not find @earendil-works/pi-tui starting from ${piCli}`);
   const scope = path.join(render, 'node_modules', '@earendil-works');
   fs.mkdirSync(scope, { recursive: true });
   fs.symlinkSync(source, path.join(scope, 'pi-tui'), 'dir');
