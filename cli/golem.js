@@ -611,9 +611,8 @@ function piLauncherHelp() {
   log(`Usage: golem pi [--role <role>] [--profile <name>] [--provider <id> --model <id>] [--resume <session-id>] [-- <pi args...>]
 
 Open native Pi with Golem's canonical rendered bridge extension. Pi retains its
-own profile, authentication, models, providers, extensions, and sessions. The
-supported bridge baseline is Pi ${SUPPORTED_PI_VERSION} on Node.js
->=${MIN_PI_NODE.major}.${MIN_PI_NODE.minor}.
+own profile, authentication, models, providers, extensions, and sessions. Tested
+on Pi ${SUPPORTED_PI_VERSION} with Node.js >=${MIN_PI_NODE.major}.${MIN_PI_NODE.minor}.
 
 Wrapper options:
   --role <role>         Apply the role's validated Pi execution preset.
@@ -739,11 +738,11 @@ async function cmdPi(args) {
 
   const childEnv = { ...process.env };
   const versionProbe = spawnSync('pi', ['--version'], { env: childEnv, encoding: 'utf8' });
-  if (versionProbe.error?.code === 'ENOENT') fatal(1, "golem pi could not find the 'pi' executable on PATH; install @earendil-works/pi-coding-agent@0.80.10");
+  if (versionProbe.error?.code === 'ENOENT') fatal(1, "golem pi could not find the 'pi' executable on PATH; install @earendil-works/pi-coding-agent");
   if (versionProbe.status !== 0) fatal(1, `golem pi could not inspect Pi: ${(versionProbe.stderr || versionProbe.error?.message || 'unknown error').trim()}`);
   const piVersion = versionProbe.stdout.trim();
   if (piVersion !== SUPPORTED_PI_VERSION) {
-    fatal(1, `golem pi supports Pi ${SUPPORTED_PI_VERSION}; found ${piVersion || '(no version)'}. Install the pinned baseline before launching.`);
+    err(`WARN: Golem tested on Pi ${SUPPORTED_PI_VERSION}; you have ${piVersion || '(no version)'} — continuing`);
   }
 
   const extension = join(renderDirFor('pi'), 'golem.ts');

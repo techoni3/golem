@@ -35,6 +35,7 @@ import {
   updateProfile,
 } from '../../lib/model-profiles.js';
 import {
+  isCatalogCacheExpired,
   readModelCatalogCache,
   readPiModelCatalog,
   writeModelCatalogCache,
@@ -106,9 +107,10 @@ function refreshCatalogPayload() {
 
 function readCatalogPayload() {
   const cached = readModelCatalogCache();
-  return cached
-    ? catalogPayload(cached.catalog, { source: 'cache', fetchedAt: cached.fetched_at })
-    : refreshCatalogPayload();
+  if (cached && !isCatalogCacheExpired(cached)) {
+    return catalogPayload(cached.catalog, { source: 'cache', fetchedAt: cached.fetched_at });
+  }
+  return refreshCatalogPayload();
 }
 
 // Legacy markdown tracker columns (kept in /api/meta for API stability; the UI

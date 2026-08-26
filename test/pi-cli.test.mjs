@@ -111,7 +111,7 @@ try {
   assert.match(help.stdout, /--profile <name>\s+Model profile override/);
   assert.match(help.stdout, /--role <role>\s+Apply the role's validated Pi execution preset/);
   assert.match(help.stdout, /retains its\s+own profile, authentication, models, providers, extensions, and sessions/);
-  assert.match(help.stdout, /Pi 0\.80\.10/);
+  assert.match(help.stdout, /Node\.js\s+>=22\.19/);
 
   const synced = run(['sync', '--target', 'pi']);
   assert.equal(synced.status, 0, synced.stderr);
@@ -163,9 +163,9 @@ try {
   assert.equal(Object.hasOwn(defaultRecord, 'profile'), false, 'golem pi does not inject a profile override');
   assert.equal(Object.hasOwn(defaultRecord, 'sessions'), false, 'golem pi does not inject a session override');
 
-  const unsupported = run(['pi'], { ...baseEnv, GOLEM_FAKE_PI_VERSION: '0.80.9' });
-  assert.equal(unsupported.status, 1, unsupported.stderr);
-  assert.match(unsupported.stderr, /supports Pi 0\.80\.10; found 0\.80\.9/);
+  const nonStandardVersion = run(['pi'], { ...baseEnv, GOLEM_FAKE_PI_VERSION: '0.84.3' });
+  assert.equal(nonStandardVersion.status, 0, nonStandardVersion.stderr);
+  assert.equal(JSON.parse(fs.readFileSync(capture, 'utf8')).pi_version, '0.84.3');
 
   const wrongNodeRunner = path.join(temp, 'wrong-node.mjs');
   fs.writeFileSync(wrongNodeRunner, `Object.defineProperty(process.versions, 'node', { value: '22.18.0' });\nawait import(${JSON.stringify(cli)});\n`);

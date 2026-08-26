@@ -122,7 +122,7 @@ assert.equal(piBusy?.continuation_key, 'pi-continuation');
 assert.equal(piBusy?.delivery_mode, 'typed-worker');
 assert.equal(piBusy?.delivery_state, 'accepted');
 assert.equal(piBusy?.trust, 'host-full-trust');
-assert.deepEqual(piBusy?.compatibility, { status: 'supported', pi_version: '0.80.10', supported_pi_version: '0.80.10', node_requirement: '>=22.19' });
+assert.deepEqual(piBusy?.compatibility, { status: 'supported', pi_version: '0.80.10', node_requirement: '>=22.19' });
 
 upsertSessionFact({
   canonical_id: 'pi-idle-live', continuation_key: 'pi-continuation-idle', harness: 'pi',

@@ -63,7 +63,7 @@
     "@fastify/static": "^7.0.4",
     "@fastify/websocket": "^10.0.1",
     "@lobehub/icons-static-svg": "1.94.0",
-    "better-sqlite3": "^11.10.0",
+    "better-sqlite3": "^12.11.1",
     "chokidar": "^3.6.0",
     "dompurify": "^3.2.6",
     "fastify": "^4.28.1",
