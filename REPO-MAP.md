@@ -1,5 +1,5 @@
 # REPO-MAP.md
-> Last verified: 2026-08-26 @ 9d9882b — maintained via golem:docs-maintenance.
+> Last verified: 2026-08-26 @ 7ce621d — maintained via golem:docs-maintenance.
 
 ## Directory structure
 
@@ -52,7 +52,7 @@ native channel or typed endpoint.
   MCP server and `shims/opencode/index.js`.
 - Separately launched Codex is pull-only. `golem codex` is the managed private
   bridge and is version-gated. Pi is a typed Tier-A worker and requires Node.js
-  22.19+ with Pi 0.80.10.
+  22.19+ with Pi 0.84.3.
 - Mutable state belongs outside the repository under `~/.golem/`; do not commit
   journals, tracker databases, credentials, or generated runtime state.
 
