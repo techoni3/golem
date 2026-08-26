@@ -23,7 +23,7 @@ The built-in roles are `lead`, `builder`, `explorer`, and `reviewer`.
 
 ## Requirements
 
-- Node.js 20 or newer and npm. Pi requires Node.js 22.19 or newer.
+- Golem requires Node.js 22.19 or newer and npm. Pi uses the pinned `@earendil-works/pi-coding-agent` 0.80.10 release.
 - Git.
 - At least one supported coding harness installed separately.
 

@@ -1,6 +1,6 @@
 # Contributing
 
-Use Node.js 20 or newer. Fork the repository, create a focused branch, run
+Golem requires Node.js 22.19 or newer. Fork the repository, create a focused branch, run
 `npm ci`, and make source changes in `substrate/` rather than the generated
 `plugin/` tree. If generated output changes, render it with the documented sync
 command and include it in the same change.
