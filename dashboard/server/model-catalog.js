@@ -102,6 +102,15 @@ export function readPiModelCatalog({ executable = 'pi', env = process.env } = {}
   return parsePiModelCatalog(result.stdout);
 }
 
+export const CATALOG_CACHE_TTL_MS = 60 * 1000;
+
+export function isCatalogCacheExpired(cached, now = Date.now(), ttlMs = CATALOG_CACHE_TTL_MS) {
+  if (!cached || !cached.fetched_at) return true;
+  const parsed = Date.parse(cached.fetched_at);
+  if (!Number.isFinite(parsed)) return true;
+  return now - parsed > ttlMs;
+}
+
 export function modelCatalogCachePath() {
   return path.join(path.dirname(profilesPath()), 'model-catalog.json');
 }

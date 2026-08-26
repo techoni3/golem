@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parsePiModelCatalog } from '../dashboard/server/model-catalog.js';
+import {
+  isCatalogCacheExpired,
+  parsePiModelCatalog,
+} from '../dashboard/server/model-catalog.js';
 
 const TABLE = `provider      model                     context  max-out  thinking  images
 antigravity   claude-opus-4-6           250K     64K      yes       yes
@@ -30,4 +33,21 @@ test('Pi catalog parser rejects output without the fixed-width header', () => {
 test('Pi catalog parser deduplicates repeated rows', () => {
   const repeated = `${TABLE}ollama        gemma4:26b                128K     16.4K    yes       no\n`;
   assert.deepEqual(parsePiModelCatalog(repeated).modelsByProvider.ollama, ['gemma4:26b']);
+});
+
+test('Pi catalog parser handles opencode-go provider rows', () => {
+  const table = `${TABLE}opencode-go   deepseek-v4-flash         1M       384K     yes       no\n`;
+  const result = parsePiModelCatalog(table);
+  assert.ok(result.providers.includes('opencode-go'));
+  assert.deepEqual(result.modelsByProvider['opencode-go'], ['deepseek-v4-flash']);
+});
+
+test('isCatalogCacheExpired respects TTL and handles missing/malformed stamps', () => {
+  const now = 1_000_000;
+  const ttl = 60_000;
+  assert.equal(isCatalogCacheExpired(null, now, ttl), true);
+  assert.equal(isCatalogCacheExpired({}, now, ttl), true);
+  assert.equal(isCatalogCacheExpired({ fetched_at: 'invalid' }, now, ttl), true);
+  assert.equal(isCatalogCacheExpired({ fetched_at: new Date(now - 30_000).toISOString() }, now, ttl), false);
+  assert.equal(isCatalogCacheExpired({ fetched_at: new Date(now - 61_000).toISOString() }, now, ttl), true);
 });
