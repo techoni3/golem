@@ -5,7 +5,7 @@
   have one source: `instructions/AGENTS.md`; cards and skills point to it.
 - `.claude/skills/` — repo-only doctrine for instructions, roles, and skills.
 - `cli/` `lib/` — entry point; runtime, role, compiler, managed-harness helpers. `golem pi`
-  version-gates Pi 0.80.10, syncs the render, and appends Golem's explicit bridge extension while
+  syncs the render, and appends Golem's explicit bridge extension while
   Pi keeps its normal profile, authentication, providers, models, extensions, and sessions.
 - `dashboard/server/` — Fastify API and tracker owner. `dashboard/web/` → `dashboard/dist/`.
 - `mcp/channel/` — channel server. `shims/{opencode,codex}/` — harness events onto hooks.
@@ -33,7 +33,7 @@
 - Passive subscription wrappers are explicitly retired; active notification and tracker-backed
   dispatch are the current shared coordination surface.
 ### `lib/pi-native-adapter.js`, `lib/pi-compatibility.js`, `shims/pi/golem.ts`
-- Pi 0.80.10 binds the shared typed-worker endpoint to native `sendUserMessage`, with a synchronous
+- Pi binds the shared typed-worker endpoint to native `sendUserMessage`, with a synchronous
   starting reservation, correlated agent acceptance/settlement, control abort/halt, durable replay,
   endpoint leases, terminal facts, and central journaling. The old Pi inbox is migration-read-only.
 - The Pi render also registers shared tools, injects Golem-owned authority plus the current

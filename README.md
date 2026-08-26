@@ -162,7 +162,7 @@ golem pi --provider ollama --model laguna-xs-2.1:q4_K_M
 golem pi --provider ollama-cloud --model deepseek-v4-flash
 ```
 
-The launcher version-gates Pi 0.80.10, syncs and appends the canonical Golem
+The launcher syncs and appends the canonical Golem
 bridge render, and supports `--resume <id>` plus native arguments after `--`.
 Pi retains its own profile, authentication, models, providers, extensions, and
 sessions; `golem pi` does not copy, install, or rewrite any Pi configuration.
@@ -170,7 +170,7 @@ Pi registers a typed live endpoint, shared tracker/project tools, Golem-owned
 authority and builder/explorer/reviewer role context, progressive skills, and
 bounded project context. The legacy next-input spool is migration-read-only.
 
-The supported package is `@earendil-works/pi-coding-agent@0.80.10` on Node.js
+The supported package is `@earendil-works/pi-coding-agent` on Node.js
 22.19 or newer. Pi extensions run with the user's full host authority; project
 trust is not a sandbox. A failure before native prompt acceptance is replayable,
 while a crash after acceptance is shown as outcome-unknown and requires explicit
