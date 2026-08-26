@@ -37,7 +37,7 @@ import * as codexAdapter from '../lib/compiler/adapters/codex.js';
 import * as piAdapter from '../lib/compiler/adapters/pi.js';
 import { isHarnessEnabled, loadConfig, saveConfig } from '../lib/golem-config.js';
 import { CodexSupervisor, readCodexSupervisor } from '../lib/codex-supervisor.js';
-import { MIN_PI_NODE, piNodeSupported } from '../lib/pi-compatibility.js';
+import { MIN_PI_NODE, SUPPORTED_PI_VERSION, piNodeSupported } from '../lib/pi-compatibility.js';
 import { resolveRolePreset } from '../lib/role-preset.js';
 import { getProfile, listProfileNames } from '../lib/model-profiles.js';
 import {
@@ -611,8 +611,8 @@ function piLauncherHelp() {
   log(`Usage: golem pi [--role <role>] [--profile <name>] [--provider <id> --model <id>] [--resume <session-id>] [-- <pi args...>]
 
 Open native Pi with Golem's canonical rendered bridge extension. Pi retains its
-own profile, authentication, models, providers, extensions, and sessions. Node.js
->=${MIN_PI_NODE.major}.${MIN_PI_NODE.minor} is required.
+own profile, authentication, models, providers, extensions, and sessions. Tested
+on Pi ${SUPPORTED_PI_VERSION} with Node.js >=${MIN_PI_NODE.major}.${MIN_PI_NODE.minor}.
 
 Wrapper options:
   --role <role>         Apply the role's validated Pi execution preset.
@@ -741,6 +741,9 @@ async function cmdPi(args) {
   if (versionProbe.error?.code === 'ENOENT') fatal(1, "golem pi could not find the 'pi' executable on PATH; install @earendil-works/pi-coding-agent");
   if (versionProbe.status !== 0) fatal(1, `golem pi could not inspect Pi: ${(versionProbe.stderr || versionProbe.error?.message || 'unknown error').trim()}`);
   const piVersion = versionProbe.stdout.trim();
+  if (piVersion !== SUPPORTED_PI_VERSION) {
+    err(`WARN: Golem tested on Pi ${SUPPORTED_PI_VERSION}; you have ${piVersion || '(no version)'} — continuing`);
+  }
 
   const extension = join(renderDirFor('pi'), 'golem.ts');
   if (!existsSync(extension)) fatal(1, `golem pi render is missing ${extension}; run golem sync --target pi`);
