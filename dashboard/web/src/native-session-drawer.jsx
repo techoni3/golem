@@ -7,7 +7,7 @@ function openNativeSessionDrawer(sessionId, tab = null) {
   window.Router.openNativeSession(sessionId ?? null);
 }
 
-function NsdTerminalView({ sessionId, session, alive }) {
+function NsdTerminalView({ sessionId, session, alive, events = [], peek = null }) {
   const [lines, setLines] = React.useState(100);
   const [autoRefresh, setAutoRefresh] = React.useState(true);
   const [terminal, setTerminal] = React.useState(null);
@@ -146,11 +146,24 @@ function NsdTerminalView({ sessionId, session, alive }) {
         ) : error ? (
           <div className="nsd-terminal-empty is-error">{error}</div>
         ) : !terminal?.ok || !terminal?.text ? (
-          <div className="nsd-terminal-empty">
-            {terminal?.error || 'No active tmux pane captured for this session.'}
-            {session?.name && (
-              <div className="nsd-terminal-hint mono">
-                Try running: <code>golem attach {session.name}</code>
+          <div className="nsd-terminal-foreground-feed">
+            <div className="nsd-foreground-badge">
+              <span className="nsd-fg-icon">⚡</span>
+              <span>Foreground terminal session ({session?.harness || 'native'}) · Live activity stream</span>
+            </div>
+            {events.length === 0 ? (
+              <div className="nsd-terminal-empty">
+                {peek?.note || 'No recorded activity yet for this session.'}
+              </div>
+            ) : (
+              <div className="nsd-terminal-events">
+                {events.map((e, i) => (
+                  <div key={`${e.t}-${i}`} className="nsd-terminal-event-row mono">
+                    <span className="nsd-event-time">{window.SubstrateFmt?.fmtTimeAgo?.(e.t) || ''}</span>
+                    <span className={`nsd-event-type type-${e.event}`}>{e.event}</span>
+                    <span className="nsd-event-summary" title={e.summary}>{e.summary}</span>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -449,7 +462,13 @@ function NativeSessionDrawer({ open, sessionId, onClose }) {
         <div className={`drawer-body nsd-body ${activeTab === 'console' ? 'is-console-tab' : ''}`}>
           {activeTab === 'console' ? (
             <div className="nsd-console-wrap">
-              <NsdTerminalView sessionId={sessionId} session={s} alive={alive}/>
+              <NsdTerminalView
+                sessionId={sessionId}
+                session={s}
+                alive={alive}
+                events={events}
+                peek={peek}
+              />
               <NsdSteerComposer
                 sessionId={sessionId}
                 session={s}
