@@ -233,6 +233,14 @@
       }),
     pushRole: (name) => postJSON(`/api/roles/${encodeURIComponent(name)}/push`, {}),
 
+    // GOL-4: background agent terminal peek & interaction
+    sessionTerminal: (sessionId, lines) =>
+      getJSON(`/api/native-sessions/${encodeURIComponent(sessionId)}/terminal${lines ? `?lines=${lines}` : ''}`),
+    sendSessionMessage: (sessionId, text) =>
+      postJSON(`/api/native-sessions/${encodeURIComponent(sessionId)}/message`, { text }),
+    interruptSession: (sessionId) =>
+      postJSON(`/api/native-sessions/${encodeURIComponent(sessionId)}/interrupt`, {}),
+
     // ---- Cross-project tracker (tracker.db) ----
     // These are SEPARATE from the legacy markdown `tickets(projectId)` above.
     // Tickets are filtered/posted by the CONTRACT `project_id` (`<slug>-<6hex>`).
