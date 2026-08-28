@@ -12,8 +12,209 @@ import { projectIdFor } from '../../lib/project-id.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const SUBSTRATE_ROOT = path.join(REPO_ROOT, 'substrate');
+const SKILLS_ROOT = path.join(SUBSTRATE_ROOT, 'skills');
+const INSTRUCTIONS_ROOT = path.join(SUBSTRATE_ROOT, 'instructions');
+const ROLES_ROOT = path.join(SUBSTRATE_ROOT, 'roles');
 const PACKAGE_JSON = path.join(REPO_ROOT, 'package.json');
 const SYNC_TIMEOUT_MS = 30_000;
+
+function sanitizeSlug(slug) {
+  if (typeof slug !== 'string' || !slug.trim()) throw Object.assign(new Error('slug is required'), { statusCode: 400 });
+  const cleaned = slug.trim().toLowerCase();
+  if (!/^[a-z0-9_-]+$/.test(cleaned)) {
+    throw Object.assign(new Error('slug must only contain lowercase alphanumeric characters, dashes, or underscores'), { statusCode: 400 });
+  }
+  return cleaned;
+}
+
+function parseFrontmatter(rawContent) {
+  const match = String(rawContent || '').match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
+  if (!match) return { frontmatter: {}, body: rawContent || '', raw: rawContent || '' };
+  const yamlBlock = match[1];
+  const body = match[2];
+  const frontmatter = {};
+  for (const line of yamlBlock.split(/\r?\n/)) {
+    const colon = line.indexOf(':');
+    if (colon > 0) {
+      const key = line.slice(0, colon).trim();
+      let val = line.slice(colon + 1).trim();
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1);
+      }
+      frontmatter[key] = val;
+    }
+  }
+  return { frontmatter, body, raw: rawContent };
+}
+
+function serializeFrontmatter(frontmatter, body) {
+  const lines = ['---'];
+  for (const [k, v] of Object.entries(frontmatter || {})) {
+    if (v != null && v !== '') {
+      lines.push(`${k}: ${v}`);
+    }
+  }
+  lines.push('---', '', String(body || '').trimStart());
+  return lines.join('\n');
+}
+
+export function listSubstrateSkills() {
+  if (!fs.existsSync(SKILLS_ROOT)) return [];
+  const entries = fs.readdirSync(SKILLS_ROOT, { withFileTypes: true });
+  const skills = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const slug = entry.name;
+    const skillMd = path.join(SKILLS_ROOT, slug, 'SKILL.md');
+    if (!fs.existsSync(skillMd)) continue;
+    try {
+      const stat = fs.statSync(skillMd);
+      const raw = fs.readFileSync(skillMd, 'utf8');
+      const { frontmatter, body } = parseFrontmatter(raw);
+      const words = body.trim().split(/\s+/).filter(Boolean).length;
+      const templatesDir = path.join(SKILLS_ROOT, slug, 'templates');
+      const hasTemplates = fs.existsSync(templatesDir);
+      skills.push({
+        slug,
+        name: frontmatter.name || slug,
+        description: frontmatter.description || '',
+        frontmatter,
+        size: stat.size,
+        word_count: words,
+        updated_at: stat.mtime.toISOString(),
+        has_templates: hasTemplates,
+      });
+    } catch {}
+  }
+  skills.sort((a, b) => a.slug.localeCompare(b.slug));
+  return skills;
+}
+
+export function getSubstrateSkill(slug) {
+  const cleaned = sanitizeSlug(slug);
+  const skillDir = path.join(SKILLS_ROOT, cleaned);
+  const skillMd = path.join(skillDir, 'SKILL.md');
+  if (!fs.existsSync(skillMd)) {
+    throw Object.assign(new Error(`Skill "${cleaned}" not found`), { statusCode: 404 });
+  }
+  const stat = fs.statSync(skillMd);
+  const raw = fs.readFileSync(skillMd, 'utf8');
+  const { frontmatter, body } = parseFrontmatter(raw);
+
+  const files = [];
+  function collectFiles(dir, rel = '') {
+    for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
+      const relPath = rel ? `${rel}/${f.name}` : f.name;
+      if (f.isDirectory()) {
+        collectFiles(path.join(dir, f.name), relPath);
+      } else {
+        files.push(relPath);
+      }
+    }
+  }
+  try { collectFiles(skillDir); } catch {}
+
+  return {
+    slug: cleaned,
+    name: frontmatter.name || cleaned,
+    description: frontmatter.description || '',
+    frontmatter,
+    body,
+    raw,
+    size: stat.size,
+    word_count: body.trim().split(/\s+/).filter(Boolean).length,
+    updated_at: stat.mtime.toISOString(),
+    files,
+  };
+}
+
+export function saveSubstrateSkill(slug, data = {}) {
+  const cleaned = sanitizeSlug(slug);
+  const skillDir = path.join(SKILLS_ROOT, cleaned);
+  fs.mkdirSync(skillDir, { recursive: true });
+  const skillMd = path.join(skillDir, 'SKILL.md');
+
+  let rawContent = '';
+  if (typeof data.raw === 'string' && data.raw.trim()) {
+    rawContent = data.raw;
+  } else {
+    const frontmatter = data.frontmatter || {
+      name: data.name || cleaned,
+      description: data.description || '',
+    };
+    rawContent = serializeFrontmatter(frontmatter, data.body || '');
+  }
+
+  fs.writeFileSync(skillMd, rawContent, 'utf8');
+  return getSubstrateSkill(cleaned);
+}
+
+export function deleteSubstrateSkill(slug) {
+  const cleaned = sanitizeSlug(slug);
+  const skillDir = path.join(SKILLS_ROOT, cleaned);
+  if (!fs.existsSync(skillDir)) {
+    throw Object.assign(new Error(`Skill "${cleaned}" not found`), { statusCode: 404 });
+  }
+  fs.rmSync(skillDir, { recursive: true, force: true });
+  return { ok: true, deleted: cleaned };
+}
+
+export function getSubstrateInstructions() {
+  const filePath = path.join(INSTRUCTIONS_ROOT, 'AGENTS.md');
+  if (!fs.existsSync(filePath)) {
+    return { path: 'instructions/AGENTS.md', raw: '', size: 0, updated_at: null };
+  }
+  const stat = fs.statSync(filePath);
+  const raw = fs.readFileSync(filePath, 'utf8');
+  return {
+    path: 'instructions/AGENTS.md',
+    raw,
+    size: stat.size,
+    word_count: raw.trim().split(/\s+/).filter(Boolean).length,
+    updated_at: stat.mtime.toISOString(),
+  };
+}
+
+export function saveSubstrateInstructions(data) {
+  const filePath = path.join(INSTRUCTIONS_ROOT, 'AGENTS.md');
+  fs.mkdirSync(INSTRUCTIONS_ROOT, { recursive: true });
+  const content = typeof data === 'string' ? data : (data?.raw ?? data?.body ?? '');
+  fs.writeFileSync(filePath, content, 'utf8');
+  return getSubstrateInstructions();
+}
+
+export function listSubstrateRoles() {
+  if (!fs.existsSync(ROLES_ROOT)) return [];
+  const files = fs.readdirSync(ROLES_ROOT).filter((f) => f.endsWith('.md'));
+  const roles = [];
+  for (const f of files) {
+    const role = f.replace(/\.md$/, '');
+    const p = path.join(ROLES_ROOT, f);
+    const stat = fs.statSync(p);
+    const raw = fs.readFileSync(p, 'utf8');
+    roles.push({
+      role,
+      body: raw,
+      size: stat.size,
+      updated_at: stat.mtime.toISOString(),
+    });
+  }
+  roles.sort((a, b) => a.role.localeCompare(b.role));
+  return roles;
+}
+
+export function saveSubstrateRole(role, data) {
+  const cleaned = sanitizeSlug(role);
+  const filePath = path.join(ROLES_ROOT, `${cleaned}.md`);
+  fs.mkdirSync(ROLES_ROOT, { recursive: true });
+  const content = typeof data === 'string' ? data : (data?.raw ?? data?.body ?? '');
+  fs.writeFileSync(filePath, content, 'utf8');
+  return {
+    role: cleaned,
+    body: content,
+    updated_at: new Date().toISOString(),
+  };
+}
 
 const TARGETS = [
   { id: 'claudecode', target: 'cc', label: 'Claude Code' },
@@ -412,6 +613,66 @@ export async function registerSubstrateRoutes(fastify) {
       out.status = 'error';
       out.error = String(err?.message ?? err);
       return reply.code(err.statusCode || 500).send(out);
+    }
+  });
+
+  // GOL-2: Substrate Skills CRUD
+  fastify.get('/api/substrate/skills', async () => listSubstrateSkills());
+
+  fastify.get('/api/substrate/skills/:slug', async (req, reply) => {
+    try {
+      return getSubstrateSkill(req.params.slug);
+    } catch (err) {
+      return reply.code(err.statusCode || 500).send({ error: String(err?.message ?? err) });
+    }
+  });
+
+  fastify.post('/api/substrate/skills', async (req, reply) => {
+    try {
+      const b = req.body ?? {};
+      const slug = b.slug || b.name;
+      const skill = saveSubstrateSkill(slug, b);
+      return reply.code(201).send(skill);
+    } catch (err) {
+      return reply.code(err.statusCode || 400).send({ error: String(err?.message ?? err) });
+    }
+  });
+
+  fastify.put('/api/substrate/skills/:slug', async (req, reply) => {
+    try {
+      return saveSubstrateSkill(req.params.slug, req.body ?? {});
+    } catch (err) {
+      return reply.code(err.statusCode || 400).send({ error: String(err?.message ?? err) });
+    }
+  });
+
+  fastify.delete('/api/substrate/skills/:slug', async (req, reply) => {
+    try {
+      return deleteSubstrateSkill(req.params.slug);
+    } catch (err) {
+      return reply.code(err.statusCode || 400).send({ error: String(err?.message ?? err) });
+    }
+  });
+
+  // GOL-2: Substrate Instructions
+  fastify.get('/api/substrate/instructions', async () => getSubstrateInstructions());
+
+  fastify.put('/api/substrate/instructions', async (req, reply) => {
+    try {
+      return saveSubstrateInstructions(req.body ?? {});
+    } catch (err) {
+      return reply.code(err.statusCode || 400).send({ error: String(err?.message ?? err) });
+    }
+  });
+
+  // GOL-2: Substrate Roles
+  fastify.get('/api/substrate/roles', async () => listSubstrateRoles());
+
+  fastify.put('/api/substrate/roles/:role', async (req, reply) => {
+    try {
+      return saveSubstrateRole(req.params.role, req.body ?? {});
+    } catch (err) {
+      return reply.code(err.statusCode || 400).send({ error: String(err?.message ?? err) });
     }
   });
 }

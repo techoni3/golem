@@ -232,7 +232,7 @@ try {
   assert.equal(enriched[0].worker_tmux_session, spawned[0].tmux_session);
   assert.equal(enriched[0].worker_state, 'live');
   assert.equal(enriched[0].worker_attach_hint, `golem attach ${spawned[0].name}`);
-  console.log(JSON.stringify({ parallel_workers: names.sort(), tmux_sessions: tmuxNames.sort(), dispatchable_worker_fields: true }));
+  console.log(JSON.stringify({ parallel_workers: names.slice().sort(), tmux_sessions: tmuxNames.slice().sort(), dispatchable_worker_fields: true }));
 
   const directListed = await listWorkerViews({ project });
   assert.ok(directListed.every((worker) => worker.dispatchable));

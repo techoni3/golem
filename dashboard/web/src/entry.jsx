@@ -56,6 +56,7 @@ await import('./ticket-drawer.jsx');
 await import('./other-pages.jsx');
 await import('./communication-drawer.jsx');
 await import('./settings-page.jsx');
+await import('./substrate-view.jsx');
 await import('./tweaks.jsx');
 await import('./drawer-ceo.jsx');
 await import('./native-session-drawer.jsx');

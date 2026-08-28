@@ -90,6 +90,7 @@ function App() {
   else if (route.kind === 'agents') page = <AgentsPage setRoute={navigate}/>;
   else if (route.kind === 'logs') page = <LogsPage/>;
   else if (route.kind === 'settings') page = <SettingsPage/>;
+  else if (route.kind === 'substrate') page = <SubstratePage route={route} setRoute={navigate}/>;
   else if (route.kind === 'project') page = (
     <ProjectView projectId={route.id} tab={route.tab} showArchived={route.showArchived} q={route.q} setRoute={navigate}/>
   );
