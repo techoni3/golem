@@ -677,10 +677,14 @@ function TdToc({ headings, rootRef, documentKey, containerSelector }) {
       const scrollRect = scrollRoot.getBoundingClientRect();
       const main = root.closest('.td-main');
       const railRect = (main || host).getBoundingClientRect();
-      setMetrics({
-        left: Math.max(0, railRect.left - hostRect.left),
-        top: Math.max(0, scrollRect.top - hostRect.top),
-        maxHeight: Math.max(160, scrollRect.bottom - scrollRect.top),
+      const nextLeft = Math.max(0, Math.round(railRect.left - hostRect.left));
+      const nextTop = Math.max(0, Math.round(scrollRect.top - hostRect.top));
+      const nextMaxHeight = Math.max(160, Math.round(scrollRect.bottom - scrollRect.top));
+      setMetrics((prev) => {
+        if (prev && prev.left === nextLeft && prev.top === nextTop && prev.maxHeight === nextMaxHeight) {
+          return prev;
+        }
+        return { left: nextLeft, top: nextTop, maxHeight: nextMaxHeight };
       });
     };
     update();
@@ -719,7 +723,8 @@ function TdToc({ headings, rootRef, documentKey, containerSelector }) {
           if (!first || top < first.top) first = { id: heading.id, top };
           if (top <= line + 1 && (!best || top > best.top)) best = { id: heading.id, top };
         }
-        setActiveId((best || first)?.id || headings[0]?.id || '');
+        const nextId = (best || first)?.id || headings[0]?.id || '';
+        setActiveId((prev) => (prev === nextId ? prev : nextId));
       });
     };
     update();
@@ -1035,7 +1040,15 @@ function TdAnnotate({ body, comments, currentAuthor = 'you', onCreate, onCreateA
     [body],
   );
 
-  React.useEffect(() => { setAnnotations(comments || []); }, [comments]);
+  React.useEffect(() => {
+    const next = comments || [];
+    setAnnotations((prev) => {
+      if (prev.length === next.length && prev.every((a, i) => a.id === next[i]?.id && a.status === next[i]?.status && a.updated_at === next[i]?.updated_at)) {
+        return prev;
+      }
+      return next;
+    });
+  }, [comments]);
 
   // Track the reader's position before updates. New comments should only move
   // the rail when the reader was already near its bottom edge.
@@ -1090,7 +1103,17 @@ function TdAnnotate({ body, comments, currentAuthor = 'you', onCreate, onCreateA
 
   React.useLayoutEffect(() => {
     const root = rootRef.current;
-    setTocHeadings(root ? assignTocHeadingIds(root, documentTitle) : []);
+    if (!root) {
+      setTocHeadings((prev) => prev.length === 0 ? prev : []);
+      return;
+    }
+    const nextList = assignTocHeadingIds(root, documentTitle);
+    setTocHeadings((prev) => {
+      if (prev.length === nextList.length && prev.every((h, i) => h.id === nextList[i]?.id && h.text === nextList[i]?.text && h.level === nextList[i]?.level)) {
+        return prev;
+      }
+      return nextList;
+    });
   }, [html, documentTitle]);
 
   React.useEffect(() => {
