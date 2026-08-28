@@ -125,8 +125,8 @@ try {
   const rolesRes = await request('/api/substrate/roles');
   assert.equal(rolesRes.status, 200);
   assert.ok(Array.isArray(rolesRes.body));
-  assert.ok(rolesRes.body.some((r) => r.role === 'lead'));
-  assert.ok(rolesRes.body.some((r) => r.role === 'builder'));
+  assert.ok(rolesRes.body.some((r) => r.role === 'lead' && r.builtin === true));
+  assert.ok(rolesRes.body.some((r) => r.role === 'builder' && r.builtin === true));
 
   // 6. Substrate Status & Sync
   const statusRes = await request('/api/substrate/status');

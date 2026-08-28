@@ -1,5 +1,6 @@
 // Substrate management surface (GOL-2) — browse, inspect, edit, create,
-// and synchronize canonical skills, global instructions, roles, and harness renders.
+// and synchronize canonical skills, global instructions, roles, and harness renders across
+// both built-in substrate sources, user global pools, and project-scoped pools.
 
 function SubstratePage({ route, setRoute }) {
   const [activeTab, setActiveTab] = React.useState(route?.tab || 'skills');
@@ -45,11 +46,11 @@ function SubstratePage({ route, setRoute }) {
       <div className="page-header substrate-page-header">
         <div>
           <div className="substrate-header-title-row">
-            <h1 className="page-title">Substrate Layer</h1>
-            <span className="substrate-badge mono">canonical source</span>
+            <h1 className="page-title">Substrate & Skills Layer</h1>
+            <span className="substrate-badge mono">canonical & user pools</span>
           </div>
           <div className="page-subtitle">
-            Author and inspect canonical skills, global instructions, roles, and live harness synchronization.
+            Author and inspect canonical substrate skills, user global skills, project skills, instructions, and roles.
           </div>
         </div>
 
@@ -81,7 +82,7 @@ function SubstratePage({ route, setRoute }) {
             <rect x="2" y="2" width="12" height="12" rx="2"/>
             <path d="M5.5 8l2 2 3.5-4"/>
           </svg>
-          <span>Skills</span>
+          <span>Skills Catalog</span>
         </button>
 
         <button
@@ -110,7 +111,7 @@ function SubstratePage({ route, setRoute }) {
             <path d="M2 13C2 11 3.5 9.5 5.5 9.5C7.5 9.5 9 11 9 13"/>
             <path d="M9.5 13C9.5 11.5 10.5 10 12 10C13.4 10 14 11 14 12"/>
           </svg>
-          <span>Roles</span>
+          <span>Roles Registry</span>
         </button>
 
         <button
@@ -160,12 +161,14 @@ function SubstratePage({ route, setRoute }) {
 }
 
 // ---------------------------------------------------------------------------
-// 1. Skills Management Tab
+// 1. Multi-Pool Skills Catalog & Editor Tab
 // ---------------------------------------------------------------------------
 
 function SubstrateSkillsView({ initialSlug, onSync, onToast }) {
   const [skills, setSkills] = React.useState([]);
   const [selectedSlug, setSelectedSlug] = React.useState(initialSlug || null);
+  const [selectedScope, setSelectedScope] = React.useState(null);
+  const [poolFilter, setPoolFilter] = React.useState('all'); // 'all' | 'builtin' | 'user' | 'project'
   const [loadingList, setLoadingList] = React.useState(true);
   const [search, setSearch] = React.useState('');
   const [showCreateModal, setShowCreateModal] = React.useState(false);
@@ -176,6 +179,7 @@ function SubstrateSkillsView({ initialSlug, onSync, onToast }) {
       setSkills(Array.isArray(list) ? list : []);
       if (!selectedSlug && list.length > 0) {
         setSelectedSlug(list[0].slug);
+        setSelectedScope(list[0].scope);
       }
     } catch (err) {
       onToast(`Failed to load skills: ${err.message}`, 'error');
@@ -188,27 +192,44 @@ function SubstrateSkillsView({ initialSlug, onSync, onToast }) {
     loadSkills();
   }, [loadSkills]);
 
+  const poolCounts = React.useMemo(() => {
+    const counts = { all: skills.length, builtin: 0, user: 0, project: 0 };
+    for (const s of skills) {
+      if (s.scope in counts) counts[s.scope] += 1;
+    }
+    return counts;
+  }, [skills]);
+
   const filtered = React.useMemo(() => {
+    let list = skills;
+    if (poolFilter !== 'all') {
+      list = list.filter((s) => s.scope === poolFilter);
+    }
     const q = search.trim().toLowerCase();
-    if (!q) return skills;
-    return skills.filter((s) => (
-      s.slug.toLowerCase().includes(q)
-      || s.name.toLowerCase().includes(q)
-      || (s.description || '').toLowerCase().includes(q)
-    ));
-  }, [skills, search]);
+    if (q) {
+      list = list.filter((s) => (
+        s.slug.toLowerCase().includes(q)
+        || s.name.toLowerCase().includes(q)
+        || (s.description || '').toLowerCase().includes(q)
+      ));
+    }
+    return list;
+  }, [skills, poolFilter, search]);
 
   const handleCreated = (newSkill) => {
     setShowCreateModal(false);
-    setSkills((prev) => [...prev.filter((s) => s.slug !== newSkill.slug), newSkill].sort((a, b) => a.slug.localeCompare(b.slug)));
+    setSkills((prev) => [...prev.filter((s) => s.slug !== newSkill.slug || s.scope !== newSkill.scope), newSkill].sort((a, b) => a.slug.localeCompare(b.slug)));
     setSelectedSlug(newSkill.slug);
-    onToast(`Skill "${newSkill.slug}" created successfully!`, 'success');
+    setSelectedScope(newSkill.scope);
+    onToast(`Skill "${newSkill.slug}" (${newSkill.scope}) created successfully!`, 'success');
   };
 
-  const handleDeleted = (slug) => {
-    setSkills((prev) => prev.filter((s) => s.slug !== slug));
-    setSelectedSlug(skills.find((s) => s.slug !== slug)?.slug || null);
-    onToast(`Skill "${slug}" deleted.`, 'success');
+  const handleDeleted = (slug, scope) => {
+    setSkills((prev) => prev.filter((s) => !(s.slug === slug && s.scope === scope)));
+    const remaining = skills.filter((s) => !(s.slug === slug && s.scope === scope));
+    setSelectedSlug(remaining[0]?.slug || null);
+    setSelectedScope(remaining[0]?.scope || null);
+    onToast(`Skill "${slug}" removed from ${scope} pool.`, 'success');
   };
 
   return (
@@ -217,7 +238,7 @@ function SubstrateSkillsView({ initialSlug, onSync, onToast }) {
       <div className="substrate-skills-sidebar">
         <div className="substrate-skills-sidebar-head">
           <div className="substrate-skills-count">
-            <strong>Skills</strong> <span className="mono tnum">({skills.length})</span>
+            <strong>Skills</strong> <span className="mono tnum">({filtered.length})</span>
           </div>
           <button
             type="button"
@@ -228,11 +249,45 @@ function SubstrateSkillsView({ initialSlug, onSync, onToast }) {
           </button>
         </div>
 
+        {/* Pool Selector Tabs */}
+        <div className="substrate-pool-pills" role="group" aria-label="Skill scope">
+          <button
+            type="button"
+            className={`substrate-pool-pill ${poolFilter === 'all' ? 'active' : ''}`}
+            onClick={() => setPoolFilter('all')}
+          >
+            All ({poolCounts.all})
+          </button>
+          <button
+            type="button"
+            className={`substrate-pool-pill ${poolFilter === 'builtin' ? 'active' : ''}`}
+            onClick={() => setPoolFilter('builtin')}
+          >
+            Substrate ({poolCounts.builtin})
+          </button>
+          <button
+            type="button"
+            className={`substrate-pool-pill ${poolFilter === 'user' ? 'active' : ''}`}
+            onClick={() => setPoolFilter('user')}
+          >
+            User Global ({poolCounts.user})
+          </button>
+          {poolCounts.project > 0 && (
+            <button
+              type="button"
+              className={`substrate-pool-pill ${poolFilter === 'project' ? 'active' : ''}`}
+              onClick={() => setPoolFilter('project')}
+            >
+              Project ({poolCounts.project})
+            </button>
+          )}
+        </div>
+
         <div className="substrate-search-box">
           <input
             type="text"
             className="substrate-search-input mono"
-            placeholder="Search skills…"
+            placeholder="Search skills across pools…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -242,16 +297,21 @@ function SubstrateSkillsView({ initialSlug, onSync, onToast }) {
           {loadingList ? (
             <div className="substrate-empty-hint">Loading skills…</div>
           ) : filtered.length === 0 ? (
-            <div className="substrate-empty-hint">No matching skills found.</div>
+            <div className="substrate-empty-hint">No matching skills found in this pool.</div>
           ) : (
             filtered.map((s) => (
               <button
-                key={s.slug}
+                key={`${s.scope}-${s.slug}`}
                 type="button"
-                className={`substrate-skill-item ${selectedSlug === s.slug ? 'active' : ''}`}
-                onClick={() => setSelectedSlug(s.slug)}
+                className={`substrate-skill-item ${selectedSlug === s.slug && selectedScope === s.scope ? 'active' : ''}`}
+                onClick={() => { setSelectedSlug(s.slug); setSelectedScope(s.scope); }}
               >
-                <div className="substrate-skill-item-name mono">{s.slug}</div>
+                <div className="substrate-skill-item-header">
+                  <div className="substrate-skill-item-name mono">{s.slug}</div>
+                  <span className={`substrate-scope-badge ${s.scope}`}>
+                    {s.scope === 'builtin' ? 'Substrate' : s.scope === 'user' ? 'User Global' : `Project: ${s.project_name || 'repo'}`}
+                  </span>
+                </div>
                 <div className="substrate-skill-item-desc">{s.description || 'No description provided.'}</div>
                 <div className="substrate-skill-item-meta">
                   <span>{s.word_count || 0} words</span>
@@ -269,9 +329,11 @@ function SubstrateSkillsView({ initialSlug, onSync, onToast }) {
       <div className="substrate-skills-main">
         {selectedSlug ? (
           <SkillDetailEditor
+            key={`${selectedScope}-${selectedSlug}`}
             slug={selectedSlug}
+            scope={selectedScope}
             onSaved={(updated) => {
-              setSkills((prev) => prev.map((s) => s.slug === updated.slug ? { ...s, ...updated } : s));
+              setSkills((prev) => prev.map((s) => s.slug === updated.slug && s.scope === updated.scope ? { ...s, ...updated } : s));
               onToast(`Skill "${updated.slug}" saved.`, 'success');
             }}
             onDeleted={handleDeleted}
@@ -295,13 +357,11 @@ function SubstrateSkillsView({ initialSlug, onSync, onToast }) {
   );
 }
 
-function SkillDetailEditor({ slug, onSaved, onDeleted, onSync, onToast }) {
+function SkillDetailEditor({ slug, scope, onSaved, onDeleted, onSync, onToast }) {
   const [skill, setSkill] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
-  const [viewMode, setViewMode] = React.useState('preview'); // 'preview' | 'edit'
+  const [viewMode, setViewMode] = React.useState('preview');
   const [rawText, setRawText] = React.useState('');
-  const [name, setName] = React.useState('');
-  const [description, setDescription] = React.useState('');
   const [saving, setSaving] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
 
@@ -311,8 +371,6 @@ function SkillDetailEditor({ slug, onSaved, onDeleted, onSync, onToast }) {
       const data = await window.SubstrateAPI.getSubstrateSkill(slug);
       setSkill(data);
       setRawText(data.raw || '');
-      setName(data.frontmatter?.name || data.slug);
-      setDescription(data.frontmatter?.description || '');
     } catch (err) {
       onToast(`Error loading skill: ${err.message}`, 'error');
     } finally {
@@ -327,7 +385,11 @@ function SkillDetailEditor({ slug, onSaved, onDeleted, onSync, onToast }) {
   const handleSave = async (andSync = false) => {
     setSaving(true);
     try {
-      const res = await window.SubstrateAPI.updateSubstrateSkill(slug, { raw: rawText });
+      const res = await window.SubstrateAPI.updateSubstrateSkill(slug, {
+        raw: rawText,
+        scope: skill?.scope || scope,
+        project_id: skill?.project_id || null,
+      });
       setSkill(res);
       onSaved(res);
       if (andSync) {
@@ -341,11 +403,11 @@ function SkillDetailEditor({ slug, onSaved, onDeleted, onSync, onToast }) {
   };
 
   const handleDelete = async () => {
-    if (!window.confirm(`Are you sure you want to delete canonical skill "${slug}"?`)) return;
+    if (!window.confirm(`Are you sure you want to delete skill "${slug}" from ${skill?.scope || scope} pool?`)) return;
     setDeleting(true);
     try {
       await window.SubstrateAPI.deleteSubstrateSkill(slug);
-      onDeleted(slug);
+      onDeleted(slug, skill?.scope || scope);
     } catch (err) {
       onToast(`Failed to delete: ${err.message}`, 'error');
     } finally {
@@ -365,8 +427,13 @@ function SkillDetailEditor({ slug, onSaved, onDeleted, onSync, onToast }) {
     <div className="substrate-skill-editor-card">
       <div className="substrate-editor-head">
         <div className="substrate-editor-identity">
-          <h2 className="substrate-editor-title mono">{skill?.slug}</h2>
-          <div className="substrate-editor-path mono">substrate/skills/{skill?.slug}/SKILL.md</div>
+          <div className="substrate-editor-title-row">
+            <h2 className="substrate-editor-title mono">{skill?.slug}</h2>
+            <span className={`substrate-scope-badge ${skill?.scope}`}>
+              {skill?.scope === 'builtin' ? 'Substrate Built-in' : skill?.scope === 'user' ? 'User Global (~/.agents/skills)' : `Project: ${skill?.project_name}`}
+            </span>
+          </div>
+          <div className="substrate-editor-path mono">{skill?.dir_path}/SKILL.md</div>
         </div>
 
         <div className="substrate-editor-actions">
@@ -405,14 +472,16 @@ function SkillDetailEditor({ slug, onSaved, onDeleted, onSync, onToast }) {
               >
                 {saving ? 'Saving…' : 'Save'}
               </button>
-              <button
-                type="button"
-                className="orch-btn primary"
-                onClick={() => handleSave(true)}
-                disabled={saving}
-              >
-                {saving ? 'Saving…' : 'Save & Sync'}
-              </button>
+              {skill?.scope === 'builtin' && (
+                <button
+                  type="button"
+                  className="orch-btn primary"
+                  onClick={() => handleSave(true)}
+                  disabled={saving}
+                >
+                  {saving ? 'Saving…' : 'Save & Sync'}
+                </button>
+              )}
             </>
           )}
 
@@ -421,7 +490,7 @@ function SkillDetailEditor({ slug, onSaved, onDeleted, onSync, onToast }) {
             className="orch-btn danger ghost"
             onClick={handleDelete}
             disabled={deleting}
-            title="Delete this canonical skill"
+            title="Delete this skill"
           >
             Delete
           </button>
@@ -459,6 +528,7 @@ function CreateSkillModal({ onClose, onCreated }) {
   const [slug, setSlug] = React.useState('');
   const [name, setName] = React.useState('');
   const [description, setDescription] = React.useState('');
+  const [scope, setScope] = React.useState('builtin');
   const [body, setBody] = React.useState(`## When to Use\n- Trigger condition 1\n- Trigger condition 2\n\n## Procedure\n1. First step\n2. Second step\n\n## Pitfalls\n- Common caveat\n\n## Verification\n- Concrete command to verify outcome\n`);
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState(null);
@@ -477,6 +547,7 @@ function CreateSkillModal({ onClose, onCreated }) {
         slug: cleanSlug,
         name: (name || cleanSlug).trim(),
         description: description.trim(),
+        scope,
         body,
       });
       onCreated(res);
@@ -492,8 +563,8 @@ function CreateSkillModal({ onClose, onCreated }) {
       <div className="model-profile-modal substrate-modal" role="dialog" aria-modal="true" aria-labelledby="create-skill-title">
         <div className="model-profile-modal-head">
           <div>
-            <div id="create-skill-title" className="model-profile-modal-title">Create Canonical Skill</div>
-            <div className="roles-save-state">Adds a new skill to substrate/skills/&lt;slug&gt;/SKILL.md</div>
+            <div id="create-skill-title" className="model-profile-modal-title">Create Skill</div>
+            <div className="roles-save-state">Author a new skill in canonical substrate, user global, or project pool</div>
           </div>
           <button className="orch-btn ghost" type="button" onClick={onClose}>×</button>
         </div>
@@ -503,10 +574,22 @@ function CreateSkillModal({ onClose, onCreated }) {
 
           <div className="substrate-form-grid">
             <label className="model-profile-field">
+              <span>Target Pool</span>
+              <select
+                className="mono"
+                value={scope}
+                onChange={(e) => setScope(e.target.value)}
+              >
+                <option value="builtin">Substrate (Canonical repo source)</option>
+                <option value="user">User Global (~/.agents/skills/)</option>
+              </select>
+            </label>
+
+            <label className="model-profile-field">
               <span>Slug (Folder identifier)</span>
               <input
                 className="mono"
-                placeholder="e.g. code-refactoring"
+                placeholder="e.g. designing"
                 value={slug}
                 onChange={(e) => setSlug(e.target.value)}
                 required
@@ -514,16 +597,16 @@ function CreateSkillModal({ onClose, onCreated }) {
                 autoFocus
               />
             </label>
-
-            <label className="model-profile-field">
-              <span>Display Name</span>
-              <input
-                placeholder="e.g. Code Refactoring"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </label>
           </div>
+
+          <label className="model-profile-field">
+            <span>Display Name</span>
+            <input
+              placeholder="e.g. Designing"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </label>
 
           <label className="model-profile-field">
             <span>Description (When to use trigger description)</span>
@@ -689,7 +772,7 @@ function SubstrateInstructionsView({ onSync, onToast }) {
 }
 
 // ---------------------------------------------------------------------------
-// 3. Roles Tab (substrate/roles/)
+// 3. Multi-Pool Roles Registry Tab
 // ---------------------------------------------------------------------------
 
 function SubstrateRolesView({ onSync, onToast }) {
@@ -729,8 +812,8 @@ function SubstrateRolesView({ onSync, onToast }) {
     setSaving(true);
     try {
       const res = await window.SubstrateAPI.updateSubstrateRole(activeRole, { raw: roleBody });
-      setRoles((prev) => prev.map((r) => r.role === activeRole ? { ...r, body: res.body } : r));
-      onToast(`Role "${activeRole}.md" saved successfully.`, 'success');
+      setRoles((prev) => prev.map((r) => r.role === activeRole ? { ...r, body: res.body, overridden: true } : r));
+      onToast(`Role "${activeRole}" saved successfully.`, 'success');
       if (andSync) {
         await onSync();
       }
@@ -745,11 +828,13 @@ function SubstrateRolesView({ onSync, onToast }) {
     return <div className="substrate-empty-card"><div>Loading roles…</div></div>;
   }
 
+  const selectedRoleObj = roles.find((r) => r.role === activeRole);
+
   return (
     <div className="substrate-roles-container">
       <div className="substrate-roles-sidebar">
         <div className="substrate-roles-sidebar-head">
-          <strong>Canonical Roles</strong>
+          <strong>Roles Registry</strong>
           <span className="mono tnum">({roles.length})</span>
         </div>
         <div className="substrate-roles-list">
@@ -760,8 +845,16 @@ function SubstrateRolesView({ onSync, onToast }) {
               className={`substrate-role-item ${activeRole === r.role ? 'active' : ''}`}
               onClick={() => selectRole(r)}
             >
-              <span className="substrate-role-item-name mono">{r.role}.md</span>
-              <span className="substrate-role-item-meta">{r.size} bytes</span>
+              <div className="substrate-role-item-main">
+                <span className="substrate-role-item-name mono">{r.name}</span>
+                <span className={`substrate-scope-badge ${r.builtin ? 'builtin' : 'custom'}`}>
+                  {r.builtin ? 'Built-in' : 'Custom'}
+                </span>
+              </div>
+              <div className="substrate-role-item-sub">
+                {r.glyph && <span className="substrate-role-glyph" style={{ color: r.color }}>{r.glyph}</span>}
+                <span className="substrate-role-item-meta">{r.overridden ? 'overridden' : 'default'}</span>
+              </div>
             </button>
           ))}
         </div>
@@ -772,8 +865,15 @@ function SubstrateRolesView({ onSync, onToast }) {
           <div className="substrate-skill-editor-card">
             <div className="substrate-editor-head">
               <div className="substrate-editor-identity">
-                <h2 className="substrate-editor-title mono">{activeRole}.md</h2>
-                <div className="substrate-editor-path mono">substrate/roles/{activeRole}.md</div>
+                <div className="substrate-editor-title-row">
+                  <h2 className="substrate-editor-title mono">{activeRole}</h2>
+                  <span className={`substrate-scope-badge ${selectedRoleObj?.builtin ? 'builtin' : 'custom'}`}>
+                    {selectedRoleObj?.builtin ? 'Built-in Role' : 'Custom User Role'}
+                  </span>
+                </div>
+                <div className="substrate-editor-path mono">
+                  {selectedRoleObj?.overlay_path || selectedRoleObj?.default_path || `~/.golem/roles/${activeRole}.md`}
+                </div>
               </div>
 
               <div className="substrate-editor-actions">
