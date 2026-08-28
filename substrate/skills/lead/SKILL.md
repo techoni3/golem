@@ -1,6 +1,6 @@
 ---
 name: lead
-description: Load upon `lead` role assignment, direct spec assignment in case of no prior role assigned or explicit human directive. Own one workstream from raw intent to closed result — brainstorm and lock the design, decompose into tasks, route the build, reconcile, and close.
+description: Use when assigned `lead` role, direct spec assignment in case of no prior role assigned or explicit human directive. Own one workstream from raw intent to closed result — brainstorm and lock the design, decompose into tasks, route the build, reconcile, and close.
 ---
 
 # Lead
