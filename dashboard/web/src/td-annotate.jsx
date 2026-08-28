@@ -667,41 +667,48 @@ function TdToc({ headings, rootRef, documentKey, containerSelector }) {
     setActiveId((current) => headings.some((heading) => heading.id === current) ? current : (headings[0]?.id || ''));
   }, [headings]);
 
-  React.useLayoutEffect(() => {
+  React.useEffect(() => {
     const root = rootRef.current;
     const host = root?.closest(containerSelector) || document.querySelector(containerSelector);
     const scrollRoot = scrollParentFor(root);
     if (!root || !host || !scrollRoot) return undefined;
+    let frame = 0;
     const update = () => {
-      const hostRect = host.getBoundingClientRect();
-      const scrollRect = scrollRoot.getBoundingClientRect();
-      const main = root.closest('.td-main');
-      const railRect = (main || host).getBoundingClientRect();
-      const nextLeft = Math.max(0, Math.round(railRect.left - hostRect.left));
-      const nextTop = Math.max(0, Math.round(scrollRect.top - hostRect.top));
-      const nextMaxHeight = Math.max(160, Math.round(scrollRect.bottom - scrollRect.top));
-      setMetrics((prev) => {
-        if (prev && prev.left === nextLeft && prev.top === nextTop && prev.maxHeight === nextMaxHeight) {
-          return prev;
-        }
-        return { left: nextLeft, top: nextTop, maxHeight: nextMaxHeight };
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const hostRect = host.getBoundingClientRect();
+        const scrollRect = scrollRoot.getBoundingClientRect();
+        const main = root.closest('.td-main');
+        const railRect = (main || host).getBoundingClientRect();
+        const nextLeft = Math.max(0, Math.round(railRect.left - hostRect.left));
+        const nextTop = Math.max(0, Math.round(scrollRect.top - hostRect.top));
+        const nextMaxHeight = Math.max(160, Math.round(scrollRect.bottom - scrollRect.top));
+        setMetrics((prev) => {
+          if (prev && Math.abs(prev.left - nextLeft) <= 1 && Math.abs(prev.top - nextTop) <= 1 && Math.abs(prev.maxHeight - nextMaxHeight) <= 1) {
+            return prev;
+          }
+          return { left: nextLeft, top: nextTop, maxHeight: nextMaxHeight };
+        });
       });
     };
     update();
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(update) : null;
-    [root, host, scrollRoot, root.closest('.td-main')].filter(Boolean).forEach((node) => observer?.observe(node));
+    observer?.observe(host);
     window.addEventListener('resize', update, { passive: true });
     return () => {
+      cancelAnimationFrame(frame);
       observer?.disconnect();
       window.removeEventListener('resize', update);
     };
-  }, [headings, rootRef, containerSelector]);
+  }, [containerSelector, rootRef]);
 
-  React.useLayoutEffect(() => {
+  React.useEffect(() => {
     const main = rootRef.current?.closest('.td-main');
     if (!main) return undefined;
     main.classList.toggle('td-toc-rail-open', !hidden);
-    return () => main.classList.remove('td-toc-rail-open');
+    return () => {
+      main.classList.remove('td-toc-rail-open');
+    };
   }, [hidden, rootRef]);
 
   React.useEffect(() => {
