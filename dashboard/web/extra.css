@@ -5505,6 +5505,18 @@ mark.anno.anno-tail::after {
    Substrate Layer UI (GOL-2)
    ========================================================================== */
 
+.ps-hint-pill {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  background: var(--bg-3);
+  color: var(--text-3);
+  padding: 1px 5px;
+  border-radius: 999px;
+  margin-left: 6px;
+  border: 1px solid var(--border-2);
+  vertical-align: middle;
+}
+
 .substrate-page {
   display: flex;
   flex-direction: column;
