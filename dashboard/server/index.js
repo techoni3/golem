@@ -21,7 +21,9 @@ import { registerSubstrateRoutes } from './substrate.js';
 import { teamAssists } from './team-assist.js';
 import { golemHome, dashboardJsonPath, journalDirFor, sessionsJsonPath } from '../../lib/golem-home.js';
 import { createRole, deleteRole, getRole, listRoleCards, roleChangeBrief, roleMission, setSessionRole, updateRoleMeta, writeRoleCard } from '../../lib/session-role.js';
-import { enrichDispatchableRows } from '../../lib/worker-manager.js';
+import { enrichDispatchableRows, spawnWorker, killWorker, peekWorker } from '../../lib/worker-manager.js';
+import { listWorkers } from '../../lib/worker-registry.js';
+import { capturePane, hasSession } from '../../lib/tmux-driver.js';
 import { acceptedDelivery, publishDurableEnvelope, settleDurableEnvelope } from './envelope-delivery.js';
 import { recordTypedEnvelopeOutcome } from './typed-delivery.js';
 import { sameEndpointSecret } from '../../lib/typed-worker-endpoint.js';
@@ -1136,6 +1138,234 @@ async function main() {
     const sessionId = req.params.sessionId;
     const session = state.nativeSessions().find((s) => s.session_id === sessionId) ?? null;
     return readNativeSessionPeek(sessionId, session);
+  });
+
+  // GOL-15: live ANSI terminal scrollback for Peek Modal.
+  // GET /api/native-sessions/:sessionId/terminal?lines=500
+  // Returns { sessionId, output, lines, truncated } with raw ANSI sequences.
+  fastify.get('/api/native-sessions/:sessionId/terminal', async (req, reply) => {
+    const sessionId = req.params.sessionId;
+    const lines = Math.min(2000, Math.max(50, Number(req.query?.lines) || 500));
+    const session = state.nativeSessions().find((s) => s.session_id === sessionId) ?? null;
+    // Resolve tmux session name: prefer worker registry, fallback to session name, then sessionId
+    let tmuxSession = null;
+    let socket = null;
+    try {
+      const workers = listWorkers({});
+      const worker = workers.find((w) => w.session_id === sessionId || w.name === session?.name);
+      if (worker) {
+        tmuxSession = worker.tmux_session || worker.name;
+        // socket stored per worker is used implicitly by capturePane via hasSession check
+      }
+    } catch {}
+    if (!tmuxSession) tmuxSession = session?.name || sessionId;
+    try {
+      // capturePane throws if tmux session missing; treat as empty output not 500
+      const output = capturePane(tmuxSession, lines, { socket });
+      return { sessionId, output, lines, truncated: output.split('\n').length >= lines };
+    } catch (err) {
+      // Fallback: try raw sessionId as tmux name
+      try {
+        const output2 = capturePane(sessionId, lines, { socket });
+        return { sessionId, output: output2, lines, truncated: output2.split('\n').length >= lines };
+      } catch {}
+      return { sessionId, output: '(no terminal session active)', lines, truncated: false };
+    }
+  });
+
+  // GOL-15: mid-turn steer / pause / halt / kill via \n  // POST /api/native-sessions/:sessionId/message  { text, mode: 'steer'|'interrupt'|'halt', pause?:bool }
+  fastify.post('/api/native-sessions/:sessionId/message', async (req, reply) => {
+    const sessionId = req.params.sessionId;
+    const body = req.body ?? {};
+    const text = String(body.text || body.message || '').trim();
+    const mode = String(body.mode || 'steer').toLowerCase();
+    if (!text && mode !== 'halt' && mode !== 'kill' && mode !== 'pause') return reply.code(400).send({ error: 'text is required for steer/interrupt' });
+    const session = state.nativeSessions().find((s) => s.session_id === sessionId);
+    if (!session && mode !== 'kill') return reply.code(404).send({ error: `session not found: ${sessionId}` });
+    try {
+      if (mode === 'steer' || mode === 'brief') {
+        const result = await deliverControlEnvelope(tracker, {
+          sender_id: 'human:dashboard', recipient_session_id: sessionId,
+          kind: 'brief', content: text, legacy: { path: '/brief', body: text },
+        });
+        const ok = result.delivered || result.retry_queued;
+        return reply.code(ok ? 200 : (result.delivery?.status || 502)).send({ ok, queued: result.retry_queued, envelope_id: result.envelope.id, delivery: result.delivery });
+      }
+      if (mode === 'interrupt') {
+        const result = await deliverControlEnvelope(tracker, {
+          sender_id: 'human:dashboard', recipient_session_id: sessionId,
+          kind: 'interrupt', content: text || 'interrupt from dashboard', legacy: { path: '/interrupt', body: text || 'interrupt' },
+        });
+        const ok = result.delivered || result.retry_queued;
+        return reply.code(ok ? 200 : (result.delivery?.status || 502)).send({ ok, queued: result.retry_queued, envelope_id: result.envelope.id, delivery: result.delivery });
+      }
+      if (mode === 'halt') {
+        const result = await deliverControlEnvelope(tracker, {
+          sender_id: 'human:dashboard', recipient_session_id: sessionId,
+          kind: 'halt', content: text || 'halt requested from dashboard', legacy: { path: '/halt', body: text || 'halt' },
+        });
+        const ok = result.delivered || result.retry_queued;
+        return reply.code(ok ? 200 : (result.delivery?.status || 502)).send({ ok, queued: result.retry_queued, envelope_id: result.envelope.id, delivery: result.delivery });
+      }
+      if (mode === 'kill') {
+        // Kill via worker-manager (tmux + process group)
+        const workers = listWorkers({});
+        const worker = workers.find((w) => w.session_id === sessionId || w.name === sessionId || w.name === session?.name);
+        if (worker) {
+          const res = await killWorker(worker.name, worker.project_id ? { projectId: worker.project_id } : {});
+          return { ok: true, killed: worker.name, worker: res };
+        }
+        // Fallback: try direct session kill via tmux hasSession check
+        return reply.code(404).send({ error: `no worker found for session ${sessionId} to kill` });
+      }
+      return reply.code(400).send({ error: `unknown mode: ${mode}` });
+    } catch (err) {
+      return reply.code(500).send({ error: String(err?.message || err) });
+    }
+  });
+
+  // GOL-15: 1-click worker spawn from UI — mirrors `golem spawn`
+  // POST /api/workers/spawn  { role, name?, project?, profile? }
+  fastify.post('/api/workers/spawn', async (req, reply) => {
+    const body = req.body ?? {};
+    const role = String(body.role || '').trim();
+    const name = body.name != null ? String(body.name).trim() || null : null;
+    const project = body.project != null ? String(body.project).trim() || null : null;
+    const profile = body.profile != null ? String(body.profile).trim() || null : null;
+    if (!role) return reply.code(400).send({ error: 'role is required' });
+    try {
+      const worker = await spawnWorker({ role, name, project, profile });
+      broadcastWS({ type: 'native-sessions-update', native_sessions: enrichSessionRows(state.nativeSessions(), state.channels()), channels: state.channels() });
+      return reply.code(201).send(worker);
+    } catch (err) {
+      return reply.code(500).send({ error: String(err?.message || err) });
+    }
+  });
+
+  fastify.get('/api/workers', async (req) => {
+    const project = req.query?.project ? resolveProjectId(String(req.query.project)) : null;
+    const workers = listWorkers({ projectId: project });
+    return workers;
+  });
+
+  // GOL-16: environment diagnostics — Pi, Claude Code, Codex, model API keys
+  fastify.get('/api/diagnostics', async () => {
+    const checks = [];
+    const hasCommand = (cmd) => {
+      try { const r = spawnSync('sh', ['-c', `command -v ${cmd}`], { encoding: 'utf8' }); return r.status === 0 && String(r.stdout||'').trim().length > 0; } catch { return false; }
+    };
+    const versionOf = (cmd, args) => {
+      try { const r = spawnSync(cmd, args, { encoding: 'utf8', timeout: 3000 }); if (r.status === 0) return String(r.stdout||'').trim().split('\n')[0].trim().slice(0,120); } catch {}
+      return null;
+    };
+    // Pi
+    {
+      const v = versionOf('pi', ['--version']);
+      const pinned = (await import('../../lib/pi-compatibility.js')).SUPPORTED_PI_VERSION;
+      let status='red', detail=v || 'not found on PATH', hint='Install Pi and ensure `pi --version` matches pinned '+pinned+' — see README';
+      if (v) {
+        if (v.includes(pinned) || v.trim()===pinned) { status='green'; detail=`${v} (pinned ${pinned})`; hint=''; }
+        else { status='amber'; detail=`${v} (expected ${pinned})`; hint=`Run golem sync or update Pi to ${pinned}`; }
+      }
+      checks.push({ id:'pi', label:'Pi', status, detail, hint });
+    }
+    // Claude Code
+    {
+      const has = hasCommand('claude');
+      const v = has ? versionOf('claude', ['--version']) : null;
+      let status = has ? 'green' : 'amber', detail = v || (has ? 'found' : 'not found on PATH'), hint = has ? '' : 'Install Claude Code (https://docs.anthropic.com/claude-code) — optional if using Pi/Codex';
+      checks.push({ id:'claude', label:'Claude Code', status, detail, hint });
+    }
+    // Codex
+    {
+      const has = hasCommand('codex') || hasCommand('code');
+      const v = hasCommand('codex') ? versionOf('codex', ['--version']) : versionOf('code', ['--version']);
+      let status = has ? 'green' : 'amber', detail = v || (has ? 'found' : 'not found on PATH'), hint = has ? '' : 'Install Codex (openai) — optional if using Pi/Claude';
+      checks.push({ id:'codex', label:'Codex', status, detail, hint });
+    }
+    // Model API keys
+    {
+      const keys = [
+        ['ANTHROPIC_API_KEY', !!process.env.ANTHROPIC_API_KEY],
+        ['OPENAI_API_KEY', !!process.env.OPENAI_API_KEY],
+        ['GOOGLE_API_KEY', !!process.env.GOOGLE_API_KEY || !!process.env.GEMINI_API_KEY],
+        ['XAI_API_KEY', !!process.env.XAI_API_KEY],
+      ];
+      const present = keys.filter(([,v])=>v).map(([k])=>k);
+      let status = present.length>0 ? 'green' : 'amber';
+      let detail = present.length>0 ? present.join(', ') + ' set' : 'no model API keys detected in env';
+      let hint = present.length>0 ? '' : 'Set at least one of ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY — see model profile';
+      checks.push({ id:'model-keys', label:'Model API keys', status, detail, hint });
+    }
+    // Substrate sync
+    {
+      let status='green', detail='substrate available', hint='';
+      try {
+        const hasConfig = !!CONFIG.golemRoot;
+        if (!hasConfig) { status='amber'; detail='golem root not configured'; hint='Check GOLEM_ROOT env'; }
+      } catch (e) { status='amber'; detail='substrate check failed'; hint=String(e.message||e); }
+      checks.push({ id:'substrate', label:'Substrate', status, detail, hint });
+    }
+    const red = checks.filter(c=>c.status==='red').length;
+    const amber = checks.filter(c=>c.status==='amber').length;
+    const overall = red>0 ? 'red' : amber>0 ? 'amber' : 'green';
+    return { checks, overall, generated_at: new Date().toISOString() };
+  });
+
+  // GOL-16: workspace setup — scaffold new project or import existing git repo
+  fastify.post('/api/projects/scaffold', async (req, reply) => {
+    const name = String(req.body?.name || '').trim();
+    if (!name) return reply.code(400).send({ error: 'name is required' });
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,48) || 'project';
+    const dir = path.join(CONFIG.projectsRoot, slug);
+    try {
+      await fs.promises.mkdir(dir, { recursive: true });
+      const agentsPath = path.join(dir, 'AGENTS.md');
+      let exists = false;
+      try { await fs.promises.access(agentsPath); exists = true; } catch {}
+      if (!exists) {
+        const template = `# ${name}\n\nGolem project — ${slug}\n\n## Agent Instructions\n\nSee substrate/AgENTS.md for harness rules.\n`;
+        await fs.promises.writeFile(agentsPath, template, 'utf8');
+      }
+      // Ensure tracker state is clean — projects are auto-discovered; no per-project DB init needed beyond dir
+      // Broadcast updated projects list after a short rescan (state watches FS; we also push optimistic)
+      const projectId = (await import('./project-id.js')).projectIdFor(dir);
+      return reply.code(201).send({ ok: true, name, slug, path: dir, project_id: projectId, agents: agentsPath });
+    } catch (e) {
+      return reply.code(500).send({ error: String(e.message||e) });
+    }
+  });
+
+  fastify.post('/api/projects/import', async (req, reply) => {
+    const p = String(req.body?.path || '').trim();
+    if (!p) return reply.code(400).send({ error: 'path is required' });
+    const resolved = path.isAbsolute(p) ? p : path.resolve(p);
+    try {
+      const stat = await fs.promises.stat(resolved);
+      if (!stat.isDirectory()) return reply.code(400).send({ error: 'path is not a directory' });
+      const gitPath = path.join(resolved, '.git');
+      try { await fs.promises.access(gitPath); } catch { return reply.code(400).send({ error: 'path is not a Git repo (missing .git)' }); }
+      const agentsPath = path.join(resolved, 'AGENTS.md');
+      let exists = false;
+      try { await fs.promises.access(agentsPath); exists = true; } catch {}
+      if (!exists) {
+        const name = path.basename(resolved);
+        await fs.promises.writeFile(agentsPath, `# ${name}\n\nGolem project — imported from ${resolved}\n`, 'utf8');
+      }
+      // If imported path is outside projectsRoot, create a symlink inside projectsRoot for discovery (optional)
+      // For now, just ensure it is seen — if outside root, add a .golem marker or symlink
+      const insideRoot = resolved.startsWith(CONFIG.projectsRoot);
+      let linkPath = null;
+      if (!insideRoot) {
+        const slug = path.basename(resolved).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,48) || 'imported';
+        linkPath = path.join(CONFIG.projectsRoot, slug);
+        try { await fs.promises.symlink(resolved, linkPath); } catch (e) { if (e.code!=='EEXIST') throw e; }
+      }
+      const projectId = (await import('./project-id.js')).projectIdFor(resolved);
+      return reply.code(201).send({ ok: true, path: resolved, link: linkPath, project_id: projectId });
+    } catch (e) {
+      return reply.code(500).send({ error: String(e.message||e) });
+    }
   });
 
   // ---- WS2: tracker REST (the dashboard is the SINGLE WRITER) ----
@@ -2373,16 +2603,20 @@ async function main() {
     return out;
   });
 
-  // TKT-0206: global ideas stack. A FIFO queue of raw thoughts the user
-  // drops via the bottom-left anchor in the dashboard. Each idea is a
-  // .md file at ~/.golem/ideas/ with frontmatter (id, created_at,
-  // status) + body. "Popping" deletes the file (the user is taking it
-  // forward — likely into a tracker ticket).
-  fastify.get('/api/ideas', async () => listIdeas());
+  // TKT-0206 / GOL-13: ideas stack now project-scoped — ?project=<contract_id>
+  // filters the queue to that project's ideas. Without the param the legacy
+  // global view (all ideas) is returned for backward compat.
+  fastify.get('/api/ideas', async (req) => {
+    const project = req.query?.project ? resolveProjectId(String(req.query.project)) : null;
+    return listIdeas(project || null);
+  });
 
   fastify.post('/api/ideas', async (req, reply) => {
     try {
-      const idea = await createIdea({ body: req.body?.body || '' });
+      const b = req.body ?? {};
+      const project = b.project_id || b.project || b.projectId || null;
+      const resolved = project ? resolveProjectId(String(project)) : null;
+      const idea = await createIdea({ body: b.body || '', project_id: resolved || project || null });
       return idea;
     } catch (err) {
       if (err && err.status) return reply.code(err.status).send({ error: err.message });

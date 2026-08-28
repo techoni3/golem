@@ -106,7 +106,7 @@ upsertSessionFact({
   provider: 'ollama', model: 'deepseek-v4-flash:0731-cloud',
   delivery: { mode: 'typed-worker', push: true, ready: true },
   capabilities: { typed_worker: true }, trust: 'host-full-trust',
-  observations: { adapter_state: 'active', delivery_state: 'accepted', pi_version: '0.80.10', extension_version: '5.6.14' },
+  observations: { adapter_state: 'active', delivery_state: 'accepted', pi_version: '0.84.3', extension_version: '5.6.14' },
   observed_at: new Date(staleFactAt).toISOString(),
 });
 const piBusy = (await readNativeSessions(() => true, [{
@@ -122,7 +122,7 @@ assert.equal(piBusy?.continuation_key, 'pi-continuation');
 assert.equal(piBusy?.delivery_mode, 'typed-worker');
 assert.equal(piBusy?.delivery_state, 'accepted');
 assert.equal(piBusy?.trust, 'host-full-trust');
-assert.deepEqual(piBusy?.compatibility, { status: 'supported', pi_version: '0.80.10', node_requirement: '>=22.19' });
+assert.deepEqual(piBusy?.compatibility, { status: 'supported', pi_version: '0.84.3', supported_pi_version: '0.84.3', node_requirement: '>=22.19' });
 
 upsertSessionFact({
   canonical_id: 'pi-idle-live', continuation_key: 'pi-continuation-idle', harness: 'pi',
@@ -131,7 +131,7 @@ upsertSessionFact({
   provider: 'ollama', model: 'deepseek-v4-flash:0731-cloud',
   delivery: { mode: 'typed-worker', push: true, ready: true },
   capabilities: { typed_worker: true }, trust: 'host-full-trust',
-  observations: { adapter_state: 'idle', delivery_state: 'settled', pi_version: '0.80.10', extension_version: '5.6.14' },
+  observations: { adapter_state: 'idle', delivery_state: 'settled', pi_version: '0.84.3', extension_version: '5.6.14' },
   observed_at: new Date(staleFactAt).toISOString(),
 });
 const piIdle = (await readNativeSessions(() => true, [{

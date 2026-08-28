@@ -49,10 +49,12 @@ function App() {
         : `Ticket ${route.id} · Golem`;
     } else if (route.kind === 'project') {
       title = project ? `${project.name} · Golem` : 'Project · Golem';
+    } else if (route.kind === 'onboarding') {
+      title = 'First Flight · Golem';
     } else {
       const names = {
-        dashboard: 'Dashboard', tracker: 'Tracker', specs: 'Specs',
-        projects: 'Projects', agents: 'Agents', logs: 'Logs', settings: 'Settings',
+        dashboard: 'Dashboard',
+        projects: 'Projects', agents: 'Swarm', settings: 'Settings', onboarding: 'First Flight',
       };
       title = `${names[route.kind] || 'Dashboard'} · Golem`;
     }
@@ -83,21 +85,26 @@ function App() {
         </div>
       </div>
     );
-  } else if (route.kind === 'dashboard') page = <Dashboard setRoute={navigate}/>;
-  else if (route.kind === 'tracker') page = <TrackerBoard route={route} setRoute={navigate} view={route.view}/>;
-  else if (route.kind === 'specs') page = <SpecsPage/>;
+  } else if (route.kind === 'onboarding') page = window.OnboardingPage ? React.createElement(window.OnboardingPage, { setRoute: navigate }) : <Dashboard setRoute={navigate}/>;
+  else if (route.kind === 'dashboard') {
+    // GOL-16: First Flight — 0 projects → onboarding wizard (auto-present)
+    if (state.projects.length === 0) page = window.OnboardingPage ? React.createElement(window.OnboardingPage, { setRoute: navigate }) : <Dashboard setRoute={navigate}/>;
+    else page = <Dashboard setRoute={navigate}/>;
+  }
   else if (route.kind === 'projects') page = <ProjectsPage setRoute={navigate}/>;
   else if (route.kind === 'agents') page = <AgentsPage setRoute={navigate}/>;
-  else if (route.kind === 'logs') page = <LogsPage/>;
   else if (route.kind === 'settings') page = <SettingsPage/>;
   else if (route.kind === 'project') page = (
     <ProjectView projectId={route.id} tab={route.tab} showArchived={route.showArchived} q={route.q} setRoute={navigate}/>
   );
-  // GOL-273: the standalone ticket page (/tickets/<id>) was scrubbed. The
-  // only full-page ticket surface is the reader view (/read/<id>); legacy
-  // /tickets/<id> deep links parse to the reader route in router.js.
+  // GOL-273 + GOL-13: pruned standalone boards (/tracker, /specs, /logs)
+  // and the CEO chat overlay — legacy deep links fallback to dashboard.
   else page = <Dashboard setRoute={navigate}/>;
 
+  // GOL-13: project-scoped ideas — the drawer's projectId is derived from
+  // the current route so it shows only that project's idea queue when open
+  // from a project workspace.
+  const ideasProjectId = route.kind === 'project' ? route.id : null;
   return (
     <div className="app">
       <Sidebar route={route} setRoute={navigate}/>
@@ -106,13 +113,10 @@ function App() {
         {page}
       </div>
       {/* Drawers are URL overlays (TKT-0153): App owns their open state, derived
-          from route.overlays (?ticket=, ?compose=1&project=, ?chat=, ?ns=).
+          from route.overlays (?ticket=, ?compose=1&project=, ?ns=).
           Openers call Router.open* (push a history entry); close calls
-          Router.closeOverlay (history.back), so Back closes each drawer. */}
-      <CeoChatDrawer
-        open={!!route.overlays.chat}
-        sessionId={route.overlays.chat}
-        onClose={() => window.Router.closeOverlay('chat')}/>
+          Router.closeOverlay (history.back), so Back closes each drawer.
+          GOL-13: CeoChatDrawer (?chat) pruned. */}
        <NativeSessionDrawer
          open={!!route.overlays.ns}
          sessionId={route.overlays.ns}
@@ -130,11 +134,11 @@ function App() {
         open={!!route.overlays.ticket}
         ticketId={route.overlays.ticket}
         onClose={() => window.Router.closeOverlay('ticket')}/>
-      {/* TKT-0206: global ideas stack — URL overlay (?ideas=1) with the
-          same shell pattern as the other drawers. The anchor is in the
-          sidebar (the user wanted it embedded, not floating). */}
+      {/* GOL-13: project-scoped ideas stack — overlay ?ideas=1, but the list/create
+          are filtered by the owning project (derived from the route). */}
       <IdeasDrawer
         open={!!route.overlays.ideas}
+        projectId={ideasProjectId}
         onClose={() => window.Router.closeOverlay('ideas')}/>
     </div>
   );
