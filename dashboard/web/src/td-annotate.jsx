@@ -1123,6 +1123,25 @@ function TdAnnotate({ body, comments, currentAuthor = 'you', onCreate, onCreateA
     });
   }, [html, documentTitle]);
 
+  const lastHtmlRef = React.useRef(null);
+  React.useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    if (lastHtmlRef.current !== html) {
+      lastHtmlRef.current = html;
+      root.innerHTML = html || '';
+      assignBlockIds(root);
+      if (window.runMermaid) {
+        const nodes = root.querySelectorAll('.mermaid');
+        if (nodes.length) {
+          window.runMermaid(nodes).then(() => {
+            attachMermaidFullscreen(root);
+          });
+        }
+      }
+    }
+  }, [html]);
+
   React.useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
@@ -1157,23 +1176,6 @@ function TdAnnotate({ body, comments, currentAuthor = 'you', onCreate, onCreateA
     const root = rootRef.current;
     if (root) setActiveAnnotationState(root, activeId);
   }, [activeId, annotations, html]);
-
-  // TKT-0171: after the body is injected, lazy-load mermaid (only when one or
-  // more .mermaid blocks are present) and render the diagrams in place. The
-  // dynamic import lives in window.runMermaid (an index.html module script),
-  // because babel-standalone rewrites dynamic import() inside text/babel
-  // components and would break a native esm.sh load.
-  React.useEffect(() => {
-    const root = rootRef.current;
-    if (!root || !window.runMermaid) return;
-    const nodes = root.querySelectorAll('.mermaid');
-    if (!nodes.length) return;
-    let cancelled = false;
-    window.runMermaid(nodes).then(() => {
-      if (!cancelled) attachMermaidFullscreen(root);
-    });
-    return () => { cancelled = true; };
-  }, [html]);
 
   // TKT-0172: keep blockCountsRef (open comments per block_id) fresh so the
   // hover effect — which only re-binds listeners when the rendered body
@@ -1862,7 +1864,7 @@ React.useEffect(() => {
 
   return (
     <div className={`td-annotate-wrap ${railOpen ? 'rail-open' : ''}`}>
-      <div ref={rootRef} className={`td-md${altComment ? ' anno-alt-comment' : ''}`} onClick={onRootClick} dangerouslySetInnerHTML={{ __html: html || '' }}/>
+      <div ref={rootRef} className={`td-md${altComment ? ' anno-alt-comment' : ''}`} onClick={onRootClick} />
       {railAndFab}
     </div>
   );
