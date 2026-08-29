@@ -89,11 +89,15 @@ function deriveSessionId() {
   // Explicit launcher override wins; else the logical id from the parent session
   // file; else the per-run CLAUDE_CODE_SESSION_ID (last resort — diverges on resume).
   if (process.env.GOLEM_CEO_SESSION_ID) return process.env.GOLEM_CEO_SESSION_ID;
+  if (process.env.HERMES_SESSION_ID) return process.env.HERMES_SESSION_ID;
+  if (process.env.GOLEM_SESSION_ID) return process.env.GOLEM_SESSION_ID;
   const j = readParentSessionFile();
   if (j && typeof j.sessionId === 'string' && j.sessionId) return j.sessionId;
   return resolveCallerSessionId({ home: tracker.golemHome() }).sessionId || process.env.CLAUDE_CODE_SESSION_ID || '';
 }
 function deriveSessionName() {
+  if (process.env.HERMES_SESSION_NAME) return process.env.HERMES_SESSION_NAME;
+  if (process.env.GOLEM_WORKER_NAME) return process.env.GOLEM_WORKER_NAME;
   const j = readParentSessionFile();
   if (j && typeof j.name === 'string' && j.name) return j.name;
   const bridge = bridgeEndpointForParent({ home: tracker.golemHome() });
@@ -105,6 +109,8 @@ function launcherBoundSessionId() {
     ? process.env.GOLEM_CEO_SESSION_ID.trim()
     : '';
   if (envId) return envId;
+  if (process.env.HERMES_SESSION_ID) return process.env.HERMES_SESSION_ID.trim();
+  if (process.env.GOLEM_SESSION_ID) return process.env.GOLEM_SESSION_ID.trim();
   const parent = readParentSessionFile();
   if (typeof parent?.sessionId === 'string' && parent.sessionId.trim()) return parent.sessionId.trim();
   const runId = typeof process.env.CLAUDE_CODE_SESSION_ID === 'string'
@@ -156,6 +162,9 @@ function claudeChannelProviderStatus(env = process.env) {
 function channelConsumerStatus(harness) {
   if (harness === 'opencode') {
     return { ready: true, reason: null, transport: 'opencode-bridge' };
+  }
+  if (harness === 'hermes') {
+    return { ready: true, reason: null, transport: 'hermes-channel' };
   }
   const provider = claudeChannelProviderStatus();
   if (!provider.supported) {
@@ -273,7 +282,9 @@ function registerChannel(port, { logMissing = true } = {}) {
   SESSION_NAME = deriveSessionName();
   const bridge = bridgeEndpointForParent({ home: tracker.golemHome() });
   const siblings = sessionsForParent({ home: tracker.golemHome() });
-  const harness = siblings.length || (bridge && bridge.session_id === SESSION_ID) ? 'opencode' : 'claudecode';
+  const harness = siblings.length || (bridge && bridge.session_id === SESSION_ID)
+    ? 'opencode'
+    : (process.env.HERMES_SESSION_ID ? 'hermes' : 'claudecode');
   const consumer = channelConsumerStatus(harness);
   if (!SESSION_ID && siblings.length === 0) {
     if (WATCH_OPENCODE_BRIDGES) {

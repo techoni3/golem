@@ -828,12 +828,16 @@ async function cmdHermes(args) {
   const hermesArgs = ['--pass-session-id', '--accept-hooks'];
   hermesArgs.push(...passthrough);
 
+  hermesAdapter.ensureHermesConfigured({ renderRoot: renderDirFor('hermes') });
+
   const env = {
     ...process.env,
     GOLEM_PROJECT_DIR: projectRoot,
     GOLEM_PROJECT_ID: projectId,
     HERMES_SESSION_ID: sessionId,
-    ...(name ? { HERMES_SESSION_NAME: name } : {}),
+    GOLEM_SESSION_ID: sessionId,
+    GOLEM_CEO_SESSION_ID: sessionId,
+    ...(name ? { HERMES_SESSION_NAME: name, GOLEM_WORKER_NAME: name } : {}),
   };
 
   const child = spawn(hermesBin, hermesArgs, { cwd: process.cwd(), env, stdio: 'inherit' });
@@ -1906,6 +1910,7 @@ async function cmdSync(args) {
   }
   if (target === 'hermes') {
     ccAdapter.syncMcpChannelDeps({ repoRoot: GOLEM_ROOT, outDir });
+    hermesAdapter.ensureHermesConfigured({ renderRoot: outDir });
   }
   if (target === 'cc-marketplace') {
     ccAdapter.ensureMarketplacePluginLink({ ccPluginDir: renderDirFor('cc'), marketplaceOutDir: outDir });
