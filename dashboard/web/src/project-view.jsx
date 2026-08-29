@@ -1500,8 +1500,34 @@ function CockpitRight({ project, cid, activeSpec, onPeek, onSpawn }) {
   (window.useStore ? window.useStore() : null);
   const [steerSessionId, setSteerSessionId] = window.React.useState(null);
   const [steerInput, setSteerInput] = window.React.useState('');
+  const [rawWorkers, setRawWorkers] = window.React.useState([]);
 
   const alive = window.Store.getProjectAliveSessions(project);
+
+  window.React.useEffect(() => {
+    if (!cid) return;
+    let cancelled = false;
+    const fetchW = () => {
+      window.SubstrateAPI.listWorkers(cid).then(list => {
+        if (!cancelled && Array.isArray(list)) setRawWorkers(list);
+      }).catch(()=>{});
+    };
+    fetchW();
+    const timer = setInterval(fetchW, 5000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [cid, alive.length]);
+
+  // Include failed/unregistered workers that still exist in workers.json
+  const failedWorkers = window.React.useMemo(() => {
+    const aliveNames = new Set(alive.map(s => s.name).filter(Boolean));
+    const aliveIds = new Set(alive.map(s => s.session_id).filter(Boolean));
+    return rawWorkers.filter(w => {
+      if (w.state !== 'failed' && w.state !== 'spawning') return false;
+      if (w.name && aliveNames.has(w.name)) return false;
+      if (w.session_id && aliveIds.has(w.session_id)) return false;
+      return true;
+    });
+  }, [rawWorkers, alive]);
 
   const handlePeek = (session) => {
     const id = session.session_id || session.name;
@@ -1519,9 +1545,10 @@ function CockpitRight({ project, cid, activeSpec, onPeek, onSpawn }) {
   };
 
   const handleKillWorker = (session) => {
-    if (!confirm(`End background worker ${session.name || session.session_id.slice(0,8)}?`)) return;
+    const name = session.name || session.session_id?.slice(0,8) || 'worker';
+    if (!confirm(`End background worker ${name}?`)) return;
     window.SubstrateAPI.killSession(session.session_id || session.name).then(() => {
-      // Optimistic refresh
+      setRawWorkers(prev => prev.filter(w => w.name !== session.name && w.session_id !== session.session_id));
     }).catch(err => console.error(err));
   };
 
@@ -1530,13 +1557,14 @@ function CockpitRight({ project, cid, activeSpec, onPeek, onSpawn }) {
       <div className="cockpit-right-section">
         <div className="cockpit-right-head">
           <span className="cockpit-right-title">Live Swarm Fleet</span>
-          <span className="cockpit-right-count tnum">{alive.length}</span>
+          <span className="cockpit-right-count tnum">{alive.length + failedWorkers.length}</span>
           <button className="orch-btn ghost small" onClick={()=> onSpawn && onSpawn()} title="Add worker" style={{marginLeft:'auto'}}>+ Add Worker</button>
         </div>
-        {alive.length===0 ? (
+        {alive.length === 0 && failedWorkers.length === 0 ? (
           <div className="cockpit-quiet">No live workers in this project.</div>
         ) : (
           <div className="cockpit-swarm-list">
+            {/* Live Active Workers */}
             {alive.map(s => {
               const isBusy = s.status==='busy';
               const isSteeringThis = steerSessionId === (s.session_id || s.name);
@@ -1618,6 +1646,47 @@ function CockpitRight({ project, cid, activeSpec, onPeek, onSpawn }) {
                       <div><span>Session ID:</span> <b>{s.session_id?.slice(0,10)}…</b></div>
                     </div>
                   </details>
+                </div>
+              );
+            })}
+
+            {/* Failed or Unregistered Spawning Workers (surfaced with 1-click End/Dismiss) */}
+            {failedWorkers.map(w => {
+              return (
+                <div key={w.worker_id || w.name} className="cockpit-swarm-card failed" style={{ borderColor: 'rgba(248,113,113,0.35)', background: 'rgba(248,113,113,0.04)' }}>
+                  <div className="cockpit-swarm-top">
+                    <div className="worker-identity">
+                      <div className="worker-avatar" style={{ background: 'rgba(248,113,113,0.2)', color: 'var(--status-blocked)' }}>
+                        {roleGlyph(w.role)}
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        <span className="cockpit-swarm-name">{w.name}</span>
+                        <span className="mono" style={{ fontSize: 10, color: 'var(--status-blocked)' }}>
+                          ⚠️ {w.state === 'spawning' ? 'starting…' : 'connection failed'}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      className="cockpit-kill-btn mono"
+                      style={{ marginLeft: 'auto' }}
+                      onClick={() => handleKillWorker(w)}
+                      title="Dismiss failed worker and free worker name"
+                    >
+                      ✕ Dismiss
+                    </button>
+                  </div>
+
+                  {w.error && (
+                    <div className="mono" style={{ fontSize: 10.5, color: 'var(--status-blocked)', background: 'rgba(0,0,0,0.2)', padding: '4px 8px', borderRadius: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                      {w.error.slice(0, 140)}
+                    </div>
+                  )}
+
+                  <div className="cockpit-swarm-actions">
+                    <button className="orch-btn ghost small" onClick={() => handlePeek(w)} title="Inspect terminal output">
+                      👁️ Inspect Log
+                    </button>
+                  </div>
                 </div>
               );
             })}
