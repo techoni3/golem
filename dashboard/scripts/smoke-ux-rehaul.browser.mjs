@@ -363,13 +363,13 @@ try {
   // Check swarm cards exist (may be 0 if no workers)
   const swarmState = await page.evaluate(() => {
     const cards = document.querySelectorAll('.cockpit-swarm-card');
-    const peekBtns = document.querySelectorAll('.cockpit-swarm-card button');
-    return { cardCount: cards.length, hasPeekBtn: [...peekBtns].some(b => b.textContent.includes('Peek')) };
+    const peekBtns = document.querySelectorAll('.cockpit-swarm-card .cockpit-swarm-actions button, .cockpit-swarm-card button[title*="streaming"]');
+    return { cardCount: cards.length, hasPeekBtn: peekBtns.length > 0 };
   });
   log('4a: swarm', swarmState);
   if (swarmState.cardCount > 0) {
-    // Click peek on first card
-    await page.click('.cockpit-swarm-card button');
+    // Click peek / live output on first card
+    await page.click('.cockpit-swarm-card .cockpit-swarm-actions button:first-child');
     await page.waitForSelector('.peek-modal', { timeout: 5000 }).catch(() => null);
     const peekState = await page.evaluate(() => {
       const modal = document.querySelector('.peek-modal');

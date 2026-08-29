@@ -270,6 +270,7 @@
     createTicket: (body) => postJSON('/api/tickets', body),
     getTicket: (id) => getJSON(`/api/tickets/${encodeURIComponent(id)}`),
     updateTicket: (id, patch) => patchJSON(`/api/tickets/${encodeURIComponent(id)}`, patch),
+    deleteTicket: (id, actor = 'human') => delJSON(`/api/tickets/${encodeURIComponent(id)}`, { actor }),
     addComment: (id, body) => postJSON(`/api/tickets/${encodeURIComponent(id)}/comments`, body),
     dispatchComment: (commentId, body) => postJSON(`/api/comments/${encodeURIComponent(commentId)}/dispatch`, body),
     batchDispatchComments: (id, body) => postJSON(`/api/tickets/${encodeURIComponent(id)}/comments/batch-dispatch`, body),

@@ -6047,6 +6047,249 @@ mark.anno.anno-tail::after {
 .cockpit-comment-card:hover {
   border-color: var(--border-2);
 }
+
+/* Top View Switcher (Spec Cockpit vs Tracker Board) */
+.cockpit-top-view-switcher {
+  display: inline-flex;
+  gap: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-1);
+  padding: 2px 4px;
+}
+.view-switch-btn {
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-2);
+  background: transparent;
+  border: none;
+  border-radius: calc(var(--radius-1) - 2px);
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.view-switch-btn:hover { color: var(--text-0); }
+.view-switch-btn.active {
+  background: var(--accent-soft);
+  color: var(--text-0);
+  font-weight: 600;
+  border: 1px solid var(--accent-border);
+}
+
+/* Delete button affordance for specs & tasks */
+.cockpit-delete-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-3);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+.cockpit-spec-item:hover .cockpit-delete-btn,
+.cockpit-ticket-row:hover .cockpit-delete-btn,
+.task-row:hover .cockpit-delete-btn {
+  opacity: 0.7;
+}
+.cockpit-delete-btn:hover {
+  opacity: 1 !important;
+  color: var(--status-blocked);
+  background: rgba(248, 113, 113, 0.15);
+}
+
+/* Fold toggle for comments */
+.cockpit-fold-toggle {
+  align-self: center;
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--accent);
+}
+.cockpit-fold-toggle:hover {
+  text-decoration: underline;
+}
+
+/* Worker Avatar Orb with Glowing Live Animations */
+.worker-avatar-orb {
+  position: relative;
+  border-radius: 50%;
+  display: inline-flex;
+}
+.worker-avatar-orb.busy::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 1.5px solid var(--status-running);
+  opacity: 0.6;
+  animation: orb-busy-spin 2s linear infinite;
+}
+.worker-avatar-orb.busy::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(96,165,250,0.3) 0%, transparent 70%);
+  animation: orb-busy-pulse 1.6s ease-in-out infinite;
+}
+@keyframes orb-busy-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+@keyframes orb-busy-pulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.9); }
+  50% { opacity: 0.8; transform: scale(1.15); }
+}
+
+.cockpit-kill-btn {
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  color: var(--status-blocked);
+  border-radius: var(--radius-1);
+  font-size: 9.5px;
+  padding: 1px 6px;
+  cursor: pointer;
+  margin-left: auto;
+  transition: all 0.15s ease;
+}
+.cockpit-kill-btn:hover {
+  background: var(--status-blocked);
+  color: #fff;
+}
+
+/* High-Level Project Kanban Tracker Board View */
+.project-tracker-board-view {
+  padding: 14px 18px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: calc(100vh - 120px);
+}
+.tracker-board-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.tracker-board-columns {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  align-items: flex-start;
+}
+@media (max-width: 1000px) {
+  .tracker-board-columns { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 600px) {
+  .tracker-board-columns { grid-template-columns: 1fr; }
+}
+.tracker-column {
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 480px;
+}
+.tracker-column-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border-1);
+}
+.tracker-column-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.tracker-column-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-0);
+  flex: 1;
+}
+.tracker-column-count {
+  font-size: 11px;
+  color: var(--text-3);
+  background: var(--bg-3);
+  padding: 1px 7px;
+  border-radius: 999px;
+}
+.tracker-column-cards {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  overflow-y: auto;
+}
+.tracker-card {
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-1);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: pointer;
+  transition: transform 0.1s, border-color 0.12s, box-shadow 0.12s;
+}
+.tracker-card:hover {
+  transform: translateY(-1px);
+  border-color: var(--border-2);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+}
+.tracker-card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+.tracker-card-id {
+  color: var(--accent);
+  font-weight: 600;
+}
+.tracker-card-cycle-btn {
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  color: var(--text-2);
+  border-radius: 3px;
+  font-size: 10px;
+  padding: 1px 5px;
+  margin-left: auto;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.tracker-card-cycle-btn:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--text-0);
+}
+.tracker-card-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-1);
+  line-height: 1.4;
+}
+.tracker-card-meta {
+  display: flex;
+  gap: 6px;
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+.tracker-column-empty {
+  font-size: 12px;
+  color: var(--text-4);
+  text-align: center;
+  padding: 24px 8px;
+}
 .cockpit-comment-card.resolved {
   opacity: 0.65;
 }

@@ -1522,6 +1522,22 @@ async function main() {
     }
   });
 
+  // DELETE /api/tickets/:id — remove ticket, comments, and links cleanly from tracker
+  fastify.delete('/api/tickets/:id', async (req, reply) => {
+    const rawId = req.params.id;
+    const resolvedId = tracker.resolveId(rawId);
+    if (!resolvedId) return reply.code(404).send({ error: `ticket '${rawId}' not found` });
+    try {
+      const actor = req.body?.actor || 'human';
+      const deleted = tracker.deleteTicket(resolvedId, { actor });
+      if (!deleted) return reply.code(404).send({ error: `ticket '${rawId}' not found` });
+      broadcastWS({ type: 'ticket-deleted', id: resolvedId, display_id: deleted.display_id, project_id: deleted.project_id });
+      return { ok: true, deleted: resolvedId, display_id: deleted.display_id };
+    } catch (err) {
+      return reply.code(500).send({ error: String(err?.message || err) });
+    }
+  });
+
   // GOL-150: POST /api/tickets/:id/transition is gone with the phase machine.
   // PATCH /api/tickets/:id with {state} is the lifecycle path.
 

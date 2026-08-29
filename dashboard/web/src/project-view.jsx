@@ -1,6 +1,7 @@
-// Project view (v4) — unified 3-pane Spec Cockpit (GOL-14, GOL-23, GOL-24).
+// Project view (v4) — unified 3-pane Spec Cockpit & Project Tracker Board (GOL-14, GOL-23, GOL-24, GOL-32-36).
 // Spec Navigator (L) | Document + Tasks + Spacious Reviews (C) | Swarm Fleet (R).
-// Fully interactive: text selection annotation in reader, embedded comment threads below spec with 1-click dispatch/resolve, resizable panes, and unpolluted spec hierarchy.
+// Fully interactive: text selection annotations, embedded comment threads below spec with 1-click dispatch/resolve,
+// newest-first folded comments, clean delete for specs/tasks, worker termination, and Kanban Tracker Board view.
 
 const { useState: usePVState, useEffect, useMemo, useRef } = window.React;
 
@@ -95,7 +96,7 @@ function LiveElapsedTimer({ iso }) {
   return <span className="cockpit-swarm-timer tnum">{str}</span>;
 }
 
-// ── ProjectView — 3-pane Spec Cockpit
+// ── ProjectView — Cockpit or Tracker Board
 function ProjectView({ projectId, tab, setRoute }) {
   (window.useStore ? window.useStore() : null);
   const project = window.Store.getProject(projectId);
@@ -113,6 +114,7 @@ function ProjectView({ projectId, tab, setRoute }) {
   const [directiveOpen, setDirectiveOpen] = window.React.useState(false);
   const [peekSessionId, setPeekSessionId] = window.React.useState(null);
   const [spawnOpen, setSpawnOpen] = window.React.useState(false);
+  const [activeView, setActiveView] = window.React.useState('cockpit'); // 'cockpit' | 'tracker'
 
   // Resizable Panes State (persisted in localStorage)
   const [leftWidth, setLeftWidth] = window.React.useState(() => {
@@ -180,13 +182,11 @@ function ProjectView({ projectId, tab, setRoute }) {
   }, []);
 
   const aliveSessions = window.Store.getProjectAliveSessions(project);
-  // Canonical truth engine — hero progress derived from tracker tickets
   const allProjectTickets = window.Store.getTrackerTickets({ project_id: cid, includeArchived: true });
   const canonicalTotal = allProjectTickets.filter(t => t.kind !== 'spec' && t.state !== 'archived').length;
   const canonicalDone = allProjectTickets.filter(t => t.kind !== 'spec' && t.state === 'done').length;
   const canonicalPct = canonicalTotal ? Math.round((canonicalDone / canonicalTotal) * 100) : 0;
 
-  // Specs sorted by recency
   const allSpecs = allProjectTickets.filter(t => t.kind === 'spec');
   const specsSorted = window.React.useMemo(() => {
     return [...allSpecs].sort((a,b) => (Date.parse(b.updated_at||b.created_at||'')||0) - (Date.parse(a.updated_at||a.created_at||'')||0));
@@ -292,6 +292,7 @@ function ProjectView({ projectId, tab, setRoute }) {
 
   return (
     <div className="page project-cockpit-page">
+      {/* Hero Bar with View Switcher */}
       <div className="project-hero cockpit-hero">
         <div
           className="project-hero-glyph"
@@ -304,14 +305,35 @@ function ProjectView({ projectId, tab, setRoute }) {
           {project.glyph}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <h1 className="project-hero-name">{project.name}</h1>
-          <div className="project-hero-meta">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <h1 className="project-hero-name" style={{ margin: 0 }}>{project.name}</h1>
+            {/* View Switcher: Spec Cockpit vs Tracker Board */}
+            <div className="cockpit-top-view-switcher">
+              <button
+                className={`view-switch-btn ${activeView === 'cockpit' ? 'active' : ''}`}
+                onClick={() => setActiveView('cockpit')}
+                title="Unified Spec-First Cockpit"
+              >
+                📋 Spec Cockpit
+              </button>
+              <button
+                className={`view-switch-btn ${activeView === 'tracker' ? 'active' : ''}`}
+                onClick={() => setActiveView('tracker')}
+                title="Classic High-Level Kanban Tracker"
+              >
+                📊 Tracker Board
+              </button>
+            </div>
+          </div>
+          <div className="project-hero-meta" style={{ marginTop: 4 }}>
             <span className="mono">{project.project_id || project.id}</span>
             <span className="sep">·</span>
             <span>{milestones.length} milestones</span>
             <span className="sep">·</span>
-            <span style={{ color: 'var(--accent)' }}>{aliveSessions.length} live worker{aliveSessions.length === 1 ? '' : 's'}</span>
-            <span className="sep">·</span><span className="mono" title="Canonical tracker truth">{canonicalDone}/{canonicalTotal} tasks</span><span className="mono" style={{color: project.color}}>{canonicalPct}%</span>
+            <span style={{ color: 'var(--status-active)' }}>{aliveSessions.length} live worker{aliveSessions.length === 1 ? '' : 's'}</span>
+            <span className="sep">·</span>
+            <span className="mono" title="Canonical tracker truth">{canonicalDone}/{canonicalTotal} tasks</span>
+            <span className="mono" style={{color: project.color}}>{canonicalPct}%</span>
           </div>
         </div>
         <div className="cockpit-hero-actions">
@@ -320,63 +342,75 @@ function ProjectView({ projectId, tab, setRoute }) {
         </div>
       </div>
 
-      {/* Next Action Banner */}
-      {nextAction && (
-        <div className="cockpit-next-action-bar">
-          <div className="cockpit-next-action-left">
-            <span className="cockpit-next-action-icon">{nextAction.icon}</span>
-            <div className="cockpit-next-action-text">
-              <span className="cockpit-next-action-title">Next: {nextAction.title}</span>
-              <span className="cockpit-next-action-desc">{nextAction.desc}</span>
+      {activeView === 'cockpit' ? (
+        <>
+          {/* Next Action Banner */}
+          {nextAction && (
+            <div className="cockpit-next-action-bar">
+              <div className="cockpit-next-action-left">
+                <span className="cockpit-next-action-icon">{nextAction.icon}</span>
+                <div className="cockpit-next-action-text">
+                  <span className="cockpit-next-action-title">Next: {nextAction.title}</span>
+                  <span className="cockpit-next-action-desc">{nextAction.desc}</span>
+                </div>
+              </div>
+              {nextAction.cta && nextAction.run && (
+                <button className="orch-btn primary small cockpit-next-action-btn" onClick={nextAction.run}>
+                  {nextAction.cta}
+                </button>
+              )}
             </div>
-          </div>
-          {nextAction.cta && nextAction.run && (
-            <button className="orch-btn primary small cockpit-next-action-btn" onClick={nextAction.run}>
-              {nextAction.cta}
-            </button>
           )}
-        </div>
-      )}
 
-      <div
-        className="cockpit-grid"
-        style={{
-          gridTemplateColumns: `${leftWidth}px 4px minmax(0, 1fr) 4px ${rightWidth}px`
-        }}
-      >
-        <CockpitLeft
+          <div
+            className="cockpit-grid"
+            style={{
+              gridTemplateColumns: `${leftWidth}px 4px minmax(0, 1fr) 4px ${rightWidth}px`
+            }}
+          >
+            <CockpitLeft
+              project={project}
+              cid={cid}
+              allTickets={allProjectTickets}
+              specs={specsSorted}
+              activeSpec={activeSpec}
+              setActiveSpecId={setActiveSpecId}
+            />
+            <div
+              className="cockpit-resizer left-resizer"
+              onMouseDown={startResizeLeft}
+              title="Drag to resize left navigation pane"
+            />
+            <CockpitCenter
+              project={project}
+              cid={cid}
+              activeSpec={activeSpec}
+              setRoute={setRoute}
+            />
+            <div
+              className="cockpit-resizer right-resizer"
+              onMouseDown={startResizeRight}
+              title="Drag to resize swarm fleet pane"
+            />
+            <CockpitRight
+              project={project}
+              cid={cid}
+              activeSpec={activeSpec}
+              setRoute={setRoute}
+              onPeek={setPeekSessionId}
+              onSpawn={()=> setSpawnOpen(true)}
+            />
+          </div>
+        </>
+      ) : (
+        /* High-Level Project Kanban Tracker Board */
+        <ProjectTrackerBoardView
           project={project}
           cid={cid}
-          allTickets={allProjectTickets}
-          specs={specsSorted}
-          activeSpec={activeSpec}
-          setActiveSpecId={setActiveSpecId}
+          tickets={allProjectTickets}
+          onOpenTicket={(id) => window.Router.openTicket(id)}
         />
-        <div
-          className="cockpit-resizer left-resizer"
-          onMouseDown={startResizeLeft}
-          title="Drag to resize left navigation pane"
-        />
-        <CockpitCenter
-          project={project}
-          cid={cid}
-          activeSpec={activeSpec}
-          setRoute={setRoute}
-        />
-        <div
-          className="cockpit-resizer right-resizer"
-          onMouseDown={startResizeRight}
-          title="Drag to resize swarm fleet pane"
-        />
-        <CockpitRight
-          project={project}
-          cid={cid}
-          activeSpec={activeSpec}
-          setRoute={setRoute}
-          onPeek={setPeekSessionId}
-          onSpawn={()=> setSpawnOpen(true)}
-        />
-      </div>
+      )}
 
       {directiveOpen && window.DirectiveModal && window.React.createElement(window.DirectiveModal, {
         open: directiveOpen,
@@ -398,10 +432,10 @@ function ProjectView({ projectId, tab, setRoute }) {
   );
 }
 
-// ── LEFT: Spec Lifecycle Navigator (Clean Fold + Ticket Filter Tab)
+// ── LEFT: Spec Lifecycle Navigator (Clean Fold, Ticket Explorer & Delete)
 function CockpitLeft({ project, cid, allTickets, specs, activeSpec, setActiveSpecId }) {
-  const [viewMode, setViewMode] = window.React.useState('specs'); // 'specs' (default) | 'tickets'
-  const [ticketKindFilter, setTicketKindFilter] = window.React.useState('all'); // 'all' | 'task' | 'doc' | 'spec'
+  const [viewMode, setViewMode] = window.React.useState('specs');
+  const [ticketKindFilter, setTicketKindFilter] = window.React.useState('all');
   const [query, setQuery] = window.React.useState('');
   const [ideasCount, setIdeasCount] = window.React.useState(0);
   const qLower = query.trim().toLowerCase();
@@ -462,6 +496,15 @@ function CockpitLeft({ project, cid, allTickets, specs, activeSpec, setActiveSpe
     }
     return rows;
   }, [allTickets, ticketKindFilter, qLower]);
+
+  const handleDeleteSpec = (e, specItem) => {
+    e.stopPropagation();
+    if (!confirm(`Delete spec ${specItem.display_id || specItem.id} ("${specItem.title}") and all its subtasks?`)) return;
+    window.SubstrateAPI.deleteTicket(specItem.id || specItem.display_id).then(() => {
+      window.Store.deleteTrackerTicket(specItem.id);
+      if (specItem.display_id) window.Store.deleteTrackerTicket(specItem.display_id);
+    }).catch(err => alert('Failed to delete spec: ' + (err.message || err)));
+  };
 
   return (
     <div className="cockpit-left">
@@ -528,7 +571,7 @@ function CockpitLeft({ project, cid, allTickets, specs, activeSpec, setActiveSpe
                   const meta = specMeta.get(s.id) || { total:0, done:0, openUndispatched:0, openTotal:0 };
                   const active = activeSpec && (activeSpec.id === s.id || activeSpec.display_id === s.display_id);
                   return (
-                    <button
+                    <div
                       key={s.id}
                       className={`cockpit-spec-item ${active ? 'active' : ''}`}
                       onClick={()=> setActiveSpecId(s.id)}
@@ -555,8 +598,15 @@ function CockpitLeft({ project, cid, allTickets, specs, activeSpec, setActiveSpe
                             {meta.openTotal}💬
                           </span>
                         )}
+                        <button
+                          className="cockpit-delete-btn"
+                          onClick={(e) => handleDeleteSpec(e, s)}
+                          title="Delete spec"
+                        >
+                          ✕
+                        </button>
                       </span>
-                    </button>
+                    </div>
                   );
                 })}
               </div>
@@ -605,6 +655,18 @@ function CockpitLeft({ project, cid, allTickets, specs, activeSpec, setActiveSpe
                     <span className={`pill ${statePillClass(t.state)}`} style={{fontSize: 10, marginLeft: 'auto'}}>
                       {t.state}
                     </span>
+                    <button
+                      className="cockpit-delete-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (confirm(`Delete ticket ${t.display_id || t.id}?`)) {
+                          window.SubstrateAPI.deleteTicket(t.id).then(() => window.Store.deleteTrackerTicket(t.id));
+                        }
+                      }}
+                      title="Delete ticket"
+                    >
+                      ✕
+                    </button>
                   </div>
                   <div className="cockpit-ticket-title" title={t.title}>{t.title}</div>
                 </div>
@@ -626,7 +688,7 @@ function CockpitCenter({ project, cid, activeSpec, setRoute }) {
   const bodyRef = window.React.useRef(null);
 
   // Text selection & inline annotation state
-  const [selectionPillPos, setSelectionPillPos] = window.React.useState(null); // { top, left, quote, prefix, suffix, section }
+  const [selectionPillPos, setSelectionPillPos] = window.React.useState(null);
   const [anchoredModalData, setAnchoredModalData] = window.React.useState(null);
   const [anchoredBody, setAnchoredBody] = window.React.useState('');
   const [anchoredTag, setAnchoredTag] = window.React.useState('comment');
@@ -634,13 +696,14 @@ function CockpitCenter({ project, cid, activeSpec, setRoute }) {
   const [isSavingAnchor, setIsSavingAnchor] = window.React.useState(false);
 
   // Reviews section state (below document)
-  const [commentFilter, setCommentFilter] = window.React.useState('open'); // open | decision | resolved | all
+  const [commentFilter, setCommentFilter] = window.React.useState('open');
   const [newCommentText, setNewCommentText] = window.React.useState('');
   const [newCommentTag, setNewCommentTag] = window.React.useState('comment');
   const [newCommentDispatchTarget, setNewCommentDispatchTarget] = window.React.useState('');
   const [replyingToId, setReplyingToId] = window.React.useState(null);
   const [replyText, setReplyText] = window.React.useState('');
   const [postingComment, setPostingComment] = window.React.useState(false);
+  const [showOlderComments, setShowOlderComments] = window.React.useState(false);
 
   window.React.useEffect(() => {
     if (!cid) return;
@@ -697,14 +760,12 @@ function CockpitCenter({ project, cid, activeSpec, setRoute }) {
         return;
       }
 
-      // Calculate quote, prefix, suffix, and nearest section heading
       const rootText = root.innerText || root.textContent || '';
       const quote = text;
       let at = rootText.indexOf(quote);
       const prefix = at > 0 ? rootText.slice(Math.max(0, at - 40), at) : '';
       const suffix = at >= 0 ? rootText.slice(at + quote.length, at + quote.length + 40) : '';
 
-      // Find nearest preceding heading
       let node = range.startContainer;
       if (node.nodeType === 3) node = node.parentNode;
       let section = 'General';
@@ -838,12 +899,19 @@ function CockpitCenter({ project, cid, activeSpec, setRoute }) {
   const allComments = window.Store.getTicketComments(spec.id) || [];
   const openUndispatched = allComments.filter(c => c.status==='open' && c.dispatch_state==='undispatched');
 
-  const filteredComments = allComments.filter(c => {
-    if (commentFilter === 'all') return true;
-    if (commentFilter === 'decision') return c.tag === 'decision' || c.tag === 'decision_ask' || /decision|choice|locked/i.test(c.body||'');
-    if (commentFilter === 'resolved') return c.status === 'resolved' || c.dispatch_state === 'addressed';
-    return c.status === 'open' && c.dispatch_state !== 'addressed';
-  });
+  // Filter & sort newest first
+  const filteredComments = allComments
+    .filter(c => {
+      if (commentFilter === 'all') return true;
+      if (commentFilter === 'decision') return c.tag === 'decision' || c.tag === 'decision_ask' || /decision|choice|locked/i.test(c.body||'');
+      if (commentFilter === 'resolved') return c.status === 'resolved' || c.dispatch_state === 'addressed';
+      return c.status === 'open' && c.dispatch_state !== 'addressed';
+    })
+    .sort((a,b) => (Date.parse(b.created_at || '') || 0) - (Date.parse(a.created_at || '') || 0));
+
+  // Collapsing / Folding logic: show top 4 by default unless expanded
+  const visibleComments = showOlderComments ? filteredComments : filteredComments.slice(0, 4);
+  const hiddenCount = filteredComments.length - visibleComments.length;
 
   const decisionSummary = allComments.filter(c => (c.tag === 'decision' || c.tag === 'decision_ask' || /decision|locked/i.test(c.body||''))).slice(0, 4);
 
@@ -865,6 +933,13 @@ function CockpitCenter({ project, cid, activeSpec, setRoute }) {
     window.SubstrateAPI.updateTicket(task.display_id || task.id, { state: next, actor: 'human:dashboard' })
       .then(updated => { if (updated && updated.id) window.Store.upsertTrackerTicket(updated); })
       .catch(err => console.error('task state update failed', err));
+  };
+
+  const handleDeleteTask = (task) => {
+    if (!confirm(`Delete task ${task.display_id || task.id} ("${task.title}")?`)) return;
+    window.SubstrateAPI.deleteTicket(task.id).then(() => {
+      window.Store.deleteTrackerTicket(task.id);
+    }).catch(err => alert('Failed to delete task: ' + (err.message || err)));
   };
 
   const dispatchAllOpen = () => {
@@ -1163,6 +1238,14 @@ function CockpitCenter({ project, cid, activeSpec, setRoute }) {
                     <span className={`pill ${statePillClass(t.state)}`} style={{fontSize:10}}>{t.state}</span>
                     {t.state==='done' && doneAt && <span className="mono" style={{fontSize:10,color:'var(--text-3)'}} title={doneAt}>{window.SubstrateFmt?.fmtTimeAgo?.(doneAt)||''} ✓</span>}
                     {t.state==='done' && actorLabel && <span className="mono" style={{fontSize:10,background:'var(--bg-3)',border:'1px solid var(--border-1)',padding:'1px 5px',borderRadius:4}}>{actorLabel}</span>}
+                    <button
+                      className="cockpit-delete-btn"
+                      onClick={() => handleDeleteTask(t)}
+                      title="Delete task"
+                      style={{marginLeft: 4}}
+                    >
+                      ✕
+                    </button>
                   </div>
                 </div>
               );
@@ -1188,13 +1271,13 @@ function CockpitCenter({ project, cid, activeSpec, setRoute }) {
             <span className="cockpit-right-count tnum">{allComments.length}</span>
           </div>
           <div className="cockpit-comment-filter">
-            <button className={`cockpit-filter-btn ${commentFilter==='open'?'active':''}`} onClick={()=>setCommentFilter('open')} title="Open feedback">
+            <button className={`cockpit-filter-btn ${commentFilter==='open'?'active':''}`} onClick={()=>setCommentFilter('open')} title="Open feedback (excludes resolved)">
               Open ({allComments.filter(c => c.status === 'open' && c.dispatch_state !== 'addressed').length})
             </button>
             <button className={`cockpit-filter-btn ${commentFilter==='decision'?'active':''}`} onClick={()=>setCommentFilter('decision')} title="Decisions">
               Decisions
             </button>
-            <button className={`cockpit-filter-btn ${commentFilter==='resolved'?'active':''}`} onClick={()=>setCommentFilter('resolved')} title="Resolved">
+            <button className={`cockpit-filter-btn ${commentFilter==='resolved'?'active':''}`} onClick={()=>setCommentFilter('resolved')} title="Resolved feedback">
               Resolved ({allComments.filter(c => c.status === 'resolved' || c.dispatch_state === 'addressed').length})
             </button>
             <button className={`cockpit-filter-btn ${commentFilter==='all'?'active':''}`} onClick={()=>setCommentFilter('all')} title="All comments">
@@ -1274,12 +1357,12 @@ function CockpitCenter({ project, cid, activeSpec, setRoute }) {
           </div>
         </div>
 
-        {/* Comment Stream Cards */}
+        {/* Comment Stream Cards (Newest First & Folded) */}
         {filteredComments.length === 0 ? (
           <div className="cockpit-quiet">No comments in this filter. Select text in the document above to add an anchored note.</div>
         ) : (
           <div className="cockpit-comment-cards-grid">
-            {filteredComments.slice().sort((a,b)=> (a.created_at||'').localeCompare(b.created_at||'')).map(c => {
+            {visibleComments.map(c => {
               const isResolved = c.status==='resolved' || c.dispatch_state==='addressed';
               const isReplying = replyingToId === c.id;
               const tag = c.tag || (/decision|locked/i.test(c.body||'') ? 'decision' : null);
@@ -1395,6 +1478,16 @@ function CockpitCenter({ project, cid, activeSpec, setRoute }) {
                 </div>
               );
             })}
+
+            {/* Expander / Collapse Toggle for Older Comments */}
+            {filteredComments.length > 4 && (
+              <button
+                className="orch-btn ghost small cockpit-fold-toggle"
+                onClick={() => setShowOlderComments(prev => !prev)}
+              >
+                {showOlderComments ? '▴ Collapse older comments' : `▾ Show ${hiddenCount} older comment${hiddenCount === 1 ? '' : 's'}`}
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -1402,7 +1495,7 @@ function CockpitCenter({ project, cid, activeSpec, setRoute }) {
   );
 }
 
-// ── RIGHT: Swarm Fleet & Live Zero-Terminal Operations
+// ── RIGHT: Swarm Fleet & Live Zero-Terminal Operations (with Orb Animations & Kill Action)
 function CockpitRight({ project, cid, activeSpec, onPeek, onSpawn }) {
   (window.useStore ? window.useStore() : null);
   const [steerSessionId, setSteerSessionId] = window.React.useState(null);
@@ -1425,6 +1518,13 @@ function CockpitRight({ project, cid, activeSpec, onPeek, onSpawn }) {
     }).catch(err => console.error(err));
   };
 
+  const handleKillWorker = (session) => {
+    if (!confirm(`End background worker ${session.name || session.session_id.slice(0,8)}?`)) return;
+    window.SubstrateAPI.killSession(session.session_id || session.name).then(() => {
+      // Optimistic refresh
+    }).catch(err => console.error(err));
+  };
+
   return (
     <div className="cockpit-right">
       <div className="cockpit-right-section">
@@ -1440,25 +1540,44 @@ function CockpitRight({ project, cid, activeSpec, onPeek, onSpawn }) {
             {alive.map(s => {
               const isBusy = s.status==='busy';
               const isSteeringThis = steerSessionId === (s.session_id || s.name);
+              const family = s.provider || s.model || '';
               return (
                 <div key={s.session_id || s.name || s.pid} className={`cockpit-swarm-card ${isBusy?'busy':''}`}>
                   <div className="cockpit-swarm-top">
                     <div className="worker-identity">
-                      <div className="worker-avatar">{roleGlyph(s.role)}</div>
-                      <span className="cockpit-swarm-name">{s.name || s.session_id.slice(0,8)}</span>
+                      <div className={`worker-avatar-orb ${isBusy ? 'busy' : s.status==='waiting' ? 'waiting' : 'idle'}`}>
+                        <div className="worker-avatar">{roleGlyph(s.role)}</div>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        <span className="cockpit-swarm-name">{s.name || s.session_id.slice(0,8)}</span>
+                        <span className="mono" style={{ fontSize: 10, color: 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                          {window.ModelFamilyIcon && <window.ModelFamilyIcon family={family} size={12} />}
+                          <span>{s.model || 'model'}</span>
+                        </span>
+                      </div>
                     </div>
                     <span className={`cockpit-swarm-dot pulse-dot ${isBusy?'running': s.status==='waiting'?'waiting':'idle'}`} style={{marginLeft:'auto'}} />
                     {isBusy && <LiveElapsedTimer iso={s.updated_at} />}
                   </div>
+
                   <div className="cockpit-swarm-meta">
                     <span className="cockpit-swarm-role worker-role">{s.role || 'worker'}</span>
                     {isBusy && <span className="mono" style={{fontSize:10, color:'var(--status-running)'}}>active turn</span>}
+                    <button
+                      className="cockpit-kill-btn mono"
+                      onClick={() => handleKillWorker(s)}
+                      title="Kill / terminate background worker process"
+                    >
+                      ✕ End
+                    </button>
                   </div>
+
                   {s.current_in_progress_ticket && (
                     <div className="cockpit-swarm-task mono" title={s.current_in_progress_ticket.title}>
                       {s.current_in_progress_ticket.display_id||s.current_in_progress_ticket.id}: {s.current_in_progress_ticket.title.slice(0,40)}
                     </div>
                   )}
+
                   <div className="cockpit-swarm-actions">
                     <button className="orch-btn ghost small" onClick={()=>handlePeek(s)} title="View streaming terminal output">👁️ Live Output</button>
                     <button
@@ -1466,7 +1585,7 @@ function CockpitRight({ project, cid, activeSpec, onPeek, onSpawn }) {
                       onClick={()=> setSteerSessionId(isSteeringThis ? null : (s.session_id || s.name))}
                       title="Send guidance to agent mid-turn"
                     >
-                      💬 Send Guidance
+                      💬 Guidance
                     </button>
                   </div>
 
@@ -1491,12 +1610,12 @@ function CockpitRight({ project, cid, activeSpec, onPeek, onSpawn }) {
 
                   {/* Progressive disclosure for technical metadata */}
                   <details className="worker-details">
-                    <summary className="worker-details-summary">▸ Details</summary>
+                    <summary className="worker-details-summary">▸ Technical Details</summary>
                     <div className="worker-details-grid mono">
                       <div><span>Harness:</span> <b>{s.harness || 'pi'}</b></div>
-                      <div><span>Model:</span> <b>{s.provider || ''} {s.model || ''}</b></div>
+                      <div><span>Provider:</span> <b>{s.provider || '—'}</b></div>
                       <div><span>PID:</span> <b>{s.pid != null ? s.pid : '—'}</b></div>
-                      <div><span>Session:</span> <b>{s.session_id?.slice(0,10)}…</b></div>
+                      <div><span>Session ID:</span> <b>{s.session_id?.slice(0,10)}…</b></div>
                     </div>
                   </details>
                 </div>
@@ -1504,6 +1623,122 @@ function CockpitRight({ project, cid, activeSpec, onPeek, onSpawn }) {
             })}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ── PROJECT TRACKER BOARD VIEW (Classic 4-Column Kanban)
+function ProjectTrackerBoardView({ project, cid, tickets, onOpenTicket }) {
+  const [kindFilter, setKindFilter] = window.React.useState('all');
+  const [search, setSearch] = window.React.useState('');
+
+  const COLUMNS = [
+    { id: 'todo', label: 'Todo', color: 'var(--status-open)' },
+    { id: 'in_progress', label: 'In Progress', color: 'var(--status-running)' },
+    { id: 'review', label: 'Review', color: 'var(--status-review)' },
+    { id: 'done', label: 'Done', color: 'var(--status-done)' },
+  ];
+
+  const filtered = window.React.useMemo(() => {
+    let rows = tickets.filter(t => t.state !== 'archived');
+    if (kindFilter !== 'all') rows = rows.filter(t => t.kind === kindFilter);
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      rows = rows.filter(t => (t.title||'').toLowerCase().includes(q) || (t.display_id||'').toLowerCase().includes(q));
+    }
+    return rows;
+  }, [tickets, kindFilter, search]);
+
+  const byState = window.React.useMemo(() => {
+    const map = { todo: [], in_progress: [], review: [], done: [] };
+    for (const t of filtered) {
+      const st = t.state || 'todo';
+      if (map[st]) map[st].push(t);
+      else map.todo.push(t);
+    }
+    return map;
+  }, [filtered]);
+
+  const handleCycleState = (e, t) => {
+    e.stopPropagation();
+    const next = nextStateFor(t.state);
+    window.SubstrateAPI.updateTicket(t.id || t.display_id, { state: next, actor: 'human:dashboard' })
+      .then(u => { if (u?.id) window.Store.upsertTrackerTicket(u); });
+  };
+
+  return (
+    <div className="project-tracker-board-view">
+      <div className="tracker-board-toolbar">
+        <div className="cockpit-kind-pills">
+          {['all', 'spec', 'task', 'doc'].map(k => (
+            <button
+              key={k}
+              className={`cockpit-filter-btn ${kindFilter === k ? 'active' : ''}`}
+              onClick={() => setKindFilter(k)}
+            >
+              {k.toUpperCase()} ({tickets.filter(t => (k==='all'||t.kind===k) && t.state!=='archived').length})
+            </button>
+          ))}
+        </div>
+        <input
+          className="cockpit-search"
+          placeholder="Filter cards…"
+          style={{ maxWidth: 240, marginLeft: 'auto' }}
+          value={search}
+          onChange={(e)=> setSearch(e.target.value)}
+        />
+        <button
+          className="orch-btn primary small"
+          onClick={() => window.Router.openComposer(cid, { kind: kindFilter === 'spec' ? 'spec' : 'task' })}
+        >
+          + New Card
+        </button>
+      </div>
+
+      <div className="tracker-board-columns">
+        {COLUMNS.map(col => {
+          const list = byState[col.id] || [];
+          return (
+            <div key={col.id} className="tracker-column">
+              <div className="tracker-column-head">
+                <span className="tracker-column-indicator" style={{ background: col.color }} />
+                <span className="tracker-column-title">{col.label}</span>
+                <span className="tracker-column-count tnum">{list.length}</span>
+              </div>
+              <div className="tracker-column-cards">
+                {list.map(t => {
+                  return (
+                    <div
+                      key={t.id}
+                      className="tracker-card"
+                      onClick={() => onOpenTicket && onOpenTicket(t.id)}
+                    >
+                      <div className="tracker-card-top">
+                        <span className="cockpit-ticket-kind-tag mono">{t.kind}</span>
+                        <span className="mono tracker-card-id">{t.display_id || t.id}</span>
+                        <button
+                          className="tracker-card-cycle-btn"
+                          onClick={(e) => handleCycleState(e, t)}
+                          title={`Move to ${nextStateFor(t.state)}`}
+                        >
+                          ➔
+                        </button>
+                      </div>
+                      <div className="tracker-card-title">{t.title}</div>
+                      {t.assignee && (
+                        <div className="tracker-card-meta mono">
+                          <span>{t.assignee_label || t.assignee.slice(0,8)}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {list.length === 0 && <div className="tracker-column-empty">Empty</div>}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
