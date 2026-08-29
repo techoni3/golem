@@ -1259,7 +1259,22 @@ async function main() {
         const worker = workers.find((w) => w.session_id === sessionId || w.name === sessionId || w.name === session?.name);
         if (worker) {
           const res = await killWorker(worker.name, worker.project_id ? { projectId: worker.project_id } : {});
+          await state.refreshNativeSessions().catch(() => {});
+          broadcastWS({ type: 'native-sessions-update', native_sessions: enrichSessionRows(state.nativeSessions(), state.channels()), channels: state.channels() });
           return { ok: true, killed: worker.name, worker: res };
+        }
+        if (session) {
+          try {
+            const { markSessionFactsEnded, retireEndpointLeasesForCanonical } = await import('../../lib/session-facts.js');
+            const { markSessionsEnded } = await import('../../lib/session-registry.js');
+            markSessionFactsEnded([sessionId], { status: 'stopped' });
+            markSessionsEnded([sessionId], { status: 'stopped' });
+            retireEndpointLeasesForCanonical([sessionId]);
+            if (session.pid) process.kill(session.pid, 'SIGTERM');
+          } catch {}
+          await state.refreshNativeSessions().catch(() => {});
+          broadcastWS({ type: 'native-sessions-update', native_sessions: enrichSessionRows(state.nativeSessions(), state.channels()), channels: state.channels() });
+          return { ok: true, killed: sessionId };
         }
         return reply.code(404).send({ error: `no worker found for session ${sessionId} to kill` });
       }
@@ -1306,6 +1321,7 @@ async function main() {
     if (!role) return reply.code(400).send({ error: 'role is required' });
     try {
       const worker = await spawnWorker({ role, name, project, profile });
+      await state.refreshNativeSessions().catch(() => {});
       broadcastWS({ type: 'native-sessions-update', native_sessions: enrichSessionRows(state.nativeSessions(), state.channels()), channels: state.channels() });
       return reply.code(201).send(worker);
     } catch (err) {

@@ -446,7 +446,13 @@
     getProjectAliveSessions: (project) => {
       if (!project) return [];
       const ids = new Set([project.project_id, project.id].filter(Boolean));
-      return sortSessionsByRecency(state.nativeSessions.filter((s) => s.alive && s.project_id && ids.has(s.project_id)));
+      const pathMatches = (cwd) => {
+        if (!cwd || !project.path) return false;
+        return cwd === project.path || cwd.startsWith(project.path + '/');
+      };
+      return sortSessionsByRecency(state.nativeSessions.filter((s) => (
+        s.alive === true && ((s.project_id && ids.has(s.project_id)) || (s.registered_project_id && ids.has(s.registered_project_id)) || pathMatches(s.cwd))
+      )));
     },
     // v4: count of all alive native Golem sessions on the machine.
     getAliveSessionCount: () => state.nativeSessions.filter((s) => s.alive).length,
