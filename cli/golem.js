@@ -27,7 +27,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, resolve, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { golemHome, legacyConfigDir, migratedHomeDir, trackerDbPath, renderDirFor, projectsJsonPath, sessionsJsonPath } from '../lib/golem-home.js';
-import { projectIdFor } from '../lib/project-id.js';
+import { projectIdFor, resolveProjectRoot } from '../lib/project-id.js';
 import { SESSION_ROLES, pushRoleBriefDirect, setSessionRole } from '../lib/session-role.js';
 import { updateProjectLsp } from '../lib/lsp.js';
 import * as compiler from '../lib/compiler/engine.js';
@@ -35,6 +35,7 @@ import * as ccAdapter from '../lib/compiler/adapters/cc.js';
 import * as ocAdapter from '../lib/compiler/adapters/opencode.js';
 import * as codexAdapter from '../lib/compiler/adapters/codex.js';
 import * as piAdapter from '../lib/compiler/adapters/pi.js';
+import * as hermesAdapter from '../lib/compiler/adapters/hermes.js';
 import { isHarnessEnabled, loadConfig, saveConfig } from '../lib/golem-config.js';
 import { CodexSupervisor, readCodexSupervisor } from '../lib/codex-supervisor.js';
 import { MIN_PI_NODE, SUPPORTED_PI_VERSION, piNodeSupported } from '../lib/pi-compatibility.js';
@@ -803,6 +804,40 @@ async function cmdPi(args) {
     err('golem pi: Pi exited without a status or signal');
     process.exitCode = 1;
   }
+}
+
+async function cmdHermes(args) {
+  const projectRoot = await resolveProjectRoot(process.cwd());
+  const projectId = projectIdFor(projectRoot);
+  const sessionId = randomUUID();
+
+  let role = null;
+  let profile = null;
+  let name = null;
+  const passthrough = [];
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--role') { role = args[++i]; continue; }
+    if (arg === '--profile') { profile = args[++i]; continue; }
+    if (arg === '--name') { name = args[++i]; continue; }
+    passthrough.push(arg);
+  }
+
+  const hermesBin = spawnSync('sh', ['-c', 'command -v hermes'], { encoding: 'utf8' }).stdout.trim() || 'hermes';
+  const hermesArgs = ['--pass-session-id', '--accept-hooks'];
+  hermesArgs.push(...passthrough);
+
+  const env = {
+    ...process.env,
+    GOLEM_PROJECT_DIR: projectRoot,
+    GOLEM_PROJECT_ID: projectId,
+    HERMES_SESSION_ID: sessionId,
+    ...(name ? { HERMES_SESSION_NAME: name } : {}),
+  };
+
+  const child = spawn(hermesBin, hermesArgs, { cwd: process.cwd(), env, stdio: 'inherit' });
+  child.on('exit', (code, sig) => process.exit(code != null ? code : (sig ? 128 : 1)));
 }
 
 function readSessionsRegistry() {
@@ -1668,8 +1703,8 @@ async function cmdMigrateHome(args) {
   log(`  (or restore from backup: tar -xzf ${backupPath} -C ${home})`);
 }
 
-const ADAPTERS = { cc: ccAdapter, codex: codexAdapter, pi: piAdapter };
-const KNOWN_TARGETS = ['cc', 'cc-marketplace', 'opencode', 'codex', 'pi'];
+const ADAPTERS = { cc: ccAdapter, codex: codexAdapter, pi: piAdapter, hermes: hermesAdapter };
+const KNOWN_TARGETS = ['cc', 'cc-marketplace', 'opencode', 'codex', 'pi', 'hermes'];
 
 /** Resolve the opencode binary: PATH first, then the default install location. */
 function resolveOpencodeBin() {
@@ -1727,10 +1762,8 @@ function planForTarget(target) {
 }
 
 // Targets whose adapter renders a golem-owned block into a global instructions
-// file the human also owns (~/.claude/CLAUDE.md, $CODEX_HOME/AGENTS.md). This
-// used to be hardcoded to cc, which is why codex silently received no root
-// rules at all. opencode has its own sync path and resolves its own adapter.
-const INSTRUCTION_ADAPTERS = { cc: ccAdapter, codex: codexAdapter };
+// file the human also owns (~/.claude/CLAUDE.md, $CODEX_HOME/AGENTS.md, ~/.hermes/AGENTS.md).
+const INSTRUCTION_ADAPTERS = { cc: ccAdapter, codex: codexAdapter, hermes: hermesAdapter };
 
 /** Instruction render plan for a target, or an empty plan when it has none.
  * The lock target is namespaced per harness because instructions land outside
@@ -1871,6 +1904,9 @@ async function cmdSync(args) {
   if (target === 'codex') {
     ccAdapter.syncMcpChannelDeps({ repoRoot: GOLEM_ROOT, outDir: join(outDir, 'plugins', 'golem') });
   }
+  if (target === 'hermes') {
+    ccAdapter.syncMcpChannelDeps({ repoRoot: GOLEM_ROOT, outDir });
+  }
   if (target === 'cc-marketplace') {
     ccAdapter.ensureMarketplacePluginLink({ ccPluginDir: renderDirFor('cc'), marketplaceOutDir: outDir });
   }
@@ -2000,6 +2036,18 @@ async function cmdSyncCheckAll({ quiet = false } = {}) {
   say(`global pi: ${piOut}`);
   if (!quiet) printDrift(pi);
   drift = drift || !pi.clean;
+
+  if (isHarnessEnabled('hermes')) {
+    const hermesOut = renderDirFor('hermes');
+    const hermes = compiler.checkDrift({ target: 'hermes', outDir: hermesOut, items: planForTarget('hermes') });
+    const hermesInstrPlan = instructionPlanFor('hermes');
+    const hermesInstr = compiler.checkDrift({ target: hermesInstrPlan.lockTarget, outDir: hermesInstrPlan.outDir, items: hermesInstrPlan.items });
+    if (!quiet) log('');
+    say(`global hermes: ${hermesOut}`);
+    say(`  instructions out: ${hermesInstrPlan.outDir}`);
+    if (!quiet) printDrift({ clean: hermes.clean && hermesInstr.clean, drifted: [...hermes.drifted, ...hermesInstr.drifted], orphaned: [...hermes.orphaned, ...hermesInstr.orphaned] });
+    drift = drift || !hermes.clean || !hermesInstr.clean;
+  }
 
   if (isHarnessEnabled('opencode')) {
     const root = substrateRoot();
@@ -2462,6 +2510,9 @@ async function main() {
       break;
     case 'pi':
       await cmdPi(rest);
+      break;
+    case 'hermes':
+      await cmdHermes(rest);
       break;
     case 'spawn':
       await cmdSpawn(rest);
