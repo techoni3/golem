@@ -107,11 +107,7 @@ upsertSessionFact({
   provider: 'ollama', model: 'deepseek-v4-flash:0731-cloud',
   delivery: { mode: 'typed-worker', push: true, ready: true },
   capabilities: { typed_worker: true }, trust: 'host-full-trust',
-<<<<<<< HEAD
-  observations: { adapter_state: 'active', delivery_state: 'accepted', pi_version: '0.84.3', extension_version: '5.6.14' },
-=======
   observations: { adapter_state: 'active', delivery_state: 'accepted', pi_version: SUPPORTED_PI_VERSION, extension_version: '5.6.14' },
->>>>>>> fix/dead-assignee-reassign
   observed_at: new Date(staleFactAt).toISOString(),
 });
 const piBusy = (await readNativeSessions(() => true, [{

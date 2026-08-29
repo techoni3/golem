@@ -91,7 +91,7 @@ function App() {
   } else if (route.kind === 'onboarding') page = window.OnboardingPage ? React.createElement(window.OnboardingPage, { setRoute: navigate }) : <Dashboard setRoute={navigate}/>;
   else if (route.kind === 'dashboard') {
     // GOL-16: First Flight — 0 projects → onboarding wizard (auto-present)
-    if (state.projects.length === 0) page = window.OnboardingPage ? React.createElement(window.OnboardingPage, { setRoute: navigate }) : <Dashboard setRoute={navigate}/>;
+    if (window.Store.getProjects().length === 0) page = window.OnboardingPage ? React.createElement(window.OnboardingPage, { setRoute: navigate }) : <Dashboard setRoute={navigate}/>;
     else page = <Dashboard setRoute={navigate}/>;
   }
   else if (route.kind === 'projects') page = <ProjectsPage setRoute={navigate}/>;

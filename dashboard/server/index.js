@@ -1151,6 +1151,7 @@ async function main() {
       const peek = await peekSessionTerminal(sessionId, {
         lines,
         projectId: session?.project_id ?? null,
+        sessionName: session?.name || session?.label || null,
       });
       if (peek.ok && peek.text) {
         return {
