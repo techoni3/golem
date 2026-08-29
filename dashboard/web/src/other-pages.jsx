@@ -371,6 +371,7 @@ function catalogModels(catalog, provider, current) {
 function ModelProfileEditor({ profile, catalog, onCancel, onSave, saving, error }) {
   const [draft, setDraft] = React.useState(() => ({
     name: profile?.name || '',
+    harness: profile?.harness || 'pi',
     provider: profile?.provider || '',
     model: profile?.model || '',
     thinking: profile?.thinking || 'medium',
@@ -378,11 +379,12 @@ function ModelProfileEditor({ profile, catalog, onCancel, onSave, saving, error 
   React.useEffect(() => {
     setDraft({
       name: profile?.name || '',
+      harness: profile?.harness || 'pi',
       provider: profile?.provider || '',
       model: profile?.model || '',
       thinking: profile?.thinking || 'medium',
     });
-  }, [profile?.name, profile?.provider, profile?.model, profile?.thinking]);
+  }, [profile?.name, profile?.harness, profile?.provider, profile?.model, profile?.thinking]);
 
   const providers = catalogProviders(catalog, draft.provider);
   const models = catalogModels(catalog, draft.provider, draft.model);
@@ -406,7 +408,7 @@ function ModelProfileEditor({ profile, catalog, onCancel, onSave, saving, error 
   };
   const submit = (event) => {
     event.preventDefault();
-    onSave({ ...draft, name: draft.name.trim(), provider: draft.provider.trim(), model: draft.model.trim() });
+    onSave({ ...draft, name: draft.name.trim(), harness: draft.harness, provider: draft.provider.trim(), model: draft.model.trim() });
   };
   return (
     <div className="model-profile-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
@@ -426,7 +428,15 @@ function ModelProfileEditor({ profile, catalog, onCancel, onSave, saving, error 
             </label>
             <label className="model-profile-field">
               <span>Harness</span>
-              <input className="mono" value="pi" disabled aria-label="Harness"/>
+              <select
+                data-testid="model-profile-harness"
+                className="mono"
+                value={draft.harness}
+                onChange={(event) => setDraft({ ...draft, harness: event.target.value })}
+              >
+                <option value="pi">pi</option>
+                <option value="hermes">hermes</option>
+              </select>
             </label>
             <div className="model-profile-field">
               <span>Provider</span>
@@ -595,7 +605,7 @@ function ModelProfilesPanel({ rev, onChanged }) {
             <article className="model-profile-card" data-testid={`model-profile-card-${profile.name}`} key={profile.name}>
               <div className="model-profile-card-head">
                 <div className="model-profile-card-name" title={profile.name}>{profile.name}</div>
-                <span className="model-profile-harness-chip"><ProfileMark provider="pi" harness/> pi</span>
+                <span className="model-profile-harness-chip"><ProfileMark provider={profile.harness || 'pi'} harness/> {profile.harness || 'pi'}</span>
               </div>
               <div className="model-profile-card-model">
                 <ProfileMark provider={profile.provider} model={profile.model}/>
