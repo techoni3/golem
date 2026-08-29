@@ -29,7 +29,7 @@
 // spammed — preserves the original "don't spam history" intent.
 
 (function () {
-  const TOP_LEVEL = ['dashboard', 'projects', 'agents', 'settings', 'onboarding'];
+  const TOP_LEVEL = ['dashboard', 'projects', 'agents', 'settings', 'substrate', 'onboarding'];
 
   const parseQuery = (search) => {
     const out = {};
@@ -64,7 +64,15 @@
     if (p === '/' || p === '/dashboard') return { kind: 'dashboard' };
     if (p === '/projects') return { kind: 'projects' };
     if (p === '/agents') return { kind: 'agents' };
-    if (p === '/settings' || p === '/substrate') return { kind: 'settings' };
+    if (p === '/settings') return { kind: 'settings' };
+    if (p === '/substrate' || p.startsWith('/substrate/')) {
+      const parts = p.split('/').filter(Boolean);
+      return {
+        kind: 'substrate',
+        tab: parts[1] || query.tab || 'skills',
+        slug: parts[2] || query.slug || null,
+      };
+    }
     if (p === '/onboarding') return { kind: 'onboarding' };
     const pm = p.match(/^\/project\/(.+)$/);
     if (pm) {
@@ -93,6 +101,12 @@
       case 'agents': return '/agents';
       case 'settings': return '/settings';
       case 'onboarding': return '/onboarding';
+      case 'substrate': {
+        const q = {};
+        if (route.tab && route.tab !== 'skills') q.tab = route.tab;
+        if (route.slug) q.slug = route.slug;
+        return `/substrate${stringifyQuery(q)}`;
+      }
       case 'project': {
         const q = {};
         if (route.tab) q.tab = route.tab;

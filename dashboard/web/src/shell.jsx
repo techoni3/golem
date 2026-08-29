@@ -49,6 +49,7 @@ function Sidebar({ route, setRoute }) {
   const items = [
     { id: 'dashboard', label: 'Workspace', icon: Icon.Projects, count: buckets.active.length, kinds: ['dashboard', 'projects', 'project'] },
     { id: 'agents', label: 'Swarm', icon: Icon.Agents, count: activeCount, kinds: ['agents'] },
+    { id: 'substrate', label: 'Substrate', icon: Icon.Substrate || Icon.Projects, kinds: ['substrate'] },
     { id: 'settings', label: 'Settings', icon: Icon.Gear, kinds: ['settings'] },
   ];
 
