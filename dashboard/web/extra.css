@@ -5921,7 +5921,147 @@ mark.anno.anno-tail::after {
 .cockpit-replies { border-top:1px solid var(--border-1); padding-top:6px; display:flex; flex-direction:column; gap:4px; }
 .cockpit-reply { font-size:11.5px; color:var(--text-2); }
 .cockpit-reply-author { font-weight:600; color:var(--text-1); margin-right: 4px; }
-.cockpit-add-comment { align-self:flex-start; margin-top:4px; }
+/* Floating Selection Annotation Pill */
+.cockpit-selection-pill {
+  position: absolute;
+  z-index: 100;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-1);
+  border: 1px solid var(--accent-border);
+  color: var(--text-0);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transform: translate(-50%, -100%);
+  animation: cockpit-pop 0.15s ease-out;
+  user-select: none;
+}
+.cockpit-selection-pill:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+@keyframes cockpit-pop {
+  from { opacity: 0; transform: translate(-50%, -85%); }
+  to { opacity: 1; transform: translate(-50%, -100%); }
+}
+
+/* Anchored Comment Modal / Popover */
+.cockpit-anchored-modal {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(600px, 94vw);
+  background: var(--bg-1);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-3);
+  box-shadow: var(--shadow-2);
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.cockpit-anchored-modal-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-1);
+  background: var(--bg-2);
+}
+.cockpit-anchored-quote-preview {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--text-1);
+  margin-top: 4px;
+  border-left: 2px solid var(--status-review);
+  padding-left: 8px;
+}
+.cockpit-anchored-modal-body {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cockpit-anchored-modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border-1);
+  background: var(--bg-2);
+}
+.cockpit-worker-select {
+  padding: 4px 8px;
+  font-size: 11px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-1);
+  background: var(--bg-0);
+  color: var(--text-0);
+}
+
+/* Spacious Center Reviews Section (Below Document) */
+.cockpit-center-comments {
+  border-top: 1px solid var(--border-1);
+  padding-top: 20px;
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.cockpit-center-comments-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.cockpit-center-comments-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-0);
+}
+.cockpit-comment-cards-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.cockpit-comment-card {
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-2);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color 0.15s, outline 0.15s;
+}
+.cockpit-comment-card:hover {
+  border-color: var(--border-2);
+}
+.cockpit-comment-card.resolved {
+  opacity: 0.65;
+}
+.cockpit-comment-card.tag-decision {
+  border-left: 3px solid var(--status-review);
+}
+.cockpit-comment-card.tag-blocker {
+  border-left: 3px solid var(--status-blocked);
+}
+.cockpit-comment-quote.clickable {
+  cursor: pointer;
+}
+.cockpit-comment-quote.clickable:hover {
+  background: color-mix(in oklab, var(--status-review) 14%, var(--bg-1));
+}
 
 /* Responsive */
 @media (max-width: 1100px) {

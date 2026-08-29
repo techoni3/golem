@@ -1,6 +1,6 @@
 // Project view (v4) — unified 3-pane Spec Cockpit (GOL-14, GOL-23, GOL-24).
-// Spec Navigator | Document + Subtasks | Swarm Ops & Comments.
-// Preserves hero, Store subscription, live WebSocket updates, resizable panes, unpolluted spec-first view, and interactive comments.
+// Spec Navigator (L) | Document + Tasks + Spacious Reviews (C) | Swarm Fleet (R).
+// Fully interactive: text selection annotation in reader, embedded comment threads below spec with 1-click dispatch/resolve, resizable panes, and unpolluted spec hierarchy.
 
 const { useState: usePVState, useEffect, useMemo, useRef } = window.React;
 
@@ -46,6 +46,7 @@ function useActiveSpecId(projectId, specs) {
 
 // ── Helpers
 function fmtAgo(iso) { return window.SubstrateFmt?.fmtTimeAgo?.(iso) || ''; }
+function fmtClock(iso) { return window.SubstrateFmt?.fmtClock?.(iso) || iso || ''; }
 function renderMd(text) {
   if (!text) return '';
   return window.SubstrateFmt?.renderMarkdown ? window.SubstrateFmt.renderMarkdown(text) : String(text);
@@ -113,7 +114,7 @@ function ProjectView({ projectId, tab, setRoute }) {
   const [peekSessionId, setPeekSessionId] = window.React.useState(null);
   const [spawnOpen, setSpawnOpen] = window.React.useState(false);
 
-  // Resizable Panes State (stored in localStorage)
+  // Resizable Panes State (persisted in localStorage)
   const [leftWidth, setLeftWidth] = window.React.useState(() => {
     try {
       const v = parseInt(localStorage.getItem('golem.cockpit.leftWidth'), 10);
@@ -126,7 +127,7 @@ function ProjectView({ projectId, tab, setRoute }) {
       const v = parseInt(localStorage.getItem('golem.cockpit.rightWidth'), 10);
       if (v >= 240 && v <= 650) return v;
     } catch {}
-    return 340;
+    return 320;
   });
 
   const startResizeLeft = (e) => {
@@ -240,7 +241,7 @@ function ProjectView({ projectId, tab, setRoute }) {
         desc: `${openComments.length} comment${openComments.length === 1 ? '' : 's'} awaiting resolution or dispatch`,
         cta: 'Review Comments ➔',
         run: () => {
-          const el = document.querySelector('.cockpit-comments-section');
+          const el = document.querySelector('.cockpit-center-comments');
           if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         },
       };
@@ -365,7 +366,7 @@ function ProjectView({ projectId, tab, setRoute }) {
         <div
           className="cockpit-resizer right-resizer"
           onMouseDown={startResizeRight}
-          title="Drag to resize swarm & review rail"
+          title="Drag to resize swarm fleet pane"
         />
         <CockpitRight
           project={project}
@@ -405,7 +406,6 @@ function CockpitLeft({ project, cid, allTickets, specs, activeSpec, setActiveSpe
   const [ideasCount, setIdeasCount] = window.React.useState(0);
   const qLower = query.trim().toLowerCase();
 
-  // Refresh ideas count for this project
   window.React.useEffect(() => {
     let cancelled = false;
     const fetch = () => window.SubstrateAPI.listIdeas(cid).then(rows => {
@@ -417,7 +417,6 @@ function CockpitLeft({ project, cid, allTickets, specs, activeSpec, setActiveSpe
     return () => { cancelled = true; window.removeEventListener('ideas:changed', onChange); };
   }, [cid]);
 
-  // Specs filtering
   const filteredSpecs = window.React.useMemo(() => {
     if (!qLower) return specs;
     return specs.filter(s =>
@@ -427,7 +426,6 @@ function CockpitLeft({ project, cid, allTickets, specs, activeSpec, setActiveSpe
     );
   }, [specs, qLower]);
 
-  // Group filtered specs by stage
   const groupedSpecs = window.React.useMemo(() => {
     const map = new Map(SPEC_STAGES.map(g => [g.id, []]));
     for (const s of filteredSpecs) {
@@ -437,7 +435,6 @@ function CockpitLeft({ project, cid, allTickets, specs, activeSpec, setActiveSpe
     return map;
   }, [filteredSpecs]);
 
-  // Spec progress & comments metadata
   const specMeta = window.React.useMemo(() => {
     const m = new Map();
     const allChildren = allTickets.filter(t => t.parent_id);
@@ -453,7 +450,6 @@ function CockpitLeft({ project, cid, allTickets, specs, activeSpec, setActiveSpe
     return m;
   }, [specs, allTickets, window.Store.getState().ticketComments]);
 
-  // Tickets filtering (in 'tickets' mode)
   const filteredTickets = window.React.useMemo(() => {
     let rows = allTickets.filter(t => t.state !== 'archived');
     if (ticketKindFilter !== 'all') rows = rows.filter(t => t.kind === ticketKindFilter);
@@ -487,7 +483,6 @@ function CockpitLeft({ project, cid, allTickets, specs, activeSpec, setActiveSpe
         </button>
       </div>
 
-      {/* Segmented View Mode Tab Bar: Clean fold for Specs vs All Tickets */}
       <div className="cockpit-nav-tabs">
         <button
           className={`cockpit-nav-tab ${viewMode === 'specs' ? 'active' : ''}`}
@@ -516,7 +511,6 @@ function CockpitLeft({ project, cid, allTickets, specs, activeSpec, setActiveSpe
       </div>
 
       {viewMode === 'specs' ? (
-        /* First fold: Specs-only hierarchy grouped cleanly by lifecycle */
         <div className="cockpit-tree">
           {SPEC_STAGES.map(group => {
             const list = groupedSpecs.get(group.id) || [];
@@ -575,7 +569,6 @@ function CockpitLeft({ project, cid, allTickets, specs, activeSpec, setActiveSpe
           ) : null}
         </div>
       ) : (
-        /* Secondary fold: Full Tickets Explorer with Kind Filters */
         <div className="cockpit-tickets-explorer">
           <div className="cockpit-kind-pills">
             {['all', 'task', 'doc', 'spec'].map(k => (
@@ -625,18 +618,40 @@ function CockpitLeft({ project, cid, allTickets, specs, activeSpec, setActiveSpe
   );
 }
 
-// ── CENTER: Spec Document + Sub-tasks + Action Bar
+// ── CENTER: Spec Document + Inline Text Selection Annotate + Subtasks + Spacious Reviews Stream Below
 function CockpitCenter({ project, cid, activeSpec, setRoute }) {
   (window.useStore ? window.useStore() : null);
   const spec = activeSpec ? (window.Store.getState().trackerTickets.get(activeSpec.id) || activeSpec) : null;
   const [dispatchable, setDispatchable] = window.React.useState([]);
   const bodyRef = window.React.useRef(null);
 
+  // Text selection & inline annotation state
+  const [selectionPillPos, setSelectionPillPos] = window.React.useState(null); // { top, left, quote, prefix, suffix, section }
+  const [anchoredModalData, setAnchoredModalData] = window.React.useState(null);
+  const [anchoredBody, setAnchoredBody] = window.React.useState('');
+  const [anchoredTag, setAnchoredTag] = window.React.useState('comment');
+  const [anchoredDispatchTarget, setAnchoredDispatchTarget] = window.React.useState('');
+  const [isSavingAnchor, setIsSavingAnchor] = window.React.useState(false);
+
+  // Reviews section state (below document)
+  const [commentFilter, setCommentFilter] = window.React.useState('open'); // open | decision | resolved | all
+  const [newCommentText, setNewCommentText] = window.React.useState('');
+  const [newCommentTag, setNewCommentTag] = window.React.useState('comment');
+  const [newCommentDispatchTarget, setNewCommentDispatchTarget] = window.React.useState('');
+  const [replyingToId, setReplyingToId] = window.React.useState(null);
+  const [replyText, setReplyText] = window.React.useState('');
+  const [postingComment, setPostingComment] = window.React.useState(false);
+
   window.React.useEffect(() => {
     if (!cid) return;
     let cancelled = false;
     window.SubstrateAPI.listDispatchable(cid).then(list => {
-      if (!cancelled) setDispatchable(Array.isArray(list) ? list : []);
+      if (!cancelled) {
+        const rows = Array.isArray(list) ? list : [];
+        setDispatchable(rows);
+        if (rows.length && !anchoredDispatchTarget) setAnchoredDispatchTarget(rows[0].session_id);
+        if (rows.length && !newCommentDispatchTarget) setNewCommentDispatchTarget(rows[0].session_id);
+      }
     }).catch(()=>{});
     return () => { cancelled = true; };
   }, [cid]);
@@ -660,6 +675,81 @@ function CockpitCenter({ project, cid, activeSpec, setRoute }) {
     if (nodes.length && window.runMermaid) window.runMermaid(nodes);
   }, [activeSpec?.body, activeSpec?.id]);
 
+  // Handle text selection in document body for inline annotation pill
+  window.React.useEffect(() => {
+    const root = bodyRef.current;
+    if (!root) return;
+
+    const onMouseUp = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) {
+        setSelectionPillPos(null);
+        return;
+      }
+      const range = sel.getRangeAt(0);
+      const text = sel.toString().trim();
+      if (!text || text.length < 2) {
+        setSelectionPillPos(null);
+        return;
+      }
+      if (!root.contains(range.commonAncestorContainer)) {
+        setSelectionPillPos(null);
+        return;
+      }
+
+      // Calculate quote, prefix, suffix, and nearest section heading
+      const rootText = root.innerText || root.textContent || '';
+      const quote = text;
+      let at = rootText.indexOf(quote);
+      const prefix = at > 0 ? rootText.slice(Math.max(0, at - 40), at) : '';
+      const suffix = at >= 0 ? rootText.slice(at + quote.length, at + quote.length + 40) : '';
+
+      // Find nearest preceding heading
+      let node = range.startContainer;
+      if (node.nodeType === 3) node = node.parentNode;
+      let section = 'General';
+      let sectionId = '';
+      let curr = node;
+      while (curr && curr !== root) {
+        let prev = curr.previousElementSibling;
+        while (prev) {
+          if (/^H[1-6]$/i.test(prev.tagName)) {
+            section = prev.textContent.trim();
+            sectionId = prev.id || section.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+            break;
+          }
+          prev = prev.previousElementSibling;
+        }
+        if (sectionId) break;
+        curr = curr.parentElement;
+      }
+
+      const rect = range.getBoundingClientRect();
+      const containerRect = root.getBoundingClientRect();
+      setSelectionPillPos({
+        top: rect.top - containerRect.top + root.scrollTop,
+        left: rect.left - containerRect.left + (rect.width / 2),
+        quote,
+        prefix,
+        suffix,
+        section,
+        sectionId,
+      });
+    };
+
+    const onMouseDown = (e) => {
+      if (e.target.closest('.cockpit-selection-pill') || e.target.closest('.cockpit-anchored-modal')) return;
+      setSelectionPillPos(null);
+    };
+
+    document.addEventListener('mouseup', onMouseUp);
+    document.addEventListener('mousedown', onMouseDown);
+    return () => {
+      document.removeEventListener('mouseup', onMouseUp);
+      document.removeEventListener('mousedown', onMouseDown);
+    };
+  }, [activeSpec?.id]);
+
   // Highlight quoted text ranges for anchored comments
   window.React.useEffect(() => {
     if (!activeSpec || !spec || !bodyRef.current) return;
@@ -671,7 +761,7 @@ function CockpitCenter({ project, cid, activeSpec, setRoute }) {
       p.normalize();
     });
     const comments = window.Store.getTicketComments(spec.id) || [];
-    const quotes = comments.filter(c => c.quote && c.status !== 'deleted').slice(0, 25);
+    const quotes = comments.filter(c => c.quote && c.status !== 'deleted').slice(0, 30);
     if (!quotes.length) return;
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode(n) {
@@ -710,17 +800,17 @@ function CockpitCenter({ project, cid, activeSpec, setRoute }) {
         mark.className = 'cockpit-anno';
         mark.dataset.commentId = c.id;
         mark.title = 'Comment: ' + (c.body||'').slice(0,80);
-        mark.style.background = 'color-mix(in oklab, var(--status-review) 22%, transparent)';
+        mark.style.background = 'color-mix(in oklab, var(--status-review) 24%, transparent)';
         mark.style.borderBottom = '2px solid var(--status-review)';
         mark.style.cursor = 'pointer';
         node.parentNode.insertBefore(mark, node);
         mark.appendChild(node);
         mark.addEventListener('click', () => {
-          const card = document.querySelector(`.cockpit-comment[data-comment-id="${c.id}"]`);
+          const card = document.querySelector(`.cockpit-comment-card[data-comment-id="${c.id}"]`);
           if (card) {
             card.scrollIntoView({ behavior: 'smooth', block: 'center' });
             card.style.outline = '2px solid var(--accent)';
-            setTimeout(()=> card.style.outline='', 1200);
+            setTimeout(()=> card.style.outline='', 1400);
           }
         });
       }
@@ -745,8 +835,17 @@ function CockpitCenter({ project, cid, activeSpec, setRoute }) {
 
   const allTickets = window.Store.getTrackerTickets({ project_id: cid, includeArchived: true });
   const children = allTickets.filter(t => t.parent_id === spec.id);
-  const comments = window.Store.getTicketComments(spec.id) || [];
-  const openUndispatched = comments.filter(c => c.status==='open' && c.dispatch_state==='undispatched');
+  const allComments = window.Store.getTicketComments(spec.id) || [];
+  const openUndispatched = allComments.filter(c => c.status==='open' && c.dispatch_state==='undispatched');
+
+  const filteredComments = allComments.filter(c => {
+    if (commentFilter === 'all') return true;
+    if (commentFilter === 'decision') return c.tag === 'decision' || c.tag === 'decision_ask' || /decision|choice|locked/i.test(c.body||'');
+    if (commentFilter === 'resolved') return c.status === 'resolved' || c.dispatch_state === 'addressed';
+    return c.status === 'open' && c.dispatch_state !== 'addressed';
+  });
+
+  const decisionSummary = allComments.filter(c => (c.tag === 'decision' || c.tag === 'decision_ask' || /decision|locked/i.test(c.body||''))).slice(0, 4);
 
   const stateOrder = { todo:'Draft', in_progress:'Refining', blocked:'Blocked', review:'Review', done:'Locked', archived:'Locked' };
   const html = renderMd(spec.body || '');
@@ -768,7 +867,7 @@ function CockpitCenter({ project, cid, activeSpec, setRoute }) {
       .catch(err => console.error('task state update failed', err));
   };
 
-  const dispatchOpen = () => {
+  const dispatchAllOpen = () => {
     if (openUndispatched.length===0) return;
     const target = spec.assignee && dispatchable.some(s=>s.session_id===spec.assignee) ? spec.assignee : (dispatchable[0]?.session_id || '');
     if (!target) { alert('No live session to dispatch to. Start a worker via Swarm pane or /agents.'); return; }
@@ -790,8 +889,101 @@ function CockpitCenter({ project, cid, activeSpec, setRoute }) {
       .catch(err=> console.error(err));
   };
 
+  // Submit Anchored Comment from Inline Selection Popover
+  const handleSaveAnchoredComment = (dispatch = false) => {
+    const text = anchoredBody.trim();
+    if (!text || !anchoredModalData) return;
+    setIsSavingAnchor(true);
+    const tag = anchoredTag !== 'comment' ? anchoredTag : undefined;
+    window.SubstrateAPI.addComment(spec.display_id || spec.id, {
+      author: 'human',
+      author_label: 'Lavee',
+      body: text,
+      tag: tag,
+      quote: anchoredModalData.quote,
+      prefix: anchoredModalData.prefix,
+      suffix: anchoredModalData.suffix,
+      section: anchoredModalData.section,
+      section_id: anchoredModalData.sectionId,
+    }).then(created => {
+      if (dispatch && created && created.id) {
+        const target = anchoredDispatchTarget || dispatchable[0]?.session_id;
+        if (target) window.SubstrateAPI.dispatchComment(created.id, { session_id: target }).catch(()=>{});
+      }
+      setAnchoredModalData(null);
+      setAnchoredBody('');
+      setIsSavingAnchor(false);
+      setSelectionPillPos(null);
+      window.getSelection()?.removeAllRanges();
+    }).catch(err => {
+      console.error(err);
+      setIsSavingAnchor(false);
+    });
+  };
+
+  // Submit Top-Level Comment in Center Pane
+  const handlePostGeneralComment = (dispatch = false) => {
+    const text = newCommentText.trim();
+    if (!text || !spec) return;
+    setPostingComment(true);
+    const tag = newCommentTag !== 'comment' ? newCommentTag : undefined;
+    window.SubstrateAPI.addComment(spec.display_id || spec.id, {
+      author: 'human',
+      author_label: 'Lavee',
+      body: text,
+      tag: tag,
+    }).then(created => {
+      if (dispatch && created && created.id) {
+        const target = newCommentDispatchTarget || dispatchable[0]?.session_id;
+        if (target) window.SubstrateAPI.dispatchComment(created.id, { session_id: target }).catch(()=>{});
+      }
+      setNewCommentText('');
+      setPostingComment(false);
+    }).catch(err => {
+      console.error(err);
+      setPostingComment(false);
+    });
+  };
+
+  const handleReplySubmit = (commentId) => {
+    const text = replyText.trim();
+    if (!text || !spec) return;
+    window.SubstrateAPI.replyComment(spec.display_id || spec.id, commentId, {
+      author: 'human',
+      author_label: 'Lavee',
+      body: text
+    }).then(() => {
+      setReplyText('');
+      setReplyingToId(null);
+    }).catch(err => console.error(err));
+  };
+
+  const handleToggleResolve = (comment) => {
+    if (!spec) return;
+    const isResolved = comment.status === 'resolved' || comment.dispatch_state === 'addressed';
+    const newStatus = isResolved ? 'open' : 'resolved';
+    window.SubstrateAPI.updateComment(spec.display_id || spec.id, comment.id, {
+      status: newStatus
+    }).then(res => {
+      if (res?.ticket?.id) window.Store.upsertTrackerTicket(res.ticket);
+    }).catch(err => console.error(err));
+  };
+
+  const handleDispatchSingleComment = (comment, targetSessionId = null) => {
+    if (!spec) return;
+    const target = targetSessionId || (spec.assignee && dispatchable.some(s => s.session_id === spec.assignee)
+      ? spec.assignee
+      : (dispatchable[0]?.session_id || ''));
+    if (!target) { alert('No live worker session to dispatch to.'); return; }
+    window.SubstrateAPI.dispatchComment(comment.id, { session_id: target }).then(res => {
+      if (res?.ticket?.id) window.Store.upsertTrackerTicket(res.ticket);
+      if (res?.ticket?.comments) window.Store.seedTicketComments(res.ticket.id, res.ticket.comments);
+    }).catch(err => console.error(err));
+  };
+
   return (
-    <div className="cockpit-center">
+    <div className="cockpit-center" style={{ position: 'relative' }}>
+      {/* Document Lifecycle & Header */}
       <div className="doc-header">
         <div className="doc-lifecycle-bar">
           <span className={`step-pill ${pillClass(1)}`}>1. Draft {lifecycle.done.includes(1) ? '✓' : ''}</span>
@@ -815,8 +1007,107 @@ function CockpitCenter({ project, cid, activeSpec, setRoute }) {
         </div>
       </div>
 
-      <div className="cockpit-doc-body td-body" ref={bodyRef} dangerouslySetInnerHTML={{ __html: html }} />
+      {/* Spec Markdown Body */}
+      <div
+        className="cockpit-doc-body td-body"
+        ref={bodyRef}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
 
+      {/* Floating Selection Trigger Pill */}
+      {selectionPillPos && !anchoredModalData && (
+        <button
+          className="cockpit-selection-pill"
+          style={{ top: `${selectionPillPos.top}px`, left: `${selectionPillPos.left}px` }}
+          onClick={() => setAnchoredModalData(selectionPillPos)}
+        >
+          <span>💬 Add Comment on Selection</span>
+        </button>
+      )}
+
+      {/* Inline Anchored Comment Popover Modal */}
+      {anchoredModalData && (
+        <div className="peek-backdrop" onClick={() => setAnchoredModalData(null)}>
+          <div className="cockpit-anchored-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="cockpit-anchored-modal-head">
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <span className="mono" style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                  Section: {anchoredModalData.section}
+                </span>
+                <div className="cockpit-anchored-quote-preview">
+                  “{anchoredModalData.quote.length > 120 ? anchoredModalData.quote.slice(0, 120) + '…' : anchoredModalData.quote}”
+                </div>
+              </div>
+              <button className="orch-btn ghost small" onClick={() => setAnchoredModalData(null)}>✕</button>
+            </div>
+            <div className="cockpit-anchored-modal-body">
+              <textarea
+                className="cockpit-composer-input"
+                placeholder="Write your review comment, question, or decision on this section…"
+                rows={3}
+                value={anchoredBody}
+                onChange={(e) => setAnchoredBody(e.target.value)}
+                autoFocus
+              />
+              <div className="cockpit-composer-bar">
+                <div className="cockpit-tag-pills">
+                  {['comment', 'decision', 'blocker', 'question'].map(t => (
+                    <button
+                      key={t}
+                      type="button"
+                      className={`cockpit-tag-btn ${anchoredTag === t ? 'active' : ''}`}
+                      onClick={() => setAnchoredTag(t)}
+                    >
+                      {t === 'decision' ? '🔒 Decision' : t === 'blocker' ? '⚠️ Blocker' : t === 'question' ? '❓ Question' : '💬 Note'}
+                    </button>
+                  ))}
+                </div>
+                {dispatchable.length > 0 && (
+                  <select
+                    className="cockpit-worker-select"
+                    value={anchoredDispatchTarget}
+                    onChange={(e) => setAnchoredDispatchTarget(e.target.value)}
+                    title="Target worker for dispatch"
+                  >
+                    {dispatchable.map(w => (
+                      <option key={w.session_id} value={w.session_id}>
+                        {w.label || w.session_id.slice(0, 8)} ({w.role || 'worker'})
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            </div>
+            <div className="cockpit-anchored-modal-actions">
+              <button
+                className="orch-btn ghost small"
+                onClick={() => setAnchoredModalData(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="orch-btn primary small"
+                disabled={!anchoredBody.trim() || isSavingAnchor}
+                onClick={() => handleSaveAnchoredComment(false)}
+              >
+                Post Comment
+              </button>
+              {dispatchable.length > 0 && (
+                <button
+                  className="orch-btn primary small"
+                  disabled={!anchoredBody.trim() || isSavingAnchor}
+                  onClick={() => handleSaveAnchoredComment(true)}
+                  title="Post and immediately dispatch to worker"
+                >
+                  ⚡ Post & Dispatch
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Subtasks Section */}
       <div className="cockpit-subtasks task-subtable">
         <div className="cockpit-subtasks-head">
           <span className="cockpit-subtasks-title">Sub-tasks</span>
@@ -880,47 +1171,244 @@ function CockpitCenter({ project, cid, activeSpec, setRoute }) {
         )}
       </div>
 
+      {/* Action Bar */}
       <div className="cockpit-actions">
         <button className="orch-btn cockpit-action" onClick={decompose} title="Lead: Decompose spec into tasks">⚡ Decompose into Tasks</button>
-        <button className="orch-btn cockpit-action primary" onClick={dispatchOpen} disabled={openUndispatched.length===0} title="Dispatch all undispatched comments on this spec">
+        <button className="orch-btn cockpit-action primary" onClick={dispatchAllOpen} disabled={openUndispatched.length===0} title="Dispatch all undispatched comments on this spec">
           💬 Dispatch Open Comments {openUndispatched.length>0 ? `(${openUndispatched.length})` : ''}
         </button>
         <button className="orch-btn cockpit-action" onClick={verifyAndLand} title="Verify & land spec (mark done)">✓ Verify & Land Spec</button>
+      </div>
+
+      {/* Spacious Reviews & Comments Stream (Directly Below Document) */}
+      <div className="cockpit-center-comments">
+        <div className="cockpit-center-comments-head">
+          <div className="cockpit-center-comments-title">
+            <span>💬 Reviews & Feedback</span>
+            <span className="cockpit-right-count tnum">{allComments.length}</span>
+          </div>
+          <div className="cockpit-comment-filter">
+            <button className={`cockpit-filter-btn ${commentFilter==='open'?'active':''}`} onClick={()=>setCommentFilter('open')} title="Open feedback">
+              Open ({allComments.filter(c => c.status === 'open' && c.dispatch_state !== 'addressed').length})
+            </button>
+            <button className={`cockpit-filter-btn ${commentFilter==='decision'?'active':''}`} onClick={()=>setCommentFilter('decision')} title="Decisions">
+              Decisions
+            </button>
+            <button className={`cockpit-filter-btn ${commentFilter==='resolved'?'active':''}`} onClick={()=>setCommentFilter('resolved')} title="Resolved">
+              Resolved ({allComments.filter(c => c.status === 'resolved' || c.dispatch_state === 'addressed').length})
+            </button>
+            <button className={`cockpit-filter-btn ${commentFilter==='all'?'active':''}`} onClick={()=>setCommentFilter('all')} title="All comments">
+              All
+            </button>
+          </div>
+        </div>
+
+        {/* Decision Summary Box */}
+        {decisionSummary.length > 0 && (
+          <div className="cockpit-decision-summary">
+            <div className="cockpit-decision-summary-head">
+              <span>🔒 Locked Architectural Decisions</span>
+            </div>
+            {decisionSummary.map(d => (
+              <div key={d.id} className="cockpit-decision-item">
+                <span>• {(d.body||'').slice(0, 100)}{(d.body||'').length > 100 ? '…' : ''}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Embedded Top-Level Comment Composer */}
+        <div className="cockpit-comment-composer">
+          <textarea
+            className="cockpit-composer-input"
+            placeholder="Write review feedback, architectural decision, or question on this spec…"
+            rows={3}
+            value={newCommentText}
+            onChange={(e)=> setNewCommentText(e.target.value)}
+          />
+          <div className="cockpit-composer-bar">
+            <div className="cockpit-tag-pills">
+              {['comment', 'decision', 'blocker', 'question'].map(t => (
+                <button
+                  key={t}
+                  type="button"
+                  className={`cockpit-tag-btn ${newCommentTag === t ? 'active' : ''}`}
+                  onClick={() => setNewCommentTag(t)}
+                >
+                  {t === 'decision' ? '🔒 Decision' : t === 'blocker' ? '⚠️ Blocker' : t === 'question' ? '❓ Question' : '💬 Note'}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              {dispatchable.length > 0 && (
+                <select
+                  className="cockpit-worker-select"
+                  value={newCommentDispatchTarget}
+                  onChange={(e) => setNewCommentDispatchTarget(e.target.value)}
+                  title="Dispatch target"
+                >
+                  {dispatchable.map(w => (
+                    <option key={w.session_id} value={w.session_id}>
+                      {w.label || w.session_id.slice(0, 8)} ({w.role || 'worker'})
+                    </option>
+                  ))}
+                </select>
+              )}
+              <button
+                type="button"
+                className="orch-btn ghost small"
+                disabled={!newCommentText.trim() || postingComment}
+                onClick={() => handlePostGeneralComment(false)}
+              >
+                Post Note
+              </button>
+              <button
+                type="button"
+                className="orch-btn primary small cockpit-post-btn"
+                disabled={!newCommentText.trim() || postingComment}
+                onClick={() => handlePostGeneralComment(true)}
+              >
+                ⚡ Post & Dispatch
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Comment Stream Cards */}
+        {filteredComments.length === 0 ? (
+          <div className="cockpit-quiet">No comments in this filter. Select text in the document above to add an anchored note.</div>
+        ) : (
+          <div className="cockpit-comment-cards-grid">
+            {filteredComments.slice().sort((a,b)=> (a.created_at||'').localeCompare(b.created_at||'')).map(c => {
+              const isResolved = c.status==='resolved' || c.dispatch_state==='addressed';
+              const isReplying = replyingToId === c.id;
+              const tag = c.tag || (/decision|locked/i.test(c.body||'') ? 'decision' : null);
+              return (
+                <div
+                  key={c.id}
+                  className={`cockpit-comment-card ${isResolved ? 'resolved' : ''} ${tag ? `tag-${tag}` : ''}`}
+                  data-comment-id={c.id}
+                >
+                  <div className="cockpit-comment-head">
+                    <span className="cockpit-comment-author">{authorMeta(c.author, c.author_label).label}</span>
+                    {c.section && <span className="mono" style={{ fontSize: 10.5, color: 'var(--text-3)' }}>§ {c.section}</span>}
+                    {tag && (
+                      <span className={`cockpit-tag-badge tag-${tag} mono`}>
+                        {tag === 'decision' ? '🔒 Decision' : tag === 'blocker' ? '⚠️ Blocker' : tag}
+                      </span>
+                    )}
+                    <span className="cockpit-comment-time mono">{fmtAgo(c.created_at||c.updated_at)}</span>
+                  </div>
+
+                  {c.quote && (
+                    <div
+                      className="cockpit-comment-quote clickable"
+                      title="Click to jump to section in document"
+                      onClick={() => {
+                        const mark = bodyRef.current?.querySelector(`mark.cockpit-anno[data-comment-id="${c.id}"]`);
+                        if (mark) {
+                          mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                          mark.style.outline = '2px solid var(--accent)';
+                          setTimeout(() => mark.style.outline = '', 1400);
+                        }
+                      }}
+                    >
+                      <span className="cockpit-quote-icon">“</span>
+                      <span>{c.quote}</span>
+                    </div>
+                  )}
+
+                  <div className="cockpit-comment-body td-body" dangerouslySetInnerHTML={{ __html: renderMd(c.body||'') }} />
+
+                  <div className="cockpit-comment-actions">
+                    <button
+                      className="orch-btn ghost small"
+                      onClick={() => setReplyingToId(isReplying ? null : c.id)}
+                      title="Reply to thread"
+                    >
+                      💬 Reply
+                    </button>
+                    <button
+                      className="orch-btn ghost small"
+                      onClick={() => handleDispatchSingleComment(c)}
+                      title="Dispatch feedback to live worker"
+                    >
+                      ⚡ Dispatch
+                    </button>
+                    <button
+                      className="orch-btn ghost small"
+                      onClick={() => handleToggleResolve(c)}
+                      title={isResolved ? 'Reopen comment' : 'Mark resolved'}
+                    >
+                      {isResolved ? '↺ Reopen' : '✓ Resolve'}
+                    </button>
+
+                    <span className="cockpit-comment-state mono" style={{marginLeft:'auto'}}>
+                      {isResolved ? (
+                        <span style={{color:'var(--status-active)'}}>Resolved ✓</span>
+                      ) : c.dispatch_state === 'dispatched' ? (
+                        <span style={{color:'var(--status-running)'}}>Sent to agent</span>
+                      ) : (
+                        <span>Open</span>
+                      )}
+                    </span>
+                  </div>
+
+                  {/* Inline Reply Composer */}
+                  {isReplying && (
+                    <div className="cockpit-reply-box">
+                      <input
+                        className="cockpit-reply-input"
+                        placeholder="Write a reply…"
+                        value={replyText}
+                        onChange={(e)=> setReplyText(e.target.value)}
+                        onKeyDown={(e)=> { if (e.key === 'Enter') handleReplySubmit(c.id); }}
+                        autoFocus
+                      />
+                      <button
+                        className="orch-btn primary small"
+                        onClick={()=> handleReplySubmit(c.id)}
+                        disabled={!replyText.trim()}
+                      >
+                        Reply
+                      </button>
+                      <button
+                        className="orch-btn ghost small"
+                        onClick={()=> setReplyingToId(null)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Threaded Replies List */}
+                  {c.replies && c.replies.length > 0 && (
+                    <div className="cockpit-replies">
+                      {c.replies.map(r => (
+                        <div key={r.id} className="cockpit-reply">
+                          <span className="cockpit-reply-author">{authorMeta(r.author, r.author_label).label}:</span>
+                          <span className="cockpit-reply-body" dangerouslySetInnerHTML={{__html: renderMd(r.body)}} />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-// ── RIGHT: Swarm Ops & Interactive Comments Stream
+// ── RIGHT: Swarm Fleet & Live Zero-Terminal Operations
 function CockpitRight({ project, cid, activeSpec, onPeek, onSpawn }) {
   (window.useStore ? window.useStore() : null);
-  const [filter, setFilter] = window.React.useState('open'); // open | decision | resolved | all
-  const [replyingToId, setReplyingToId] = window.React.useState(null);
-  const [replyText, setReplyText] = window.React.useState('');
-  const [newCommentText, setNewCommentText] = window.React.useState('');
-  const [newCommentTag, setNewCommentTag] = window.React.useState('comment'); // comment | decision | blocker | question
   const [steerSessionId, setSteerSessionId] = window.React.useState(null);
   const [steerInput, setSteerInput] = window.React.useState('');
-  const [postingComment, setPostingComment] = window.React.useState(false);
 
   const alive = window.Store.getProjectAliveSessions(project);
-  const spec = activeSpec ? (window.Store.getState().trackerTickets.get(activeSpec.id) || activeSpec) : null;
-  const allComments = spec ? (window.Store.getTicketComments(spec.id) || []) : [];
-
-  const comments = window.React.useMemo(() => {
-    if (filter === 'all') return allComments;
-    if (filter === 'decision') return allComments.filter(c => c.tag === 'decision' || c.tag === 'decision_ask' || /decision|choice|locked/i.test(c.body||''));
-    if (filter === 'resolved') return allComments.filter(c => c.status === 'resolved' || c.dispatch_state === 'addressed');
-    return allComments.filter(c => c.status === 'open' && c.dispatch_state !== 'addressed');
-  }, [allComments, filter]);
-
-  // Decision Summary box
-  const decisionSummary = window.React.useMemo(() => {
-    if (!allComments.length) return null;
-    const decisions = allComments.filter(c => (c.tag === 'decision' || c.tag === 'decision_ask' || /decision|locked/i.test(c.body||'')));
-    if (!decisions.length) return null;
-    return decisions.slice(0, 3);
-  }, [allComments]);
 
   const handlePeek = (session) => {
     const id = session.session_id || session.name;
@@ -937,69 +1425,11 @@ function CockpitRight({ project, cid, activeSpec, onPeek, onSpawn }) {
     }).catch(err => console.error(err));
   };
 
-  const handlePostComment = (e) => {
-    if (e) e.preventDefault();
-    const text = newCommentText.trim();
-    if (!text || !spec) return;
-    setPostingComment(true);
-    const tag = newCommentTag !== 'comment' ? newCommentTag : undefined;
-    window.SubstrateAPI.addComment(spec.display_id || spec.id, {
-      author: 'human',
-      author_label: 'Lavee',
-      body: text,
-      tag: tag
-    }).then(comment => {
-      setNewCommentText('');
-      setPostingComment(false);
-    }).catch(err => {
-      console.error('Failed to post comment', err);
-      setPostingComment(false);
-    });
-  };
-
-  const handleReplySubmit = (commentId) => {
-    const text = replyText.trim();
-    if (!text || !spec) return;
-    window.SubstrateAPI.replyComment(spec.display_id || spec.id, commentId, {
-      author: 'human',
-      author_label: 'Lavee',
-      body: text
-    }).then(() => {
-      setReplyText('');
-      setReplyingToId(null);
-    }).catch(err => console.error(err));
-  };
-
-  const handleToggleResolve = (comment) => {
-    if (!spec) return;
-    const isResolved = comment.status === 'resolved' || comment.dispatch_state === 'addressed';
-    const newStatus = isResolved ? 'open' : 'resolved';
-    window.SubstrateAPI.updateComment(spec.display_id || spec.id, comment.id, {
-      status: newStatus
-    }).then(res => {
-      if (res?.ticket?.id) window.Store.upsertTrackerTicket(res.ticket);
-    }).catch(err => console.error(err));
-  };
-
-  const handleDispatchComment = (comment) => {
-    if (!spec) return;
-    const dispatchable = window.Store.getState().nativeSessions.filter(s => s.alive && s.project_id === cid);
-    const target = spec.assignee && dispatchable.some(s => s.session_id === spec.assignee)
-      ? spec.assignee
-      : (dispatchable[0]?.session_id || '');
-    if (!target) { alert('No live worker session to dispatch to.'); return; }
-    window.SubstrateAPI.dispatchComment(comment.id, { session_id: target }).then(res => {
-      if (res?.ticket?.id) window.Store.upsertTrackerTicket(res.ticket);
-      if (res?.ticket?.comments) window.Store.seedTicketComments(res.ticket.id, res.ticket.comments);
-    }).catch(err => console.error(err));
-  };
-
   return (
     <div className="cockpit-right">
-      {/* Live Workers Section */}
       <div className="cockpit-right-section">
         <div className="cockpit-right-head">
-          <span className="cockpit-right-title">Live Workers</span>
+          <span className="cockpit-right-title">Live Swarm Fleet</span>
           <span className="cockpit-right-count tnum">{alive.length}</span>
           <button className="orch-btn ghost small" onClick={()=> onSpawn && onSpawn()} title="Add worker" style={{marginLeft:'auto'}}>+ Add Worker</button>
         </div>
@@ -1073,193 +1503,6 @@ function CockpitRight({ project, cid, activeSpec, onPeek, onSpawn }) {
               );
             })}
           </div>
-        )}
-      </div>
-
-      {/* Reviews & Interactive Comments Section */}
-      <div className="cockpit-right-section cockpit-comments-section">
-        <div className="cockpit-right-head">
-          <span className="cockpit-right-title">Reviews & Comments</span>
-          <span className="cockpit-right-count tnum">{allComments.length}</span>
-          <span className="cockpit-comment-filter">
-            <button className={`cockpit-filter-btn ${filter==='open'?'active':''}`} onClick={()=>setFilter('open')} title="Open feedback">
-              Open ({allComments.filter(c => c.status === 'open' && c.dispatch_state !== 'addressed').length})
-            </button>
-            <button className={`cockpit-filter-btn ${filter==='decision'?'active':''}`} onClick={()=>setFilter('decision')} title="Decisions">
-              Decisions
-            </button>
-            <button className={`cockpit-filter-btn ${filter==='resolved'?'active':''}`} onClick={()=>setFilter('resolved')} title="Resolved">
-              Resolved ({allComments.filter(c => c.status === 'resolved' || c.dispatch_state === 'addressed').length})
-            </button>
-            <button className={`cockpit-filter-btn ${filter==='all'?'active':''}`} onClick={()=>setFilter('all')} title="All comments">
-              All
-            </button>
-          </span>
-        </div>
-
-        {/* Decision Summary Box */}
-        {decisionSummary && (
-          <div className="cockpit-decision-summary">
-            <div className="cockpit-decision-summary-head">
-              <span>🔒 Decision Summary</span>
-            </div>
-            {decisionSummary.map(d => (
-              <div key={d.id} className="cockpit-decision-item">
-                <span>• {(d.body||'').slice(0, 80)}{(d.body||'').length > 80 ? '…' : ''}</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {spec ? (
-          <div className="cockpit-comments-wrapper">
-            {/* Fresh Top-Level Comment Composer */}
-            <form className="cockpit-comment-composer" onSubmit={handlePostComment}>
-              <textarea
-                className="cockpit-composer-input"
-                placeholder="Write a comment, review feedback, or locked decision…"
-                rows={2}
-                value={newCommentText}
-                onChange={(e)=> setNewCommentText(e.target.value)}
-                onKeyDown={(e)=> { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') handlePostComment(e); }}
-              />
-              <div className="cockpit-composer-bar">
-                <div className="cockpit-tag-pills">
-                  {['comment', 'decision', 'blocker', 'question'].map(t => (
-                    <button
-                      key={t}
-                      type="button"
-                      className={`cockpit-tag-btn ${newCommentTag === t ? 'active' : ''}`}
-                      onClick={() => setNewCommentTag(t)}
-                    >
-                      {t === 'decision' ? '🔒 Decision' : t === 'blocker' ? '⚠️ Blocker' : t === 'question' ? '❓ Question' : '💬 Note'}
-                    </button>
-                  ))}
-                </div>
-                <button
-                  type="submit"
-                  className="orch-btn primary small cockpit-post-btn"
-                  disabled={!newCommentText.trim() || postingComment}
-                >
-                  {postingComment ? 'Posting…' : 'Post Comment'}
-                </button>
-              </div>
-            </form>
-
-            {/* Comment Stream */}
-            {comments.length === 0 ? (
-              <div className="cockpit-quiet">No comments in this filter.</div>
-            ) : (
-              <div className="cockpit-comment-list">
-                {comments.slice().sort((a,b)=> (a.created_at||'').localeCompare(b.created_at||'')).map(c => {
-                  const isResolved = c.status==='resolved' || c.dispatch_state==='addressed';
-                  const isReplying = replyingToId === c.id;
-                  const tag = c.tag || (/decision|locked/i.test(c.body||'') ? 'decision' : null);
-                  return (
-                    <div
-                      key={c.id}
-                      className={`cockpit-comment ${isResolved?'resolved':''} ${tag ? `tag-${tag}` : ''}`}
-                      data-comment-id={c.id}
-                    >
-                      <div className="cockpit-comment-head">
-                        <span className="cockpit-comment-author">{authorMeta(c.author, c.author_label).label}</span>
-                        {tag && (
-                          <span className={`cockpit-tag-badge tag-${tag} mono`}>
-                            {tag === 'decision' ? '🔒 Decision' : tag === 'blocker' ? '⚠️ Blocker' : tag}
-                          </span>
-                        )}
-                        <span className="cockpit-comment-time mono">{fmtAgo(c.created_at||c.updated_at)}</span>
-                      </div>
-
-                      <div className="cockpit-comment-body td-body" dangerouslySetInnerHTML={{ __html: renderMd(c.body||'') }} />
-
-                      {c.quote && (
-                        <div className="cockpit-comment-quote">
-                          <span className="cockpit-quote-icon">“</span>
-                          <span>{c.quote}</span>
-                        </div>
-                      )}
-
-                      <div className="cockpit-comment-actions">
-                        <button
-                          className="orch-btn ghost small"
-                          onClick={() => setReplyingToId(isReplying ? null : c.id)}
-                          title="Reply to thread"
-                        >
-                          💬 Reply
-                        </button>
-                        <button
-                          className="orch-btn ghost small"
-                          onClick={() => handleDispatchComment(c)}
-                          title="Dispatch feedback to worker"
-                        >
-                          ⚡ Dispatch
-                        </button>
-                        <button
-                          className="orch-btn ghost small"
-                          onClick={() => handleToggleResolve(c)}
-                          title={isResolved ? 'Reopen comment' : 'Mark resolved'}
-                        >
-                          {isResolved ? '↺ Reopen' : '✓ Resolve'}
-                        </button>
-
-                        <span className="cockpit-comment-state mono" style={{marginLeft:'auto'}}>
-                          {isResolved ? (
-                            <span style={{color:'var(--status-active)'}}>Resolved ✓</span>
-                          ) : c.dispatch_state === 'dispatched' ? (
-                            <span style={{color:'var(--status-running)'}}>Sent to agent</span>
-                          ) : (
-                            <span>Open</span>
-                          )}
-                        </span>
-                      </div>
-
-                      {/* Inline Reply Composer */}
-                      {isReplying && (
-                        <div className="cockpit-reply-box">
-                          <input
-                            className="cockpit-reply-input"
-                            placeholder="Write a reply…"
-                            value={replyText}
-                            onChange={(e)=> setReplyText(e.target.value)}
-                            onKeyDown={(e)=> { if (e.key === 'Enter') handleReplySubmit(c.id); }}
-                            autoFocus
-                          />
-                          <button
-                            className="orch-btn primary small"
-                            onClick={()=> handleReplySubmit(c.id)}
-                            disabled={!replyText.trim()}
-                          >
-                            Reply
-                          </button>
-                          <button
-                            className="orch-btn ghost small"
-                            onClick={()=> setReplyingToId(null)}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Threaded Replies List */}
-                      {c.replies && c.replies.length > 0 && (
-                        <div className="cockpit-replies">
-                          {c.replies.map(r => (
-                            <div key={r.id} className="cockpit-reply">
-                              <span className="cockpit-reply-author">{authorMeta(r.author, r.author_label).label}:</span>
-                              <span className="cockpit-reply-body" dangerouslySetInnerHTML={{__html: renderMd(r.body)}} />
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="cockpit-quiet">Select a spec to see its comments.</div>
         )}
       </div>
     </div>
