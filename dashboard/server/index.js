@@ -2409,7 +2409,15 @@ async function main() {
       // Once a harness has adopted canonical facts, an authenticated healthy
       // endpoint lease is part of dispatchability. Legacy rows retain the
       // queue-while-unreachable compatibility behavior during migration.
-      if (s.fact_observed_at && !hasAuthenticatedHealthyChannel(s)) continue;
+      // Hermes is the same story structurally: its channel MCP child is lazy —
+      // Hermes initializes stdio servers on first use, not at TUI startup — so
+      // a freshly spawned Hermes worker cannot present a healthy channel
+      // within the spawn-ready window. Its launcher-written typed-worker fact
+      // (push:true) is the readiness evidence; while the channel is absent the
+      // row stays listed with reachable:false and dispatch queues when-idle
+      // until the channel heartbeat registers (first turn / first tool call).
+      const hermesFactRow = s.harness === 'hermes' && !!s.fact_observed_at;
+      if (s.fact_observed_at && !hermesFactRow && !hasAuthenticatedHealthyChannel(s)) continue;
       const team = teamBySession.get(s.session_id);
       // TKT-0369: an alive session whose channel MCP died must NOT silently
       // vanish from the picker — it stays listed with reachable:false so the UI

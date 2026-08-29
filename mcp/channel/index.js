@@ -83,6 +83,59 @@ function readParentSessionFile() {
   } catch { /* missing / unreadable — fall through */ }
   return null;
 }
+function resolveWorkerContext() {
+  const cwd = process.env.GOLEM_PROJECT_DIR || process.cwd();
+  const normalizedCwd = String(cwd || '').replace(/\/+$/, '');
+  // 1. Durable bindings written by `golem hermes` — newest for this project
+  // wins. This is the authoritative launcher-owned canonical session id.
+  try {
+    const file = path.join(tracker.golemHome(), 'hermes-session-bindings.json');
+    if (fs.existsSync(file)) {
+      const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const bindings = (Array.isArray(raw?.bindings) ? raw.bindings : [])
+        .filter((b) => b?.session_id)
+        .sort((a, b) => Date.parse(b.created_at || 0) - Date.parse(a.created_at || 0));
+      const match = bindings.find((b) => {
+        const p = String(b.project_path || '').replace(/\/+$/, '');
+        return p && p === normalizedCwd;
+      }) || bindings.find((b) => {
+        const p = String(b.project_path || '').replace(/\/+$/, '');
+        return p && normalizedCwd.startsWith(p + '/');
+      });
+      if (match) return { session_id: match.session_id, name: match.name ?? null, source: 'hermes-binding' };
+    }
+  } catch {}
+  // 2. Fallback: worker registry rows for this project.
+  try {
+    const file = path.join(tracker.golemHome(), 'workers.json');
+    if (!fs.existsSync(file)) return null;
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const rows = (raw.workers || []).filter((w) => w.state === 'spawning' || w.state === 'live');
+    const spawningInCwd = rows.find((w) => w.state === 'spawning' && (w.cwd === normalizedCwd || w.project_root === normalizedCwd));
+    if (spawningInCwd) return spawningInCwd;
+    const byPid = rows.find((w) => w.pid === process.ppid);
+    if (byPid) return byPid;
+    const inCwd = rows.find((w) => w.cwd === normalizedCwd || w.project_root === normalizedCwd);
+    if (inCwd) return inCwd;
+  } catch {}
+  return null;
+}
+
+/** True when THIS channel server process is bound to a Hermes session: the
+ * launcher env carries the id directly, or a durable hermes binding names it. */
+function isHermesBoundSession(sessionId) {
+  if (process.env.HERMES_SESSION_ID) return true;
+  if (!sessionId) return false;
+  try {
+    const file = path.join(tracker.golemHome(), 'hermes-session-bindings.json');
+    if (!fs.existsSync(file)) return false;
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return (Array.isArray(raw?.bindings) ? raw.bindings : []).some((b) => b?.session_id === sessionId);
+  } catch {
+    return false;
+  }
+}
+
 function deriveSessionId() {
   const managed = managedCodexBinding();
   if (managed.enabled) return managed.sessionId || '';
@@ -93,6 +146,8 @@ function deriveSessionId() {
   if (process.env.GOLEM_SESSION_ID) return process.env.GOLEM_SESSION_ID;
   const j = readParentSessionFile();
   if (j && typeof j.sessionId === 'string' && j.sessionId) return j.sessionId;
+  const worker = resolveWorkerContext();
+  if (worker) return worker.session_id || worker.worker_id;
   return resolveCallerSessionId({ home: tracker.golemHome() }).sessionId || process.env.CLAUDE_CODE_SESSION_ID || '';
 }
 function deriveSessionName() {
@@ -100,6 +155,8 @@ function deriveSessionName() {
   if (process.env.GOLEM_WORKER_NAME) return process.env.GOLEM_WORKER_NAME;
   const j = readParentSessionFile();
   if (j && typeof j.name === 'string' && j.name) return j.name;
+  const worker = resolveWorkerContext();
+  if (worker && worker.name) return worker.name;
   const bridge = bridgeEndpointForParent({ home: tracker.golemHome() });
   return bridge && typeof bridge.name === 'string' && bridge.name ? bridge.name : null;
 }
@@ -113,6 +170,8 @@ function launcherBoundSessionId() {
   if (process.env.GOLEM_SESSION_ID) return process.env.GOLEM_SESSION_ID.trim();
   const parent = readParentSessionFile();
   if (typeof parent?.sessionId === 'string' && parent.sessionId.trim()) return parent.sessionId.trim();
+  const worker = resolveWorkerContext();
+  if (worker) return (worker.session_id || worker.worker_id).trim();
   const runId = typeof process.env.CLAUDE_CODE_SESSION_ID === 'string'
     ? process.env.CLAUDE_CODE_SESSION_ID.trim()
     : '';
@@ -284,7 +343,7 @@ function registerChannel(port, { logMissing = true } = {}) {
   const siblings = sessionsForParent({ home: tracker.golemHome() });
   const harness = siblings.length || (bridge && bridge.session_id === SESSION_ID)
     ? 'opencode'
-    : (process.env.HERMES_SESSION_ID ? 'hermes' : 'claudecode');
+    : (isHermesBoundSession(SESSION_ID) ? 'hermes' : 'claudecode');
   const consumer = channelConsumerStatus(harness);
   if (!SESSION_ID && siblings.length === 0) {
     if (WATCH_OPENCODE_BRIDGES) {

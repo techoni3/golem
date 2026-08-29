@@ -41,6 +41,8 @@ import { CodexSupervisor, readCodexSupervisor } from '../lib/codex-supervisor.js
 import { MIN_PI_NODE, SUPPORTED_PI_VERSION, piNodeSupported } from '../lib/pi-compatibility.js';
 import { resolveRolePreset } from '../lib/role-preset.js';
 import { getProfile, listProfileNames } from '../lib/model-profiles.js';
+import { upsertSessionFact } from '../lib/session-facts.js';
+import { upsertSessionRegistration } from '../lib/session-registry.js';
 import {
   attachSwarm,
   attachWorker,
@@ -56,6 +58,37 @@ const __dirname = dirname(__filename);
 const GOLEM_ROOT = resolve(__dirname, '..');
 const DASHBOARD_DIR = resolve(GOLEM_ROOT, 'dashboard');
 const DEFAULT_DASHBOARD_PORT = 7420;
+
+/** Durable binding written by `golem hermes` so the golem channel MCP child
+ * spawned by Hermes can discover ITS canonical session id without any
+ * per-spawn env (config.yaml env is static across sessions). The channel
+ * server reads the newest binding for its project at startup. */
+function writeHermesSessionBinding({ sessionId, name, projectPath, projectId }) {
+  try {
+    const file = join(golemHome(), 'hermes-session-bindings.json');
+    let registry = { version: 1, bindings: [] };
+    try {
+      const parsed = JSON.parse(readFileSync(file, 'utf8'));
+      if (parsed && Array.isArray(parsed.bindings)) registry = parsed;
+    } catch { /* first write */ }
+    const now = new Date().toISOString();
+    registry.bindings = registry.bindings.filter((b) => b?.session_id !== sessionId);
+    registry.bindings.push({
+      session_id: sessionId,
+      name: name ?? null,
+      project_path: projectPath,
+      project_id: projectId ?? null,
+      created_at: now,
+    });
+    // Keep the ledger bounded — newest 50 bindings.
+    registry.bindings = registry.bindings.slice(-50);
+    mkdirSync(dirname(file), { recursive: true });
+    const tmp = `${file}.tmp.${process.pid}`;
+    writeFileSync(tmp, JSON.stringify(registry, null, 2));
+    renameSync(tmp, file);
+  } catch { /* fail open — the channel heartbeat retries registration */ }
+}
+
 function dashboardUrl() {
   if (process.env.GOLEM_DASHBOARD_URL) return process.env.GOLEM_DASHBOARD_URL.replace(/\/$/, '');
   const port = process.env.PORT || String(DEFAULT_DASHBOARD_PORT);
@@ -809,11 +842,11 @@ async function cmdPi(args) {
 async function cmdHermes(args) {
   const projectRoot = await resolveProjectRoot(process.cwd());
   const projectId = projectIdFor(projectRoot);
-  const sessionId = randomUUID();
 
   let role = null;
   let profile = null;
   let name = null;
+  let sessionId = null;
   const passthrough = [];
 
   for (let i = 0; i < args.length; i++) {
@@ -821,14 +854,47 @@ async function cmdHermes(args) {
     if (arg === '--role') { role = args[++i]; continue; }
     if (arg === '--profile') { profile = args[++i]; continue; }
     if (arg === '--name') { name = args[++i]; continue; }
+    if (arg === '--session-id') { sessionId = args[++i]; continue; }
     passthrough.push(arg);
   }
+  if (!sessionId || !sessionId.trim()) sessionId = randomUUID();
+  sessionId = sessionId.trim();
 
   const hermesBin = spawnSync('sh', ['-c', 'command -v hermes'], { encoding: 'utf8' }).stdout.trim() || 'hermes';
   const hermesArgs = ['--pass-session-id', '--accept-hooks'];
   hermesArgs.push(...passthrough);
 
   hermesAdapter.ensureHermesConfigured({ renderRoot: renderDirFor('hermes') });
+
+  try {
+    await upsertSessionRegistration({
+      sessionId,
+      cwd: projectRoot,
+      harness: 'hermes',
+      name,
+      model: profile || 'hermes',
+    });
+    upsertSessionFact({
+      canonical_id: sessionId,
+      continuation_key: sessionId,
+      harness: 'hermes',
+      locator: { raw_session_id: sessionId },
+      project_path: projectRoot,
+      name,
+      model: profile || 'hermes',
+      status: 'idle',
+      delivery: { mode: 'typed-worker', push: true, ready: true },
+      capabilities: { typed_worker: true },
+      trust: 'host-full-trust',
+      lifecycle_event: 'session-start',
+      observed_at: new Date().toISOString(),
+    });
+    // Durable session binding for the golem channel MCP child that Hermes
+    // spawns. The MCP child has no per-spawn env of its own (config.yaml env is
+    // static), so it reads the newest binding for this project at startup and
+    // registers the channel under THIS canonical id eagerly.
+    writeHermesSessionBinding({ sessionId, name, projectPath: projectRoot, projectId });
+  } catch {}
 
   const env = {
     ...process.env,
