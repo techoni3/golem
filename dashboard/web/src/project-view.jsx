@@ -1501,21 +1501,41 @@ function CockpitRight({ project, cid, activeSpec, onPeek, onSpawn }) {
   const [steerSessionId, setSteerSessionId] = window.React.useState(null);
   const [steerInput, setSteerInput] = window.React.useState('');
   const [rawWorkers, setRawWorkers] = window.React.useState([]);
+  // Model switch state — per-worker selection + in-flight flag.
+  const [profiles, setProfiles] = window.React.useState([]);
+  const [modelPick, setModelPick] = window.React.useState({}); // name -> profile
+  const [switchingName, setSwitchingName] = window.React.useState(null);
+  const [switchMsg, setSwitchMsg] = window.React.useState(null); // { name, tone, text }
 
   const alive = window.Store.getProjectAliveSessions(project);
 
   window.React.useEffect(() => {
     if (!cid) return;
     let cancelled = false;
+    const fetchProfiles = () => window.SubstrateAPI.modelProfiles().then((store) => {
+      if (!cancelled && Array.isArray(store?.profiles)) setProfiles(store.profiles);
+    }).catch(()=>{});
     const fetchW = () => {
       window.SubstrateAPI.listWorkers(cid).then(list => {
         if (!cancelled && Array.isArray(list)) setRawWorkers(list);
       }).catch(()=>{});
+      fetchProfiles();
     };
     fetchW();
     const timer = setInterval(fetchW, 5000);
     return () => { cancelled = true; clearInterval(timer); };
   }, [cid, alive.length]);
+
+  // Model profiles for the per-worker switcher (also refreshed on the WS-signal
+  // DOM event when Settings saves a profile).
+  window.React.useEffect(() => {
+    let cancelled = false;
+    const handler = () => window.SubstrateAPI.modelProfiles().then((store) => {
+      if (!cancelled && Array.isArray(store?.profiles)) setProfiles(store.profiles);
+    }).catch(()=>{});
+    window.addEventListener('model-profiles-updated', handler);
+    return () => { cancelled = true; window.removeEventListener('model-profiles-updated', handler); };
+  }, []);
 
   // Include failed/unregistered workers that still exist in workers.json
   const failedWorkers = window.React.useMemo(() => {
@@ -1550,6 +1570,26 @@ function CockpitRight({ project, cid, activeSpec, onPeek, onSpawn }) {
     window.SubstrateAPI.killSession(session.session_id || session.name).then(() => {
       setRawWorkers(prev => prev.filter(w => w.name !== session.name && w.session_id !== session.session_id));
     }).catch(err => console.error(err));
+  };
+
+  const handleSwitchModel = (session) => {
+    const name = session.name || session.worker_name;
+    const profile = modelPick[name];
+    if (!name || !profile) return;
+    const harness = session.harness || 'pi';
+    const note = harness === 'pi'
+      ? 'Pi workers resume their conversation on the new model.'
+      : 'Hermes workers restart fresh on the new model.';
+    if (!confirm(`Switch ${name} to profile “${profile}” and restart it?\n\n${note}`)) return;
+    setSwitchingName(name);
+    setSwitchMsg(null);
+    window.SubstrateAPI.switchWorkerModel(name, { profile, project: cid }).then((res) => {
+      setSwitchMsg({ name, tone: 'ok', text: `Switched to ${profile} ✓` });
+      setModelPick((prev) => ({ ...prev, [name]: '' }));
+      setTimeout(() => setSwitchMsg((m) => (m?.name === name ? null : m)), 4000);
+    }).catch((err) => {
+      setSwitchMsg({ name, tone: 'err', text: String(err?.message || err).slice(0, 160) });
+    }).finally(() => setSwitchingName(null));
   };
 
   return (
@@ -1636,15 +1676,61 @@ function CockpitRight({ project, cid, activeSpec, onPeek, onSpawn }) {
                     </div>
                   )}
 
-                  {/* Progressive disclosure for technical metadata */}
+                  {/* Progressive disclosure for technical metadata + model switcher */}
                   <details className="worker-details">
-                    <summary className="worker-details-summary">▸ Technical Details</summary>
+                    <summary className="worker-details-summary">▸ Technical Details & Model</summary>
                     <div className="worker-details-grid mono">
                       <div><span>Harness:</span> <b>{s.harness || 'pi'}</b></div>
                       <div><span>Provider:</span> <b>{s.provider || '—'}</b></div>
                       <div><span>PID:</span> <b>{s.pid != null ? s.pid : '—'}</b></div>
                       <div><span>Session ID:</span> <b>{s.session_id?.slice(0,10)}…</b></div>
                     </div>
+                    {(() => {
+                      const harness = s.harness || 'pi';
+                      const name = s.name || s.worker_name;
+                      if (!['pi', 'hermes'].includes(harness)) {
+                        return (
+                          <div className="cockpit-model-switch mono" title={`Model switching is available for golem-managed pi/hermes workers; this session runs ${harness}`}>
+                            <span className="cockpit-model-switch-hint">Model switch unavailable ({harness})</span>
+                          </div>
+                        );
+                      }
+                      const matching = profiles.filter((p) => (p.harness || 'pi') === harness);
+                      const current = modelPick[name] || '';
+                      const msg = switchMsg?.name === name ? switchMsg : null;
+                      return (
+                        <div className="cockpit-model-switch">
+                          <div className="cockpit-model-switch-row">
+                            <select
+                              className="cockpit-model-switch-select mono"
+                              value={current}
+                              disabled={switchingName === name || matching.length === 0}
+                              onChange={(e) => setModelPick((prev) => ({ ...prev, [name]: e.target.value }))}
+                              aria-label={`Switch model for ${name}`}
+                            >
+                              <option value="">Switch model… ({matching.length} profiles)</option>
+                              {matching.map((p) => (
+                                <option key={p.name} value={p.name}>{p.name} · {p.model}</option>
+                              ))}
+                            </select>
+                            <button
+                              className="orch-btn small cockpit-model-switch-btn"
+                              disabled={!current || switchingName === name}
+                              onClick={() => handleSwitchModel(s)}
+                              title={harness === 'pi' ? 'Restart worker on the selected profile (conversation resumes)' : 'Restart worker on the selected profile (fresh session)'}
+                            >
+                              {switchingName === name ? 'Switching…' : 'Switch'}
+                            </button>
+                          </div>
+                          {msg && (
+                            <div className={`cockpit-model-switch-msg ${msg.tone} mono`}>{msg.text}</div>
+                          )}
+                          {matching.length === 0 && (
+                            <div className="cockpit-model-switch-hint mono">No {harness} profiles yet — create one in Settings.</div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </details>
                 </div>
               );

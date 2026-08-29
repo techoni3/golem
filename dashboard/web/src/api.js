@@ -341,6 +341,7 @@
     killSession: (sessionId) => postJSON(`/api/native-sessions/${encodeURIComponent(sessionId)}/message`, { mode: 'kill' }),
     listWorkers: (projectId) => getJSON(`/api/workers${qs(projectId ? { project: projectId } : {})}`),
     spawnWorker: (body) => postJSON('/api/workers/spawn', body),
+    switchWorkerModel: (name, body) => postJSON(`/api/workers/${encodeURIComponent(name)}/switch-model`, body),
     diagnostics: () => getJSON('/api/diagnostics'),
     scaffoldProject: (name) => postJSON('/api/projects/scaffold', { name }),
     importProject: (path) => postJSON('/api/projects/import', { path }),

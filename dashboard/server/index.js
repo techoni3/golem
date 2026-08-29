@@ -21,8 +21,8 @@ import { registerSubstrateRoutes } from './substrate.js';
 import { teamAssists } from './team-assist.js';
 import { golemHome, dashboardJsonPath, journalDirFor, sessionsJsonPath } from '../../lib/golem-home.js';
 import { createRole, deleteRole, getRole, listRoleCards, roleChangeBrief, roleMission, setSessionRole, updateRoleMeta, writeRoleCard } from '../../lib/session-role.js';
-import { enrichDispatchableRows, spawnWorker, killWorker, peekWorker, peekSessionTerminal, sendWorkerKeys } from '../../lib/worker-manager.js';
-import { listWorkers } from '../../lib/worker-registry.js';
+import { enrichDispatchableRows, spawnWorker, switchWorkerModel, killWorker, peekWorker, peekSessionTerminal, sendWorkerKeys } from '../../lib/worker-manager.js';
+import { findWorker, listWorkers } from '../../lib/worker-registry.js';
 import { capturePane, hasSession } from '../../lib/tmux-driver.js';
 import { acceptedDelivery, publishDurableEnvelope, settleDurableEnvelope } from './envelope-delivery.js';
 import { recordTypedEnvelopeOutcome } from './typed-delivery.js';
@@ -32,6 +32,7 @@ import {
   clearRoleDefault,
   createProfile,
   deleteProfile,
+  getProfile,
   loadProfilesStore,
   setRoleDefault,
   updateProfile,
@@ -1324,6 +1325,74 @@ async function main() {
       await state.refreshNativeSessions().catch(() => {});
       broadcastWS({ type: 'native-sessions-update', native_sessions: enrichSessionRows(state.nativeSessions(), state.channels()), channels: state.channels() });
       return reply.code(201).send(worker);
+    } catch (err) {
+      return reply.code(500).send({ error: String(err?.message || err) });
+    }
+  });
+
+  // GOL-15/39: switch an existing golem-managed worker onto a different model
+  // profile. Universal mechanism: controlled restart under the SAME role +
+  // name with `--profile` (resolved at launch). Pi workers resume their prior
+  // conversation; hermes workers restart fresh. Non-golem-managed sessions
+  // (user-launched claudecode/codex without a worker row) fall back to a
+  // terminate-and-relaunch using the native session's role when available.
+  fastify.post('/api/workers/:name/switch-model', async (req, reply) => {
+    const name = String(req.params.name || '').trim();
+    const body = req.body ?? {};
+    const profile = typeof body.profile === 'string' ? body.profile.trim() : '';
+    const resume = body.resume !== false;
+    const project = body.project != null ? String(body.project).trim() || null : null;
+    if (!name) return reply.code(400).send({ error: 'worker name is required' });
+    if (!profile) return reply.code(400).send({ error: 'profile is required' });
+    try {
+      const profileRecord = getProfile(profile);
+      if (!profileRecord) {
+        return reply.code(400).send({ error: `unknown model profile: ${profile}` });
+      }
+      const wantedProject = project ? resolveProjectId(project) : null;
+      let workerRow = null;
+      try { workerRow = findWorker(name, { projectId: wantedProject }); } catch { workerRow = null; }
+
+      let result;
+      if (workerRow) {
+        result = await switchWorkerModel(name, { projectId: workerRow.project_id, profile, resume });
+      } else {
+        // No worker registry row — the session was launched interactively
+        // (e.g. `golem pi` in a user terminal). Terminate the native session
+        // and relaunch it as a managed worker with the same role + name.
+        const session = state.nativeSessions().find((s) => s.name === name || s.session_id === name);
+        if (!session || !session.alive) {
+          return reply.code(404).send({ error: `no live worker or session found for ${name}` });
+        }
+        const harness = String(session.harness || 'pi').toLowerCase();
+        if (!['pi', 'hermes'].includes(harness)) {
+          return reply.code(400).send({ error: `model switching requires a golem-managed worker (pi or hermes); session ${name} runs ${harness}` });
+        }
+        if (!session.role) {
+          return reply.code(400).send({ error: `session ${name} has no role to relaunch with; assign a role first` });
+        }
+        // Terminate via the same path as the kill endpoint (no worker row).
+        try {
+          const { markSessionFactsEnded, retireEndpointLeasesForCanonical: retireLeases } = await import('../../lib/session-facts.js');
+          const { markSessionsEnded } = await import('../../lib/session-registry.js');
+          markSessionFactsEnded([session.session_id], { status: 'stopped' });
+          markSessionsEnded([session.session_id], { status: 'stopped' });
+          retireLeases([session.session_id]);
+          if (session.pid) {
+            try { process.kill(session.pid, 'SIGTERM'); } catch {}
+          }
+        } catch {}
+        result = await spawnWorker({
+          role: session.role,
+          name: session.name,
+          project: session.project_id ?? wantedProject,
+          profile,
+          resumeSessionId: harness === 'pi' && resume ? session.session_id : null,
+        });
+      }
+      await state.refreshNativeSessions().catch(() => {});
+      broadcastWS({ type: 'native-sessions-update', native_sessions: enrichSessionRows(state.nativeSessions(), state.channels()), channels: state.channels() });
+      return { ok: true, switched_to: profile, worker: result };
     } catch (err) {
       return reply.code(500).send({ error: String(err?.message || err) });
     }
