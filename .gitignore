@@ -22,3 +22,6 @@ archive/
 .DS_Store
 *.swp
 *.swo
+
+# Python bytecode (hermes platform plugin)
+__pycache__/
