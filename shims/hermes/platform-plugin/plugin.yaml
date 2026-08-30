@@ -1,0 +1,26 @@
+name: golem-platform
+label: Golem Dashboard
+kind: platform
+version: 0.1.0
+description: >
+  Golem Dashboard gateway adapter for Hermes Agent (GOL-39 part 2).
+  Bridges the Golem dashboard and Hermes workers bidirectionally: dashboard
+  dispatches (briefs, comment dispatches, steers) arrive as native worker
+  turns, and worker replies land in the dashboard chat lane — the same
+  bidirectional mechanism Hermes uses for Telegram/Slack.
+author: golem
+requires_env:
+  - name: GOLEM_DASHBOARD_URL
+    description: "Base URL of the Golem dashboard (e.g. http://dashboard.golem.localhost:7420)"
+    prompt: "Golem dashboard URL"
+    password: false
+optional_env:
+  - name: GOLEM_SESSION_NAME
+    description: "Worker name this adapter serves (defaults to the pi/hermes session name)"
+    password: false
+  - name: GOLEM_PROJECT_ID
+    description: "Golem contract project id to scope dispatches"
+    password: false
+  - name: GOLEM_POLL_SECONDS
+    description: "Dispatch poll interval in seconds (default 5)"
+    password: false
