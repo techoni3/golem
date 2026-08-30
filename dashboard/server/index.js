@@ -646,7 +646,7 @@ async function main() {
   }
 
   const NORMALIZED_DELIVERY_REASONS = new Set([
-    'ready', 'busy', 'waiting', 'missing_channel', 'endpoint_unhealthy', 'not_ready',
+    'ready', 'busy', 'waiting', 'missing_channel', 'endpoint_unhealthy', 'not_ready', 'pull_adapter',
   ]);
 
   function deriveSessionDelivery(session, channel) {
@@ -681,6 +681,10 @@ async function main() {
   }
 
   function hasAuthenticatedHealthyChannel(session) {
+    // Pull-only adapters (hermes, codex Tier-B) are healthy when they have a lease + healthz, even though delivery_ready is false
+    if (session.delivery_reason === 'pull_adapter' || session.consumer_reason === 'pull_adapter') {
+      return session.channel_present === true && session.endpoint_health === 'healthy';
+    }
     return session.channel_present === true
       && session.endpoint_health === 'healthy'
       && session.delivery_reason !== 'not_ready';
@@ -957,6 +961,22 @@ async function main() {
       : null) ?? (typeof req.query?.session === 'string' ? req.query.session : null);
     return sid && sid.trim() ? sid.trim() : null;
   }
+
+  // GOL-46: worker-reply ingest — hermes adapter posts worker replies here so the cockpit chat lane shows them live.
+  // Body: { session_id, author, author_label?, content } — author is the worker's display name (e.g. hermes), content is the reply text.
+  fastify.post('/api/chat', async (req, reply) => {
+    const b = req.body ?? {};
+    const sessionId = typeof b.session_id === 'string' && b.session_id.trim() ? b.session_id.trim() : null;
+    const author = typeof b.author === 'string' && b.author.trim() ? b.author.trim() : 'hermes';
+    const authorLabel = typeof b.author_label === 'string' && b.author_label.trim() ? b.author_label.trim() : author;
+    const content = typeof b.content === 'string' ? b.content : (typeof b.text === 'string' ? b.text : '');
+    if (!sessionId) return reply.code(400).send({ error: 'session_id is required' });
+    if (!content || !String(content).trim()) return reply.code(400).send({ error: 'content is required' });
+    const msg = chat.record('ceo', 'response', String(content), { session_id: sessionId, author, author_label: authorLabel });
+    // chat.record already emits 'message' which index.js fans out as WS chat-message, but ensure broadcast in case chat is stubbed in tests
+    try { broadcastWS({ type: 'chat-message', message: msg }); } catch {}
+    return { ok: true, message: msg };
+  });
 
   fastify.post('/api/brief', async (req, reply) => {
     const body = extractBody(req);
@@ -2384,6 +2404,38 @@ async function main() {
     let status = q.status || 'pending';
     if (status === 'all') status = null;
     return tracker.listDispatchQueue({ session_id: sessionId, project_id: projectId, status });
+  });
+
+  // GOL-46: POST /api/dispatch-queue/:id/claim — hermes adapter claims a pending row for pull delivery.
+  // Atomically marks pending -> publishing with owner, 409 if already claimed/publishing.
+  fastify.post('/api/dispatch-queue/:id/claim', async (req, reply) => {
+    const id = req.params.id;
+    const owner = typeof req.body?.owner === 'string' && req.body.owner.trim() ? req.body.owner.trim() : `hermes-${crypto.randomUUID()}`;
+    const db = tracker.raw();
+    const row = db.prepare('SELECT * FROM dispatch_queue WHERE id = ?').get(id);
+    if (!row) return reply.code(404).send({ error: `dispatch queue row ${id} not found` });
+    const claimed = tracker.claimQueuePublishing ? tracker.claimQueuePublishing(id, { ownerToken: owner }) : db.prepare("UPDATE dispatch_queue SET status = 'publishing', publishing_owner = @owner, publishing_expires_at = @expires WHERE id = @id AND (status = 'pending' OR (status = 'publishing' AND publishing_expires_at < @now))").run({ id, owner, expires: new Date(Date.now() + 30000).toISOString(), now: new Date().toISOString() }).changes === 1;
+    if (!claimed) {
+      const current = db.prepare('SELECT * FROM dispatch_queue WHERE id = ?').get(id);
+      return reply.code(409).send({ error: `dispatch queue row ${id} already claimed`, row: current });
+    }
+    const claimedRow = db.prepare('SELECT * FROM dispatch_queue WHERE id = ?').get(id);
+    let envelope = null;
+    if (claimedRow.envelope_id) {
+      try { envelope = tracker.getEnvelope(claimedRow.envelope_id); } catch {}
+    }
+    let ticket = null;
+    if (claimedRow.ticket_id) {
+      try { ticket = tracker.getTicket(claimedRow.ticket_id); } catch {}
+    }
+    let content = '';
+    if (envelope) {
+      try { content = JSON.parse(envelope.payload || '{}').content || claimedRow.note || ''; } catch { content = claimedRow.note || ''; }
+    } else {
+      content = claimedRow.note || '';
+    }
+    broadcastWS({ type: 'dispatch-queue-updated' });
+    return { ok: true, row: claimedRow, ticket, envelope, content, note: claimedRow.note, workspace: claimedRow.workspace, envelope_id: claimedRow.envelope_id, owner };
   });
 
   // TKT-0245: DELETE /api/dispatch-queue/:qid — cancel a pending queued

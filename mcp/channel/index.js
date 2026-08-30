@@ -223,7 +223,9 @@ function channelConsumerStatus(harness) {
     return { ready: true, reason: null, transport: 'opencode-bridge' };
   }
   if (harness === 'hermes') {
-    return { ready: true, reason: null, transport: 'hermes-channel' };
+    // Pull-only: hermes adapter polls GET /api/dispatch-queue and claims via POST /api/dispatch-queue/:id/claim (codex Tier-B pattern)
+    // so the drainer must never double-push rows the adapter claims.
+    return { ready: false, reason: 'pull_adapter', transport: 'hermes-channel' };
   }
   const provider = claudeChannelProviderStatus();
   if (!provider.supported) {
