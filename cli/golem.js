@@ -29,6 +29,8 @@ import { fileURLToPath } from 'node:url';
 import { golemHome, legacyConfigDir, migratedHomeDir, trackerDbPath, renderDirFor, projectsJsonPath, sessionsJsonPath } from '../lib/golem-home.js';
 import { projectIdFor, resolveProjectRoot } from '../lib/project-id.js';
 import { SESSION_ROLES, pushRoleBriefDirect, setSessionRole } from '../lib/session-role.js';
+import { upsertSessionFact } from '../lib/session-facts.js';
+import { upsertSessionRegistration } from '../lib/session-registry.js';
 import { updateProjectLsp } from '../lib/lsp.js';
 import * as compiler from '../lib/compiler/engine.js';
 import * as ccAdapter from '../lib/compiler/adapters/cc.js';
@@ -41,8 +43,6 @@ import { CodexSupervisor, readCodexSupervisor } from '../lib/codex-supervisor.js
 import { MIN_PI_NODE, SUPPORTED_PI_VERSION, piNodeSupported } from '../lib/pi-compatibility.js';
 import { resolveRolePreset } from '../lib/role-preset.js';
 import { getProfile, listProfileNames } from '../lib/model-profiles.js';
-import { upsertSessionFact } from '../lib/session-facts.js';
-import { upsertSessionRegistration } from '../lib/session-registry.js';
 import {
   attachSwarm,
   attachWorker,
@@ -801,6 +801,56 @@ async function cmdPi(args) {
     ...(resume ? ['--session', resume.trim()] : []),
     ...passthrough,
   ];
+  // GOL-39: a RESUMED pi session does not fire the SessionStart hook the same
+  // way a fresh boot does, so the SessionStart hook script never clears the
+  // registry retirement killWorker wrote and the resumed worker can stay
+  // invisible to the dispatchable roster. Pre-write the live registration +
+  // fact for the resumed session id so the roster shows it as soon as the
+  // extension's endpoint lease passes its health probe.
+  if (resume) {
+    try {
+      const resumeId = resume.trim();
+      // Only pre-write when pi actually persisted the session — a resumed id
+      // with no on-disk file means pi will exit with "No session found" and a
+      // pre-written live fact would linger as a ghost.
+      const sessionsRoot = join(homedir(), '.pi', 'agent', 'sessions');
+      let sessionFile = null;
+      if (resumeId.includes('/') && existsSync(resumeId)) sessionFile = resolve(resumeId);
+      else {
+        for (const dir of readdirSync(sessionsRoot)) {
+          const candidate = readdirSync(join(sessionsRoot, dir)).find((f) => f.includes(resumeId) && f.endsWith('.jsonl'));
+          if (candidate) { sessionFile = join(sessionsRoot, dir, candidate); break; }
+        }
+      }
+      if (!sessionFile) {
+        err(`golem pi: no stored session matching "${resumeId}" — starting fresh is the fallback, but this resume cannot succeed.`);
+      } else {
+        const resumeProjectRoot = await resolveProjectRoot(process.cwd());
+        await upsertSessionRegistration({
+          sessionId: resumeId,
+          cwd: resumeProjectRoot,
+          harness: 'pi',
+          name: name ?? undefined,
+          model: effectiveModel ?? profileExec?.model ?? undefined,
+        });
+        upsertSessionFact({
+          canonical_id: resumeId,
+          continuation_key: resumeId,
+          harness: 'pi',
+          locator: { raw_session_id: resumeId, session_file: sessionFile },
+          project_path: resumeProjectRoot,
+          ...(name ? { name } : {}),
+          ...(effectiveModel ? { model: effectiveModel } : {}),
+          status: 'idle',
+          delivery: { mode: 'typed-worker', push: true, ready: true },
+          capabilities: { typed_worker: true },
+          trust: 'host-full-trust',
+          lifecycle_event: 'session-resume',
+          observed_at: new Date().toISOString(),
+        });
+      }
+    } catch { /* fail open — the extension heartbeat retries registration */ }
+  }
   const child = spawn('pi', launchArgs, { cwd: process.cwd(), env: childEnv, stdio: 'inherit' });
   const onSigint = () => { /* native Pi owns terminal Ctrl-C turn semantics */ };
   const forward = (signal) => { if (child.exitCode === null && child.signalCode === null) child.kill(signal); };
