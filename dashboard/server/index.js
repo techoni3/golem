@@ -2407,14 +2407,23 @@ async function main() {
   });
 
   // GOL-46: POST /api/dispatch-queue/:id/claim — hermes adapter claims a pending row for pull delivery.
-  // Atomically marks pending -> publishing with owner, 409 if already claimed/publishing.
+  // Atomically marks pending -> publishing with an owner lease; 409 on double-claim while leased.
+  // Body: { owner?, lease_ms? } — lease_ms defaults to 15m (pull_adapter consumers: the drainer holds
+  // their rows so a long lease costs nothing and absorbs slow native turns); clamped 1s..24h. After
+  // expiry the row is re-claimable (at-least-once with a crash-recovery fence; the adapter dedups by
+  // queue/envelope id). Settle with POST /:id/settle, abort with POST /:id/release.
+  const DEFAULT_PULL_LEASE_MS = 15 * 60_000;
   fastify.post('/api/dispatch-queue/:id/claim', async (req, reply) => {
     const id = req.params.id;
     const owner = typeof req.body?.owner === 'string' && req.body.owner.trim() ? req.body.owner.trim() : `hermes-${crypto.randomUUID()}`;
+    const rawLease = Number(req.body?.lease_ms);
+    const leaseMs = Number.isFinite(rawLease) && rawLease > 0
+      ? Math.min(Math.max(Math.round(rawLease), 1_000), 24 * 60 * 60_000)
+      : DEFAULT_PULL_LEASE_MS;
     const db = tracker.raw();
     const row = db.prepare('SELECT * FROM dispatch_queue WHERE id = ?').get(id);
     if (!row) return reply.code(404).send({ error: `dispatch queue row ${id} not found` });
-    const claimed = tracker.claimQueuePublishing ? tracker.claimQueuePublishing(id, { ownerToken: owner }) : db.prepare("UPDATE dispatch_queue SET status = 'publishing', publishing_owner = @owner, publishing_expires_at = @expires WHERE id = @id AND (status = 'pending' OR (status = 'publishing' AND publishing_expires_at < @now))").run({ id, owner, expires: new Date(Date.now() + 30000).toISOString(), now: new Date().toISOString() }).changes === 1;
+    const claimed = tracker.claimQueuePublishing(id, { ownerToken: owner, leaseMs });
     if (!claimed) {
       const current = db.prepare('SELECT * FROM dispatch_queue WHERE id = ?').get(id);
       return reply.code(409).send({ error: `dispatch queue row ${id} already claimed`, row: current });
@@ -2435,7 +2444,51 @@ async function main() {
       content = claimedRow.note || '';
     }
     broadcastWS({ type: 'dispatch-queue-updated' });
-    return { ok: true, row: claimedRow, ticket, envelope, content, note: claimedRow.note, workspace: claimedRow.workspace, envelope_id: claimedRow.envelope_id, owner };
+    return { ok: true, row: claimedRow, ticket, envelope, content, note: claimedRow.note, workspace: claimedRow.workspace, envelope_id: claimedRow.envelope_id, owner, lease_ms: leaseMs };
+  });
+
+  // GOL-46: POST /api/dispatch-queue/:id/settle — crash fence for the pull adapter.
+  // Called by the claimer when the claimed brief has been injected (or its native
+  // turn completed) → marks the row delivered. Owner-checked; idempotent on an
+  // already-delivered row so a settle retry after a network blip never 5xxs.
+  fastify.post('/api/dispatch-queue/:id/settle', async (req, reply) => {
+    const id = req.params.id;
+    const owner = typeof req.body?.owner === 'string' && req.body.owner.trim() ? req.body.owner.trim() : null;
+    if (!owner) return reply.code(400).send({ error: 'owner is required' });
+    const db = tracker.raw();
+    const row = db.prepare('SELECT * FROM dispatch_queue WHERE id = ?').get(id);
+    if (!row) return reply.code(404).send({ error: `dispatch queue row ${id} not found` });
+    if (row.status === 'delivered') return { ok: true, already_settled: true, row };
+    if (row.status !== 'publishing') return reply.code(409).send({ error: `dispatch queue row ${id} is not claimed (status ${row.status})`, row });
+    if (row.publishing_owner !== owner) return reply.code(409).send({ error: `dispatch queue row ${id} is claimed by another owner`, row });
+    const settledRow = tracker.markQueueDelivered(id, { ownerToken: owner });
+    const ticket = tracker.getTicket(settledRow.ticket_id);
+    if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
+    broadcastWS({ type: 'dispatch-queue-updated' });
+    broadcastWS({ type: 'communication-health-updated' });
+    return { ok: true, row: settledRow };
+  });
+
+  // GOL-46: POST /api/dispatch-queue/:id/release — adapter abort: hand the row
+  // back to pending immediately instead of waiting out the lease (e.g. inject
+  // failed, session vanished). Owner-checked like settle.
+  fastify.post('/api/dispatch-queue/:id/release', async (req, reply) => {
+    const id = req.params.id;
+    const owner = typeof req.body?.owner === 'string' && req.body.owner.trim() ? req.body.owner.trim() : null;
+    if (!owner) return reply.code(400).send({ error: 'owner is required' });
+    const db = tracker.raw();
+    const row = db.prepare('SELECT * FROM dispatch_queue WHERE id = ?').get(id);
+    if (!row) return reply.code(404).send({ error: `dispatch queue row ${id} not found` });
+    if (row.status !== 'publishing') return reply.code(409).send({ error: `dispatch queue row ${id} is not claimed (status ${row.status})`, row });
+    if (row.publishing_owner !== owner) return reply.code(409).send({ error: `dispatch queue row ${id} is claimed by another owner`, row });
+    const released = tracker.releaseQueuePublishing(id, { ownerToken: owner });
+    if (!released) return reply.code(409).send({ error: `dispatch queue row ${id} could not be released` });
+    const current = db.prepare('SELECT * FROM dispatch_queue WHERE id = ?').get(id);
+    const ticket = tracker.getTicket(row.ticket_id);
+    if (ticket) broadcastWS({ type: 'ticket-updated', ticket });
+    broadcastWS({ type: 'dispatch-queue-updated' });
+    broadcastWS({ type: 'communication-health-updated' });
+    return { ok: true, row: current };
   });
 
   // TKT-0245: DELETE /api/dispatch-queue/:qid — cancel a pending queued

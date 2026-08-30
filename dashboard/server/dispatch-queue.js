@@ -375,12 +375,26 @@ export function initDispatchDrainer({
     // (safe), not burn.
     let channelIds = new Set();
     let channelsBySession = new Map();
+    let pullAdapterSessions = new Set();
     try {
       // A managed Codex supervisor can keep a healthy loopback lease while it
       // is busy/recovering. Treat delivery_ready:false exactly like an absent
       // channel here so a queued envelope is held, never burned on a 409.
       // Legacy CC/OC rows remain eligible by their established presence rule.
-      const readyChannels = (await listChannels()).filter((channel) => isChannelDeliveryReady(channel));
+      const channels = await listChannels();
+      // GOL-46: pull-only adapters (hermes platform adapter) own their delivery
+      // through poll + claim (POST /api/dispatch-queue/:id/claim, settle/release).
+      // Their sessions are dispatchable despite delivery_ready:false and their
+      // queue rows are held indefinitely — skip the 60m offline expiry below so
+      // a long adapter lease never loses a dispatch. When the adapter dies its
+      // channel row is reaped and normal expiry semantics resume.
+      pullAdapterSessions = new Set(
+        channels
+          .filter((ch) => ch.consumer_reason === 'pull_adapter' || ch.harness === 'hermes')
+          .map((ch) => ch.session_id)
+          .filter(Boolean),
+      );
+      const readyChannels = channels.filter((channel) => isChannelDeliveryReady(channel));
       channelIds = new Set(readyChannels.map((channel) => channel.session_id));
       channelsBySession = new Map(readyChannels.map((channel) => [channel.session_id, channel]));
     } catch { /* transient → everyone waits a tick */ }
@@ -407,7 +421,10 @@ export function initDispatchDrainer({
 
       // Session unknown, dead, OR unreachable (channel MCP down — TKT-0369):
       // hold rows pending (60m expiry), never burn one on a push that can't land.
+      // GOL-46: pull-only adapter sessions are exempt — they take delivery via
+      // claim/settle, so their rows wait (never expire) until claimed/released.
       if (!s || !s.alive || !channelIds.has(sessionId)) {
+        if (pullAdapterSessions.has(sessionId)) continue;
         const oldest = rows[0];
         if (!oldest) continue;
         const createdMs = Date.parse(oldest.created_at);
