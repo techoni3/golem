@@ -167,12 +167,33 @@ def _resolve_session_id(
 
 
 def _resolve_dashboard_url(config_extra: Dict[str, Any]) -> str:
+    """Dashboard base URL: config extra → GOLEM_DASHBOARD_URL → ~/.golem/dashboard.json → default.
+
+    The dashboard.json fallback mirrors lib/golem-client.js
+    resolveGolemDashboardBaseUrl — TUI workers never carry GOLEM_DASHBOARD_URL
+    in their env, so the dashboard self-registration record is the source.
+    """
     extra_url = ""
     if isinstance(config_extra, dict):
         extra_url = (config_extra.get("dashboard_url") or config_extra.get("dashboardUrl") or "").strip()
     env_url = (os.getenv("GOLEM_DASHBOARD_URL") or "").strip()
-    raw = extra_url or env_url or DEFAULT_DASHBOARD_URL
-    return raw.rstrip("/")
+    if extra_url or env_url:
+        return (extra_url or env_url).rstrip("/")
+    try:
+        import json as _json
+
+        dashboard_file = _golem_home() / "dashboard.json"
+        if dashboard_file.is_file():
+            value = _json.loads(dashboard_file.read_text(encoding="utf-8"))
+            if isinstance(value, dict):
+                url = str(value.get("url") or "").strip()
+                if url:
+                    return url.rstrip("/")
+                if value.get("host") and value.get("port"):
+                    return f"http://{value['host']}:{value['port']}"
+    except Exception:
+        pass
+    return DEFAULT_DASHBOARD_URL
 
 
 def _resolve_poll_seconds(config_extra: Dict[str, Any]) -> float:
@@ -844,3 +865,21 @@ def register(ctx) -> None:
             "handle them as priority instructions from the orchestrator."
         ),
     )
+
+    # ── In-TUI dispatch loop (GOL-45 round 2) ────────────────────
+    # register() runs wherever the plugin manager loads — messaging gateway,
+    # cron, one-shot CLI, worker TUI panes, and the dashboard-PTY tui_gateway
+    # entry server. Only the worker TUI surfaces run the loop; the gateway
+    # register_platform surface above stays intact for future gateway-managed
+    # workers. The loop additionally requires the golem launcher identity
+    # (HERMES_SESSION_ID), so no other hermes process can adopt dispatches.
+    try:
+        from . import tui_loop
+
+        ctx.register_hook("on_session_start", tui_loop.on_session_start)
+        ctx.register_hook("on_session_end", tui_loop.on_session_end)
+        ctx.register_hook("on_session_finalize", tui_loop.on_session_finalize)
+        tui_loop.get_controller().ensure_started()
+    except Exception as exc:
+        _reg_logger = logging.getLogger(__name__)
+        _reg_logger.warning("[golem] tui loop wiring failed: %s", exc)
