@@ -2165,6 +2165,18 @@ async function main() {
     const existing = ticketRef;
     if (!sessionId) return reply.code(400).send({ error: 'session_id is required' });
     const nativeTarget = state.nativeSessions().find((s) => s.session_id === sessionId);
+    // GOL-46: pull-only adapters (hermes platform adapter) take delivery via
+    // poll + claim — never push to them. This must hold even when a channel
+    // row still advertises delivery-ready (stale registration from before the
+    // channel server restarts with the pull-only flip), so key on the harness
+    // too. Both the 'now' path and the when_idle fall-through check this.
+    let targetIsPullAdapter = nativeTarget?.harness === 'hermes';
+    if (!targetIsPullAdapter) {
+      try {
+        targetIsPullAdapter = (await listChannels()).some((c) => c.session_id === sessionId
+          && (c.consumer_reason === 'pull_adapter' || c.harness === 'hermes'));
+      } catch { /* registry read failure falls back to the native-harness check */ }
+    }
     // 'when_idle': queue for delivery on idle unless the target is already idle
     // (in which case fall through to the immediate 'now' path — no queue row).
     if (mode === 'when_idle') {
@@ -2175,7 +2187,10 @@ async function main() {
       // on an immediate push that cannot succeed.
       let hasChannel = false;
       try { hasChannel = (await listChannels()).some((c) => c.session_id === sessionId && isChannelDeliveryReady(c)); } catch { /* treat as unreachable */ }
-      const isIdle = !!target && target.alive && target.status === 'idle' && hasChannel;
+      // GOL-46: a pull_adapter target never takes an immediate push — even a
+      // stale delivery-ready row must not fall through; the row waits for the
+      // adapter's claim/settle instead.
+      const isIdle = !!target && target.alive && target.status === 'idle' && hasChannel && !targetIsPullAdapter;
       if (!isIdle) {
         const envelope = tracker.createDispatchEnvelope(id, { session_id: sessionId, actor: senderId || 'human', sender_id: senderId });
         const briefString = buildDispatchBrief(existing, note, workspace, envelope.id, envelope.sender_session_id);
@@ -2211,6 +2226,24 @@ async function main() {
     // belongs to its own delivery opportunity.
     const immediateCommentDispatches = tracker.listPendingCommentDispatchesForTicket(id, sessionId);
     const immediateCommentDispatchIds = immediateCommentDispatches.map((dispatch) => dispatch.id);
+
+    // GOL-46: pull-only adapters (hermes) — hold the dispatch for the adapter's
+    // poll + claim/settle cycle. A push here would POST to the channel endpoint
+    // and get a typed 202 back while the hermes pane never sees the brief
+    // (verified live on GOL-45), so "delivered" would be a lie. queueDispatch +
+    // hold = the correct receiver contract (claim/lease/settle from 2bc959e).
+    if (targetIsPullAdapter) {
+      const queueRow = tracker.queueDispatch(id, {
+        session_id: sessionId, note, workspace, payload: briefString, envelope_id: envelope.id, actor: senderId || 'human',
+      });
+      chat.record('system', 'info', `held ${queueRow.id.slice(0, 8)} for ${sessionId} — pull adapter will claim it (never pushed)`);
+      const heldTicket = tracker.getTicket(id);
+      broadcastWS({ type: 'ticket-updated', ticket: heldTicket });
+      broadcastWS({ type: 'dispatch-queue-updated' });
+      broadcastWS({ type: 'communication-health-updated' });
+      return { ok: true, assignment: { ok: true, ticket: heldTicket }, queued: true, delivered: false, held: true, reason: 'pull_adapter', queue_id: queueRow.id, envelope_id: queueRow.envelope_id, ticket: heldTicket,
+        delivery: { ok: true, queued: true, mode: 'next_turn', status: 0, error: null }, channel: null };
+    }
 
     // 3) Best-effort channel push — never fail the request on a push miss.
     let channelResult = null;
@@ -2437,14 +2470,32 @@ async function main() {
     if (claimedRow.ticket_id) {
       try { ticket = tracker.getTicket(claimedRow.ticket_id); } catch {}
     }
+    // GOL-46: claim is the pull flow's delivery opportunity. The drainer holds
+    // (never delivers) pull_adapter rows, so a when_idle-queued ticket has not
+    // had setDispatched run. Do the durable-first assignment here, before the
+    // adapter injects — mirrors the drainer's "assignment is durable" rule and
+    // keeps the cockpit showing the ticket as assigned/working.
+    let assignedHere = false;
+    if (ticket && !ticket.dispatched_to && ticket.state !== 'archived') {
+      try {
+        tracker.setDispatched(ticket.id, { session_id: claimedRow.session_id, actor: 'hermes-pull' });
+        ticket = tracker.getTicket(ticket.id);
+        assignedHere = true;
+      } catch (assignErr) {
+        console.error('[dispatch-claim] durable assignment failed:', assignErr);
+      }
+    }
     let content = '';
     if (envelope) {
       try { content = JSON.parse(envelope.payload || '{}').content || claimedRow.note || ''; } catch { content = claimedRow.note || ''; }
     } else {
       content = claimedRow.note || '';
     }
+    if (assignedHere || ticket) {
+      broadcastWS({ type: 'ticket-updated', ticket });
+    }
     broadcastWS({ type: 'dispatch-queue-updated' });
-    return { ok: true, row: claimedRow, ticket, envelope, content, note: claimedRow.note, workspace: claimedRow.workspace, envelope_id: claimedRow.envelope_id, owner, lease_ms: leaseMs };
+    return { ok: true, row: claimedRow, ticket, envelope, content, note: claimedRow.note, workspace: claimedRow.workspace, envelope_id: claimedRow.envelope_id, owner, lease_ms: leaseMs, assigned: assignedHere };
   });
 
   // GOL-46: POST /api/dispatch-queue/:id/settle — crash fence for the pull adapter.
