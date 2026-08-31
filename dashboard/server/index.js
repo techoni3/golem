@@ -690,6 +690,21 @@ async function main() {
       && session.delivery_reason !== 'not_ready';
   }
 
+  // GOL-46: pull-only adapters (hermes) take delivery exclusively through the
+  // dispatch-queue poll + claim cycle. A direct push to their channel endpoint
+  // gets a typed 202 while the hermes pane never sees the content (verified
+  // live on GOL-45) — so immediate push surfaces must hold for them and report
+  // honestly. The native-session harness check first covers stale
+  // delivery-ready channel rows from before the pull-only flip.
+  async function isPullAdapterTarget(sessionId) {
+    if (state.nativeSessions().find((s) => s.session_id === sessionId)?.harness === 'hermes') return true;
+    try {
+      return (await listChannels()).some((c) => c.session_id === sessionId
+        && (c.consumer_reason === 'pull_adapter' || c.harness === 'hermes'));
+    } catch { /* registry read failure: fall back to the harness check above */ }
+    return false;
+  }
+
   function enrichSessionRows(rows, channels = []) {
     const channelById = new Map((channels || []).filter((c) => c.session_id).map((c) => [c.session_id, c]));
     const pendingBySession = tracker.countPendingDispatchesBySession();
@@ -984,6 +999,15 @@ async function main() {
     const content = bodyToText(body);
     chat.record('user', 'brief', content, sessionId ? { session_id: sessionId } : {});
     if (!sessionId) return reply.code(400).send({ error: 'session_id is required' });
+    // GOL-46: pull-only adapters take delivery via dispatch-queue claim only —
+    // a direct brief push would false-deliver (typed 202, pane never sees it,
+    // verified live on GOL-45). There is no queue row to hold for a freeform
+    // brief, so surface the constraint explicitly instead of lying.
+    if (await isPullAdapterTarget(sessionId)) {
+      chat.record('system', 'warning', 'brief not delivered — pull-adapter session holds; dispatch a ticket so the adapter pulls it');
+      return reply.code(503).send({ ok: false, held: true, reason: 'pull_adapter', delivered: false,
+        error: 'pull-adapter sessions take delivery via dispatch-queue claim — dispatch a ticket instead of a direct brief' });
+    }
     const result = await deliverControlEnvelope(tracker, {
       sender_id: 'human:dashboard', recipient_session_id: sessionId,
       kind: 'brief', content, legacy: { path: '/brief', body },
@@ -1954,6 +1978,14 @@ async function main() {
       if (!ticket) return reply.code(404).send({ error: 'ticket_not_found' });
       const sessionId = commentDispatchTarget(ticket, b);
       if (!sessionId) return reply.code(400).send({ error: 'session_id is required when the ticket has no session assignee' });
+      // GOL-46: pull-adapter targets must hold — a push here would false-deliver
+      // (typed 202 while the pane never sees it). The comment stays undispatched
+      // (its honest state); dispatching the parent ticket puts the full brief on
+      // the adapter's pull queue instead.
+      if (await isPullAdapterTarget(sessionId)) {
+        return reply.code(503).send({ ok: false, held: true, reason: 'pull_adapter', delivered: false, rolled_back: false,
+          error: 'comment dispatch cannot be pushed to a pull-adapter session — the comment stays undispatched; dispatch the parent ticket so the adapter pulls the full brief' });
+      }
       const dispatch = tracker.enqueueCommentDispatch(comment, sessionId);
       const delivered = await deliverCommentDispatch(ticket, comment, sessionId, { dispatches: [dispatch] });
       if (!delivered.delivered) {
@@ -1987,6 +2019,12 @@ async function main() {
       if (!ticket) return reply.code(404).send({ error: 'not_found' });
       const sessionId = commentDispatchTarget(ticket, b);
       if (!sessionId) return reply.code(400).send({ error: 'session_id is required when the ticket has no session assignee' });
+      // GOL-46: pull-adapter hold — comments stay undispatched; ticket dispatch
+      // is the surface the adapter pulls (same reason as the single route).
+      if (await isPullAdapterTarget(sessionId)) {
+        return reply.code(503).send({ ok: false, held: true, reason: 'pull_adapter', delivered: false, batch_id: null, dispatches: [], ticket,
+          error: 'comment dispatch cannot be pushed to a pull-adapter session — comments stay undispatched; dispatch the parent ticket so the adapter pulls the full brief' });
+      }
       const comments = tracker.listUndispatchedCommentsForTicket(id);
       if (comments.length === 0) return { ok: true, batch_id: null, dispatches: [], delivered: false, ticket };
       const batch = tracker.enqueueCommentDispatchBatch(id, sessionId);
