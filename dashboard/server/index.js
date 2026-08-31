@@ -1251,6 +1251,14 @@ async function main() {
 
     try {
       if (mode === 'steer' || mode === 'brief') {
+        // GOL-46: pull_adapter targets hold — the TUI dispatch loop claims from
+        // the queue, so a push would false-deliver (typed 202, pane never sees it).
+        // Freeform steers have no queue row to hold; surface the constraint.
+        if (await isPullAdapterTarget(sessionId)) {
+          chat.record('system', 'warning', 'steer not delivered — pull-adapter session holds; dispatch a ticket so the adapter pulls it');
+          return reply.code(503).send({ ok: false, held: true, reason: 'pull_adapter', delivered: false,
+            error: 'pull-adapter sessions take delivery via dispatch-queue claim — dispatch a ticket instead of a direct steer' });
+        }
         const result = await deliverControlEnvelope(tracker, {
           project_id: session?.project_id ?? null,
           sender_id: 'human:dashboard',
